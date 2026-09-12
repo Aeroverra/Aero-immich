@@ -243,7 +243,10 @@ describe(AlbumService.name, () => {
 
       expect(mocks.user.get).toHaveBeenCalledWith(albumUser.userId, {});
       expect(mocks.user.getMetadata).toHaveBeenCalledWith(owner.id);
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId]), false);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.event.emit).toHaveBeenCalledTimes(1);
       expect(mocks.event.emit).toHaveBeenCalledWith('AlbumInvite', {
         id: album.id,
@@ -296,7 +299,10 @@ describe(AlbumService.name, () => {
 
       expect(mocks.user.get).toHaveBeenCalledWith(albumUser.userId, {});
       expect(mocks.user.getMetadata).toHaveBeenCalledWith(owner.id);
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId]), false);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.event.emit).toHaveBeenCalledWith('AlbumInvite', {
         id: album.id,
         userId: albumUser.userId,
@@ -345,7 +351,10 @@ describe(AlbumService.name, () => {
         [{ userId: owner.id, role: AlbumUserRole.Owner }],
         owner.id,
       );
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId, 'asset-2']), false);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([assetId, 'asset-2']), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
     });
 
     it('should deduplicate owner from albumUsers on create', async () => {
@@ -913,7 +922,10 @@ describe(AlbumService.name, () => {
         { success: false, id: asset.id, error: BulkIdErrorReason.NO_PERMISSION },
       ]);
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([asset.id]), false);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(owner.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.access.asset.checkPartnerAccess).toHaveBeenCalledWith(owner.id, new Set([asset.id]));
     });
 
@@ -1277,7 +1289,7 @@ describe(AlbumService.name, () => {
       expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
         owner.id,
         new Set([asset1.id, asset2.id, asset3.id]),
-        false,
+        { hasElevatedPermission: false, privateMode: false },
       );
       expect(mocks.access.asset.checkPartnerAccess).toHaveBeenCalledWith(
         owner.id,

@@ -80,7 +80,7 @@ describe(AssetService.name, () => {
       expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
         authStub.admin.user.id,
         new Set([asset.id]),
-        undefined,
+        { hasElevatedPermission: false, privateMode: false },
       );
     });
 
@@ -132,7 +132,7 @@ describe(AssetService.name, () => {
 
       await sut.get(authStub.admin, asset.id);
 
-      expect(mocks.access.asset.checkAlbumAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]));
+      expect(mocks.access.asset.checkAlbumAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), false);
     });
 
     it('should throw an error for no access', async () => {
@@ -664,7 +664,7 @@ describe(AssetService.name, () => {
       expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
         authStub.admin.user.id,
         new Set([asset.id]),
-        undefined,
+        { hasElevatedPermission: false, privateMode: false },
       );
       expect(mocks.ocr.getByAssetId).toHaveBeenCalledWith(asset.id);
     });

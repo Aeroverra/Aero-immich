@@ -9,6 +9,7 @@ import z from 'zod';
 const UpdateAssetBaseSchema = z
   .object({
     isFavorite: z.boolean().optional().describe('Mark as favorite'),
+    isPrivate: z.boolean().optional().describe('Mark as private (requires private mode)'),
     visibility: AssetVisibilitySchema.optional(),
     dateTimeOriginal: z.string().optional().describe('Original date and time'),
     latitude: latitudeSchema.optional().describe('Latitude coordinate'),

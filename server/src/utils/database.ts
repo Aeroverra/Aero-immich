@@ -111,6 +111,34 @@ export function withDefaultVisibility<O>(qb: SelectQueryBuilder<DB, 'asset', O>)
   return qb.where('asset.visibility', 'in', [sql.lit(AssetVisibility.Archive), sql.lit(AssetVisibility.Timeline)]);
 }
 
+/**
+ * Private-mode scope for the current request. `privateMode` is true only when the
+ * session has been unlocked with the PIN; `userId` is the requesting user.
+ */
+export type PrivateScope = {
+  privateMode: boolean;
+  userId: string;
+};
+
+/**
+ * Mixed-owner feeds (timeline with partners, search, map, memories, people, stats):
+ * private assets are visible only to their owner and only while private mode is on.
+ */
+export function withPrivateScope<O>(scope: PrivateScope) {
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) =>
+    scope.privateMode
+      ? qb.where((eb) => eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)]))
+      : qb.where('asset.isPrivate', '=', false);
+}
+
+/**
+ * Album-scoped reads: a viewer with their own private mode on may see the owner's
+ * private assets. With it off, private assets are hidden regardless of owner.
+ */
+export function withPrivateAlbumScope<O>(scope: PrivateScope) {
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) => (scope.privateMode ? qb : qb.where('asset.isPrivate', '=', false));
+}
+
 const selectExifInfo = (eb: AssetExpressionBuilder) =>
   eb.fn
     .toJson(eb.table('asset_exif'))
