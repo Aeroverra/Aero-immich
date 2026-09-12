@@ -63,7 +63,7 @@ export const getAlbumActions = ($t: MessageFormatter, album: AlbumResponseDto) =
     title: $t('create_link'),
     icon: mdiLink,
     color: 'primary',
-    onAction: () => modalManager.show(SharedLinkCreateModal, { albumId: album.id }),
+    onAction: () => modalManager.show(SharedLinkCreateModal, { albumId: album.id, hasPrivate: album.isPrivate }),
   };
 
   return { Share, AddUsers, CreateSharedLink };
@@ -196,8 +196,26 @@ export const handleUpdateUserAlbumRole = async ({
 export const handleAddUsersToAlbum = async (album: AlbumResponseDto, users: UserResponseDto[]) => {
   const $t = await getFormatter();
 
+  let confirmPrivate: boolean | undefined;
+  if (album.isPrivate) {
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: $t('share_private_album_confirmation'),
+      confirmText: $t('share'),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    confirmPrivate = true;
+  }
+
   try {
-    await addUsersToAlbum({ id: album.id, addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id })) } });
+    await addUsersToAlbum({
+      id: album.id,
+      addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id })), confirmPrivate },
+    });
     eventManager.emit('AlbumShare');
     return true;
   } catch (error) {
