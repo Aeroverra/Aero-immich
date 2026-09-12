@@ -198,6 +198,7 @@ export type Album = Selectable<AlbumTable> & {
 export type AuthSession = {
   id: string;
   hasElevatedPermission: boolean;
+  privateMode: boolean;
 };
 
 export type Partner = {
@@ -320,6 +321,7 @@ export const columns = {
     'asset.fileModifiedAt',
     'asset.isExternal',
     'asset.isFavorite',
+    'asset.isPrivate',
     'asset.isOffline',
     'asset.isEdited',
     'asset.visibility',
@@ -357,9 +359,11 @@ export const columns = {
     'asset.originalFileName',
     'asset.isOffline',
     'asset.isFavorite',
+    'asset.isPrivate',
     'asset.isExternal',
     'asset.isEdited',
     'asset.isFavorite',
+    'asset.isPrivate',
   ],
   assetFiles: ['asset_file.id', 'asset_file.path', 'asset_file.type', 'asset_file.isEdited'],
   assetFilesForThumbnail: [
@@ -372,7 +376,13 @@ export const columns = {
   ],
   authUser: ['user.id', 'user.name', 'user.email', 'user.isAdmin', 'user.quotaUsageInBytes', 'user.quotaSizeInBytes'],
   authApiKey: ['api_key.id', 'api_key.permissions'],
-  authSession: ['session.id', 'session.updatedAt', 'session.pinExpiresAt', 'session.appVersion'],
+  authSession: [
+    'session.id',
+    'session.updatedAt',
+    'session.pinExpiresAt',
+    'session.privateModeExpiresAt',
+    'session.appVersion',
+  ],
   user: userColumns,
   userWithPrefix: userWithPrefixColumns,
   userAdmin: [
@@ -416,6 +426,7 @@ export const columns = {
     'asset.type',
     'asset.deletedAt',
     'asset.isFavorite',
+    'asset.isPrivate',
     'asset.visibility',
     'asset.duration',
     'asset.livePhotoVideoId',
