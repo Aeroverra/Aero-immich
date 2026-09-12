@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/settings_key.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/utils/background_sync.dart';
@@ -206,5 +207,17 @@ class AuthService {
 
   Future<void> setupPinCode(String pinCode) {
     return _authApiRepository.setupPinCode(pinCode);
+  }
+
+  Future<bool> enablePrivateMode(String pinCode) {
+    return _authApiRepository.enablePrivateMode(pinCode);
+  }
+
+  Future<void> disablePrivateMode() {
+    return _authApiRepository.disablePrivateMode();
+  }
+
+  Future<PrivateModeStatus> getPrivateModeStatus() {
+    return _authApiRepository.getPrivateModeStatus();
   }
 }
