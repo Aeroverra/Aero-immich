@@ -771,7 +771,7 @@ export class AssetRepository {
 
   @GenerateSql({ params: [{}, { user: { id: DummyValue.UUID } }] })
   async getTimeBuckets(options: TimeBucketOptions, auth: AuthDto): Promise<TimeBucketItem[]> {
-    const scope = toPrivateScope(auth);
+    const scope = auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
     return this.db
       .with('asset', (qb) =>
         qb
@@ -838,7 +838,7 @@ export class AssetRepository {
   })
   getTimeBucket(timeBucket: string, options: TimeBucketOptions, auth: AuthDto) {
     const order = options.order ?? 'desc';
-    const scope = toPrivateScope(auth);
+    const scope = auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
     const query = this.db
       .with('cte', (qb) =>
         qb
