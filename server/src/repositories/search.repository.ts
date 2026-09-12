@@ -11,6 +11,7 @@ import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
 import {
   anyUuid,
+  type PrivateScope,
   searchAssetBuilder,
   searchAssetBuilderLegacy,
   searchMetadataV3Examples,
@@ -111,6 +112,11 @@ export interface SearchAlbumOptions {
   albumIds?: string[];
 }
 
+export interface SearchPrivateScopeOptions {
+  /** private-mode scope of the requesting session; missing means private mode off */
+  privateScope?: PrivateScope;
+}
+
 export interface SearchOrderOptions {
   orderDirection?: 'asc' | 'desc';
 }
@@ -130,7 +136,8 @@ type BaseAssetSearchOptions = SearchDateOptions &
   SearchPeopleOptions &
   SearchTagOptions &
   SearchAlbumOptions &
-  SearchOcrOptions;
+  SearchOcrOptions &
+  SearchPrivateScopeOptions;
 
 export type AssetSearchOptions = Omit<BaseAssetSearchOptions, 'visibility'> &
   SearchRelationOptions & { visibility?: AssetVisibility | 'not-locked' };
@@ -140,6 +147,8 @@ export type AssetSearchBuilderOptions = Omit<AssetSearchOptions, 'orderDirection
 export interface AssetSearchScope {
   userIds: string[];
   lockedOwnerId: string;
+  /** whose private assets may be returned: the requesting user while in private mode, otherwise nobody's */
+  privateOwnerId: string | null;
   /** whose version of the people to select, required when selecting faces or people */
   viewingUserId?: string;
 }
@@ -161,7 +170,8 @@ export type SmartSearchOptions = SearchDateOptions &
   SearchUserIdOptions &
   SearchPeopleOptions &
   SearchTagOptions &
-  SearchOcrOptions & { visibility?: AssetVisibility | 'not-locked'; viewingUserId?: string };
+  SearchOcrOptions &
+  SearchPrivateScopeOptions & { visibility?: AssetVisibility | 'not-locked'; viewingUserId?: string };
 
 export type LargeAssetSearchOptions = AssetSearchOptions & { minFileSize?: number };
 
@@ -423,8 +433,8 @@ export class SearchRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID]] })
-  getAssetsByCity(userIds: string[]) {
+  @GenerateSql({ params: [[DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
+  getAssetsByCity(userIds: string[], scope: PrivateScope) {
     return this.db
       .withRecursive('cte', (qb) => {
         const base = qb
@@ -435,6 +445,11 @@ export class SearchRepository {
           .where('asset.visibility', '=', AssetVisibility.Timeline)
           .where('asset.type', '=', AssetType.Image)
           .where('asset.deletedAt', 'is', null)
+          .where((eb) =>
+            scope.privateMode
+              ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
+              : eb('asset.isPrivate', '=', false),
+          )
           .orderBy('city')
           .limit(1);
 
@@ -451,6 +466,11 @@ export class SearchRepository {
                 .where('asset.visibility', '=', AssetVisibility.Timeline)
                 .where('asset.type', '=', AssetType.Image)
                 .where('asset.deletedAt', 'is', null)
+                .where((eb) =>
+                  scope.privateMode
+                    ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
+                    : eb('asset.isPrivate', '=', false),
+                )
                 .whereRef('asset_exif.city', '>', 'cte.city')
                 .orderBy('city')
                 .limit(1)
@@ -482,23 +502,32 @@ export class SearchRepository {
       .execute();
   }
 
-  async getCountries(userIds: string[]): Promise<string[]> {
-    const res = await this.getExifField('country', userIds).execute();
+  @GenerateSql({ params: [[DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
+  async getCountries(userIds: string[], scope: PrivateScope): Promise<string[]> {
+    const res = await this.getExifField('country', userIds, scope).execute();
     return res.map((row) => row.country!);
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], DummyValue.STRING] })
-  async getStates(userIds: string[], { country }: GetStatesOptions): Promise<string[]> {
-    const res = await this.getExifField('state', userIds)
+  @GenerateSql({
+    params: [[DummyValue.UUID], { country: DummyValue.STRING }, { privateMode: false, userId: DummyValue.UUID }],
+  })
+  async getStates(userIds: string[], { country }: GetStatesOptions, scope: PrivateScope): Promise<string[]> {
+    const res = await this.getExifField('state', userIds, scope)
       .$if(!!country, (qb) => qb.where('country', '=', country!))
       .execute();
 
     return res.map((row) => row.state!);
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], DummyValue.STRING, DummyValue.STRING] })
-  async getCities(userIds: string[], { country, state }: GetCitiesOptions): Promise<string[]> {
-    const res = await this.getExifField('city', userIds)
+  @GenerateSql({
+    params: [
+      [DummyValue.UUID],
+      { country: DummyValue.STRING, state: DummyValue.STRING },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
+  async getCities(userIds: string[], { country, state }: GetCitiesOptions, scope: PrivateScope): Promise<string[]> {
+    const res = await this.getExifField('city', userIds, scope)
       .$if(!!country, (qb) => qb.where('country', '=', country!))
       .$if(!!state, (qb) => qb.where('state', '=', state!))
       .execute();
@@ -506,9 +535,19 @@ export class SearchRepository {
     return res.map((row) => row.city!);
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], DummyValue.STRING, DummyValue.STRING] })
-  async getCameraMakes(userIds: string[], { model, lensModel }: GetCameraMakesOptions): Promise<string[]> {
-    const res = await this.getExifField('make', userIds)
+  @GenerateSql({
+    params: [
+      [DummyValue.UUID],
+      { model: DummyValue.STRING, lensModel: DummyValue.STRING },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
+  async getCameraMakes(
+    userIds: string[],
+    { model, lensModel }: GetCameraMakesOptions,
+    scope: PrivateScope,
+  ): Promise<string[]> {
+    const res = await this.getExifField('make', userIds, scope)
       .$if(!!model, (qb) => qb.where('model', '=', model!))
       .$if(!!lensModel, (qb) => qb.where('lensModel', '=', lensModel!))
       .execute();
@@ -516,9 +555,19 @@ export class SearchRepository {
     return res.map((row) => row.make!);
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], DummyValue.STRING, DummyValue.STRING] })
-  async getCameraModels(userIds: string[], { make, lensModel }: GetCameraModelsOptions): Promise<string[]> {
-    const res = await this.getExifField('model', userIds)
+  @GenerateSql({
+    params: [
+      [DummyValue.UUID],
+      { make: DummyValue.STRING, lensModel: DummyValue.STRING },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
+  async getCameraModels(
+    userIds: string[],
+    { make, lensModel }: GetCameraModelsOptions,
+    scope: PrivateScope,
+  ): Promise<string[]> {
+    const res = await this.getExifField('model', userIds, scope)
       .$if(!!make, (qb) => qb.where('make', '=', make!))
       .$if(!!lensModel, (qb) => qb.where('lensModel', '=', lensModel!))
       .execute();
@@ -526,9 +575,19 @@ export class SearchRepository {
     return res.map((row) => row.model!);
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], DummyValue.STRING] })
-  async getCameraLensModels(userIds: string[], { make, model }: GetCameraLensModelsOptions): Promise<string[]> {
-    const res = await this.getExifField('lensModel', userIds)
+  @GenerateSql({
+    params: [
+      [DummyValue.UUID],
+      { make: DummyValue.STRING, model: DummyValue.STRING },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
+  async getCameraLensModels(
+    userIds: string[],
+    { make, model }: GetCameraLensModelsOptions,
+    scope: PrivateScope,
+  ): Promise<string[]> {
+    const res = await this.getExifField('lensModel', userIds, scope)
       .$if(!!make, (qb) => qb.where('make', '=', make!))
       .$if(!!model, (qb) => qb.where('model', '=', model!))
       .execute();
@@ -590,7 +649,11 @@ export class SearchRepository {
       .executeTakeFirstOrThrow();
   }
 
-  private getExifField(field: 'city' | 'state' | 'country' | 'make' | 'model' | 'lensModel', userIds: string[]) {
+  private getExifField(
+    field: 'city' | 'state' | 'country' | 'make' | 'model' | 'lensModel',
+    userIds: string[],
+    scope: PrivateScope,
+  ) {
     return this.db
       .selectFrom('asset_exif')
       .select(field)
@@ -599,6 +662,11 @@ export class SearchRepository {
       .where('ownerId', '=', anyUuid(userIds))
       .where('visibility', '=', AssetVisibility.Timeline)
       .where('deletedAt', 'is', null)
+      .where((eb) =>
+        scope.privateMode
+          ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
+          : eb('asset.isPrivate', '=', false),
+      )
       .where(field, 'is not', null)
       .where(field, '!=', '');
   }

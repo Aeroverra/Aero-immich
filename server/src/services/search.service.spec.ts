@@ -103,7 +103,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.COUNTRY }),
       ).resolves.toEqual(['USA']);
-      expect(mocks.search.getCountries).toHaveBeenCalledWith([authStub.user1.user.id]);
+      expect(mocks.search.getCountries).toHaveBeenCalledWith([authStub.user1.user.id], {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for country (including null)', async () => {
@@ -113,7 +116,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.COUNTRY }),
       ).resolves.toEqual(['USA', null]);
-      expect(mocks.search.getCountries).toHaveBeenCalledWith([authStub.user1.user.id]);
+      expect(mocks.search.getCountries).toHaveBeenCalledWith([authStub.user1.user.id], {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for state', async () => {
@@ -123,7 +129,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.STATE }),
       ).resolves.toEqual(['California']);
-      expect(mocks.search.getStates).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getStates).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for state (including null)', async () => {
@@ -133,7 +142,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.STATE }),
       ).resolves.toEqual(['California', null]);
-      expect(mocks.search.getStates).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getStates).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for city', async () => {
@@ -143,7 +155,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.CITY }),
       ).resolves.toEqual(['Denver']);
-      expect(mocks.search.getCities).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCities).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for city (including null)', async () => {
@@ -153,7 +168,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.CITY }),
       ).resolves.toEqual(['Denver', null]);
-      expect(mocks.search.getCities).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCities).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera make', async () => {
@@ -163,7 +181,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.CAMERA_MAKE }),
       ).resolves.toEqual(['Nikon']);
-      expect(mocks.search.getCameraMakes).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraMakes).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera make (including null)', async () => {
@@ -173,7 +194,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.CAMERA_MAKE }),
       ).resolves.toEqual(['Nikon', null]);
-      expect(mocks.search.getCameraMakes).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraMakes).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera model', async () => {
@@ -183,7 +207,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.CAMERA_MODEL }),
       ).resolves.toEqual(['Fujifilm X100VI']);
-      expect(mocks.search.getCameraModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera model (including null)', async () => {
@@ -193,7 +220,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.CAMERA_MODEL }),
       ).resolves.toEqual(['Fujifilm X100VI', null]);
-      expect(mocks.search.getCameraModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera lens model', async () => {
@@ -203,7 +233,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: false, type: SearchSuggestionType.CAMERA_LENS_MODEL }),
       ).resolves.toEqual(['10-24mm']);
-      expect(mocks.search.getCameraLensModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraLensModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
 
     it('should return search suggestions for camera lens model (including null)', async () => {
@@ -213,7 +246,10 @@ describe(SearchService.name, () => {
       await expect(
         sut.getSearchSuggestions(authStub.user1, { includeNull: true, type: SearchSuggestionType.CAMERA_LENS_MODEL }),
       ).resolves.toEqual(['10-24mm', null]);
-      expect(mocks.search.getCameraLensModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything());
+      expect(mocks.search.getCameraLensModels).toHaveBeenCalledWith([authStub.user1.user.id], expect.anything(), {
+        privateMode: false,
+        userId: authStub.user1.user.id,
+      });
     });
   });
 
@@ -260,6 +296,48 @@ describe(SearchService.name, () => {
       const filter = { visibility: { in: [AssetVisibility.Locked, AssetVisibility.Timeline] } };
       await expect(sut.searchMetadata(AuthFactory.create(), { size: 250, filter })).rejects.toBeInstanceOf(
         UnauthorizedException,
+      );
+    });
+
+    it('should reject a filter asking for private assets outside private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      await expect(sut.searchMetadata(auth, { size: 250, filter: { isPrivate: { eq: true } } })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      await expect(
+        sut.searchMetadata(auth, {
+          size: 250,
+          filter: { or: [{ isPrivate: { eq: true } }, { isFavorite: { eq: true } }] },
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(mocks.search.searchMetadataV3).not.toHaveBeenCalled();
+    });
+
+    it('should search without a private owner outside private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.partner.getAll.mockResolvedValue([]);
+      mocks.search.searchMetadataV3.mockResolvedValue({ hasNextPage: false, items: [] });
+
+      await sut.searchMetadata(auth, { size: 250, filter: { isPrivate: { eq: false } } });
+
+      expect(mocks.search.searchMetadataV3).toHaveBeenCalledWith(
+        { take: 250, skip: 0 },
+        expect.objectContaining({ filter: expect.objectContaining({ isPrivate: { eq: false } }) }),
+        expect.objectContaining({ privateOwnerId: null }),
+      );
+    });
+
+    it('should search with the user as private owner in private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.partner.getAll.mockResolvedValue([]);
+      mocks.search.searchMetadataV3.mockResolvedValue({ hasNextPage: false, items: [] });
+
+      await sut.searchMetadata(auth, { size: 250, filter: { isPrivate: { eq: true } } });
+
+      expect(mocks.search.searchMetadataV3).toHaveBeenCalledWith(
+        { take: 250, skip: 0 },
+        expect.objectContaining({ filter: expect.objectContaining({ isPrivate: { eq: true } }) }),
+        expect.objectContaining({ privateOwnerId: auth.user.id }),
       );
     });
 
@@ -336,6 +414,7 @@ describe(SearchService.name, () => {
           embedding: '[1, 2, 3]',
           userIds: [authStub.user1.user.id],
           viewingUserId: authStub.user1.user.id,
+          privateScope: { privateMode: false, userId: authStub.user1.user.id },
           visibility: 'not-locked',
         },
       );

@@ -78,6 +78,7 @@ select
           "album_asset"."albumId" = "album"."id"
           and "asset"."deletedAt" is null
           and "asset"."visibility" in ('archive', 'timeline')
+          and "asset"."isPrivate" = $3
         order by
           "asset"."fileCreatedAt" desc
       ) as "asset"
@@ -85,7 +86,7 @@ select
 from
   "album"
 where
-  "album"."id" = $3
+  "album"."id" = $4
   and "album"."deletedAt" is null
 
 -- AlbumRepository.getByAssetId
@@ -174,13 +175,23 @@ select
     ("asset"."localDateTime" AT TIME ZONE 'UTC'::text)::date
   ) as "endDate",
   max("asset"."updatedAt") as "lastModifiedAssetTimestamp",
-  count("asset"."id")::int as "assetCount"
+  count("asset"."id")::int as "assetCount",
+  (
+    select
+      "thumbnail"."isPrivate"
+    from
+      "album"
+      inner join "asset" as "thumbnail" on "thumbnail"."id" = "album"."albumThumbnailAssetId"
+    where
+      "album"."id" = "album_asset"."albumId"
+  ) as "thumbnailIsPrivate"
 from
   "asset"
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
 where
   "asset"."visibility" in ('archive', 'timeline')
-  and "album_asset"."albumId" in ($1)
+  and "asset"."isPrivate" = $1
+  and "album_asset"."albumId" in ($2)
   and "asset"."deletedAt" is null
 group by
   "album_asset"."albumId"
@@ -430,6 +441,7 @@ from
 where
   "asset"."deletedAt" is null
   and "album_asset"."albumId" = $1
+  and "asset"."isPrivate" = $2
 group by
   "asset"."ownerId"
 order by

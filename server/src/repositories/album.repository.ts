@@ -18,7 +18,8 @@ import { AlbumUserRole } from 'src/enum';
 import { DB } from 'src/schema';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { asUuid, dummy, withDefaultVisibility } from 'src/utils/database';
+import { PrivateScope } from 'src/utils/database';
+import { asUuid, dummy, withDefaultVisibility, withPrivateAlbumScope } from 'src/utils/database';
 
 export interface AlbumAssetCount {
   albumId: string;
@@ -26,10 +27,13 @@ export interface AlbumAssetCount {
   startDate: Date | null;
   endDate: Date | null;
   lastModifiedAssetTimestamp: Date | null;
+  thumbnailIsPrivate: boolean | null;
 }
 
 export interface AlbumInfoOptions {
   withAssets: boolean;
+  /** Required when `withAssets` is true; defaults to hiding private assets. */
+  scope?: PrivateScope;
 }
 
 const withAlbumUsers = (authUserId?: string) => (eb: ExpressionBuilder<DB, 'album'>) =>
@@ -52,7 +56,7 @@ const withSharedLink = (eb: ExpressionBuilder<DB, 'album'>) =>
     eb.selectFrom('shared_link').selectAll('shared_link').whereRef('shared_link.albumId', '=', 'album.id'),
   ).as('sharedLinks');
 
-const withAssets = (eb: ExpressionBuilder<DB, 'album'>) => {
+const withAssets = (scope: PrivateScope) => (eb: ExpressionBuilder<DB, 'album'>) => {
   return eb
     .selectFrom((eb) =>
       eb
@@ -66,6 +70,7 @@ const withAssets = (eb: ExpressionBuilder<DB, 'album'>) => {
         .whereRef('album_asset.albumId', '=', 'album.id')
         .where('asset.deletedAt', 'is', null)
         .$call(withDefaultVisibility)
+        .$call(withPrivateAlbumScope(scope))
         .orderBy('asset.fileCreatedAt', 'desc')
         .as('asset'),
     )
@@ -86,8 +91,15 @@ const isAlbumOwned = (ownerId: string) => (eb: ExpressionBuilder<DB, 'album'>) =
 export class AlbumRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [DummyValue.UUID, { withAssets: true }, DummyValue.UUID] })
+  @GenerateSql({
+    params: [
+      DummyValue.UUID,
+      { withAssets: true, scope: { privateMode: false, userId: DummyValue.UUID } },
+      DummyValue.UUID,
+    ],
+  })
   getById(id: string, options: AlbumInfoOptions, authUserId?: string) {
+    const scope = options.scope ?? { privateMode: false, userId: authUserId ?? '' };
     return this.db
       .with('album_user', (qb) => qb.selectFrom('album_user').selectAll().where('album_user.albumId', '=', id))
       .selectFrom('album')
@@ -96,7 +108,7 @@ export class AlbumRepository {
       .where('album.deletedAt', 'is', null)
       .select(withAlbumUsers(authUserId))
       .select(withSharedLink)
-      .$if(options.withAssets, (eb) => eb.select(withAssets))
+      .$if(options.withAssets, (eb) => eb.select(withAssets(scope)))
       .$narrowType<{ assets: NotNull }>()
       .executeTakeFirst();
   }
@@ -157,9 +169,9 @@ export class AlbumRepository {
     return map;
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @GenerateSql({ params: [[DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
   @ChunkedArray()
-  async getMetadataForIds(ids: string[]): Promise<AlbumAssetCount[]> {
+  async getMetadataForIds(ids: string[], scope: PrivateScope): Promise<AlbumAssetCount[]> {
     // Guard against running invalid query when ids list is empty.
     if (ids.length === 0) {
       return [];
@@ -169,6 +181,7 @@ export class AlbumRepository {
       this.db
         .selectFrom('asset')
         .$call(withDefaultVisibility)
+        .$call(withPrivateAlbumScope(scope))
         .innerJoin('album_asset', 'album_asset.assetId', 'asset.id')
         .select('album_asset.albumId as albumId')
         .select((eb) => eb.fn.min(sql<Date>`("asset"."localDateTime" AT TIME ZONE 'UTC'::text)::date`).as('startDate'))
@@ -176,6 +189,15 @@ export class AlbumRepository {
         // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
         .select((eb) => eb.fn.max('asset.updatedAt').as('lastModifiedAssetTimestamp'))
         .select((eb) => sql<number>`${eb.fn.count('asset.id')}::int`.as('assetCount'))
+        // whether the album's current cover is a private asset (null when no cover is set)
+        .select((eb) =>
+          eb
+            .selectFrom('album')
+            .innerJoin('asset as thumbnail', 'thumbnail.id', 'album.albumThumbnailAssetId')
+            .select('thumbnail.isPrivate')
+            .whereRef('album.id', '=', 'album_asset.albumId')
+            .as('thumbnailIsPrivate'),
+        )
         .where('album_asset.albumId', 'in', ids)
         .where('asset.deletedAt', 'is', null)
         .groupBy('album_asset.albumId')
@@ -351,7 +373,8 @@ export class AlbumRepository {
       .selectFrom('album')
       .selectAll('album')
       .select(withAlbumUsers(authUserId))
-      .select(withAssets)
+      // every asset id was already access-checked against the creator's session, so nothing needs hiding here
+      .select(withAssets({ privateMode: true, userId: authUserId }))
       .$narrowType<{ assets: NotNull }>()
       .executeTakeFirstOrThrow();
 
@@ -402,6 +425,8 @@ export class AlbumRepository {
       .set((eb) => ({
         albumThumbnailAssetId: this.updateThumbnailBuilder(eb)
           .select('album_asset.assetId')
+          // prefer a non-private cover so the album stays presentable outside private mode
+          .orderBy('asset.isPrivate', 'asc')
           .orderBy('asset.fileCreatedAt', 'desc')
           .limit(sql.lit(1)),
       }))
@@ -441,13 +466,14 @@ export class AlbumRepository {
    * Get per-user asset contribution counts for a single album.
    * Excludes deleted assets, orders by count desc.
    */
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getContributorCounts(id: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getContributorCounts(id: string, scope: PrivateScope) {
     return this.db
       .selectFrom('album_asset')
       .innerJoin('asset', 'asset.id', 'assetId')
       .where('asset.deletedAt', 'is', sql.lit(null))
       .where('album_asset.albumId', '=', id)
+      .$call(withPrivateAlbumScope(scope))
       .select('asset.ownerId as userId')
       .select((eb) => eb.fn.countAll<number>().as('assetCount'))
       .groupBy('asset.ownerId')
