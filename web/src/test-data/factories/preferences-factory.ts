@@ -30,6 +30,9 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
     enabled: false,
     sidebarWeb: false,
   },
+  privateMode: {
+    timeoutMinutes: 30,
+  },
   purchase: {
     hideBuyButtonUntil: '',
     showSupportBadge: false,

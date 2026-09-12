@@ -27,6 +27,7 @@ export class AssetMultiSelectManager {
   isAllTrashed = $derived(this.assets.every((asset) => asset.isTrashed));
   isAllArchived = $derived(this.assets.every((asset) => asset.visibility === AssetVisibility.Archive));
   isAllFavorite = $derived(this.assets.every((asset) => asset.isFavorite));
+  isAllPrivate = $derived(this.assets.every((asset) => asset.isPrivate));
   isAllUserOwned = $derived(
     authManager.authenticated && this.assets.every((asset) => asset.ownerId === authManager.user.id),
   );
