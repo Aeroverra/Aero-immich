@@ -34,7 +34,7 @@ import {
 } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
-import { requireElevatedPermission } from 'src/utils/access';
+import { requireElevatedPermission, requirePrivateMode } from 'src/utils/access';
 import {
   getAssetFiles,
   getDimensions,
@@ -98,6 +98,10 @@ export class AssetService extends BaseService {
     const { description, dateTimeOriginal, latitude, longitude, rating, ...rest } = dto;
     const repos = { asset: this.assetRepository, event: this.eventRepository };
 
+    if (rest.isPrivate !== undefined) {
+      requirePrivateMode(auth);
+    }
+
     let previousMotion: { id: string } | null = null;
     if (rest.livePhotoVideoId) {
       await onBeforeLink(repos, { userId: auth.user.id, livePhotoVideoId: rest.livePhotoVideoId });
@@ -131,6 +135,7 @@ export class AssetService extends BaseService {
     const {
       ids,
       isFavorite,
+      isPrivate,
       visibility,
       dateTimeOriginal,
       latitude,
@@ -141,9 +146,13 @@ export class AssetService extends BaseService {
       dateTimeRelative,
       timeZone,
     } = dto;
+    if (isPrivate !== undefined) {
+      requirePrivateMode(auth);
+    }
+
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids });
 
-    const assetDto = _.omitBy({ isFavorite, visibility, duplicateId }, _.isUndefined);
+    const assetDto = _.omitBy({ isFavorite, isPrivate, visibility, duplicateId }, _.isUndefined);
     const exifDto = _.omitBy(
       {
         latitude,

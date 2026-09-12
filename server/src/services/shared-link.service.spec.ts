@@ -177,11 +177,10 @@ describe(SharedLinkService.name, () => {
         allowUpload: true,
       });
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        false,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.sharedLink.create).toHaveBeenCalledWith({
         type: SharedLinkType.Individual,
         userId: authStub.admin.user.id,
@@ -213,11 +212,10 @@ describe(SharedLinkService.name, () => {
         allowUpload: true,
       });
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        false,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.sharedLink.create).toHaveBeenCalledWith({
         type: SharedLinkType.Individual,
         userId: authStub.admin.user.id,
