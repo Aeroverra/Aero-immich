@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_album.repository.dart';
 import 'package:immich_mobile/models/albums/album_search.model.dart';
@@ -55,12 +56,12 @@ class RemoteAlbumService {
     return _repository.watchAlbum(albumId);
   }
 
-  Future<List<RemoteAlbum>> getAll() {
-    return _repository.getAll();
+  Future<List<RemoteAlbum>> getAll({PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.getAll(privateFilter: privateFilter);
   }
 
-  Future<RemoteAlbum?> get(String albumId) {
-    return _repository.get(albumId);
+  Future<RemoteAlbum?> get(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.get(albumId, privateFilter: privateFilter);
   }
 
   Future<List<RemoteAlbum>> sortAlbums(
@@ -157,8 +158,11 @@ class RemoteAlbumService {
     return updatedAlbum;
   }
 
-  Stream<(DateTime, DateTime)> watchDateRange(String albumId) {
-    return _repository.watchDateRange(albumId);
+  Stream<(DateTime, DateTime)> watchDateRange(
+    String albumId, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
+    return _repository.watchDateRange(albumId, privateFilter: privateFilter);
   }
 
   Future<List<UserDto>> getSharedUsers(String albumId) {
@@ -290,8 +294,8 @@ class RemoteAlbumService {
     await _repository.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers({required String albumId, required List<String> userIds}) async {
-    await _albumApiRepository.addUsers(albumId, userIds);
+  Future<void> addUsers({required String albumId, required List<String> userIds, bool confirmPrivate = false}) async {
+    await _albumApiRepository.addUsers(albumId, userIds, confirmPrivate: confirmPrivate);
 
     return _repository.addUsers(albumId, userIds);
   }

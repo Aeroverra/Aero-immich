@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dar
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/widgets/common/confirm_dialog.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_mobile/widgets/common/remote_album_sliver_app_bar.dart';
 
@@ -75,12 +76,30 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
       return;
     }
 
+    if (!context.mounted) {
+      return;
+    }
+
+    if (_album.isPrivate) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (_) => ConfirmDialog(
+          title: context.t.private,
+          content: context.t.share_private_album_confirmation,
+          ok: context.t.confirm,
+        ),
+      );
+      if (confirmed != true) {
+        return;
+      }
+    }
+
     try {
       if (!context.mounted) {
         return;
       }
 
-      await ref.read(remoteAlbumProvider.notifier).addUsers(_album.id, newUsers);
+      await ref.read(remoteAlbumProvider.notifier).addUsers(_album.id, newUsers, confirmPrivate: _album.isPrivate);
       ref.invalidate(remoteAlbumSharedUsersProvider(_album.id));
       if (!context.mounted) {
         return;
