@@ -57,9 +57,21 @@ describe('PrivateModeManager', () => {
       expect(privateModeManager.hasPinCode).toBe(true);
     });
 
-    it('emits PrivateModeChange and invalidates loaded pages when the state flips', async () => {
+    it('does not emit or invalidate on the very first load, even when the mode is already on', async () => {
       sdkMock.getAuthStatus.mockResolvedValue(authStatus({ privateMode: true }));
 
+      await privateModeManager.load();
+
+      expect(privateModeManager.enabled).toBe(true);
+      expect(onPrivateModeChange).not.toHaveBeenCalled();
+      expect(invalidateAll).not.toHaveBeenCalled();
+    });
+
+    it('emits PrivateModeChange and invalidates loaded pages when the state flips', async () => {
+      sdkMock.getAuthStatus.mockResolvedValue(authStatus({ privateMode: false }));
+      await privateModeManager.load();
+
+      sdkMock.getAuthStatus.mockResolvedValue(authStatus({ privateMode: true }));
       await privateModeManager.load();
 
       expect(onPrivateModeChange).toHaveBeenCalledExactlyOnceWith(true);
