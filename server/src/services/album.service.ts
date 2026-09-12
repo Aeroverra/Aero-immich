@@ -148,7 +148,10 @@ export class AlbumService extends BaseService {
       await this.eventRepository.emit('AlbumInvite', { id: album.id, userId, senderName: auth.user.name });
     }
 
-    return mapAlbum(album);
+    // the album_asset trigger derives isPrivate after the insert, so re-read the flag
+    const created = assetIds.length > 0 ? await this.albumRepository.getById(album.id, { withAssets: false }) : null;
+
+    return mapAlbum({ ...album, isPrivate: created?.isPrivate ?? album.isPrivate });
   }
 
   async update(auth: AuthDto, id: string, dto: UpdateAlbumDto): Promise<AlbumResponseDto> {
