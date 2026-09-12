@@ -114,6 +114,10 @@ describe(SharedLinkService.name, () => {
   });
 
   describe('create', () => {
+    beforeEach(() => {
+      mocks.sharedLink.hasPrivateAssets.mockResolvedValue(false);
+    });
+
     it('should not allow an album shared link without an albumId', async () => {
       await expect(sut.create(authStub.admin, { type: SharedLinkType.Album, assetIds: [] })).rejects.toBeInstanceOf(
         BadRequestException,

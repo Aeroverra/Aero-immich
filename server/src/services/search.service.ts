@@ -25,11 +25,12 @@ import {
 import { AssetOrder, AssetVisibility, Permission } from 'src/enum';
 import { AssetSearchScope } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
-import { requireElevatedPermission } from 'src/utils/access';
+import { requireElevatedPermission, toPrivateScope } from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
+import { PrivateScope } from 'src/utils/database';
 import { isSmartSearchEnabled } from 'src/utils/misc';
 import { decodeSearchCursor, encodeSearchCursor } from 'src/utils/search-cursor';
-import { applyLockedVisibilityPolicy, collectFilterIds } from 'src/utils/search-filter';
+import { applyLockedVisibilityPolicy, applyPrivatePolicy, collectFilterIds } from 'src/utils/search-filter';
 
 @Injectable()
 export class SearchService extends BaseService {
@@ -47,15 +48,16 @@ export class SearchService extends BaseService {
 
   async getExploreData(auth: AuthDto) {
     const options = { maxFields: 12, minAssetsPerField: 5 };
+    const scope = toPrivateScope(auth);
 
-    const cities = await this.assetRepository.getAssetIdByCity(auth.user.id, options);
+    const cities = await this.assetRepository.getAssetIdByCity(auth.user.id, options, scope);
     const cityAssets = await this.assetRepository.getByIdsWithAllRelationsButStacks(
       cities.items.map(({ data }) => data),
       auth.user.id,
     );
     const cityItems = cityAssets.map((asset) => ({ value: asset.exifInfo!.city!, data: mapAsset(asset, { auth }) }));
 
-    const recents = await this.assetRepository.getRecentlyCreatedAssetIds(auth.user.id, options.maxFields);
+    const recents = await this.assetRepository.getRecentlyCreatedAssetIds(auth.user.id, options.maxFields, scope);
     const recentAssets = await this.assetRepository.getByIdsWithAllRelationsButStacks(
       recents.items.map((item) => item.data),
       auth.user.id,
@@ -106,6 +108,7 @@ export class SearchService extends BaseService {
         visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
         userIds,
         viewingUserId: auth.user.id,
+        privateScope: toPrivateScope(auth),
         orderDirection: dto.order ?? AssetOrder.Desc,
       },
     );
@@ -128,6 +131,7 @@ export class SearchService extends BaseService {
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
       userIds,
       viewingUserId: auth.user.id,
+      privateScope: toPrivateScope(auth),
     });
   }
 
@@ -146,6 +150,7 @@ export class SearchService extends BaseService {
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
       userIds,
       viewingUserId: auth.user.id,
+      privateScope: toPrivateScope(auth),
     });
     return items.map((item) => mapAsset(item, { auth }));
   }
@@ -161,6 +166,7 @@ export class SearchService extends BaseService {
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
       userIds,
       viewingUserId: auth.user.id,
+      privateScope: toPrivateScope(auth),
     });
     return items.map((item) => mapAsset(item, { auth }));
   }
@@ -189,6 +195,7 @@ export class SearchService extends BaseService {
         ...dto,
         userIds: await userIds,
         viewingUserId: auth.user.id,
+        privateScope: toPrivateScope(auth),
         embedding,
         visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
       },
@@ -199,38 +206,42 @@ export class SearchService extends BaseService {
 
   async getAssetsByCity(auth: AuthDto): Promise<AssetResponseDto[]> {
     const userIds = await this.getUserIdsToSearch(auth);
-    const assets = await this.searchRepository.getAssetsByCity(userIds);
+    const assets = await this.searchRepository.getAssetsByCity(userIds, toPrivateScope(auth));
     return assets.map((asset) => mapAsset(asset));
   }
 
   async getSearchSuggestions(auth: AuthDto, dto: SearchSuggestionRequestDto) {
     const userIds = await this.getUserIdsToSearch(auth);
-    const suggestions = await this.getSuggestions(userIds, dto);
+    const suggestions = await this.getSuggestions(userIds, dto, toPrivateScope(auth));
     if (dto.includeNull) {
       suggestions.push(null);
     }
     return suggestions;
   }
 
-  private getSuggestions(userIds: string[], dto: SearchSuggestionRequestDto): Promise<Array<string | null>> {
+  private getSuggestions(
+    userIds: string[],
+    dto: SearchSuggestionRequestDto,
+    scope: PrivateScope,
+  ): Promise<Array<string | null>> {
     switch (dto.type) {
       case SearchSuggestionType.COUNTRY: {
-        return this.searchRepository.getCountries(userIds);
+        return this.searchRepository.getCountries(userIds, scope);
       }
       case SearchSuggestionType.STATE: {
-        return this.searchRepository.getStates(userIds, dto);
+        return this.searchRepository.getStates(userIds, dto, scope);
       }
       case SearchSuggestionType.CITY: {
-        return this.searchRepository.getCities(userIds, dto);
+        return this.searchRepository.getCities(userIds, dto, scope);
       }
       case SearchSuggestionType.CAMERA_MAKE: {
-        return this.searchRepository.getCameraMakes(userIds, dto);
+        return this.searchRepository.getCameraMakes(userIds, dto, scope);
       }
       case SearchSuggestionType.CAMERA_MODEL: {
-        return this.searchRepository.getCameraModels(userIds, dto);
+        return this.searchRepository.getCameraModels(userIds, dto, scope);
       }
       case SearchSuggestionType.CAMERA_LENS_MODEL: {
-        return this.searchRepository.getCameraLensModels(userIds, dto);
+        return this.searchRepository.getCameraLensModels(userIds, dto, scope);
       }
       default: {
         return Promise.resolve([]);
@@ -304,7 +315,7 @@ export class SearchService extends BaseService {
     dto: { filter?: SearchFilter },
   ): Promise<{ filter: SearchFilter; scope: AssetSearchScope }> {
     const filter = dto.filter ?? {};
-    const effectiveFilter = applyLockedVisibilityPolicy(auth, filter);
+    const effectiveFilter = applyPrivatePolicy(auth, applyLockedVisibilityPolicy(auth, filter));
 
     const fullyConfined = isFullyAlbumConfined(filter);
     // a shared link visitor does not have a universe, so there every branch must be confined
@@ -319,7 +330,15 @@ export class SearchService extends BaseService {
       albumIds.length > 0 ? this.requireAccess({ auth, ids: albumIds, permission: Permission.AlbumRead }) : undefined,
     ]);
 
-    return { filter: effectiveFilter, scope: { userIds, lockedOwnerId: auth.user.id, viewingUserId: auth.user.id } };
+    return {
+      filter: effectiveFilter,
+      scope: {
+        userIds,
+        lockedOwnerId: auth.user.id,
+        privateOwnerId: auth.session?.privateMode ? auth.user.id : null,
+        viewingUserId: auth.user.id,
+      },
+    };
   }
 
   private async resolveEmbedding(

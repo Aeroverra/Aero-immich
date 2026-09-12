@@ -1,7 +1,9 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AssetVisibility } from 'src/enum';
 import { TimelineService } from 'src/services/timeline.service';
+import { AuthFactory } from 'test/factories/auth.factory';
 import { authStub } from 'test/fixtures/auth.stub';
+import { newUuid } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
 describe(TimelineService.name, () => {
@@ -220,6 +222,48 @@ describe(TimelineService.name, () => {
           userId: authStub.adminWithElevatedPermission.user.id,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should require private mode when isPrivate is requested', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+
+      await expect(sut.getTimeBucket(auth, { timeBucket: 'bucket', isPrivate: true })).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mocks.asset.getTimeBucket).not.toHaveBeenCalled();
+    });
+
+    it('should throw an error if withPartners is true and isPrivate is true', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+
+      await expect(
+        sut.getTimeBucket(auth, { timeBucket: 'bucket', isPrivate: true, withPartners: true, userId: auth.user.id }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mocks.asset.getTimeBucket).not.toHaveBeenCalled();
+    });
+
+    it("should not allow another user's private timeline", async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      const partnerId = newUuid();
+      mocks.access.timeline.checkPartnerAccess.mockResolvedValue(new Set([partnerId]));
+
+      await expect(
+        sut.getTimeBucket(auth, { timeBucket: 'bucket', isPrivate: true, userId: partnerId }),
+      ).rejects.toThrow("You may not access another user's private timeline");
+      expect(mocks.asset.getTimeBucket).not.toHaveBeenCalled();
+    });
+
+    it('should pass isPrivate to the repository in private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      const json = `[{ id: ['asset-id'] }]`;
+      mocks.asset.getTimeBucket.mockResolvedValue({ assets: json });
+
+      await expect(sut.getTimeBucket(auth, { timeBucket: 'bucket', isPrivate: true })).resolves.toEqual(json);
+      expect(mocks.asset.getTimeBucket).toHaveBeenCalledWith(
+        'bucket',
+        { timeBucket: 'bucket', isPrivate: true, userIds: [auth.user.id] },
+        auth,
+      );
     });
   });
 });

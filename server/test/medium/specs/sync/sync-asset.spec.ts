@@ -57,6 +57,7 @@ describe(SyncEntityType.AssetV2, () => {
           fileModifiedAt: asset.fileModifiedAt,
           createdAt: asset.createdAt,
           isFavorite: asset.isFavorite,
+          isPrivate: asset.isPrivate,
           localDateTime: asset.localDateTime,
           type: asset.type,
           visibility: asset.visibility,
@@ -119,5 +120,20 @@ describe(SyncEntityType.AssetV2, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+  });
+
+  it('should carry the private flag', async () => {
+    const { auth, ctx } = await setup();
+    const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+
+    const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+    expect(response).toEqual([
+      {
+        ack: expect.any(String),
+        data: expect.objectContaining({ id: asset.id, isPrivate: true }),
+        type: SyncEntityType.AssetV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
   });
 });

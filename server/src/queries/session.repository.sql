@@ -5,6 +5,7 @@ select
   "id",
   "expiresAt",
   "pinExpiresAt",
+  "privateModeExpiresAt",
   "oauthBearerToken"
 from
   "session"
@@ -24,6 +25,7 @@ select
   "session"."id",
   "session"."updatedAt",
   "session"."pinExpiresAt",
+  "session"."privateModeExpiresAt",
   "session"."appVersion",
   (
     select
@@ -84,9 +86,10 @@ where
 -- SessionRepository.lockAll
 update "session"
 set
-  "pinExpiresAt" = $1
+  "pinExpiresAt" = $1,
+  "privateModeExpiresAt" = $2
 where
-  "userId" = $2
+  "userId" = $3
 
 -- SessionRepository.resetSyncProgress
 begin

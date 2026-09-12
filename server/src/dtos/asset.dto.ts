@@ -81,6 +81,7 @@ const AssetStatsSchema = z
   .object({
     visibility: AssetVisibilitySchema.optional(),
     isFavorite: stringToBool.optional().describe('Filter by favorite status'),
+    isPrivate: stringToBool.optional().describe('Only private assets'),
     isTrashed: stringToBool.optional().describe('Filter by trash status'),
   })
   .meta({ id: 'AssetStatsDto' });
