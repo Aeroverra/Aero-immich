@@ -8,6 +8,7 @@ class PrivateModeManager {
   enabled = $state(false);
   expiresAt = $state<string | undefined>();
   hasPinCode = $state(false);
+  #initialized = false;
 
   constructor() {
     eventManager.on({
@@ -37,16 +38,20 @@ class PrivateModeManager {
       this.#apply(privateMode, privateModeExpiresAt, pinCode);
     } catch {
       // noop
+    } finally {
+      this.#initialized = true;
     }
   }
 
   async enable(pinCode: string) {
     await enablePrivateMode({ sessionUnlockDto: { pinCode } });
+    this.#initialized = true;
     await this.load();
   }
 
   async disable() {
     await disablePrivateMode();
+    this.#initialized = true;
     await this.load();
   }
 
@@ -54,6 +59,7 @@ class PrivateModeManager {
     this.enabled = false;
     this.expiresAt = undefined;
     this.hasPinCode = false;
+    this.#initialized = false;
   }
 
   #apply(enabled: boolean, expiresAt: string | undefined, hasPinCode: boolean) {
@@ -63,7 +69,8 @@ class PrivateModeManager {
     this.expiresAt = expiresAt;
     this.hasPinCode = hasPinCode;
 
-    if (changed) {
+    // the very first load runs inside the root layout load; invalidating there would deadlock the app
+    if (changed && this.#initialized) {
       eventManager.emit('PrivateModeChange', enabled);
       void invalidateAll();
     }
