@@ -4,6 +4,7 @@ import { SvelteDate, SvelteSet } from 'svelte/reactivity';
 import { VirtualScrollManager } from '$lib/managers/VirtualScrollManager/VirtualScrollManager.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { GroupInsertionCache } from '$lib/managers/timeline-manager/group-insertion-cache.svelte';
 import { updateTimelineMonthViewportProximity } from '$lib/managers/timeline-manager/internal/intersection-support.svelte';
 import { updateGeometry } from '$lib/managers/timeline-manager/internal/layout-support.svelte';
@@ -122,6 +123,7 @@ export class TimelineManager extends VirtualScrollManager {
           }
         },
         AssetsUnarchive: (assets) => this.upsertAssets(assets),
+        PrivateModeChange: () => void this.reset(),
       }),
     );
   }
@@ -280,6 +282,26 @@ export class TimelineManager extends VirtualScrollManager {
       return;
     }
 
+    await this.#reload(options);
+  }
+
+  /**
+   * Re-run the initial load with the current options, ignoring the equality guard in updateOptions.
+   * Used when the server-side view changes (e.g. private mode toggles) but the options do not.
+   */
+  async reset() {
+    if (this.#options === TimelineManager.#INIT_OPTIONS) {
+      return;
+    }
+    // a private-only timeline cannot be loaded once the mode is off; the page navigates away instead
+    if (this.#options.isPrivate && !privateModeManager.enabled) {
+      return;
+    }
+
+    await this.#reload(this.#options);
+  }
+
+  async #reload(options: TimelineManagerOptions) {
     this.suspendTransitions = true;
     try {
       await this.initTask.reset();
@@ -621,6 +643,8 @@ export class TimelineManager extends VirtualScrollManager {
       isMismatched(this.#options.visibility, asset.visibility) ||
       isMismatched(this.#options.isFavorite, asset.isFavorite) ||
       isMismatched(this.#options.isTrashed, asset.isTrashed) ||
+      isMismatched(this.#options.isPrivate, asset.isPrivate) ||
+      (asset.isPrivate && !privateModeManager.enabled) ||
       (this.#options.tagId && asset.tags && !asset.tags.includes(this.#options.tagId)) ||
       (this.#options.assetFilter !== undefined && !this.#options.assetFilter.has(asset.id))
     );

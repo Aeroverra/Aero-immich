@@ -109,7 +109,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     title: $t('share'),
     icon: mdiShareVariantOutline,
     $if: () => !!(authUser && !asset.isTrashed && asset.visibility !== AssetVisibility.Locked),
-    onAction: () => modalManager.show(SharedLinkCreateModal, { assetIds: [asset.id] }),
+    onAction: () => modalManager.show(SharedLinkCreateModal, { assetIds: [asset.id], hasPrivate: asset.isPrivate }),
   };
 
   const Download: ActionItem = {
