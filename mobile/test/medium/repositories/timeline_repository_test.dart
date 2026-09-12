@@ -1,7 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/map.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
+import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/timeline.repository.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:maplibre_gl/maplibre_gl.dart';
 
 import '../repository_context.dart';
 
@@ -147,6 +151,157 @@ void main() {
 
       final assets = await query.assetSource(0, 10);
       expect(assets.map((asset) => (asset as RemoteAsset).id), [shiftedLater.id, shiftedEarlier.id]);
+    });
+  });
+
+  group('private mode', () {
+    Future<List<String>> idsOf(TimelineQuery query) async {
+      final buckets = await query.bucketSource().first;
+      final total = buckets.fold<int>(0, (sum, bucket) => sum + bucket.assetCount);
+      final assets = await query.assetSource(0, 100);
+      expect(assets, hasLength(total), reason: 'bucket count and asset count agree for ${query.origin}');
+      return assets.map((asset) => (asset as RemoteAsset).id).toList();
+    }
+
+    test('hides own private assets when off and shows them when on, for every origin', () async {
+      final user = await ctx.newUser();
+      final person = await ctx.newPerson(ownerId: user.id);
+      final album = await ctx.newRemoteAlbum(ownerId: user.id, isPrivate: true);
+      final world = LatLngBounds(southwest: const LatLng(-80, -170), northeast: const LatLng(80, 170));
+      final mapOptions = TimelineMapOptions(bounds: world);
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+
+      final origins = <String, TimelineQuery Function(PrivateModeFilter filter)>{
+        'main': (filter) => sut.main([user.id], .day, privateFilter: filter),
+        'remote': (filter) => sut.remote(user.id, .day, privateFilter: filter),
+        'favorite': (filter) => sut.favorite(user.id, .day, privateFilter: filter),
+        'trash': (filter) => sut.trash(user.id, .day, privateFilter: filter),
+        'archived': (filter) => sut.archived(user.id, .day, privateFilter: filter),
+        'video': (filter) => sut.video(user.id, .day, privateFilter: filter),
+        'recentlyAdded': (filter) => sut.recentlyAdded(user.id, .day, privateFilter: filter),
+        'album': (filter) => sut.remoteAlbum(album.id, .day, privateFilter: filter),
+        'albumUngrouped': (filter) => sut.remoteAlbum(album.id, .none, privateFilter: filter),
+        'person': (filter) => sut.person(user.id, person.id, .day, privateFilter: filter),
+        'place': (filter) => sut.place('Berlin', .day, privateFilter: filter),
+        'map': (filter) =>
+            sut.geographicMap([user.id], () => mapOptions, const Stream.empty(), .day, privateFilter: filter),
+      };
+
+      // one public + one private asset per origin, shaped so that the origin's own filter matches them
+      for (final entry in origins.entries) {
+        final origin = entry.key;
+        final isVideo = origin == 'video';
+        final isTrash = origin == 'trash';
+        final isArchived = origin == 'archived';
+        final isFavorite = origin == 'favorite';
+        final ids = <bool, String>{};
+        for (final isPrivate in [false, true]) {
+          final asset = await ctx.newRemoteAsset(
+            ownerId: user.id,
+            isPrivate: isPrivate,
+            isFavorite: isFavorite,
+            type: isVideo ? .video : .image,
+            visibility: isArchived ? .archive : .timeline,
+            deletedAt: isTrash ? DateTime.now() : null,
+          );
+          await ctx.db.customStatement(
+            "UPDATE remote_asset_entity SET uploaded_at = created_at WHERE id = '${asset.id}'",
+          );
+          await ctx.newFace(assetId: asset.id, personId: person.id);
+          if (!isTrash) {
+            // the ungrouped album count does not exclude trashed assets, keep the album consistent
+            await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: asset.id);
+          }
+          await ctx.newRemoteExif(assetId: asset.id, city: 'Berlin', latitude: 1, longitude: 1);
+          ids[isPrivate] = asset.id;
+        }
+
+        final off = await idsOf(entry.value(PrivateModeFilter.off));
+        expect(off, contains(ids[false]), reason: '$origin shows the public asset when off');
+        expect(off, isNot(contains(ids[true])), reason: '$origin hides the private asset when off');
+
+        final shown = await idsOf(entry.value(on));
+        expect(shown, contains(ids[false]), reason: '$origin shows the public asset when on');
+        expect(shown, contains(ids[true]), reason: '$origin shows the private asset when on');
+      }
+    });
+
+    test('never shows a partner private asset, on or off', () async {
+      final user = await ctx.newUser();
+      final partner = await ctx.newUser();
+      await ctx.newPartner(sharedById: partner.id, sharedWithId: user.id, inTimeline: true);
+      final partnerPublic = await ctx.newRemoteAsset(ownerId: partner.id);
+      final partnerPrivate = await ctx.newRemoteAsset(ownerId: partner.id, isPrivate: true);
+      await ctx.newRemoteExif(assetId: partnerPublic.id, city: 'Berlin', latitude: 1, longitude: 1);
+      await ctx.newRemoteExif(assetId: partnerPrivate.id, city: 'Berlin', latitude: 1, longitude: 1);
+      final world = LatLngBounds(southwest: const LatLng(-80, -170), northeast: const LatLng(80, 170));
+      final mapOptions = TimelineMapOptions(bounds: world);
+
+      for (final filter in [PrivateModeFilter.off, PrivateModeFilter(enabled: true, userId: user.id)]) {
+        final main = await idsOf(sut.main([user.id, partner.id], .day, privateFilter: filter));
+        expect(main, [partnerPublic.id], reason: 'main with $filter');
+
+        final place = await idsOf(sut.place('Berlin', .day, privateFilter: filter));
+        expect(place, [partnerPublic.id], reason: 'place with $filter');
+
+        final map = await idsOf(
+          sut.geographicMap([user.id, partner.id], () => mapOptions, const Stream.empty(), .day, privateFilter: filter),
+        );
+        expect(map, [partnerPublic.id], reason: 'map with $filter');
+      }
+    });
+
+    test('album origin follows the album rule: private assets show whenever the mode is on', () async {
+      final user = await ctx.newUser();
+      final partner = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: partner.id, isPrivate: true);
+      final partnerPublic = await ctx.newRemoteAsset(ownerId: partner.id);
+      final partnerPrivate = await ctx.newRemoteAsset(ownerId: partner.id, isPrivate: true);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: partnerPublic.id);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: partnerPrivate.id);
+
+      final off = await idsOf(sut.remoteAlbum(album.id, .day, privateFilter: PrivateModeFilter.off));
+      expect(off, [partnerPublic.id]);
+
+      final on = await idsOf(
+        sut.remoteAlbum(album.id, .day, privateFilter: PrivateModeFilter(enabled: true, userId: user.id)),
+      );
+      expect(on, containsAll([partnerPublic.id, partnerPrivate.id]));
+      expect(on, hasLength(2));
+    });
+
+    test('privateFolder lists only own private assets and only while the mode is on', () async {
+      final user = await ctx.newUser();
+      final partner = await ctx.newUser();
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      final archivedPrivate = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true, visibility: .archive);
+      await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true, deletedAt: DateTime.now());
+      await ctx.newRemoteAsset(ownerId: partner.id, isPrivate: true);
+
+      final query = sut.privateFolder(user.id, .day, privateFilter: PrivateModeFilter(enabled: true, userId: user.id));
+      expect(query.origin, TimelineOrigin.privateFolder);
+      final on = await idsOf(query);
+      expect(on, containsAll([private.id, archivedPrivate.id]));
+      expect(on, hasLength(2));
+      expect(on, isNot(contains(public.id)));
+
+      final off = await idsOf(sut.privateFolder(user.id, .day));
+      expect(off, isEmpty);
+    });
+
+    test('main timeline carries isPrivate on the returned asset', () async {
+      final user = await ctx.newUser();
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+
+      final assets = await sut
+          .main([user.id], .day, privateFilter: PrivateModeFilter(enabled: true, userId: user.id))
+          .assetSource(0, 10);
+
+      expect(assets, hasLength(1));
+      final remote = assets.single as RemoteAsset;
+      expect(remote.id, private.id);
+      expect(remote.isPrivate, isTrue);
     });
   });
 
