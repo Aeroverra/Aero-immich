@@ -52,6 +52,7 @@ describe(AlbumService.name, () => {
           startDate: null,
           endDate: null,
           lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
         },
         {
           albumId: sharedWithUserAlbum.id,
@@ -59,6 +60,7 @@ describe(AlbumService.name, () => {
           startDate: null,
           endDate: null,
           lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -85,6 +87,7 @@ describe(AlbumService.name, () => {
           startDate: new Date('1970-01-01'),
           endDate: new Date('1970-01-01'),
           lastModifiedAssetTimestamp: new Date('1970-01-01'),
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -105,6 +108,7 @@ describe(AlbumService.name, () => {
           startDate: null,
           endDate: null,
           lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -125,6 +129,7 @@ describe(AlbumService.name, () => {
           startDate: null,
           endDate: null,
           lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -139,7 +144,14 @@ describe(AlbumService.name, () => {
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
       mocks.album.getAll.mockResolvedValue([getForAlbum(album)]);
       mocks.album.getMetadataForIds.mockResolvedValue([
-        { albumId: album.id, assetCount: 0, startDate: null, endDate: null, lastModifiedAssetTimestamp: null },
+        {
+          albumId: album.id,
+          assetCount: 0,
+          startDate: null,
+          endDate: null,
+          lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
+        },
       ]);
 
       const result = await sut.getAll(AuthFactory.create(owner), { isOwned: true });
@@ -152,7 +164,14 @@ describe(AlbumService.name, () => {
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
       mocks.album.getAll.mockResolvedValue([getForAlbum(album)]);
       mocks.album.getMetadataForIds.mockResolvedValue([
-        { albumId: album.id, assetCount: 0, startDate: null, endDate: null, lastModifiedAssetTimestamp: null },
+        {
+          albumId: album.id,
+          assetCount: 0,
+          startDate: null,
+          endDate: null,
+          lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
+        },
       ]);
 
       const result = await sut.getAll(AuthFactory.create(owner), { isOwned: false });
@@ -165,7 +184,14 @@ describe(AlbumService.name, () => {
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
       mocks.album.getAll.mockResolvedValue([getForAlbum(album)]);
       mocks.album.getMetadataForIds.mockResolvedValue([
-        { albumId: album.id, assetCount: 0, startDate: null, endDate: null, lastModifiedAssetTimestamp: null },
+        {
+          albumId: album.id,
+          assetCount: 0,
+          startDate: null,
+          endDate: null,
+          lastModifiedAssetTimestamp: null,
+          thumbnailIsPrivate: null,
+        },
       ]);
 
       const result = await sut.getAll(AuthFactory.create(owner), { isOwned: true, isShared: true });
@@ -195,6 +221,7 @@ describe(AlbumService.name, () => {
         startDate: new Date('1970-01-01'),
         endDate: new Date('1970-01-01'),
         lastModifiedAssetTimestamp: new Date('1970-01-01'),
+        thumbnailIsPrivate: null,
       },
     ]);
 
@@ -697,6 +724,7 @@ describe(AlbumService.name, () => {
           startDate: new Date('1970-01-01'),
           endDate: new Date('1970-01-01'),
           lastModifiedAssetTimestamp: new Date('1970-01-01'),
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -717,6 +745,7 @@ describe(AlbumService.name, () => {
           startDate: new Date('1970-01-01'),
           endDate: new Date('1970-01-01'),
           lastModifiedAssetTimestamp: new Date('1970-01-01'),
+          thumbnailIsPrivate: null,
         },
       ]);
 
@@ -739,6 +768,7 @@ describe(AlbumService.name, () => {
           startDate: new Date('1970-01-01'),
           endDate: new Date('1970-01-01'),
           lastModifiedAssetTimestamp: new Date('1970-01-01'),
+          thumbnailIsPrivate: null,
         },
       ]);
 

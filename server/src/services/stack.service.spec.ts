@@ -30,10 +30,13 @@ describe(StackService.name, () => {
       mocks.stack.search.mockResolvedValue([getForStack(stack)]);
 
       await sut.search(auth, { primaryAssetId: asset.id });
-      expect(mocks.stack.search).toHaveBeenCalledWith({
-        ownerId: auth.user.id,
-        primaryAssetId: asset.id,
-      });
+      expect(mocks.stack.search).toHaveBeenCalledWith(
+        {
+          ownerId: auth.user.id,
+          primaryAssetId: asset.id,
+        },
+        { privateMode: false, userId: expect.any(String) },
+      );
     });
   });
 
@@ -90,7 +93,7 @@ describe(StackService.name, () => {
       await expect(sut.get(authStub.admin, 'stack-id')).rejects.toBeInstanceOf(BadRequestException);
 
       expect(mocks.access.stack.checkOwnerAccess).toHaveBeenCalled();
-      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id');
+      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id', { privateMode: false, userId: expect.any(String) });
     });
 
     it('should get stack', async () => {
@@ -110,7 +113,7 @@ describe(StackService.name, () => {
         assets: [expect.objectContaining({ id: primaryAsset.id }), expect.objectContaining({ id: asset.id })],
       });
       expect(mocks.access.stack.checkOwnerAccess).toHaveBeenCalled();
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
     });
   });
 
@@ -129,7 +132,7 @@ describe(StackService.name, () => {
 
       await expect(sut.update(AuthFactory.create(), 'stack-id', {})).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id');
+      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id', { privateMode: false, userId: expect.any(String) });
       expect(mocks.stack.update).not.toHaveBeenCalled();
       expect(mocks.event.emit).not.toHaveBeenCalled();
     });
@@ -148,7 +151,7 @@ describe(StackService.name, () => {
         BadRequestException,
       );
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
       expect(mocks.stack.update).not.toHaveBeenCalled();
       expect(mocks.event.emit).not.toHaveBeenCalled();
     });
@@ -167,11 +170,15 @@ describe(StackService.name, () => {
 
       await sut.update(auth, stack.id, { primaryAssetId: asset.id });
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
-      expect(mocks.stack.update).toHaveBeenCalledWith(stack.id, {
-        id: stack.id,
-        primaryAssetId: asset.id,
-      });
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
+      expect(mocks.stack.update).toHaveBeenCalledWith(
+        stack.id,
+        {
+          id: stack.id,
+          primaryAssetId: asset.id,
+        },
+        { privateMode: false, userId: expect.any(String) },
+      );
       expect(mocks.event.emit).toHaveBeenCalledWith('StackUpdate', {
         stackId: stack.id,
         userId: auth.user.id,

@@ -34,7 +34,7 @@ import {
 } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
-import { requireElevatedPermission, requirePrivateMode } from 'src/utils/access';
+import { requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import {
   getAssetFiles,
   getDimensions,
@@ -55,21 +55,29 @@ export class AssetService extends BaseService {
       requireElevatedPermission(auth);
     }
 
-    const stats = await this.assetRepository.getStatistics(auth.user.id, dto);
+    if (dto.isPrivate) {
+      requirePrivateMode(auth);
+    }
+
+    const stats = await this.assetRepository.getStatistics(auth.user.id, dto, toPrivateScope(auth));
     return mapStats(stats);
   }
 
   async get(auth: AuthDto, id: string): Promise<AssetResponseDto | SanitizedAssetResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
 
-    const asset = await this.assetRepository.getById(id, {
-      exifInfo: true,
-      owner: true,
-      faces: { person: true, viewingUserId: auth.user.id },
-      stack: { assets: true },
-      edits: true,
-      tags: true,
-    });
+    const asset = await this.assetRepository.getById(
+      id,
+      {
+        exifInfo: true,
+        owner: true,
+        faces: { person: true, viewingUserId: auth.user.id },
+        stack: { assets: true },
+        edits: true,
+        tags: true,
+      },
+      toPrivateScope(auth),
+    );
 
     if (!asset) {
       throw new BadRequestException('Asset not found');
@@ -226,7 +234,13 @@ export class AssetService extends BaseService {
     }
 
     if (favorite) {
-      await this.assetRepository.update({ id: targetId, isFavorite: sourceAsset.isFavorite });
+      // getForCopy does not carry isPrivate, so read it from the full row
+      const [source] = (await this.assetRepository.getByIds([sourceId])) ?? [];
+      await this.assetRepository.update({
+        id: targetId,
+        isFavorite: sourceAsset.isFavorite,
+        isPrivate: source?.isPrivate,
+      });
     }
 
     if (sidecar) {
@@ -321,10 +335,14 @@ export class AssetService extends BaseService {
         await this.stackRepository.delete(asset.stack.id);
       } else if (asset.stack.primaryAssetId === id) {
         // the primary is being deleted but others remain: promote a new primary
-        await this.stackRepository.update(asset.stack.id, {
-          id: asset.stack.id,
-          primaryAssetId: remainingStackAssetIds[0],
-        });
+        await this.stackRepository.update(
+          asset.stack.id,
+          {
+            id: asset.stack.id,
+            primaryAssetId: remainingStackAssetIds[0],
+          },
+          { privateMode: true, userId: asset.ownerId },
+        );
       }
     }
 

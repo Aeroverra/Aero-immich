@@ -250,6 +250,7 @@ const searchFilterBranchShape = {
   type: EnumFilterAssetTypeSchema,
   visibility: EnumFilterAssetVisibilitySchema,
   isFavorite: BoolFilterSchema,
+  isPrivate: BoolFilterSchema,
   isMotion: BoolFilterSchema,
   isOffline: BoolFilterSchema,
   isEncoded: BoolFilterSchema,
