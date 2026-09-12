@@ -107,9 +107,17 @@ class AlbumApiRepository extends ApiRepository {
     return _api.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers(String albumId, Iterable<String> userIds) async {
+  Future<void> addUsers(String albumId, Iterable<String> userIds, {bool confirmPrivate = false}) async {
     final albumUsers = userIds.map((userId) => AlbumUserAddDto(userId: userId)).toList();
-    await checkNull(_api.addUsersToAlbum(albumId, AddUsersDto(albumUsers: albumUsers)));
+    await checkNull(
+      _api.addUsersToAlbum(
+        albumId,
+        AddUsersDto(
+          albumUsers: albumUsers,
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
+        ),
+      ),
+    );
   }
 
   Future<void> removeUser(String albumId, {required String userId}) async {
@@ -139,6 +147,7 @@ extension on AlbumResponseDto {
       order: order.orElse(null) == AssetOrder.asc ? AlbumAssetOrder.asc : AlbumAssetOrder.desc,
       assetCount: assetCount,
       isShared: albumUsers.length > 2,
+      isPrivate: isPrivate,
     );
   }
 }
