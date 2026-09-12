@@ -14,6 +14,7 @@ export type OnLink = (assets: { still: TimelineAsset; motion: TimelineAsset }) =
 export type OnUnlink = (assets: { still: TimelineAsset; motion: TimelineAsset }) => void;
 export type OnArchive = (ids: string[], visibility: AssetVisibility) => void;
 export type OnFavorite = (ids: string[], favorite: boolean) => void;
+export type OnSetPrivate = (ids: string[], isPrivate: boolean) => void;
 export type OnStack = (result: StackResponse) => void;
 export type OnUnstack = (assets: TimelineAsset[]) => void;
 export type OnSetVisibility = (ids: string[]) => void;

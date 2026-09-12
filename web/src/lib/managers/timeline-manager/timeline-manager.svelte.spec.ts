@@ -2,6 +2,7 @@ import { AssetOrderBy, AssetVisibility, type AssetResponseDto, type TimeBucketAs
 import { tick } from 'svelte';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { getTimelineMonthByDate } from '$lib/managers/timeline-manager/internal/search-support.svelte';
 import { AbortError } from '$lib/utils';
 import { fromISODateTimeUTCToObject } from '$lib/utils/timeline-util';
@@ -482,6 +483,115 @@ describe('TimelineManager', () => {
 
       expect(timelineManager.assetCount).toEqual(1);
       expect(timelineManager.months[0].getFirstAsset().isFavorite).toEqual(true);
+    });
+  });
+
+  describe('private mode', () => {
+    let timelineManager: TimelineManager;
+
+    beforeEach(async () => {
+      privateModeManager.enabled = false;
+      timelineManager = new TimelineManager();
+      sdkMock.getTimeBuckets.mockResolvedValue([]);
+
+      await timelineManager.updateViewport({ width: 1588, height: 1000 });
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+      sdkMock.getTimeBuckets.mockClear();
+    });
+
+    afterEach(() => {
+      privateModeManager.enabled = false;
+      timelineManager.destroy();
+    });
+
+    it('does not refetch through updateOptions when the options are unchanged', async () => {
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalled();
+    });
+
+    it('refetches with the same options on reset', async () => {
+      await timelineManager.reset();
+
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ visibility: AssetVisibility.Timeline }),
+      );
+    });
+
+    it('resets when private mode changes', async () => {
+      const reset = vi.spyOn(timelineManager, 'reset');
+
+      eventManager.emit('PrivateModeChange', true);
+
+      await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(sdkMock.getTimeBuckets).toHaveBeenCalled());
+    });
+
+    it('drops private assets while the mode is off', () => {
+      const asset = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: true, visibility: AssetVisibility.Timeline }),
+      );
+
+      timelineManager.upsertAssets([asset]);
+
+      expect(timelineManager.isExcluded(asset)).toBe(true);
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+
+    it('keeps private assets while the mode is on', () => {
+      privateModeManager.enabled = true;
+      const asset = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: true, visibility: AssetVisibility.Timeline }),
+      );
+
+      timelineManager.upsertAssets([asset]);
+
+      expect(timelineManager.isExcluded(asset)).toBe(false);
+      expect(timelineManager.assetCount).toEqual(1);
+    });
+
+    it('removes an asset that becomes private through an AssetUpdate event while the mode is off', () => {
+      const existing = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: false, visibility: AssetVisibility.Timeline }),
+      );
+      timelineManager.upsertAssets([existing]);
+      expect(timelineManager.assetCount).toEqual(1);
+
+      eventManager.emit(
+        'AssetUpdate',
+        assetFactory.build({
+          id: existing.id,
+          ownerId: existing.ownerId,
+          isPrivate: true,
+          isFavorite: existing.isFavorite,
+          isTrashed: existing.isTrashed,
+          visibility: existing.visibility,
+        }),
+      );
+
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+
+    it('only keeps private assets on a private-only timeline', async () => {
+      privateModeManager.enabled = true;
+      await timelineManager.updateOptions({ isPrivate: true });
+
+      const plain = deriveLocalDateTimeFromFileCreatedAt(timelineAssetFactory.build({ isPrivate: false }));
+      const secret = deriveLocalDateTimeFromFileCreatedAt(timelineAssetFactory.build({ isPrivate: true }));
+
+      expect(timelineManager.isExcluded(plain)).toBe(true);
+      expect(timelineManager.isExcluded(secret)).toBe(false);
+    });
+
+    it('does not reload a private-only timeline once the mode is off', async () => {
+      privateModeManager.enabled = true;
+      await timelineManager.updateOptions({ isPrivate: true });
+      sdkMock.getTimeBuckets.mockClear();
+
+      privateModeManager.enabled = false;
+      await timelineManager.reset();
+
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalled();
     });
   });
 
