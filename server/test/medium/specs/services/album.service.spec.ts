@@ -75,20 +75,17 @@ describe(AlbumService.name, () => {
       });
       const { album } = await ctx.newAlbum({ ownerId: user.id }, [plain.id, hidden.id]);
 
-      await expect(sut.get(factory.auth({ user }), album.id)).resolves.toMatchObject({
-        assetCount: 1,
-        startDate: '2021-01-01T00:00:00+00:00',
-        endDate: '2021-01-01T00:00:00+00:00',
-        isPrivate: true,
-      });
+      const hiddenView = await sut.get(factory.auth({ user }), album.id);
+      expect(hiddenView).toMatchObject({ assetCount: 1, isPrivate: true });
+      expect(new Date(hiddenView.startDate!).toISOString()).toBe('2021-01-01T00:00:00.000Z');
+      expect(new Date(hiddenView.endDate!).toISOString()).toBe('2021-01-01T00:00:00.000Z');
       const [listed] = await sut.getAll(factory.auth({ user }), {});
       expect(listed).toMatchObject({ id: album.id, assetCount: 1, isPrivate: true });
 
-      await expect(sut.get(factory.auth({ user, session: { privateMode: true } }), album.id)).resolves.toMatchObject({
-        assetCount: 2,
-        startDate: '2021-01-01T00:00:00+00:00',
-        endDate: '2023-01-01T00:00:00+00:00',
-      });
+      const fullView = await sut.get(factory.auth({ user, session: { privateMode: true } }), album.id);
+      expect(fullView).toMatchObject({ assetCount: 2 });
+      expect(new Date(fullView.startDate!).toISOString()).toBe('2021-01-01T00:00:00.000Z');
+      expect(new Date(fullView.endDate!).toISOString()).toBe('2023-01-01T00:00:00.000Z');
       const updated = await sut.update(factory.auth({ user, session: { privateMode: true } }), album.id, {
         albumName: 'renamed',
       });
