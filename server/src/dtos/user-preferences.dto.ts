@@ -106,6 +106,13 @@ const RecentlyAddedUpdateSchema = z
   .optional()
   .meta({ id: 'RecentlyAddedUpdate' });
 
+const PrivateModeUpdateSchema = z
+  .object({
+    timeoutMinutes: z.int().min(1).max(1440).optional().describe('Minutes of inactivity before private mode turns off'),
+  })
+  .optional()
+  .meta({ id: 'PrivateModeUpdate' });
+
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
@@ -121,6 +128,7 @@ const UserPreferencesUpdateSchema = z
     sharedLinks: SharedLinksUpdateSchema,
     tags: TagsUpdateSchema,
     recentlyAdded: RecentlyAddedUpdateSchema,
+    privateMode: PrivateModeUpdateSchema,
   })
   .meta({ id: 'UserPreferencesUpdateDto' });
 
@@ -207,6 +215,12 @@ const RecentlyAddedResponseSchema = z
   })
   .meta({ id: 'RecentlyAddedResponse' });
 
+const PrivateModeResponseSchema = z
+  .object({
+    timeoutMinutes: z.int().describe('Minutes of inactivity before private mode turns off'),
+  })
+  .meta({ id: 'PrivateModeResponse' });
+
 const UserPreferencesResponseSchema = z
   .object({
     albums: AlbumsResponseSchema,
@@ -221,6 +235,7 @@ const UserPreferencesResponseSchema = z
     purchase: PurchaseResponseSchema,
     cast: CastResponseSchema,
     recentlyAdded: RecentlyAddedResponseSchema,
+    privateMode: PrivateModeResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });
 
