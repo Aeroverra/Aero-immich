@@ -313,7 +313,7 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
       expect(memories[0]).toEqual(
         expect.objectContaining({
@@ -353,7 +353,7 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
       expect(memories[0]).toEqual(
         expect.objectContaining({
@@ -408,12 +408,12 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
 
       await sut.onMemoriesCreate();
 
-      const memoriesAfter = await memoryRepo.search(user.id, {});
+      const memoriesAfter = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memoriesAfter.length).toBe(1);
     });
   });
@@ -422,6 +422,31 @@ describe(MemoryService.name, () => {
     it('should run without error', async () => {
       const { sut } = setup();
       await expect(sut.onMemoriesCleanup()).resolves.not.toThrow();
+    });
+  });
+
+  describe('private mode', () => {
+    it('should hide private assets from memories outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { memory } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: plain.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: hidden.id });
+      const { memory: secret } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: secret.id, assetId: hidden.id });
+
+      const off = await sut.search(factory.auth({ user }), {});
+      expect(off.map(({ id }) => id)).toEqual([memory.id]);
+      expect(off[0].assets.map(({ id }) => id)).toEqual([plain.id]);
+      await expect(sut.get(factory.auth({ user }), memory.id)).resolves.toMatchObject({
+        assets: [expect.objectContaining({ id: plain.id })],
+      });
+
+      const on = await sut.search(factory.auth({ user, session: { privateMode: true } }), {});
+      expect(on.map(({ id }) => id).sort()).toEqual([memory.id, secret.id].sort());
+      expect(on.find(({ id }) => id === memory.id)?.assets).toHaveLength(2);
     });
   });
 });

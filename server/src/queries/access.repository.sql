@@ -90,11 +90,12 @@ from
   and "user"."deletedAt" is null
   cross join "target"
 where
-  (
+  "asset"."isPrivate" = $2
+  and (
     "asset"."id" = any (target.ids)
     or "asset"."livePhotoVideoId" = any (target.ids)
   )
-  and "user"."id" = $2
+  and "user"."id" = $3
   and "album"."deletedAt" is null
 
 -- AccessRepository.asset.checkOwnerAccess
@@ -106,6 +107,7 @@ where
   "asset"."id" in ($1)
   and "asset"."ownerId" = $2
   and "asset"."visibility" != $3
+  and "asset"."isPrivate" = $4
 
 -- AccessRepository.asset.checkPartnerAccess
 select
@@ -122,7 +124,8 @@ where
     "asset"."visibility" = 'timeline'
     or "asset"."visibility" = 'hidden'
   )
-  and "asset"."id" in ($2)
+  and "asset"."isPrivate" = $2
+  and "asset"."id" in ($3)
 
 -- AccessRepository.asset.checkSharedLinkAccess
 select
@@ -157,8 +160,9 @@ from
   inner join "asset" on "asset"."id" = "asset_file"."assetId"
 where
   "asset"."visibility" != $1
-  and "asset"."ownerId" = $2
-  and "asset_file"."id" in ($3)
+  and "asset"."isPrivate" = $2
+  and "asset"."ownerId" = $3
+  and "asset_file"."id" in ($4)
 
 -- AccessRepository.authDevice.checkOwnerAccess
 select

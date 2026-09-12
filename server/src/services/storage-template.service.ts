@@ -315,7 +315,11 @@ export class StorageTemplateService extends BaseService {
           albumName = album.albumName || null;
 
           if (this.template.needsAlbumMetadata) {
-            const [metadata] = await this.albumRepository.getMetadataForIds([album.id]);
+            // storage paths reflect the whole album, so private assets count towards its date range
+            const [metadata] = await this.albumRepository.getMetadataForIds([album.id], {
+              privateMode: true,
+              userId: assetForMetadata.ownerId,
+            });
             albumStartDate = metadata?.startDate || null;
             albumEndDate = metadata?.endDate || null;
           }

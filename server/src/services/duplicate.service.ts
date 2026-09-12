@@ -8,6 +8,7 @@ import { AssetStatus, AssetVisibility, JobName, JobStatus, Permission, QueueName
 import { AssetDuplicateResult } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobOf } from 'src/types';
+import { toPrivateScope } from 'src/utils/access';
 import { suggestDuplicateKeepAssetIds } from 'src/utils/duplicate';
 import { batched, isDuplicateDetectionEnabled } from 'src/utils/misc';
 
@@ -69,15 +70,20 @@ export class DuplicateService extends BaseService {
     // Clean up singleton groups (assets that are the only member of their duplicate group)
     await this.duplicateRepository.cleanupSingletonGroups(auth.user.id);
 
-    const duplicates = await this.duplicateRepository.getAll(auth.user.id);
-    return duplicates.map(({ duplicateId, assets }) => {
-      const mappedAssets = assets.map((asset) => mapAsset(asset, { auth }));
-      return {
-        duplicateId,
-        assets: mappedAssets,
-        suggestedKeepAssetIds: suggestDuplicateKeepAssetIds(mappedAssets),
-      };
-    });
+    const duplicates = await this.duplicateRepository.getAll(auth.user.id, toPrivateScope(auth));
+    return (
+      duplicates
+        // a group whose private members are hidden may no longer have anything to compare
+        .filter(({ assets }) => assets.length > 1)
+        .map(({ duplicateId, assets }) => {
+          const mappedAssets = assets.map((asset) => mapAsset(asset, { auth }));
+          return {
+            duplicateId,
+            assets: mappedAssets,
+            suggestedKeepAssetIds: suggestDuplicateKeepAssetIds(mappedAssets),
+          };
+        })
+    );
   }
 
   async delete(auth: AuthDto, id: string): Promise<void> {
@@ -112,7 +118,7 @@ export class DuplicateService extends BaseService {
   private async resolveGroup(auth: AuthDto, group: DuplicateResolveGroupDto): Promise<BulkIdResponseDto> {
     const { duplicateId, keepAssetIds, trashAssetIds } = group;
 
-    const duplicateGroup = await this.duplicateRepository.get(duplicateId);
+    const duplicateGroup = await this.duplicateRepository.get(duplicateId, toPrivateScope(auth));
     if (!duplicateGroup) {
       return { id: duplicateId, success: false, error: BulkIdErrorReason.NOT_FOUND };
     }

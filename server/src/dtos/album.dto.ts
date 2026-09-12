@@ -21,6 +21,10 @@ const AlbumUserAddSchema = z
 const AddUsersSchema = z
   .object({
     albumUsers: z.array(AlbumUserAddSchema).min(1).describe('Album users to add'),
+    confirmPrivate: z
+      .boolean()
+      .optional()
+      .describe('Required to be true when the album contains private assets, acknowledging they will be shared'),
   })
   .meta({ id: 'AddUsersDto' });
 
@@ -187,6 +191,7 @@ export const AlbumResponseSchema = z
     isActivityEnabled: z.boolean().describe('Activity feed enabled'),
     order: AssetOrderSchema.optional(),
     contributorCounts: z.array(ContributorCountResponseSchema).optional(),
+    isPrivate: z.boolean().describe('Album contains at least one private asset'),
   })
   .meta({ id: 'AlbumResponseDto' });
 
@@ -227,6 +232,7 @@ export type MapAlbumDto = {
   id: string;
   isActivityEnabled: boolean;
   order: AssetOrder;
+  isPrivate: boolean;
 };
 
 export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto => {
@@ -270,5 +276,6 @@ export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto
     assetCount: entity.assets?.length || 0,
     isActivityEnabled: entity.isActivityEnabled,
     order: entity.order,
+    isPrivate: entity.isPrivate,
   };
 };

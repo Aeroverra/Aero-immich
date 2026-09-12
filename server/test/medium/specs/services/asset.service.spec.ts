@@ -1,6 +1,14 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import { AssetFileType, AssetMetadataKey, AssetStatus, JobName, SharedLinkType } from 'src/enum';
+import {
+  AssetFileType,
+  AssetMetadataKey,
+  AssetStatus,
+  CalendarHeatmapType,
+  JobName,
+  SharedLinkType,
+} from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
@@ -66,6 +74,52 @@ describe(AssetService.name, () => {
       await ctx.newExif({ assetId: asset.id, fileSizeInByte: 12_345 });
       const auth = factory.auth({ user: { id: user.id } });
       await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should not count private assets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id });
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should count private assets in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id });
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: true } });
+      await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+      await expect(sut.getStatistics(auth, { isPrivate: true })).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should require private mode for private statistics', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getStatistics(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('getCalendarHeatmap', () => {
+    it('should count private assets only in private mode', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const createdAt = new Date('2024-06-15T12:00:00.000Z');
+      await ctx.newAsset({ ownerId: user.id, createdAt });
+      await ctx.newAsset({ ownerId: user.id, createdAt, isPrivate: true });
+      const dto = { from: new Date('2024-06-01'), to: new Date('2024-07-01'), type: CalendarHeatmapType.Upload };
+
+      const assetRepository = ctx.get(AssetRepository);
+      await expect(
+        assetRepository.getCalendarHeatmap(user.id, dto, { privateMode: false, userId: user.id }),
+      ).resolves.toEqual([expect.objectContaining({ count: 1 })]);
+      await expect(
+        assetRepository.getCalendarHeatmap(user.id, dto, { privateMode: true, userId: user.id }),
+      ).resolves.toEqual([expect.objectContaining({ count: 2 })]);
     });
   });
 
@@ -143,9 +197,9 @@ describe(AssetService.name, () => {
       const auth = factory.auth({ user: { id: user.id } });
       await sut.copy(auth, { sourceId: oldAsset.id, targetId: newAsset.id });
 
-      await expect(stackRepo.getById(oldAsset.id)).resolves.toEqual(undefined);
+      await expect(stackRepo.getById(oldAsset.id, { privateMode: true, userId: user.id })).resolves.toEqual(undefined);
 
-      const newStack = await stackRepo.getById(newStackId);
+      const newStack = await stackRepo.getById(newStackId, { privateMode: true, userId: user.id });
       expect(newStack).toEqual(
         expect.objectContaining({
           primaryAssetId: newAsset.id,
@@ -176,7 +230,7 @@ describe(AssetService.name, () => {
       const auth = factory.auth({ user: { id: user.id } });
       await sut.copy(auth, { sourceId: oldAsset.id, targetId: newAsset.id });
 
-      const stack = await stackRepo.getById(stackId);
+      const stack = await stackRepo.getById(stackId, { privateMode: true, userId: user.id });
       expect(stack).toEqual(
         expect.objectContaining({
           primaryAssetId: oldAsset.id,
@@ -279,7 +333,7 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // stack is deleted as well
-      await expect(stackRepo.getById(stack.id)).resolves.toBe(undefined);
+      await expect(stackRepo.getById(stack.id, { privateMode: true, userId: user.id })).resolves.toBe(undefined);
     });
 
     it('should delete a stacked primary asset (3 assets)', async () => {
@@ -297,7 +351,9 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // new primary asset is picked
-      await expect(ctx.get(StackRepository).getById(stack.id)).resolves.toMatchObject({ primaryAssetId: asset2.id });
+      await expect(
+        ctx.get(StackRepository).getById(stack.id, { privateMode: true, userId: user.id }),
+      ).resolves.toMatchObject({ primaryAssetId: asset2.id });
     });
 
     it('should delete a stacked primary asset (3 trashed assets)', async () => {
@@ -320,7 +376,9 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // stack is deleted as well
-      await expect(ctx.get(StackRepository).getById(stack.id)).resolves.toBe(undefined);
+      await expect(ctx.get(StackRepository).getById(stack.id, { privateMode: true, userId: user.id })).resolves.toBe(
+        undefined,
+      );
     });
 
     it('should not delete offline assets', async () => {
