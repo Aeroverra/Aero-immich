@@ -131,7 +131,6 @@
       />
 
       <SetPrivateAction
-        unmark={assetMultiSelectManager.isAllPrivate}
         onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
         onRemove={handleSetVisibility}
       />
@@ -159,11 +158,6 @@
         <ArchiveAction
           menuItem
           onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
-        />
-        <SetPrivateAction
-          menuItem
-          onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-          onRemove={handleSetVisibility}
         />
         {#if authManager.preferences.tags.enabled}
           <TagAction menuItem />

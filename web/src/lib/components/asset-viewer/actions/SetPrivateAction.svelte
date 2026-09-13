@@ -3,6 +3,7 @@
   import { AssetAction } from '$lib/constants';
   import { eventManager } from '$lib/managers/event-manager.svelte';
   import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+  import { handleMarkPrivateAlbums } from '$lib/services/private-mode.service';
   import { handleError } from '$lib/utils/handle-error';
   import { toTimelineAsset } from '$lib/utils/timeline-util';
   import { updateAsset, type AssetResponseDto } from '@immich/sdk';
@@ -22,6 +23,11 @@
   const onSetPrivate = async () => {
     const isPrivate = !asset.isPrivate;
     const type = isPrivate ? AssetAction.SET_PRIVATE : AssetAction.UNSET_PRIVATE;
+
+    // the albums holding this asset turn private with it, the user decides what happens to them first
+    if (isPrivate && !(await handleMarkPrivateAlbums([asset.id]))) {
+      return;
+    }
 
     try {
       // while the mode is off the asset disappears from the view, so move on to the next one first

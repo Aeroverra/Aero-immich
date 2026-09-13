@@ -146,13 +146,13 @@
         }}
       />
 
+      <SetPrivateAction onSetPrivate={triggerAssetUpdate} onRemove={triggerAssetUpdate} />
       <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
         <DownloadAction menuItem />
         <ChangeDate menuItem />
         <ChangeDescription menuItem />
         <ChangeLocation menuItem />
         <ArchiveAction menuItem unarchive={assetMultiSelectManager.isAllArchived} onArchive={triggerAssetUpdate} />
-        <SetPrivateAction menuItem onSetPrivate={triggerAssetUpdate} onRemove={triggerAssetUpdate} />
         <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
         {#if authManager.preferences.tags.enabled && assetMultiSelectManager.isAllUserOwned}
           <TagAction menuItem />
