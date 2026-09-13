@@ -23,6 +23,7 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { searchManager } from '$lib/managers/search-manager.svelte';
   import type { Viewport } from '$lib/managers/timeline-manager/types';
   import { Route } from '$lib/route';
@@ -74,7 +75,16 @@
     // we want this to *only* be reactive on `terms`
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     terms;
-    untrack(() => handlePromiseError(onSearchQueryUpdate()));
+    untrack(() => {
+      // an explicit private filter is rejected by the server while the mode is off (and would leak the choice
+      // through the URL), so drop it first; the navigation reruns this effect with the remaining terms
+      if (!privateModeManager.enabled && terms.isPrivate !== undefined) {
+        removeFilter('isPrivate');
+        return;
+      }
+
+      handlePromiseError(onSearchQueryUpdate());
+    });
   });
 
   $effect(() => {
@@ -124,6 +134,15 @@
         asset.isPrivate = isPrivate;
       }
     }
+  };
+
+  const onPrivateModeChange = (enabled: boolean) => {
+    if (!enabled && terms.isPrivate !== undefined) {
+      removeFilter('isPrivate');
+      return;
+    }
+
+    handlePromiseError(onSearchQueryUpdate());
   };
 
   const handleSelectAll = () => {
@@ -203,6 +222,7 @@
       description: $t('description'),
       queryAssetId: $t('query_asset_id'),
       ocr: $t('ocr'),
+      isPrivate: $t('search_private_filter'),
     };
     return keyMap[key] || key;
   }
@@ -263,7 +283,7 @@
 
 <svelte:window bind:scrollY />
 
-<OnEvents {onAlbumAddAssets} onPrivateModeChange={() => handlePromiseError(onSearchQueryUpdate())} />
+<OnEvents {onAlbumAddAssets} {onPrivateModeChange} />
 
 {#if searchTermKeys.length > 0}
   <section id="search-chips" class="mx-auto mt-24 w-full max-w-7xl px-4 sm:px-8 lg:px-12">
@@ -279,9 +299,11 @@
             {getHumanReadableSearchKey(searchKey as keyof SearchTerms)}
           </span>
 
-          {#if value !== true}
+          {#if value !== true || searchKey === 'isPrivate'}
             <span class="max-w-[min(36rem,55vw)] min-w-0 truncate px-3 py-1.5 text-immich-fg dark:text-immich-dark-fg">
-              {#if (searchKey === 'takenAfter' || searchKey === 'takenBefore') && typeof value === 'string'}
+              {#if searchKey === 'isPrivate'}
+                {value ? $t('search_private_only') : $t('search_private_exclude')}
+              {:else if (searchKey === 'takenAfter' || searchKey === 'takenBefore') && typeof value === 'string'}
                 {getHumanReadableDate(value)}
               {:else if searchKey === 'personIds' && Array.isArray(value)}
                 {#await getPersonName(value) then personName}
