@@ -390,23 +390,49 @@ describe(TimelineService.name, () => {
       expect(privateResponse).toEqual(expect.objectContaining({ id: [asset.id], isTrashed: [true] }));
     });
 
-    it('should hide private assets of an album outside private mode', async () => {
+    it('should hide the buckets of a private album outside private mode', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();
       const { publicAsset, privateAsset } = await newBucketAssets(ctx, user.id);
       const { album } = await ctx.newAlbum({ ownerId: user.id }, [publicAsset.id, privateAsset.id]);
+      const { album: plainAlbum } = await ctx.newAlbum({ ownerId: user.id }, [publicAsset.id]);
 
       const auth = factory.auth({ user, session: { privateMode: false } });
-      await expect(sut.getTimeBuckets(auth, { albumId: album.id })).resolves.toEqual([
+      await expect(sut.getTimeBuckets(auth, { albumId: album.id })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      await expect(sut.getTimeBucket(auth, { albumId: album.id, timeBucket: '1970-02-01' })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      // an album without private assets is unaffected
+      await expect(sut.getTimeBuckets(auth, { albumId: plainAlbum.id })).resolves.toEqual([
         { count: 1, timeBucket: '1970-02-01' },
       ]);
-      const response = JSON.parse(await sut.getTimeBucket(auth, { albumId: album.id, timeBucket: '1970-02-01' }));
-      expect(response).toEqual(expect.objectContaining({ id: [publicAsset.id] }));
 
       const privateAuth = factory.auth({ user, session: { privateMode: true } });
       await expect(sut.getTimeBuckets(privateAuth, { albumId: album.id })).resolves.toEqual([
         { count: 2, timeBucket: '1970-02-01' },
       ]);
+      const response = JSON.parse(
+        await sut.getTimeBucket(privateAuth, { albumId: album.id, timeBucket: '1970-02-01' }),
+      );
+      expect(response.id.sort()).toEqual([publicAsset.id, privateAsset.id].sort());
+    });
+
+    it('should hide the buckets of a private album from a co-viewer outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { album, owner, sharedWith, asset } = await ctx.newSharedAlbum();
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      const { privateAsset } = await newBucketAssets(ctx, owner.id);
+      await ctx.newAlbumAsset({ albumId: album.id, assetId: privateAsset.id });
+
+      await expect(sut.getTimeBuckets(factory.auth({ user: sharedWith }), { albumId: album.id })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      const buckets = await sut.getTimeBuckets(factory.auth({ user: sharedWith, session: { privateMode: true } }), {
+        albumId: album.id,
+      });
+      expect(buckets.reduce((sum, { count }) => sum + count, 0)).toBe(2);
     });
   });
 });

@@ -4,7 +4,7 @@ import { InjectKysely } from 'nestjs-kysely';
 import { ChunkedSet, DummyValue, GenerateSql } from 'src/decorators';
 import { AlbumUserRole, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
-import { asUuid } from 'src/utils/database';
+import { asUuid, withPrivateAlbumVisibility } from 'src/utils/database';
 
 export type AssetAccessOptions = {
   hasElevatedPermission: boolean;
@@ -52,15 +52,16 @@ class ActivityAccess {
       .then((activities) => new Set(activities.map((activity) => activity.id)));
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkCreateAccess(userId: string, albumIds: Set<string>) {
+  async checkCreateAccess(userId: string, albumIds: Set<string>, privateMode: boolean) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
 
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility({ privateMode }))
       .select('album.id')
       .innerJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
       .innerJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
@@ -76,15 +77,16 @@ class ActivityAccess {
 class AlbumAccess {
   constructor(private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkOwnerAccess(userId: string, albumIds: Set<string>) {
+  async checkOwnerAccess(userId: string, albumIds: Set<string>, privateMode: boolean) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
 
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility({ privateMode }))
       .select('album.id')
       .where('album.id', 'in', [...albumIds])
       .innerJoin('album_user', (join) =>
@@ -98,9 +100,9 @@ class AlbumAccess {
       .then((albums) => new Set(albums.map((album) => album.id)));
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, AlbumUserRole.Viewer, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkSharedAlbumAccess(userId: string, albumIds: Set<string>, access: AlbumUserRole) {
+  async checkSharedAlbumAccess(userId: string, albumIds: Set<string>, access: AlbumUserRole, privateMode: boolean) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
@@ -110,6 +112,7 @@ class AlbumAccess {
 
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility({ privateMode }))
       .select('album.id')
       .innerJoin('album_user', 'album_user.albumId', 'album.id')
       .innerJoin('user', (join) => join.onRef('user.id', '=', 'album_user.userId').on('user.deletedAt', 'is', null))
@@ -153,39 +156,42 @@ class AssetAccess {
       return new Set<string>();
     }
 
-    return this.db
-      .with('target', (qb) => qb.selectNoFrom(sql`array[${sql.join([...assetIds])}]::uuid[]`.as('ids')))
-      .selectFrom('album')
-      .innerJoin('album_asset as albumAssets', 'album.id', 'albumAssets.albumId')
-      .innerJoin('asset', (join) =>
-        join.onRef('asset.id', '=', 'albumAssets.assetId').on('asset.deletedAt', 'is', null),
-      )
-      .$if(!privateMode, (qb) => qb.where('asset.isPrivate', '=', false))
-      .leftJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
-      .leftJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
-      .crossJoin('target')
-      .select(['asset.id', 'asset.livePhotoVideoId'])
-      .where((eb) =>
-        eb.or([
-          eb('asset.id', '=', sql<string>`any(target.ids)`),
-          eb('asset.livePhotoVideoId', '=', sql<string>`any(target.ids)`),
-        ]),
-      )
-      .where('user.id', '=', userId)
-      .where('album.deletedAt', 'is', null)
-      .execute()
-      .then((assets) => {
-        const allowedIds = new Set<string>();
-        for (const asset of assets) {
-          if (asset.id && assetIds.has(asset.id)) {
-            allowedIds.add(asset.id);
+    return (
+      this.db
+        .with('target', (qb) => qb.selectNoFrom(sql`array[${sql.join([...assetIds])}]::uuid[]`.as('ids')))
+        .selectFrom('album')
+        .innerJoin('album_asset as albumAssets', 'album.id', 'albumAssets.albumId')
+        .innerJoin('asset', (join) =>
+          join.onRef('asset.id', '=', 'albumAssets.assetId').on('asset.deletedAt', 'is', null),
+        )
+        // only through albums (and assets) that are visible under the caller's mode
+        .$if(!privateMode, (qb) => qb.where('album.isPrivate', '=', false).where('asset.isPrivate', '=', false))
+        .leftJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
+        .leftJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
+        .crossJoin('target')
+        .select(['asset.id', 'asset.livePhotoVideoId'])
+        .where((eb) =>
+          eb.or([
+            eb('asset.id', '=', sql<string>`any(target.ids)`),
+            eb('asset.livePhotoVideoId', '=', sql<string>`any(target.ids)`),
+          ]),
+        )
+        .where('user.id', '=', userId)
+        .where('album.deletedAt', 'is', null)
+        .execute()
+        .then((assets) => {
+          const allowedIds = new Set<string>();
+          for (const asset of assets) {
+            if (asset.id && assetIds.has(asset.id)) {
+              allowedIds.add(asset.id);
+            }
+            if (asset.livePhotoVideoId && assetIds.has(asset.livePhotoVideoId)) {
+              allowedIds.add(asset.livePhotoVideoId);
+            }
           }
-          if (asset.livePhotoVideoId && assetIds.has(asset.livePhotoVideoId)) {
-            allowedIds.add(asset.livePhotoVideoId);
-          }
-        }
-        return allowedIds;
-      });
+          return allowedIds;
+        })
+    );
   }
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, { hasElevatedPermission: false, privateMode: false }] })

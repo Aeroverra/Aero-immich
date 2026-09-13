@@ -139,6 +139,14 @@ export function withPrivateAlbumScope<O>(scope: PrivateScope) {
   return (qb: SelectQueryBuilder<DB, 'asset', O>) => (scope.privateMode ? qb : qb.where('asset.isPrivate', '=', false));
 }
 
+/**
+ * Album listings and access checks: a private album is hidden as a whole while the
+ * caller's session is not in private mode, whoever owns it.
+ */
+export function withPrivateAlbumVisibility<O>(scope: Pick<PrivateScope, 'privateMode'>) {
+  return (qb: SelectQueryBuilder<DB, 'album', O>) => (scope.privateMode ? qb : qb.where('album.isPrivate', '=', false));
+}
+
 const selectExifInfo = (eb: AssetExpressionBuilder) =>
   eb.fn
     .toJson(eb.table('asset_exif'))
