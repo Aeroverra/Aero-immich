@@ -1,14 +1,21 @@
 import { modalManager } from '@immich/ui';
 import { mdiLockOutline } from '@mdi/js';
-import { goto } from '$app/navigation';
+import { goto, invalidateAll } from '$app/navigation';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { eventManager } from '$lib/managers/event-manager.svelte';
-import { addAssetsToAlbums, handleAddUsersToAlbum, handleAlbumPrivateModeChange } from '$lib/services/album.service';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import {
+  addAssetsToAlbums,
+  handleAddUsersToAlbum,
+  handleAlbumPrivateModeChange,
+  handleAlbumRemoteUpdate,
+} from '$lib/services/album.service';
 import { albumFactory } from '@test-data/factories/album-factory';
 import { userAdminFactory } from '@test-data/factories/user-factory';
 
 vi.mock('$app/navigation', () => ({
   goto: vi.fn(),
+  invalidateAll: vi.fn(),
 }));
 
 vi.mock('@immich/ui', async (originalImport) => {
@@ -234,6 +241,43 @@ describe('AlbumService', () => {
 
       expect(result).toBe(false);
       expect(goto).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleAlbumRemoteUpdate', () => {
+    const onAlbumUpdate = vi.fn();
+    let unsubscribe: () => void;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      vi.spyOn(privateModeManager, 'invalidate').mockImplementation(() => {});
+      unsubscribe = eventManager.on({ AlbumUpdate: onAlbumUpdate });
+    });
+
+    afterEach(() => {
+      unsubscribe();
+    });
+
+    it('reloads the album and announces it', async () => {
+      const album = albumFactory.build();
+      sdkMock.getAlbumInfo.mockResolvedValue(album);
+
+      await handleAlbumRemoteUpdate(album.id);
+
+      expect(sdkMock.getAlbumInfo).toHaveBeenCalledExactlyOnceWith({ id: album.id });
+      expect(onAlbumUpdate).toHaveBeenCalledExactlyOnceWith(album);
+      expect(invalidateAll).toHaveBeenCalledOnce();
+      expect(privateModeManager.invalidate).not.toHaveBeenCalled();
+    });
+
+    it('reloads everything private-dependent when the album is no longer visible', async () => {
+      sdkMock.getAlbumInfo.mockRejectedValue(new Error('Bad Request'));
+
+      await handleAlbumRemoteUpdate('album-1');
+
+      expect(privateModeManager.invalidate).toHaveBeenCalledOnce();
+      expect(onAlbumUpdate).not.toHaveBeenCalled();
+      expect(invalidateAll).not.toHaveBeenCalled();
     });
   });
 });
