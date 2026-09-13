@@ -23,6 +23,7 @@ import { AlbumUserRepository } from 'src/repositories/album-user.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { ApiKeyRepository } from 'src/repositories/api-key.repository';
 import { AppRepository } from 'src/repositories/app.repository';
+import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
@@ -239,6 +240,7 @@ export type ServiceOverrides = {
   apiKey: ApiKeyRepository;
   app: AppRepository;
   asset: AssetRepository;
+  assetDeletedChecksum: AssetDeletedChecksumRepository;
   assetEdit: AssetEditRepository;
   assetFile: AssetFileRepository;
   assetJob: AssetJobRepository;
@@ -324,6 +326,7 @@ export const getMocks = () => {
     album: automock(AlbumRepository, { strict: false }),
     albumUser: automock(AlbumUserRepository),
     asset: newAssetRepositoryMock(),
+    assetDeletedChecksum: automock(AssetDeletedChecksumRepository),
     assetEdit: automock(AssetEditRepository),
     assetFile: automock(AssetFileRepository),
     assetJob: automock(AssetJobRepository),
@@ -399,6 +402,7 @@ export const newTestService = <T extends BaseService>(
     overrides.apiKey || (mocks.apiKey as As<ApiKeyRepository>),
     overrides.app || (mocks.app as As<AppRepository>),
     overrides.asset || (mocks.asset as As<AssetRepository>),
+    overrides.assetDeletedChecksum || (mocks.assetDeletedChecksum as As<AssetDeletedChecksumRepository>),
     overrides.assetEdit || (mocks.assetEdit as As<AssetEditRepository>),
     overrides.assetFile || (mocks.assetFile as As<AssetFileRepository>),
     overrides.assetJob || (mocks.assetJob as As<AssetJobRepository>),
