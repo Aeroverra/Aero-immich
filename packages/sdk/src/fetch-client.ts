@@ -653,6 +653,11 @@ export type CastResponse = {
     /** Whether Google Cast is enabled */
     gCastEnabled: boolean;
 };
+export type DeletedReimportResponse = {
+    /** The "Previously deleted" album re-uploads are added to in album mode, once it exists */
+    albumId: string | null;
+    mode: DeletedReimportMode;
+};
 export type DownloadResponse = {
     /** Maximum archive size in bytes */
     archiveSize: number;
@@ -726,6 +731,7 @@ export type TagsResponse = {
 export type UserPreferencesResponseDto = {
     albums: AlbumsResponse;
     cast: CastResponse;
+    deletedReimport: DeletedReimportResponse;
     download: DownloadResponse;
     emailNotifications: EmailNotificationsResponse;
     folders: FoldersResponse;
@@ -747,6 +753,9 @@ export type AvatarUpdate = {
 export type CastUpdate = {
     /** Whether Google Cast is enabled */
     gCastEnabled?: boolean;
+};
+export type DeletedReimportUpdate = {
+    mode?: DeletedReimportMode;
 };
 export type DownloadUpdate = {
     /** Maximum archive size in bytes */
@@ -822,6 +831,7 @@ export type UserPreferencesUpdateDto = {
     albums?: AlbumsUpdate;
     avatar?: AvatarUpdate;
     cast?: CastUpdate;
+    deletedReimport?: DeletedReimportUpdate;
     download?: DownloadUpdate;
     emailNotifications?: EmailNotificationsUpdate;
     folders?: FoldersUpdate;
@@ -3170,6 +3180,10 @@ export type UserUpdateMeDto = {
     name?: string;
     /** User password (deprecated, use change password endpoint) */
     password?: string;
+};
+export type DeletedChecksumStatisticsResponseDto = {
+    /** Number of remembered checksums of permanently deleted files */
+    count: number;
 };
 export type OnboardingResponseDto = {
     /** Is user onboarded */
@@ -7543,6 +7557,26 @@ export function getMyCalendarHeatmap({ $from, to, $type }: {
     }));
 }
 /**
+ * Forget my deleted checksums
+ */
+export function deleteMyDeletedChecksums(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText("/users/me/deleted-checksums", {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Get my deleted checksum statistics
+ */
+export function getMyDeletedChecksumStatistics(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: DeletedChecksumStatisticsResponseDto;
+    }>("/users/me/deleted-checksums/statistics", {
+        ...opts
+    }));
+}
+/**
  * Delete user product key
  */
 export function deleteUserLicense(opts?: Oazapfts.RequestOpts) {
@@ -7979,6 +8013,11 @@ export enum AssetOrder {
     Asc = "asc",
     Desc = "desc"
 }
+export enum DeletedReimportMode {
+    Trash = "trash",
+    Skip = "skip",
+    Album = "album"
+}
 export enum AssetVisibility {
     Archive = "archive",
     Timeline = "timeline",
@@ -8052,6 +8091,8 @@ export enum Permission {
     AdminConfigRead = "adminConfig.read",
     AdminConfigUpdate = "adminConfig.update",
     UserConfigRead = "userConfig.read",
+    DeletedChecksumRead = "deletedChecksum.read",
+    DeletedChecksumDelete = "deletedChecksum.delete",
     DuplicateRead = "duplicate.read",
     DuplicateDelete = "duplicate.delete",
     FaceCreate = "face.create",
@@ -8329,6 +8370,7 @@ export enum JobName {
     NotifyUserSignup = "NotifyUserSignup",
     NotifyAlbumInvite = "NotifyAlbumInvite",
     NotifyAlbumUpdate = "NotifyAlbumUpdate",
+    NotifyDeletedReimport = "NotifyDeletedReimport",
     UserDelete = "UserDelete",
     UserDeleteCheck = "UserDeleteCheck",
     UserSyncUsage = "UserSyncUsage",
