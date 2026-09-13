@@ -24,17 +24,58 @@ void main() {
     await context.dispose();
   });
 
-  group('needsPrivateShareConfirmation', () {
-    test('only a private asset headed for a shared album needs it', () {
-      final shared = RemoteAlbumFactory.create(isShared: true);
-      final own = RemoteAlbumFactory.create();
-      final private = RemoteAssetFactory.create(isPrivate: true);
-      final public = RemoteAssetFactory.create();
+  group('privateAddWarning', () {
+    final private = RemoteAssetFactory.create(isPrivate: true);
+    final public = RemoteAssetFactory.create();
+    final t = StaticTranslations.instance;
 
-      expect(needsPrivateShareConfirmation(shared, [public, private]), isTrue);
-      expect(needsPrivateShareConfirmation(shared, [public]), isFalse);
-      expect(needsPrivateShareConfirmation(own, [private]), isFalse);
-      expect(needsPrivateShareConfirmation(shared, const []), isFalse);
+    Future<BuildContext> pumpContext(WidgetTester tester) async {
+      late BuildContext buildContext;
+      await tester.pumpTestWidget(
+        context,
+        Builder(
+          builder: (context) {
+            buildContext = context;
+            return const SizedBox.shrink();
+          },
+        ),
+      );
+      return buildContext;
+    }
+
+    testWidgets('nothing to acknowledge without a private asset or for an album that is private already', (
+      tester,
+    ) async {
+      final buildContext = await pumpContext(tester);
+
+      expect(privateAddWarning(buildContext, RemoteAlbumFactory.create(isShared: true), [public]), isNull);
+      expect(privateAddWarning(buildContext, RemoteAlbumFactory.create(isShared: true), const []), isNull);
+      expect(privateAddWarning(buildContext, RemoteAlbumFactory.create(isPrivate: true), [private]), isNull);
+    });
+
+    testWidgets('a public album is warned about becoming private and hidden', (tester) async {
+      final buildContext = await pumpContext(tester);
+      final album = RemoteAlbumFactory.create(name: 'Trip');
+
+      expect(privateAddWarning(buildContext, album, [public, private]), t.add_to_album_private_prompt(album: 'Trip'));
+    });
+
+    testWidgets('a private shared album is warned about the share only', (tester) async {
+      final buildContext = await pumpContext(tester);
+      final album = RemoteAlbumFactory.create(isShared: true, isPrivate: true);
+
+      expect(privateAddWarning(buildContext, album, [private]), t.add_private_assets_to_shared_album_confirmation);
+    });
+
+    testWidgets('a public shared album folds both warnings into one text', (tester) async {
+      final buildContext = await pumpContext(tester);
+      final album = RemoteAlbumFactory.create(name: 'Trip', isShared: true);
+
+      expect(
+        privateAddWarning(buildContext, album, [private]),
+        '${t.add_to_album_private_prompt(album: 'Trip')}\n\n'
+        '${t.add_private_assets_to_shared_album_confirmation}',
+      );
     });
   });
 
@@ -131,25 +172,29 @@ void main() {
     final serverRefusal = ApiException(400, '{"message":"Album contains private assets, confirmPrivate is required"}');
 
     /// Renders a button that runs the helper and records what it returned
+    const warning = 'Trip will become private';
+
     Future<void> pumpRunner(
       WidgetTester tester, {
-      required bool needsConfirmation,
+      required String? warning,
       required Future<String> Function({required bool confirmPrivate}) add,
       required void Function(String? result) onDone,
     }) => tester.pumpTestWidget(
       context,
       Builder(
         builder: (context) => TextButton(
-          onPressed: () async =>
-              onDone(await addWithPrivateShareConfirmation(context, needsConfirmation: needsConfirmation, add: add)),
+          onPressed: () async => onDone(await addWithPrivateShareConfirmation(context, warning: warning, add: add)),
           child: const Text('run'),
         ),
       ),
     );
 
-    Future<void> answerDialog(WidgetTester tester, {required bool confirm}) async {
+    Future<void> answerDialog(WidgetTester tester, {required bool confirm, String? expectedText}) async {
       await tester.pumpUntilFound(find.byType(ConfirmDialog));
-      expect(find.text(StaticTranslations.instance.add_private_assets_to_shared_album_confirmation), findsOneWidget);
+      expect(
+        find.text(expectedText ?? StaticTranslations.instance.add_private_assets_to_shared_album_confirmation),
+        findsOneWidget,
+      );
       await tester.tap(find.text(confirm ? StaticTranslations.instance.confirm : StaticTranslations.instance.cancel));
       await tester.pumpAndSettle();
     }
@@ -159,7 +204,7 @@ void main() {
       String? result;
       await pumpRunner(
         tester,
-        needsConfirmation: false,
+        warning: null,
         add: ({required confirmPrivate}) async {
           calls.add(confirmPrivate);
           return 'added';
@@ -175,14 +220,12 @@ void main() {
       expect(result, 'added');
     });
 
-    testWidgets('asks first and forwards confirmPrivate when the local state knows the album is shared', (
-      tester,
-    ) async {
+    testWidgets('shows the warning first and forwards confirmPrivate once acknowledged', (tester) async {
       final calls = <bool>[];
       String? result;
       await pumpRunner(
         tester,
-        needsConfirmation: true,
+        warning: warning,
         add: ({required confirmPrivate}) async {
           calls.add(confirmPrivate);
           return 'added';
@@ -191,7 +234,7 @@ void main() {
       );
 
       await tester.tap(find.text('run'));
-      await answerDialog(tester, confirm: true);
+      await answerDialog(tester, confirm: true, expectedText: warning);
 
       expect(calls, [true]);
       expect(result, 'added');
@@ -202,7 +245,7 @@ void main() {
       String? result = 'untouched';
       await pumpRunner(
         tester,
-        needsConfirmation: true,
+        warning: warning,
         add: ({required confirmPrivate}) async {
           calls.add(confirmPrivate);
           return 'added';
@@ -211,7 +254,7 @@ void main() {
       );
 
       await tester.tap(find.text('run'));
-      await answerDialog(tester, confirm: false);
+      await answerDialog(tester, confirm: false, expectedText: warning);
 
       expect(calls, isEmpty);
       expect(result, isNull);
@@ -222,7 +265,7 @@ void main() {
       String? result;
       await pumpRunner(
         tester,
-        needsConfirmation: false,
+        warning: null,
         add: ({required confirmPrivate}) async {
           calls.add(confirmPrivate);
           if (!confirmPrivate) {
@@ -245,7 +288,7 @@ void main() {
       String? result = 'untouched';
       await pumpRunner(
         tester,
-        needsConfirmation: false,
+        warning: null,
         add: ({required confirmPrivate}) async {
           calls.add(confirmPrivate);
           throw serverRefusal;
@@ -275,7 +318,7 @@ void main() {
       await expectLater(
         addWithPrivateShareConfirmation(
           buildContext,
-          needsConfirmation: false,
+          warning: null,
           add: ({required confirmPrivate}) async => throw ApiException(500, 'boom'),
         ),
         throwsA(isA<ApiException>().having((e) => e.code, 'code', 500)),

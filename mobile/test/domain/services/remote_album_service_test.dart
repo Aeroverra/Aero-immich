@@ -101,14 +101,19 @@ void main() {
       when(
         () => repository.getAlbumsContainingAsset(any(), privateFilter: any(named: 'privateFilter')),
       ).thenAnswer((_) async => const []);
+      when(
+        () => repository.getAlbumsContainingAssets(any(), privateFilter: any(named: 'privateFilter')),
+      ).thenAnswer((_) async => const []);
 
       sut.watchAlbum('album-1', privateFilter: filter);
       await sut.getCount(privateFilter: filter);
       await sut.getAlbumsContainingAsset('a1', privateFilter: filter);
+      await sut.getAlbumsContainingAssets(['a1', 'a2'], privateFilter: filter);
 
       verify(() => repository.watchAlbum('album-1', privateFilter: filter)).called(1);
       verify(() => repository.getCount(privateFilter: filter)).called(1);
       verify(() => repository.getAlbumsContainingAsset('a1', privateFilter: filter)).called(1);
+      verify(() => repository.getAlbumsContainingAssets(['a1', 'a2'], privateFilter: filter)).called(1);
     });
   });
 }
