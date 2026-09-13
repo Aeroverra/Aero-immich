@@ -1,0 +1,150 @@
+name: Aero dry run
+
+# Fork-only workflow. It lives ONLY on the `main` branch (see docs-aero/README.md).
+#
+# Early warning: once a week, rebase every branch in .github/aero-branches.txt
+# onto upstream `main` (not a release tag) and rebuild `main` locally, exactly
+# like aero-release.yml does, but push nothing and build no image.
+#
+#   conflict  open/update the issue "Upcoming conflict with upstream main: <branch>"
+#   clean     close every such issue that is still open, log, done
+#
+# This is the only workflow that looks at upstream `main`; releases come from
+# tags via aero-release.yml.
+
+on:
+  schedule:
+    # weekly, Monday 07:41 UTC
+    - cron: '41 7 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: aero-dry-run
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  UPSTREAM_REPO: https://github.com/immich-app/immich.git
+
+jobs:
+  dry-run:
+    name: Rebase onto upstream main (no push)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      AERO_STATE: ${{ github.workspace }}/../aero-state
+      GIT_AUTHOR_NAME: aero-sync
+      GIT_AUTHOR_EMAIL: aero-sync@users.noreply.github.com
+      GIT_COMMITTER_NAME: aero-sync
+      GIT_COMMITTER_EMAIL: aero-sync@users.noreply.github.com
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase branches and rebuild main locally
+        id: integrate
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch --no-tags upstream main
+          target=$(git rev-parse upstream/main)
+          echo "upstream/main = $target"
+          cp -r .github/scripts "$RUNNER_TEMP/aero-scripts"
+          rc=0
+          bash "$RUNNER_TEMP/aero-scripts/aero-integrate.sh" integrate "$target" "$AERO_STATE" || rc=$?
+          # shellcheck disable=SC1091
+          source "$AERO_STATE/result.env"
+          if [[ $rc -ne 0 ]]; then
+            {
+              echo "## Dry run against upstream main $target: FAILED"
+              echo
+              echo "$message"
+              if [[ -f "$AERO_STATE/conflict-files.txt" ]]; then
+                echo
+                echo '```'
+                cat "$AERO_STATE/conflict-files.txt"
+                echo '```'
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
+          {
+            echo "## Dry run against upstream main $target: clean"
+            echo
+            echo "| branch | would move to |"
+            echo "|---|---|"
+            while IFS=$'\t' read -r name old new parent; do
+              echo "| $name | $new |"
+            done < "$AERO_STATE/branches.tsv"
+            echo
+            echo "Nothing was pushed."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close resolved conflict issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash "$RUNNER_TEMP/aero-scripts/aero-issue.sh" close-prefix "Upcoming conflict with upstream main: " \
+            "All fork branches rebase cleanly onto upstream main again ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID). Closing."
+
+      - name: Report the conflict as an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          scripts="$RUNNER_TEMP/aero-scripts"
+          [[ -d "$scripts" ]] || scripts=.github/scripts
+          status=unknown message=""
+          # shellcheck disable=SC1091
+          [[ -f "$AERO_STATE/result.env" ]] && source "$AERO_STATE/result.env"
+          if [[ "$status" != conflict ]]; then
+            echo "not a rebase/merge conflict (status=$status); see the run log, no issue opened."
+            exit 0
+          fi
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body=$RUNNER_TEMP/issue-body.md
+          {
+            echo "The weekly dry run could not rebase the fork onto upstream \`main\` (\`$target\`). Nothing was pushed and no release is affected yet, but the next upstream release will most likely fail to integrate the same way."
+            echo
+            echo "Workflow run: $run_url"
+            echo
+            echo "$message"
+            echo
+            echo "- Branch: \`$conflict_branch\`"
+            echo "- ${conflict_kind}d onto: \`$conflict_onto\`"
+            echo "- Conflicting files:"
+            echo
+            echo '```'
+            cat "$AERO_STATE/conflict-files.txt" 2>/dev/null || echo "(not recorded)"
+            echo '```'
+            echo
+            echo "## How to fix locally"
+            echo
+            echo '```bash'
+            echo "git fetch upstream main"
+            if [[ "$conflict_kind" == rebase && "$conflict_onto" == "$target" ]]; then
+              echo "git rebase upstream/main $conflict_branch"
+            elif [[ "$conflict_kind" == rebase ]]; then
+              echo "git rebase upstream/main $conflict_onto"
+              echo "git rebase --onto $conflict_onto <old $conflict_onto tip> $conflict_branch"
+            else
+              echo "git rebase upstream/main $conflict_branch"
+            fi
+            echo "# resolve, continue, run the checks, then:"
+            echo "git push --force-with-lease origin $conflict_branch"
+            echo '```'
+            echo
+            echo "Rebasing onto upstream \`main\` is optional; the branch only has to rebase cleanly onto the next release tag. This issue closes itself on the next clean dry run (Actions, Aero dry run, Run workflow)."
+          } > "$body"
+          n=$(bash "$scripts/aero-issue.sh" upsert "Upcoming conflict with upstream main: $conflict_branch" "$body")
+          echo "issue #$n: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n"
+          echo "Opened/updated issue #$n" >> "$GITHUB_STEP_SUMMARY"
