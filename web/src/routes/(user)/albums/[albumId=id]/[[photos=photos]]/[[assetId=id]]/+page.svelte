@@ -478,7 +478,6 @@
             onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
           ></FavoriteAction>
           <SetPrivateAction
-            unmark={assetMultiSelectManager.isAllPrivate}
             onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
             onRemove={handleSetVisibility}
           />
@@ -493,11 +492,6 @@
               menuItem
               unarchive={assetMultiSelectManager.isAllArchived}
               onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
-            />
-            <SetPrivateAction
-              menuItem
-              onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-              onRemove={handleSetVisibility}
             />
             <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
           {/if}

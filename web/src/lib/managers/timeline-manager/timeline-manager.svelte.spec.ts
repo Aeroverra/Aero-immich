@@ -629,6 +629,27 @@ describe('TimelineManager', () => {
       favorites.destroy();
     });
 
+    it('still refetches on a manager created before an older one was destroyed (page navigation)', async () => {
+      // the new page's manager subscribes first, then the old page's manager is destroyed
+      const older = timelineManager;
+      const newer = new TimelineManager();
+      await newer.updateViewport({ width: 1588, height: 1000 });
+      await newer.updateOptions({ isFavorite: true });
+      older.destroy();
+      sdkMock.getTimeBuckets.mockClear();
+
+      eventManager.emit('PrivateModeChange', false);
+
+      await vi.waitFor(() =>
+        expect(sdkMock.getTimeBuckets).toHaveBeenCalledWith(expect.objectContaining({ isFavorite: true })),
+      );
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalledWith(
+        expect.objectContaining({ visibility: AssetVisibility.Timeline }),
+      );
+      newer.destroy();
+      timelineManager = new TimelineManager();
+    });
+
     it('does not let months discarded by a reset shift the new layout', async () => {
       sdkMock.getTimeBuckets.mockResolvedValue([{ count: 100, timeBucket: '2024-02-01T00:00:00.000Z' }]);
       // the first bucket request (the only month, so it is in the viewport) stays in flight across the reset
@@ -767,6 +788,23 @@ describe('TimelineManager', () => {
       expect(after.findAssetById({ id: anchor.id })).toBeUndefined();
       expect(timelineManager.scrollTop).toBeCloseTo(after.top + after.height * viewportTopRatioInMonth, 5);
       expect(timelineManager.scrollTop).not.toBe(2000);
+    });
+
+    it('restores the anchor after a reset while scrolled to the bottom with every month loaded', async () => {
+      for (const month of timelineManager.months) {
+        await timelineManager.loadTimelineMonth(month.yearMonth);
+      }
+      const bottom = timelineManager.totalViewerHeight - 1000;
+      timelineManager.scrollTo(bottom);
+      const before = timelineManager.months.find((month) => month.isInViewport)!;
+      const anchor = findAnchor(before, bottom);
+
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, before.yearMonth)!;
+      expect(after).not.toBe(before);
+      const position = after.findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
     });
 
     it('leaves a timeline scrolled to the top alone', async () => {

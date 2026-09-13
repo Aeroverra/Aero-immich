@@ -1,3 +1,4 @@
+import { modalManager } from '@immich/ui';
 import { waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
@@ -6,7 +7,23 @@ import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.
 import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
 import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { renderWithTooltips } from '$tests/helpers';
+import { albumFactory } from '@test-data/factories/album-factory';
 import { timelineAssetFactory } from '@test-data/factories/asset-factory';
+
+vi.mock('@immich/ui', async (originalImport) => {
+  const module = await originalImport<typeof import('@immich/ui')>();
+  return {
+    ...module,
+    modalManager: {
+      show: vi.fn(),
+      showDialog: vi.fn(),
+    },
+    toastManager: {
+      primary: vi.fn(),
+      danger: vi.fn(),
+    },
+  };
+});
 
 describe('SetPrivateAction component', () => {
   beforeAll(async () => {
@@ -20,6 +37,8 @@ describe('SetPrivateAction component', () => {
     assetMultiSelectManager.clear();
     privateModeManager.enabled = false;
     sdkMock.updateAssets.mockResolvedValue(undefined as never);
+    sdkMock.getAllAlbums.mockResolvedValue([]);
+    sdkMock.removeAssetFromAlbum.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -71,14 +90,14 @@ describe('SetPrivateAction component', () => {
     expect(assetMultiSelectManager.selectionActive).toBe(false);
   });
 
-  it('removes private from the selected private assets when unmarking', async () => {
+  it('removes private from the selected private assets through the unlock button', async () => {
     privateModeManager.enabled = true;
     const privateAsset = timelineAssetFactory.build({ isPrivate: true });
     const plainAsset = timelineAssetFactory.build({ isPrivate: false });
     assetMultiSelectManager.selectAssets([privateAsset, plainAsset]);
     const onSetPrivate = vi.fn();
 
-    const sut = renderWithTooltips(SetPrivateAction, { unmark: true, onSetPrivate });
+    const sut = renderWithTooltips(SetPrivateAction, { onSetPrivate });
     await userEvent.click(sut.getByRole('button', { name: 'Remove from private' }));
 
     await waitFor(() =>
@@ -88,16 +107,42 @@ describe('SetPrivateAction component', () => {
     );
     expect(privateAsset.isPrivate).toBe(false);
     expect(onSetPrivate).toHaveBeenCalledWith([privateAsset.id], false);
+    expect(sdkMock.getAllAlbums).not.toHaveBeenCalled();
   });
 
-  it('skips the request when nothing needs to change', async () => {
-    assetMultiSelectManager.selectAssets([timelineAssetFactory.build({ isPrivate: true })]);
+  it('shows both the lock and the unlock button for a mixed selection while the mode is on', () => {
+    privateModeManager.enabled = true;
+    assetMultiSelectManager.selectAssets([
+      timelineAssetFactory.build({ isPrivate: true }),
+      timelineAssetFactory.build({ isPrivate: false }),
+    ]);
 
     const sut = renderWithTooltips(SetPrivateAction, {});
-    await userEvent.click(sut.getByRole('button', { name: 'Mark as private' }));
 
-    await waitFor(() => expect(assetMultiSelectManager.selectionActive).toBe(false));
-    expect(sdkMock.updateAssets).not.toHaveBeenCalled();
+    expect(sut.getByRole('button', { name: 'Mark as private' })).toBeInTheDocument();
+    expect(sut.getByRole('button', { name: 'Remove from private' })).toBeInTheDocument();
+  });
+
+  it('only shows the unlock button when every selected asset is private', () => {
+    privateModeManager.enabled = true;
+    assetMultiSelectManager.selectAssets(timelineAssetFactory.buildList(2, { isPrivate: true }));
+
+    const sut = renderWithTooltips(SetPrivateAction, {});
+
+    expect(sut.queryByRole('button', { name: 'Mark as private' })).not.toBeInTheDocument();
+    expect(sut.getByRole('button', { name: 'Remove from private' })).toBeInTheDocument();
+  });
+
+  it('only shows the lock button while the mode is off', () => {
+    assetMultiSelectManager.selectAssets([
+      timelineAssetFactory.build({ isPrivate: true }),
+      timelineAssetFactory.build({ isPrivate: false }),
+    ]);
+
+    const sut = renderWithTooltips(SetPrivateAction, {});
+
+    expect(sut.getByRole('button', { name: 'Mark as private' })).toBeInTheDocument();
+    expect(sut.queryByRole('button', { name: 'Remove from private' })).not.toBeInTheDocument();
   });
 
   it('keeps the selection when the request fails', async () => {
@@ -113,67 +158,58 @@ describe('SetPrivateAction component', () => {
     expect(assetMultiSelectManager.selectionActive).toBe(true);
   });
 
-  describe('as menu items', () => {
-    it('offers both directions for a mixed selection while the mode is on', async () => {
-      privateModeManager.enabled = true;
-      const privateAsset = timelineAssetFactory.build({ isPrivate: true });
+  describe('albums that would become private', () => {
+    const album = albumFactory.build({ isPrivate: false });
+
+    it('asks first and marks nothing when declined', async () => {
       const plainAsset = timelineAssetFactory.build({ isPrivate: false });
-      assetMultiSelectManager.selectAssets([privateAsset, plainAsset]);
-      const onSetPrivate = vi.fn();
-
-      const sut = renderWithTooltips(SetPrivateAction, { menuItem: true, onSetPrivate });
-
-      expect(sut.getByRole('menuitem', { name: 'Mark as private' })).toBeInTheDocument();
-      expect(sut.getByRole('menuitem', { name: 'Remove from private' })).toBeInTheDocument();
-
-      await userEvent.click(sut.getByRole('menuitem', { name: 'Remove from private' }));
-      await waitFor(() =>
-        expect(sdkMock.updateAssets).toHaveBeenCalledExactlyOnceWith({
-          assetBulkUpdateDto: { ids: [privateAsset.id], isPrivate: false },
-        }),
-      );
-      expect(onSetPrivate).toHaveBeenCalledWith([privateAsset.id], false);
-    });
-
-    it('removes the freshly marked assets through onRemove while the mode is off', async () => {
-      const [plainAsset, otherPlainAsset] = timelineAssetFactory.buildList(2, { isPrivate: false });
-      assetMultiSelectManager.selectAssets([plainAsset, otherPlainAsset]);
-      const onSetPrivate = vi.fn();
+      assetMultiSelectManager.selectAssets([plainAsset]);
+      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
       const onRemove = vi.fn();
 
-      const sut = renderWithTooltips(SetPrivateAction, { menuItem: true, onSetPrivate, onRemove });
-      await userEvent.click(sut.getByRole('menuitem', { name: 'Mark as private' }));
+      const sut = renderWithTooltips(SetPrivateAction, { onRemove });
+      await userEvent.click(sut.getByRole('button', { name: 'Mark as private' }));
 
-      await waitFor(() =>
-        expect(sdkMock.updateAssets).toHaveBeenCalledExactlyOnceWith({
-          assetBulkUpdateDto: { ids: [plainAsset.id, otherPlainAsset.id], isPrivate: true },
-        }),
+      await waitFor(() => expect(modalManager.show).toHaveBeenCalledOnce());
+      expect(sdkMock.updateAssets).not.toHaveBeenCalled();
+      expect(onRemove).not.toHaveBeenCalled();
+      expect(plainAsset.isPrivate).toBe(false);
+      expect(assetMultiSelectManager.selectionActive).toBe(true);
+    });
+
+    it('removes the assets from the listed albums before marking when asked to', async () => {
+      const plainAsset = timelineAssetFactory.build({ isPrivate: false });
+      assetMultiSelectManager.selectAssets([plainAsset]);
+      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      vi.mocked(modalManager.show).mockResolvedValue('remove' as never);
+
+      const sut = renderWithTooltips(SetPrivateAction, {});
+      await userEvent.click(sut.getByRole('button', { name: 'Mark as private' }));
+
+      await waitFor(() => expect(sdkMock.updateAssets).toHaveBeenCalledOnce());
+      expect(sdkMock.removeAssetFromAlbum).toHaveBeenCalledExactlyOnceWith({
+        id: album.id,
+        bulkIdsDto: { ids: [plainAsset.id] },
+      });
+      expect(sdkMock.removeAssetFromAlbum.mock.invocationCallOrder[0]).toBeLessThan(
+        sdkMock.updateAssets.mock.invocationCallOrder[0],
       );
-      expect(onRemove).toHaveBeenCalledExactlyOnceWith([plainAsset.id, otherPlainAsset.id]);
-      expect(onSetPrivate).not.toHaveBeenCalled();
-      expect(assetMultiSelectManager.selectionActive).toBe(false);
+      expect(plainAsset.isPrivate).toBe(true);
     });
 
-    it('only offers unmarking when every selected asset is private', () => {
-      privateModeManager.enabled = true;
-      assetMultiSelectManager.selectAssets(timelineAssetFactory.buildList(2, { isPrivate: true }));
+    it('marks without touching the albums when they are kept', async () => {
+      const plainAsset = timelineAssetFactory.build({ isPrivate: false });
+      assetMultiSelectManager.selectAssets([plainAsset]);
+      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      vi.mocked(modalManager.show).mockResolvedValue('keep' as never);
 
-      const sut = renderWithTooltips(SetPrivateAction, { menuItem: true });
+      const sut = renderWithTooltips(SetPrivateAction, {});
+      await userEvent.click(sut.getByRole('button', { name: 'Mark as private' }));
 
-      expect(sut.queryByRole('menuitem', { name: 'Mark as private' })).not.toBeInTheDocument();
-      expect(sut.getByRole('menuitem', { name: 'Remove from private' })).toBeInTheDocument();
-    });
-
-    it('only offers marking while the mode is off', () => {
-      assetMultiSelectManager.selectAssets([
-        timelineAssetFactory.build({ isPrivate: true }),
-        timelineAssetFactory.build({ isPrivate: false }),
-      ]);
-
-      const sut = renderWithTooltips(SetPrivateAction, { menuItem: true });
-
-      expect(sut.getByRole('menuitem', { name: 'Mark as private' })).toBeInTheDocument();
-      expect(sut.queryByRole('menuitem', { name: 'Remove from private' })).not.toBeInTheDocument();
+      await waitFor(() => expect(sdkMock.updateAssets).toHaveBeenCalledOnce());
+      expect(sdkMock.removeAssetFromAlbum).not.toHaveBeenCalled();
+      expect(plainAsset.isPrivate).toBe(true);
     });
   });
 });

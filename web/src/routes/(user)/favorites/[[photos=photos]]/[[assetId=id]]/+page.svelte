@@ -73,6 +73,10 @@
     <CreateSharedLink />
     <SelectAllAssets {timelineManager} assetInteraction={assetMultiSelectManager} />
     <ActionButton action={Actions.AddToAlbum} />
+    <SetPrivateAction
+      onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+      onRemove={handleSetVisibility}
+    />
     <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
       <DownloadAction menuItem />
       <ChangeDate menuItem />
@@ -82,11 +86,6 @@
         menuItem
         unarchive={assetMultiSelectManager.isAllArchived}
         onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
-      />
-      <SetPrivateAction
-        menuItem
-        onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-        onRemove={handleSetVisibility}
       />
       {#if authManager.preferences.tags.enabled}
         <TagAction menuItem />

@@ -1,3 +1,4 @@
+import { modalManager } from '@immich/ui';
 import { waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
@@ -8,7 +9,23 @@ import { eventManager } from '$lib/managers/event-manager.svelte';
 import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { toTimelineAsset } from '$lib/utils/timeline-util';
 import { renderWithTooltips } from '$tests/helpers';
+import { albumFactory } from '@test-data/factories/album-factory';
 import { assetFactory } from '@test-data/factories/asset-factory';
+
+vi.mock('@immich/ui', async (originalImport) => {
+  const module = await originalImport<typeof import('@immich/ui')>();
+  return {
+    ...module,
+    modalManager: {
+      show: vi.fn(),
+      showDialog: vi.fn(),
+    },
+    toastManager: {
+      primary: vi.fn(),
+      danger: vi.fn(),
+    },
+  };
+});
 
 describe('asset viewer SetPrivateAction component', () => {
   beforeAll(async () => {
@@ -20,6 +37,7 @@ describe('asset viewer SetPrivateAction component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     privateModeManager.enabled = false;
+    sdkMock.getAllAlbums.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -68,6 +86,22 @@ describe('asset viewer SetPrivateAction component', () => {
 
     await waitFor(() => expect(onAction).toHaveBeenCalledOnce());
     expect(preAction).not.toHaveBeenCalled();
+  });
+
+  it('asks about the albums the asset is in and stops when declined', async () => {
+    const asset = assetFactory.build({ isPrivate: false });
+    sdkMock.getAllAlbums.mockResolvedValue([albumFactory.build({ isPrivate: false })]);
+    vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
+    const onAction = vi.fn();
+    const preAction = vi.fn();
+
+    const sut = renderWithTooltips(SetPrivateAction, { asset, onAction, preAction });
+    await userEvent.click(sut.getByRole('menuitem', { name: 'Mark as private' }));
+
+    await waitFor(() => expect(modalManager.show).toHaveBeenCalledOnce());
+    expect(sdkMock.updateAsset).not.toHaveBeenCalled();
+    expect(preAction).not.toHaveBeenCalled();
+    expect(onAction).not.toHaveBeenCalled();
   });
 
   it('unmarks a private asset without a pre-action', async () => {
