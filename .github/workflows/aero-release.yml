@@ -21,15 +21,21 @@ name: Aero release
 #              image, run scripts/aero/revert-to-immich.sql, boot upstream
 #              `<tag>` on it. A broken revert blocks the release.
 #   ready      open/update the issue "Upstream <tag>: ready for release" (or
-#              "Upstream <tag>: revert validation failed").
-#   publish    waits for approval in the `release` environment. Retags the rc
-#              image as `<tag>-aero` and `aero`, creates the GitHub release
-#              `<tag>-aero` on the fork (its git tag is what marks the upstream
-#              tag as processed) with revert-to-immich.sql attached, and closes
-#              the "ready for release" issue.
+#              "Upstream <tag>: revert validation failed"); it says which fork
+#              revision the approval will create.
+#   publish    waits for approval in the `release` environment. Computes the
+#              fork revision N (1 + the highest published revision of <tag>,
+#              see .github/scripts/aero-revision.sh), retags the rc image as
+#              the immutable `<tag>-aero.N`, creates the GitHub release / git
+#              tag `<tag>-aero.N` on the fork with revert-to-immich.sql
+#              attached, moves the pointer image tags `<tag>-aero` and `aero`
+#              to it, and closes the "ready for release" issue. An existing
+#              `<tag>-aero.N` is never edited or moved; re-running the release
+#              for the same upstream tag produces N+1.
 #
 # State, all visible on GitHub:
-#   - processed:  the fork release / git tag `<tag>-aero` exists
+#   - processed:  a fork release `<tag>-aero.N` (or the historical bare
+#                 `<tag>-aero` = revision 1) exists
 #   - in flight:  an open issue titled "Upstream <tag>: ready for release"
 #                 (close it, or dispatch with `tag`, to rebuild the candidate)
 #
@@ -79,6 +85,13 @@ jobs:
       release_url: ${{ steps.detect.outputs.release_url }}
       release_name: ${{ steps.detect.outputs.release_name }}
     steps:
+      - name: Checkout fork scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
       - name: Compare latest upstream release with fork state
         id: detect
         env:
@@ -113,12 +126,14 @@ jobs:
             echo "release_name=$name"
           } >> "$GITHUB_OUTPUT"
 
-          # already published by this fork? (the fork release creates the git tag <tag>-aero)
-          if gh api --silent "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag-aero" 2>/dev/null; then
+          # already published by this fork? (every publish creates a release
+          # <tag>-aero.N; the bare <tag>-aero from the first publish is revision 1)
+          latest=$(bash .github/scripts/aero-revision.sh latest "$tag")
+          if [[ "$latest" -gt 0 ]]; then
             if [[ "$forced" == true ]]; then
-              echo "::warning::$tag-aero already exists on the fork; forced re-run will rebuild the candidate and, on approval, move the image tags and update the release."
+              echo "::warning::$tag is already published as $tag-aero.$latest; forced re-run will rebuild the candidate and, on approval, publish it as $tag-aero.$((latest + 1))."
             else
-              echo "$tag is already published as $tag-aero; nothing to do."
+              echo "$tag is already published as $tag-aero.$latest; nothing to do."
               echo "proceed=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -623,9 +638,12 @@ jobs:
         run: |
           set -euo pipefail
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # the same computation publish does; it is repeated there at approval time
+          revision=$(bash .github/scripts/aero-revision.sh next "$TAG")
+          release_tag="$TAG-aero.$revision"
           body=$RUNNER_TEMP/issue-body.md
           {
-            echo "Upstream release **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`) has been integrated into this fork and a release candidate image is built."
+            echo "Upstream release **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`) has been integrated into this fork and a release candidate image is built. Approving it will publish **fork revision $revision** of \`$TAG\` as \`$release_tag\`."
             echo
             echo "## Fork state"
             echo
@@ -649,7 +667,7 @@ jobs:
             echo
             echo "Workflow run: $run_url"
             echo
-            echo "The \`publish\` job of that run is waiting for approval in the \`release\` environment (you also got a deployment review email). Approving it retags the rc image as \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\`, creates the GitHub release \`$TAG-aero\` (with \`revert-to-immich.sql\` attached) and closes this issue. Rejecting it leaves the rc image as is; close this issue (or dispatch **Aero release** with \`tag\` = \`$TAG\`) to build a new candidate later."
+            echo "The \`publish\` job of that run is waiting for approval in the \`release\` environment (you also got a deployment review email). Approving it will publish as **\`$release_tag\`**: the rc image is retagged as the immutable \`$SERVER_IMAGE:$release_tag\`, the GitHub release \`$release_tag\` is created (with \`revert-to-immich.sql\` attached), the pointer tags \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\` move to it and this issue is closed. Rejecting it leaves the rc image as is; close this issue (or dispatch **Aero release** with \`tag\` = \`$TAG\`) to build a new candidate later."
           } > "$body"
           n=$(bash .github/scripts/aero-issue.sh upsert "Upstream $TAG: ready for release" "$body")
           echo "number=$n" >> "$GITHUB_OUTPUT"
@@ -661,7 +679,7 @@ jobs:
             echo "- \`$SERVER_IMAGE:$RC_TAG\`"
             echo "- \`$SERVER_IMAGE:$RC_SHA_TAG\`"
             echo
-            echo "Issue: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n. Approve the \`publish\` job to release."
+            echo "Issue: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n. Approve the \`publish\` job to release it as \`$release_tag\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
   publish:
@@ -680,6 +698,10 @@ jobs:
       TAG: ${{ needs.detect.outputs.tag }}
       MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
       RC_SHA_TAG: ${{ needs.candidate.outputs.rc_sha_tag }}
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
+      release_tag: ${{ steps.revision.outputs.release_tag }}
+      release_url: ${{ steps.release.outputs.url }}
     steps:
       - name: Checkout fork scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -690,6 +712,28 @@ jobs:
             scripts/aero
           persist-credentials: false
 
+      # Computed at approval time, not in `ready`: another publish of the same
+      # upstream tag may have happened while this run waited. The git tag is
+      # checked as well because the git tag of a deleted release lingers, and
+      # `gh release create` would silently reuse it.
+      - name: Compute the fork revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          revision=$(bash .github/scripts/aero-revision.sh next "$TAG")
+          release_tag="$TAG-aero.$revision"
+          if gh api --silent "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" 2>/dev/null; then
+            echo "::error::git tag $release_tag already exists on the fork without a release; delete the tag or the stale release state before publishing."
+            exit 1
+          fi
+          {
+            echo "revision=$revision"
+            echo "release_tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "publishing $TAG as fork revision $revision: $release_tag"
+
       - name: Login to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -697,14 +741,16 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Retag the release candidate
+      # the immutable tag first, the pointers only once the release exists
+      - name: Tag the release candidate as the immutable revision
+        env:
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools create \
-            --tag "$SERVER_IMAGE:$TAG-aero" \
-            --tag "$SERVER_IMAGE:aero" \
+            --tag "$SERVER_IMAGE:$RELEASE_TAG" \
             "$SERVER_IMAGE:$RC_SHA_TAG"
-          docker buildx imagetools inspect "$SERVER_IMAGE:$TAG-aero"
+          docker buildx imagetools inspect "$SERVER_IMAGE:$RELEASE_TAG"
 
       - name: Create the fork release
         id: release
@@ -714,18 +760,24 @@ jobs:
           RELEASE_NAME: ${{ needs.detect.outputs.release_name }}
           BRANCH_TABLE: ${{ needs.integrate.outputs.branch_table }}
           CHECKS: ${{ needs.integrate.outputs.checks_summary }}
+          REVISION: ${{ steps.revision.outputs.revision }}
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
         run: |
           set -euo pipefail
           notes=$RUNNER_TEMP/notes.md
           {
-            echo "Aero-immich build of upstream **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`)."
+            echo "Aero-immich build of upstream **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`), fork revision $REVISION. The server reports \`$TAG\` (the mobile apps require the upstream version); the fork revision is only visible in the tags below."
             echo
             echo "## Image"
             echo
-            echo "- \`$SERVER_IMAGE:$TAG-aero\` (also \`:aero\`); built as \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            echo "- \`$SERVER_IMAGE:$RELEASE_TAG\`: this release, immutable, pin this at home; built as \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            echo "- \`$SERVER_IMAGE:$TAG-aero\`: moving pointer, the latest fork revision of \`$TAG\` (this one at publish time)"
+            echo "- \`$SERVER_IMAGE:aero\`: moving pointer, the latest fork release of any upstream version (this one at publish time)"
             echo "- machine learning: unchanged, use upstream's \`ghcr.io/immich-app/immich-machine-learning:$TAG\`"
             echo
             echo "## Fork branches on top of $TAG"
+            echo
+            echo "This revision is \`$TAG\` plus the branches below at the listed \`after\` commits, merged in this order (\`main\` = \`$MAIN_SHA\` at publish time, the release target)."
             echo
             echo "$BRANCH_TABLE"
             echo
@@ -733,34 +785,44 @@ jobs:
             echo
             echo "$CHECKS"
             echo
-            echo "Integration commit: \`$MAIN_SHA\` (\`main\` at publish time)."
-            echo
             echo "## Reverting to upstream"
             echo
             echo "The attached \`revert-to-immich.sql\` turns a database migrated by this image back into a plain upstream \`$TAG\` database (validated in this run: the rc image migrated a fresh database, the script reverted it, upstream \`$TAG\` booted on it with nothing to migrate and no schema drift). It drops the private flags of assets and albums and the private-mode session state; nothing else. See docs-aero/README.md, \"Reverting to upstream Immich\"."
           } > "$notes"
           asset=scripts/aero/revert-to-immich.sql
-          if gh release view -R "$GITHUB_REPOSITORY" "$TAG-aero" >/dev/null 2>&1; then
-            echo "release $TAG-aero exists; updating notes and the revert script"
-            url=$(gh release edit -R "$GITHUB_REPOSITORY" "$TAG-aero" --title "$TAG-aero" --notes-file "$notes")
-            gh release upload -R "$GITHUB_REPOSITORY" "$TAG-aero" --clobber "$asset"
-          else
-            url=$(gh release create -R "$GITHUB_REPOSITORY" "$TAG-aero" --target "$MAIN_SHA" --title "$TAG-aero" --notes-file "$notes" "$asset")
+          # never edit an existing revision: a collision means the revision
+          # computation and the fork's releases disagree, stop
+          if gh release view -R "$GITHUB_REPOSITORY" "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::release $RELEASE_TAG already exists; revisions are immutable. Re-run the workflow to publish the next revision."
+            exit 1
           fi
+          url=$(gh release create -R "$GITHUB_REPOSITORY" "$RELEASE_TAG" --target "$MAIN_SHA" --title "$RELEASE_TAG" --notes-file "$notes" "$asset")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "release: $url"
+
+      - name: Move the pointer tags
+        env:
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$SERVER_IMAGE:$TAG-aero" \
+            --tag "$SERVER_IMAGE:aero" \
+            "$SERVER_IMAGE:$RELEASE_TAG"
+          docker buildx imagetools inspect "$SERVER_IMAGE:$TAG-aero"
 
       - name: Close the "ready for release" issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_HTML_URL: ${{ steps.release.outputs.url }}
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
         run: |
           set -euo pipefail
           bash .github/scripts/aero-issue.sh close "Upstream $TAG: ready for release" \
-            "Published: $RELEASE_HTML_URL. Image tags \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\` now point at the release candidate. Deploy at home by setting the server image tag to \`$TAG-aero\`."
+            "Published: $RELEASE_HTML_URL. Immutable image tag \`$SERVER_IMAGE:$RELEASE_TAG\`; the pointer tags \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\` now point at it. Deploy at home by pinning the server image tag to \`$RELEASE_TAG\`."
           {
-            echo "## Published $TAG-aero"
+            echo "## Published $RELEASE_TAG"
             echo
             echo "- $RELEASE_HTML_URL"
-            echo "- \`$SERVER_IMAGE:$TAG-aero\`, \`$SERVER_IMAGE:aero\`"
+            echo "- \`$SERVER_IMAGE:$RELEASE_TAG\` (immutable); \`$SERVER_IMAGE:$TAG-aero\`, \`$SERVER_IMAGE:aero\` (moved)"
           } >> "$GITHUB_STEP_SUMMARY"

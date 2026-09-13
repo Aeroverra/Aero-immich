@@ -2,7 +2,22 @@
 
 This fork carries a small set of features on top of upstream [immich-app/immich](https://github.com/immich-app/immich) and ships them as a Docker image for the family instance. Everything fork-specific (this folder, the branch list, the workflows, the scripts) lives only on the `main` branch so it never collides with upstream.
 
-Images are cut from **upstream releases**, never from upstream `main`: every upstream release tag `vX.Y.Z` becomes a fork release `vX.Y.Z-aero` after a one-click approval.
+Images are cut from **upstream releases**, never from upstream `main`: every upstream release tag `vX.Y.Z` becomes a fork release `vX.Y.Z-aero.N` after a one-click approval (see [Versioning](#versioning)).
+
+## Versioning
+
+A fork release is identified by two numbers, the way a distro package is: the **upstream version** it is built from (`vX.Y.Z`, upstream's release tag) and the **fork revision** `N` (1, 2, 3 ... per upstream version, one per approved publish). Together they form the release name `vX.Y.Z-aero.N`. The revision goes up whenever the same upstream version is published again, which happens when a fork branch changed and the current tag was forced (see [Forcing a tag](#forcing-a-tag)); two revisions of the same upstream version therefore differ only in fork branches, never in upstream code.
+
+The server keeps reporting the plain upstream version (`vX.Y.Z` in the About dialog and the `/api/server/version` endpoint): the mobile apps check it for compatibility with their own version, so the fork revision must not leak into it. The revision is visible only in the tags below and in the release notes, which list the exact branch commits the revision contains.
+
+| Tag | Kind | Meaning |
+|---|---|---|
+| `vX.Y.Z-aero.N` (image, GitHub release, git tag) | immutable | one approved publish; never edited, never moved. **Pin this at home.** |
+| `vX.Y.Z-aero` (image only) | moving | the latest fork revision of upstream `vX.Y.Z`; retagged on every publish of that version |
+| `aero` (image only) | moving | the latest fork release of any upstream version; retagged on every publish |
+| `vX.Y.Z-aero-rc`, `vX.Y.Z-aero-rc-<sha>` (image only) | candidate | built by every run, waiting for (or refused) approval |
+
+Historical exception: the first fork release was published before revisions existed, as the release and git tag `v3.2.0-aero`. It is revision 1 of `v3.2.0` (the pipeline counts it as `v3.2.0-aero.1`; the next publish of `v3.2.0` is `v3.2.0-aero.2`) and is left as it is. No moving git tags or GitHub releases are created any more, only the image tags move.
 
 ## Branch model
 
@@ -13,7 +28,7 @@ Images are cut from **upstream releases**, never from upstream `main`: every ups
 | `feat/*`, `fix/*` | One branch per upstream-PR-able change. Always **rebased** (never merged) onto the current upstream tag, so each stays a clean PR candidate. | you, plus the release workflow (rebase only) |
 | `main` | Disposable integration branch and the repository default: upstream tag + a merge of every branch listed in `.github/aero-branches.txt`, in order, plus one "fork glue" commit (this folder, the workflows, the scripts, the branch list). Rebuilt from scratch by automation. The Docker image is built from it. | the release workflow (and the initial setup) |
 
-Do not develop on `main`. Anything you commit there other than the glue paths (`.github/workflows/aero-release.yml`, `.github/workflows/aero-dry-run.yml`, `.github/workflows/aero-revert-validation.yml`, `.github/scripts/`, `.github/aero-branches.txt`, `docs-aero/`, `scripts/aero/`) is thrown away on the next integration.
+Do not develop on `main`. Anything you commit there other than the glue paths (`.github/workflows/aero-release.yml`, `.github/workflows/aero-dry-run.yml`, `.github/workflows/aero-revert-validation.yml`, `.github/scripts/`, `.github/aero-branches.txt`, `docs-aero/`, `scripts/aero/`) is thrown away on the next integration. A change to the glue itself (this file, the workflows, the scripts) needs no release: it is committed to `main` directly and applies to the next run.
 
 Never use GitHub's "Sync fork" button on this repository. It would merge upstream into the integration `main` instead of rebuilding it; the release workflow is the replacement.
 
@@ -65,7 +80,7 @@ detect ──new tag──> integrate ──ok──> candidate ──> revert-v
 
 **`detect`** asks the GitHub API for the latest upstream release (`repos/immich-app/immich/releases/latest`, which never returns prereleases or drafts) and stops, with a log line, when:
 
-- the fork already has a release `<tag>-aero` (that git tag is the "processed" marker), or
+- the fork already has a release `<tag>-aero.N` for any `N` (or the historical bare `<tag>-aero`); the fork's releases are the "processed" marker, listed with `gh api repos/<fork>/releases` and matched by prefix in `.github/scripts/aero-revision.sh`, or
 - an issue `Upstream <tag>: ready for release` is open (a candidate is built and waiting for your approval).
 
 Dispatching with `tag` skips both checks and forces that tag.
@@ -90,25 +105,23 @@ It first verifies that `machine-learning/` is identical to the upstream tag and 
 
 **`revert-validation`** calls the reusable workflow `.github/workflows/aero-revert-validation.yml` with the rc image and the tag (see [Reverting to upstream Immich](#reverting-to-upstream-immich)): a fresh database is migrated by the rc image, `scripts/aero/revert-to-immich.sql` reverts it, upstream `<tag>` has to boot on the result with nothing to migrate and no schema drift. A fork release that cannot be undone is not released.
 
-**`ready`** opens or updates the issue `Upstream <tag>: ready for release` with the upstream release link, the branch tips, the check results, the rc tags and a link to the run whose `publish` job is waiting. If the revert validation failed it instead opens `Upstream <tag>: revert validation failed` with the fix commands and fails, so `publish` never runs for that candidate.
+**`ready`** opens or updates the issue `Upstream <tag>: ready for release` with the upstream release link, the branch tips, the check results, the rc tags, the revision the approval will create ("will publish as `<tag>-aero.N`") and a link to the run whose `publish` job is waiting. If the revert validation failed it instead opens `Upstream <tag>: revert validation failed` with the fix commands and fails, so `publish` never runs for that candidate.
 
 **`publish`** runs in the `release` environment, so it waits for a required reviewer. GitHub emails you a deployment review request; approve it from the email, the issue link or the run page. On approval it:
 
-1. retags the rc image as `ghcr.io/aeroverra/immich-server:<tag>-aero` and `:aero` with `docker buildx imagetools create` (no rebuild, same digest),
-2. creates the GitHub release `<tag>-aero` on the fork (target: the `main` commit, notes: upstream release link, fork branch table, checks, image tags) with `scripts/aero/revert-to-immich.sql` attached as a release asset. Its git tag is what marks the upstream tag as processed,
-3. closes the "ready for release" issue with a comment.
+1. computes the fork revision `N` = 1 + the highest revision among the fork's releases `<tag>-aero.N` (the bare `<tag>-aero` counts as 1; `.github/scripts/aero-revision.sh next <tag>`). It is computed again here, not taken from `ready`, in case another publish of the same tag happened while the run waited; a git tag `<tag>-aero.N` that already exists stops the job,
+2. retags the rc image as the immutable `ghcr.io/aeroverra/immich-server:<tag>-aero.N` with `docker buildx imagetools create` (no rebuild, same digest),
+3. creates the GitHub release `<tag>-aero.N` on the fork with `gh release create --target <main commit>` (notes: upstream release link, the immutable image tag first and the moving ones after, the fork branch table with the exact commits, checks) with `scripts/aero/revert-to-immich.sql` attached as a release asset. An existing release of that name is never edited: the job fails instead,
+4. moves the pointer image tags `<tag>-aero` and `aero` to the new revision,
+5. closes the "ready for release" issue with a comment naming the immutable tag to pin at home.
 
-Rejecting the deployment leaves the rc image in place and the issue open, so the 6-hour schedule leaves that tag alone. To get a new candidate later (after fixing a branch, say), close the issue or dispatch with `tag`.
+The job exposes `revision` and `release_tag` as outputs. Rejecting the deployment leaves the rc image in place and the issue open, so the 6-hour schedule leaves that tag alone. To get a new candidate later (after fixing a branch, say), close the issue or dispatch with `tag`.
 
 `dry_run` on dispatch runs `detect` and `integrate` (rebase, rebuild, checks) and stops there: no push, no image, no issue.
 
 ### Image tags
 
-| Tag | Meaning |
-|---|---|
-| `<tag>-aero` (for example `v3.2.0-aero`) | approved release built from upstream `<tag>` plus the fork branches; use this at home |
-| `aero` | the most recently approved release |
-| `<tag>-aero-rc`, `<tag>-aero-rc-<sha>` | candidates waiting for (or refused) approval; try one before approving if you like |
+See the tag table under [Versioning](#versioning): pin `<tag>-aero.N` at home; `<tag>-aero` and `aero` are moving pointers; `<tag>-aero-rc` and `<tag>-aero-rc-<sha>` are candidates you can try before approving.
 
 The machine-learning image is never built here. The family instance keeps upstream's `ghcr.io/immich-app/immich-machine-learning`.
 
@@ -137,7 +150,7 @@ Only the server container changes. Machine learning, Postgres and Redis/Valkey s
 ```yaml
 services:
   immich-server:
-    image: ghcr.io/aeroverra/immich-server:v3.2.0-aero   # the approved fork release
+    image: ghcr.io/aeroverra/immich-server:v3.2.0-aero.2   # the approved fork release, immutable
     # everything else unchanged
 
   immich-machine-learning:
@@ -145,9 +158,9 @@ services:
     # unchanged: the fork does not modify the ML image
 ```
 
-Then on the aero-docker host `docker compose pull immich-server && docker compose up -d immich-server`. Using the pinned `<tag>-aero` tag (rather than `aero`) means the instance moves only when you edit the compose file, after you approved the release and read its notes; the ML image should be bumped to the same upstream version at the same time.
+Then on the aero-docker host `docker compose pull immich-server && docker compose up -d immich-server`. Pin the immutable `<tag>-aero.N` (the release notes and the closing comment on the "ready for release" issue name it), not `<tag>-aero` or `aero`: those move on every publish, so a `pull` would silently change what runs. With the pin the instance moves only when you edit the compose file, after you approved the release and read its notes; the ML image should be bumped to the same upstream version at the same time.
 
-The image's base version is visible in its tag and in the server's About dialog (`IMMICH_SOURCE_COMMIT` is the `main` commit).
+The image's upstream version is visible in its tag and in the server's About dialog (`IMMICH_SOURCE_COMMIT` is the `main` commit); the fork revision only in the tag.
 
 ## Recovering from a failed integration
 
@@ -174,7 +187,7 @@ Actions, **Aero release**, Run workflow, `tag` = `vX.Y.Z` (any tag upstream has 
 - rebuild a candidate that was rejected,
 - integrate a specific older tag (only works while `upstream-main` is still an ancestor of it; the mirror is never rewound).
 
-Forcing a tag that already has a fork release rebuilds the candidate and, on approval, moves `<tag>-aero` and `aero` to the new image and updates the release notes.
+Forcing a tag that already has a fork release rebuilds the candidate and, on approval, publishes it as the next revision `<tag>-aero.N+1` (new immutable image tag, release and git tag) and moves `<tag>-aero` and `aero` to it. The earlier revision stays as it was.
 
 ## Doing it by hand
 
@@ -197,7 +210,7 @@ The fork image adds two database migrations (`1789200000000-PrivateMode`, `17892
 Migration "1789200000000-PrivateMode" was already applied to this database but is not in this version of Immich
 ```
 
-`scripts/aero/revert-to-immich.sql` undoes exactly those two migrations, so the container can be pointed back at upstream. The same file is attached to every fork release (`<tag>-aero`, asset `revert-to-immich.sql`), and every release candidate is validated with it before it can be published (see `revert-validation` above).
+`scripts/aero/revert-to-immich.sql` undoes exactly those two migrations, so the container can be pointed back at upstream. The same file is attached to every fork release (`<tag>-aero.N`, asset `revert-to-immich.sql`), and every release candidate is validated with it before it can be published (see `revert-validation` above).
 
 **What is lost** (there is no undo other than a database backup):
 
@@ -218,7 +231,7 @@ docker compose exec database psql -U postgres -d immich -v ON_ERROR_STOP=1 \
   -f /tmp/revert-to-immich.sql
 ```
 
-The `SET aero.revert_token` is the acknowledgement; without it the script refuses to run and changes nothing. Then in `docker-compose.yml` set the server image to upstream at the **same** version the fork image was built from (the fork tag says which: `v3.2.0-aero` was built from `v3.2.0`):
+The `SET aero.revert_token` is the acknowledgement; without it the script refuses to run and changes nothing. Then in `docker-compose.yml` set the server image to upstream at the **same** version the fork image was built from (the fork tag says which: `v3.2.0-aero.2` was built from `v3.2.0`):
 
 ```yaml
     image: ghcr.io/immich-app/immich-server:v3.2.0
@@ -235,7 +248,7 @@ Going back to the fork later is just switching the image again: the fork migrati
 ```bash
 git fetch upstream --no-tags "+refs/tags/v3.2.0:refs/tags/v3.2.0"
 bash scripts/aero/revert-coverage-check.sh v3.2.0           # every file in migrations-aero is in the script's DELETE, nothing upstream is, upstream's folder is pristine
-bash scripts/aero/revert-validate.sh ghcr.io/aeroverra/immich-server:v3.2.0-aero v3.2.0
+bash scripts/aero/revert-validate.sh ghcr.io/aeroverra/immich-server:v3.2.0-aero.2 v3.2.0
 ```
 
 `revert-validate.sh` starts a throwaway postgres and valkey on a private docker network (`PG_PORT=55440` also publishes postgres on localhost), boots the fork image until it has migrated, stops it, runs the script (once without the token, which must be refused; once with it; once more, which must be a no-op), then boots the upstream image on the same database and asserts `Finished running migrations` with nothing executed, `No schema drift detected`, a clean `immich-admin schema-check` and no `isPrivate` column in `\d asset`. Everything it created is removed on exit. When a new fork migration lands, the coverage check fails until the SQL is extended, and the runtime check fails until the SQL actually drops what the migration created.
