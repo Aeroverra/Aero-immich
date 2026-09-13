@@ -16,7 +16,15 @@ import {
   type UserResponseDto,
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
-import { mdiImageOutline, mdiLink, mdiPlus, mdiPlusBoxOutline, mdiShareVariantOutline, mdiUpload } from '@mdi/js';
+import {
+  mdiImageOutline,
+  mdiLink,
+  mdiLockOutline,
+  mdiPlus,
+  mdiPlusBoxOutline,
+  mdiShareVariantOutline,
+  mdiUpload,
+} from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
 import { goto } from '$app/navigation';
 import { authManager } from '$lib/managers/auth-manager.svelte';
@@ -92,7 +100,7 @@ export const getAlbumAssetsActions = ($t: MessageFormatter, album: AlbumResponse
         {
           notify: true,
           hasPrivate: assets.some((asset) => asset.isPrivate),
-          isShared: album.shared || album.hasSharedLink,
+          albums: [album],
         },
       ).then(() => undefined),
   };
@@ -113,31 +121,49 @@ export const addAssetsToAlbums = async (
   {
     notify,
     hasPrivate = false,
-    isShared = false,
+    albums = [],
   }: {
     notify: boolean;
     /** whether any of the assets is private */
     hasPrivate?: boolean;
-    /** whether any of the albums is shared with users or through a link */
-    isShared?: boolean;
+    /** the target albums, when known: a non-private one turns private, a shared one exposes the assets */
+    albums?: AlbumResponseDto[];
   },
 ) => {
   const $t = await getFormatter();
 
-  // private assets reaching other users needs an explicit acknowledgement
   let confirmPrivate: boolean | undefined;
-  if (hasPrivate && isShared) {
-    const confirmed = await modalManager.showDialog({
-      title: $t('private_mode'),
-      prompt: $t('share_private_assets_album_confirmation'),
-      confirmText: $t('add'),
-    });
-
-    if (!confirmed) {
-      return false;
+  if (hasPrivate) {
+    // an empty album (e.g. one created for this selection) is private from the start, nothing gets hidden
+    const becomingPrivate = albums.filter((album) => !album.isPrivate && album.assetCount > 0);
+    const shared = albums.filter((album) => album.shared || album.hasSharedLink);
+    const sentences = [];
+    if (becomingPrivate.length > 0) {
+      sentences.push(
+        $t('add_to_album_private_prompt', {
+          values: { album: becomingPrivate.map(({ albumName }) => albumName).join(', ') },
+        }),
+      );
+    }
+    if (shared.length > 0) {
+      sentences.push($t('add_to_album_shared_private_prompt', { values: { count: shared.length } }));
     }
 
-    confirmPrivate = true;
+    if (sentences.length > 0) {
+      const confirmed = await modalManager.showDialog({
+        title: $t('private_mode'),
+        prompt: sentences.join(' '),
+        confirmText: $t('add_to_album_private_confirm'),
+        confirmColor: 'primary',
+        icon: mdiLockOutline,
+      });
+
+      if (!confirmed) {
+        return false;
+      }
+
+      confirmPrivate = true;
+    }
   }
 
   try {
