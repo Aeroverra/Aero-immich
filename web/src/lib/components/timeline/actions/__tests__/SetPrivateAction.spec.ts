@@ -135,6 +135,25 @@ describe('SetPrivateAction component', () => {
       expect(onSetPrivate).toHaveBeenCalledWith([privateAsset.id], false);
     });
 
+    it('removes the freshly marked assets through onRemove while the mode is off', async () => {
+      const [plainAsset, otherPlainAsset] = timelineAssetFactory.buildList(2, { isPrivate: false });
+      assetMultiSelectManager.selectAssets([plainAsset, otherPlainAsset]);
+      const onSetPrivate = vi.fn();
+      const onRemove = vi.fn();
+
+      const sut = renderWithTooltips(SetPrivateAction, { menuItem: true, onSetPrivate, onRemove });
+      await userEvent.click(sut.getByRole('menuitem', { name: 'Mark as private' }));
+
+      await waitFor(() =>
+        expect(sdkMock.updateAssets).toHaveBeenCalledExactlyOnceWith({
+          assetBulkUpdateDto: { ids: [plainAsset.id, otherPlainAsset.id], isPrivate: true },
+        }),
+      );
+      expect(onRemove).toHaveBeenCalledExactlyOnceWith([plainAsset.id, otherPlainAsset.id]);
+      expect(onSetPrivate).not.toHaveBeenCalled();
+      expect(assetMultiSelectManager.selectionActive).toBe(false);
+    });
+
     it('only offers unmarking when every selected asset is private', () => {
       privateModeManager.enabled = true;
       assetMultiSelectManager.selectAssets(timelineAssetFactory.buildList(2, { isPrivate: true }));
