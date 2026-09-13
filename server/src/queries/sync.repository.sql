@@ -92,6 +92,7 @@ where
   and "album_asset"."updateId" <= $4
   and "album_asset"."updateId" > $5
   and "album_asset"."albumId" = $6
+  and "asset"."isPrivate" = $7
 order by
   "album_asset"."updateId" asc
 
@@ -208,6 +209,14 @@ where
   and "album_asset"."updateId" <= $2
   and "album_asset"."updateId" > $3
   and "album_asset"."albumId" = $4
+  and "album_asset"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $5
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -248,6 +257,14 @@ where
   and "asset_exif"."updateId" > $2
   and "album_asset"."updateId" <= $3
   and "album_user"."userId" = $4
+  and "asset_exif"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $5
+  )
 order by
   "asset_exif"."updateId" asc
 
@@ -288,6 +305,14 @@ where
   "album_asset"."updateId" < $1
   and "album_asset"."updateId" > $2
   and "album_user"."userId" = $3
+  and "album_asset"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $4
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -487,6 +512,7 @@ where
       "asset"
     where
       "ownerId" = $3
+      and "isPrivate" = $4
   )
 order by
   "asset_exif"."updateId" asc
@@ -818,6 +844,7 @@ where
   and "asset"."updateId" <= $3
   and "asset"."updateId" > $4
   and "ownerId" = $5
+  and "asset"."isPrivate" = $6
 order by
   "asset"."updateId" asc
 
@@ -917,6 +944,7 @@ where
   and "asset_exif"."updateId" <= $2
   and "asset_exif"."updateId" > $3
   and "asset"."ownerId" = $4
+  and "asset"."isPrivate" = $5
 order by
   "asset_exif"."updateId" asc
 
@@ -967,6 +995,7 @@ where
         where
           "sharedWithId" = $3
       )
+      and "isPrivate" = $4
   )
 order by
   "asset_exif"."updateId" asc

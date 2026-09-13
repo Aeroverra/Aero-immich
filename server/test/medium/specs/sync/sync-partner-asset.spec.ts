@@ -358,4 +358,47 @@ describe(SyncRequestType.PartnerAssetsV2, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
   });
+  describe('private assets and the includePrivate flag', () => {
+    it('should never send a partner private asset, and drop it when it becomes private', async () => {
+      const { auth, ctx } = await setup();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: auth.user.id });
+      const { asset } = await ctx.newAsset({ ownerId: partner.id });
+      const { asset: alreadyPrivate } = await ctx.newAsset({ ownerId: partner.id, isPrivate: true });
+      const assetRepo = ctx.get(AssetRepository);
+
+      const initial = await ctx.syncStream(auth, [SyncRequestType.PartnerAssetsV2]);
+      const initialUpserts = initial.filter(({ type }) => type === SyncEntityType.PartnerAssetV2);
+      expect(initialUpserts).toEqual([expect.objectContaining({ data: expect.objectContaining({ id: asset.id }) })]);
+      expect(initial.map(({ data }) => (data as { id?: string }).id)).not.toContain(alreadyPrivate.id);
+      await ctx.syncAckAll(auth, initial);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerAssetsV2]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: true });
+      const hidden = await ctx.syncStream(auth, [SyncRequestType.PartnerAssetsV2]);
+      expect(hidden).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: SyncEntityType.PartnerAssetDeleteV1, data: { assetId: asset.id } }),
+        ]),
+      );
+      expect(hidden.map(({ type }) => type)).not.toContain(SyncEntityType.PartnerAssetV2);
+      await ctx.syncAckAll(auth, hidden);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerAssetsV2]);
+    });
+
+    it('should carry a partner private asset for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: auth.user.id });
+      const { asset } = await ctx.newAsset({ ownerId: partner.id, isPrivate: true });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.PartnerAssetsV2], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.PartnerAssetV2,
+          data: expect.objectContaining({ id: asset.id, isPrivate: true }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+  });
 });
