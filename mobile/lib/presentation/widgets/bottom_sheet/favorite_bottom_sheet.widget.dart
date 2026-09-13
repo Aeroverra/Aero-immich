@@ -38,7 +38,7 @@ class FavoriteBottomSheet extends ConsumerWidget {
       final remoteAssets = selectedAssets.whereType<RemoteAsset>();
       final result = await addWithPrivateShareConfirmation(
         context,
-        needsConfirmation: needsPrivateShareConfirmation(album, remoteAssets),
+        warning: privateAddWarning(context, album, remoteAssets),
         add: ({required confirmPrivate}) => ref
             .read(remoteAlbumProvider.notifier)
             .addAssets(album.id, remoteAssets.map((e) => e.id).toList(), confirmPrivate: confirmPrivate),
