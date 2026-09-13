@@ -57,6 +57,7 @@ const getDefaultPreferences = (): UserPreferences => {
     privateMode: {
       timeoutMinutes: 30,
       sidebarWeb: true,
+      includeInMemories: false,
     },
   };
 };

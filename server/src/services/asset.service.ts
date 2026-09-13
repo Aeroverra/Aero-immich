@@ -112,6 +112,8 @@ export class AssetService extends BaseService {
 
     const { description, dateTimeOriginal, latitude, longitude, rating, ...rest } = dto;
     const repos = { asset: this.assetRepository, event: this.eventRepository };
+    const stackMemberIds =
+      rest.isPrivate === undefined ? [] : await this.getStackMembersToFlag(auth, [id], rest.isPrivate);
 
     let previousMotion: { id: string } | null = null;
     if (rest.livePhotoVideoId) {
@@ -126,6 +128,10 @@ export class AssetService extends BaseService {
     await this.updateExif({ id, description, dateTimeOriginal, latitude, longitude, rating });
 
     const asset = await this.assetRepository.update({ id, ...rest });
+
+    if (rest.isPrivate !== undefined) {
+      await this.assetRepository.updateAll(stackMemberIds, { isPrivate: rest.isPrivate });
+    }
 
     if (previousMotion && asset) {
       await onAfterUnlink(repos, {
@@ -162,6 +168,7 @@ export class AssetService extends BaseService {
     } = dto;
 
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids });
+    const stackMemberIds = isPrivate === undefined ? [] : await this.getStackMembersToFlag(auth, ids, isPrivate);
 
     const assetDto = _.omitBy({ isFavorite, isPrivate, visibility, duplicateId }, _.isUndefined);
     const exifDto = _.omitBy(
@@ -193,11 +200,30 @@ export class AssetService extends BaseService {
       await this.assetRepository.updateAll(ids, assetDto);
     }
 
+    if (isPrivate !== undefined) {
+      await this.assetRepository.updateAll(stackMemberIds, { isPrivate });
+    }
+
     if (visibility === AssetVisibility.Locked) {
       await this.albumRepository.removeAssetsFromAll(ids);
     }
 
-    await this.jobRepository.queueAll(ids.map((id) => ({ name: JobName.SidecarWrite, data: { id } })));
+    await this.jobRepository.queueAll(
+      [...ids, ...stackMemberIds].map((id) => ({ name: JobName.SidecarWrite, data: { id } })),
+    );
+  }
+
+  /**
+   * A stack is never half private: the private flag applies to every member of every stack the
+   * targeted assets belong to. Returns the members that still need the flag, access-checked.
+   */
+  private async getStackMembersToFlag(auth: AuthDto, ids: string[], isPrivate: boolean) {
+    const members = await this.assetRepository.getStackMembers(auth.user.id, ids);
+    const memberIds = members
+      .filter((member) => member.isPrivate !== isPrivate && !ids.includes(member.id))
+      .map(({ id }) => id);
+    await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: memberIds });
+    return memberIds;
   }
 
   async copy(

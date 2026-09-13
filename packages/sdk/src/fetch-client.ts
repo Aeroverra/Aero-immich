@@ -690,6 +690,8 @@ export type PeopleResponse = {
     sidebarWeb: boolean;
 };
 export type PrivateModeResponse = {
+    /** Whether private assets are included in generated memories */
+    includeInMemories: boolean;
     /** Whether the private page appears in the web sidebar */
     sidebarWeb: boolean;
     /** Minutes of inactivity before private mode turns off */
@@ -783,6 +785,8 @@ export type PeopleUpdate = {
     sidebarWeb?: boolean;
 };
 export type PrivateModeUpdate = {
+    /** Whether private assets are included in generated memories */
+    includeInMemories?: boolean;
     /** Whether the private page appears in the web sidebar */
     sidebarWeb?: boolean;
     /** Minutes of inactivity before private mode turns off */

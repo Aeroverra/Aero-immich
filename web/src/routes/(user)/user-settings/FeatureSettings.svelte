@@ -45,6 +45,7 @@
   // Private page
   let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
   let privateTimeout = $state(authManager.preferences.privateMode?.timeoutMinutes ?? 30);
+  let privateMemories = $state(authManager.preferences.privateMode?.includeInMemories ?? false);
 
   const handleSave = async () => {
     try {
@@ -59,7 +60,11 @@
           tags: { enabled: tagsEnabled, sidebarWeb: tagsSidebar },
           cast: { gCastEnabled },
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
-          privateMode: { sidebarWeb: privateSidebar, timeoutMinutes: privateTimeout },
+          privateMode: {
+            sidebarWeb: privateSidebar,
+            timeoutMinutes: privateTimeout,
+            includeInMemories: privateMemories,
+          },
         },
       });
 
@@ -202,6 +207,10 @@
           <div class="mt-4 flex flex-col gap-4 sm:ms-4">
             <Field label={$t('sidebar')} description={$t('private_page_sidebar')}>
               <Switch bind:checked={privateSidebar} />
+            </Field>
+
+            <Field label={$t('private_memories')} description={$t('private_memories_description')}>
+              <Switch bind:checked={privateMemories} />
             </Field>
 
             <Field label={$t('private_mode_timeout')} description={$t('private_mode_timeout_description')}>

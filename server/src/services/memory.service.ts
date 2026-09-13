@@ -10,6 +10,7 @@ import { BaseService } from 'src/services/base.service';
 import { toPrivateScope } from 'src/utils/access';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
 import { findOrFail } from 'src/utils/misc';
+import { getPreferences } from 'src/utils/preferences';
 
 const DAYS = 3;
 
@@ -49,7 +50,11 @@ export class MemoryService extends BaseService {
   private async createOnThisDayMemories(ownerId: string, target: DateTime) {
     const showAt = target.startOf('day').toISO();
     const hideAt = target.endOf('day').toISO();
-    const memories = await this.assetRepository.getByDayOfYear([ownerId], target);
+    const metadata = await this.userRepository.getMetadata(ownerId);
+    const { includeInMemories } = getPreferences(metadata).privateMode;
+    const memories = await this.assetRepository.getByDayOfYear([ownerId], target, {
+      includePrivate: includeInMemories,
+    });
     await Promise.all(
       memories.map(({ year, assets }) =>
         this.memoryRepository.create(
@@ -80,7 +85,7 @@ export class MemoryService extends BaseService {
   }
 
   statistics(auth: AuthDto, dto: MemorySearchDto) {
-    return this.memoryRepository.statistics(auth.user.id, dto);
+    return this.memoryRepository.statistics(auth.user.id, dto, toPrivateScope(auth));
   }
 
   async get(auth: AuthDto, id: string): Promise<MemoryResponseDto> {
