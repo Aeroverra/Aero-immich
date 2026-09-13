@@ -336,6 +336,13 @@ class RemoteAlbumService {
     return _repository.getAlbumsContainingAsset(assetId, privateFilter: privateFilter);
   }
 
+  Future<List<RemoteAlbum>> getAlbumsContainingAssets(
+    List<String> assetIds, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
+    return _repository.getAlbumsContainingAssets(assetIds, privateFilter: privateFilter);
+  }
+
   Future<List<RemoteAlbum>> _sortByAssetDate(
     List<RemoteAlbum> albums, {
     required AssetDateAggregation aggregation,

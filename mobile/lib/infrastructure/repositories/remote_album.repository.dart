@@ -538,11 +538,21 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
   Future<List<RemoteAlbum>> getAlbumsContainingAsset(
     String assetId, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => getAlbumsContainingAssets([assetId], privateFilter: privateFilter);
+
+  /// Every album holding at least one of [assetIds], each listed once
+  Future<List<RemoteAlbum>> getAlbumsContainingAssets(
+    List<String> assetIds, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
   }) async {
+    if (assetIds.isEmpty) {
+      return [];
+    }
+
     // Note: this needs to be 2 queries as the where clause filtering causes the assetCount to always be 1
-    final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly()
+    final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly(distinct: true)
       ..addColumns([_db.remoteAlbumAssetEntity.albumId])
-      ..where(_db.remoteAlbumAssetEntity.assetId.equals(assetId));
+      ..where(_db.remoteAlbumAssetEntity.assetId.isIn(assetIds));
 
     final albumIds = await albumIdsQuery.map((row) => row.read(_db.remoteAlbumAssetEntity.albumId)!).get();
 

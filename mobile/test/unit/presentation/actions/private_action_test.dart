@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.widget.dart';
 import 'package:immich_mobile/presentation/actions/private.action.dart';
+import 'package:immich_mobile/widgets/common/confirm_dialog.dart';
 import 'package:immich_ui/immich_ui.dart';
 import 'package:mocktail/mocktail.dart';
 
 import '../../../service.mocks.dart';
+import '../../factories/remote_album_factory.dart';
 import '../../factories/remote_asset_factory.dart';
+import '../../mocks.dart';
 import '../presentation_context.dart';
 
 void main() {
@@ -150,6 +154,101 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ImmichIconButton), findsNothing, reason: 'an empty selection hides the action');
+    });
+  });
+
+  group('MarkPrivateAction album warning', () {
+    late MockRemoteAlbumService albumService;
+    late RemoteAlbumServiceStub albumStub;
+    final t = StaticTranslations.instance;
+
+    setUp(() {
+      albumStub = context.service.album;
+      albumService = albumStub.service;
+    });
+
+    Future<void> pumpMark(WidgetTester tester, Set<BaseAsset> selection) => tester.pumpTestAction(
+      context,
+      const MarkPrivateAction(source: .timeline),
+      overrides: context.selected(selection),
+    );
+
+    testWidgets('marks straight away when the assets are in no album', (tester) async {
+      final asset = owned();
+
+      await pumpMark(tester, {asset});
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ConfirmDialog), findsNothing);
+      verify(() => albumService.getAlbumsContainingAssets([asset.id], privateFilter: any(named: 'privateFilter')));
+      verify(() => assetService.update([asset.id], isPrivate: const .some(true))).called(1);
+    });
+
+    testWidgets('lists the public albums the assets are in, flagging the shared ones', (tester) async {
+      when(albumStub.getAlbumsContainingAssets).thenAnswer(
+        (_) async => [
+          RemoteAlbumFactory.create(name: 'Trip'),
+          RemoteAlbumFactory.create(name: 'Family', isShared: true),
+          RemoteAlbumFactory.create(name: 'Secrets', isPrivate: true),
+        ],
+      );
+
+      await pumpMark(tester, {owned()});
+      await tester.pumpUntilFound(find.byType(ConfirmDialog));
+
+      expect(find.text(t.mark_private_albums_title), findsOneWidget);
+      expect(find.text(t.mark_private_albums_description(count: 2)), findsOneWidget);
+      expect(find.text('Trip'), findsOneWidget);
+      expect(find.text('Family'), findsOneWidget);
+      expect(find.text('Secrets'), findsNothing, reason: 'an album that is private already does not change');
+      expect(find.text(t.shared), findsOneWidget);
+      expect(find.text(t.mark_private_remove_from_albums), findsOneWidget);
+      expect(find.text(t.mark_private_keep_albums), findsOneWidget);
+    });
+
+    testWidgets('cancel leaves the assets and the albums alone', (tester) async {
+      when(albumStub.getAlbumsContainingAssets).thenAnswer((_) async => [RemoteAlbumFactory.create()]);
+
+      await pumpMark(tester, {owned()});
+      await tester.pumpUntilFound(find.byType(ConfirmDialog));
+      await tester.tap(find.text(t.cancel));
+      await tester.pumpAndSettle();
+
+      verifyNever(() => assetService.update(any(), isPrivate: any(named: 'isPrivate')));
+      verifyNever(albumStub.removeAssets);
+    });
+
+    testWidgets('confirming marks private and lets the albums turn private', (tester) async {
+      final asset = owned();
+      when(albumStub.getAlbumsContainingAssets).thenAnswer((_) async => [RemoteAlbumFactory.create()]);
+
+      await pumpMark(tester, {asset});
+      await tester.pumpUntilFound(find.byType(ConfirmDialog));
+      await tester.tap(find.text(t.mark_private_keep_albums));
+      await tester.pumpAndSettle();
+
+      verify(() => assetService.update([asset.id], isPrivate: const .some(true))).called(1);
+      verifyNever(albumStub.removeAssets);
+    });
+
+    testWidgets('with the checkbox on the assets leave every listed album before turning private', (tester) async {
+      final asset = owned();
+      final trip = RemoteAlbumFactory.create(name: 'Trip');
+      final family = RemoteAlbumFactory.create(name: 'Family', isShared: true);
+      when(albumStub.getAlbumsContainingAssets).thenAnswer((_) async => [trip, family]);
+
+      await pumpMark(tester, {asset});
+      await tester.pumpUntilFound(find.byType(ConfirmDialog));
+      await tester.tap(find.text(t.mark_private_remove_from_albums));
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.text(t.mark_private_keep_albums));
+      await tester.pumpAndSettle();
+
+      verifyInOrder([
+        () => albumService.removeAssets(albumId: trip.id, assetIds: [asset.id]),
+        () => albumService.removeAssets(albumId: family.id, assetIds: [asset.id]),
+        () => assetService.update([asset.id], isPrivate: const .some(true)),
+      ]);
     });
   });
 

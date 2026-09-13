@@ -52,7 +52,7 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
     Future<void> addToAlbum(RemoteAlbum album) async {
       final result = await addWithPrivateShareConfirmation(
         context,
-        needsConfirmation: needsPrivateShareConfirmation(album, ref.read(multiSelectProvider).selectedAssets),
+        warning: privateAddWarning(context, album, ref.read(multiSelectProvider).selectedAssets),
         add: ({required confirmPrivate}) =>
             ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album, confirmPrivate: confirmPrivate),
       );
