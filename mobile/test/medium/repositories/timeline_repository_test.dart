@@ -2,7 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
+import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
+import 'package:immich_mobile/infrastructure/repositories/remote_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/timeline.repository.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
@@ -166,7 +168,8 @@ void main() {
     test('hides own private assets when off and shows them when on, for every origin', () async {
       final user = await ctx.newUser();
       final person = await ctx.newPerson(ownerId: user.id);
-      final album = await ctx.newRemoteAlbum(ownerId: user.id, isPrivate: true);
+      // a private album would be hidden as a whole, the asset level rule is exercised on a public one
+      final album = await ctx.newRemoteAlbum(ownerId: user.id);
       final world = LatLngBounds(southwest: const LatLng(-80, -170), northeast: const LatLng(80, 170));
       final mapOptions = TimelineMapOptions(bounds: world);
       final on = PrivateModeFilter(enabled: true, userId: user.id);
@@ -251,7 +254,27 @@ void main() {
       }
     });
 
-    test('album origin follows the album rule: private assets show whenever the mode is on', () async {
+    test('a private album has no timeline while off and a full one once the mode is on, for both groupings', () async {
+      final user = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: user.id, isPrivate: true);
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: public.id);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: private.id);
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+
+      for (final groupBy in [GroupAssetsBy.day, GroupAssetsBy.none]) {
+        final offQuery = sut.remoteAlbum(album.id, groupBy, privateFilter: PrivateModeFilter.off);
+        expect(await offQuery.bucketSource().first, isEmpty, reason: 'no buckets while off ($groupBy)');
+        expect(await offQuery.assetSource(0, 10), isEmpty, reason: 'no assets while off ($groupBy)');
+
+        final shown = await idsOf(sut.remoteAlbum(album.id, groupBy, privateFilter: on));
+        expect(shown, containsAll([public.id, private.id]), reason: 'everything once on ($groupBy)');
+        expect(shown, hasLength(2));
+      }
+    });
+
+    test('a partner private album follows the same album rule: hidden while off, complete when on', () async {
       final user = await ctx.newUser();
       final partner = await ctx.newUser();
       final album = await ctx.newRemoteAlbum(ownerId: partner.id, isPrivate: true);
@@ -261,13 +284,31 @@ void main() {
       await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: partnerPrivate.id);
 
       final off = await idsOf(sut.remoteAlbum(album.id, .day, privateFilter: PrivateModeFilter.off));
-      expect(off, [partnerPublic.id]);
+      expect(off, isEmpty);
 
       final on = await idsOf(
         sut.remoteAlbum(album.id, .day, privateFilter: PrivateModeFilter(enabled: true, userId: user.id)),
       );
       expect(on, containsAll([partnerPublic.id, partnerPrivate.id]));
       expect(on, hasLength(2));
+    });
+
+    test('an asset marked private while off drops out of the filtered timeline queries', () async {
+      final user = await ctx.newUser();
+      final asset = await ctx.newRemoteAsset(ownerId: user.id, isFavorite: true);
+      final assets = RemoteAssetRepository(ctx.db);
+
+      expect(await idsOf(sut.main([user.id], .day)), [asset.id]);
+      expect(await idsOf(sut.favorite(user.id, .day)), [asset.id]);
+
+      await assets.updateAssets([asset.id], isPrivate: const .some(true));
+
+      expect(await idsOf(sut.main([user.id], .day)), isEmpty);
+      expect(await idsOf(sut.favorite(user.id, .day)), isEmpty);
+      expect(await idsOf(sut.remote(user.id, .day)), isEmpty);
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+      expect(await idsOf(sut.main([user.id], .day, privateFilter: on)), [asset.id]);
+      expect(await idsOf(sut.privateFolder(user.id, .day, privateFilter: on)), [asset.id]);
     });
 
     test('privateFolder lists only own private assets and only while the mode is on', () async {

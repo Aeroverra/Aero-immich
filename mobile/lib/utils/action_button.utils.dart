@@ -128,10 +128,10 @@ enum ActionButtonType {
         context.isOwner && //
             context.isInLockedView && //
             context.asset.hasRemote,
-      // The server only accepts private changes while the session's private mode is on
+      // Marking works in any session state, like moving to the locked folder. Unmarking needs the
+      // session's private mode on, which is also the only time a private asset is listed at all.
       ActionButtonType.markPrivate =>
         context.isOwner && //
-            context.isPrivateMode && //
             !context.isInLockedView && //
             !context.isInPrivateView && //
             context.asset.hasRemote && //
@@ -206,8 +206,8 @@ enum ActionButtonType {
       ActionButtonType.delete => ActionMenuItem(action: DeleteAction(source: context.source)),
       ActionButtonType.moveToLockFolder ||
       ActionButtonType.removeFromLockFolder => ActionMenuItem(action: LockAction(source: context.source)),
-      ActionButtonType.markPrivate ||
-      ActionButtonType.unmarkPrivate => ActionMenuItem(action: PrivateAction(source: context.source)),
+      ActionButtonType.markPrivate => ActionMenuItem(action: MarkPrivateAction(source: context.source)),
+      ActionButtonType.unmarkPrivate => ActionMenuItem(action: UnmarkPrivateAction(source: context.source)),
       ActionButtonType.deleteLocal => ActionMenuItem(action: CleanupLocalAction(source: context.source)),
       ActionButtonType.upload => ActionMenuItem(
         action: UploadAction(source: context.source, showProgress: context.source == ActionSource.viewer),

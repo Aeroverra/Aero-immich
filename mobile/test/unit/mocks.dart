@@ -281,6 +281,7 @@ extension type const RemoteAssetRepositoryStub(MockRemoteAssetRepository repo)
         isFavorite: any(named: 'isFavorite'),
         visibility: any(named: 'visibility'),
         createdAt: any(named: 'createdAt'),
+        isPrivate: any(named: 'isPrivate'),
       );
 }
 
@@ -350,6 +351,7 @@ extension type const AssetServiceStub(MockAssetService service) implements Stub<
         visibility: any(named: 'visibility'),
         dateTime: any(named: 'dateTime'),
         location: any(named: 'location'),
+        isPrivate: any(named: 'isPrivate'),
       );
 
   Future<void> Function() get stack =>
@@ -403,6 +405,7 @@ extension type const AssetApiRepositoryStub(MockAssetApiRepository api) implemen
         visibility: any(named: 'visibility'),
         dateTimeOriginal: any(named: 'dateTimeOriginal'),
         location: any(named: 'location'),
+        isPrivate: any(named: 'isPrivate'),
       );
 }
 

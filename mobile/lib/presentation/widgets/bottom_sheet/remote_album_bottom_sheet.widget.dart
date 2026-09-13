@@ -12,6 +12,7 @@ import 'package:immich_mobile/presentation/actions/edit_datetime.action.dart';
 import 'package:immich_mobile/presentation/actions/edit_location.action.dart';
 import 'package:immich_mobile/presentation/actions/favorite.action.dart';
 import 'package:immich_mobile/presentation/actions/lock.action.dart';
+import 'package:immich_mobile/presentation/actions/private.action.dart';
 import 'package:immich_mobile/presentation/actions/remove_from_album.action.dart';
 import 'package:immich_mobile/presentation/actions/set_album_cover.action.dart';
 import 'package:immich_mobile/presentation/actions/share.action.dart';
@@ -20,7 +21,9 @@ import 'package:immich_mobile/presentation/actions/stack.action.dart';
 import 'package:immich_mobile/presentation/widgets/album/album_selector.widget.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_sheet.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
+import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class RemoteAlbumBottomSheet extends ConsumerStatefulWidget {
@@ -51,9 +54,14 @@ class _RemoteAlbumBottomSheetState extends ConsumerState<RemoteAlbumBottomSheet>
     final ownsAlbum = ref.watch(currentUserProvider)?.id == widget.album.ownerId;
 
     Future<void> addToAlbum(RemoteAlbum album) async {
-      final result = await ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album);
+      final result = await addWithPrivateShareConfirmation(
+        context,
+        needsConfirmation: needsPrivateShareConfirmation(album, ref.read(multiSelectProvider).selectedAssets),
+        add: ({required confirmPrivate}) =>
+            ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album, confirmPrivate: confirmPrivate),
+      );
 
-      if (!context.mounted) {
+      if (result == null || !context.mounted) {
         return;
       }
 
@@ -95,6 +103,8 @@ class _RemoteAlbumBottomSheetState extends ConsumerState<RemoteAlbumBottomSheet>
           .new(action: EditDateTimeAction(source: .timeline)),
           .new(action: EditLocationAction(source: .timeline)),
           .new(action: LockAction(source: .timeline)),
+          .new(action: MarkPrivateAction(source: .timeline)),
+          .new(action: UnmarkPrivateAction(source: .timeline)),
           .new(action: StackAction(source: .timeline)),
         ],
         const .new(action: CleanupLocalAction(source: .timeline)),

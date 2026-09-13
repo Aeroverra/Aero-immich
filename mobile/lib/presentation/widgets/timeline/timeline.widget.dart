@@ -170,6 +170,16 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     _baseScaleFactor = _scaleFactor;
 
     ref.listenManual(multiSelectProvider.select((s) => s.isEnabled), _onMultiSelectionToggled);
+    // The service is swapped when its inputs change (private mode toggled, partners changed). The segments
+    // are regenerated from scratch, so remember where the user was and restore it once the list reattaches
+    ref.listenManual(timelineServiceProvider, (_, _) => _rememberAssetPosition());
+  }
+
+  void _rememberAssetPosition() {
+    final segments = ref.read(timelineSegmentProvider).valueOrNull;
+    if (segments != null && _scrollController.hasClients) {
+      _restoreAssetIndex = _getCurrentAssetIndex(segments);
+    }
   }
 
   @override
@@ -177,10 +187,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     super.didUpdateWidget(oldWidget);
     if (widget.maxWidth != oldWidget.maxWidth) {
       // The updated args already regenerate the segments, only remember the scroll position to restore it afterwards
-      final segments = ref.read(timelineSegmentProvider).valueOrNull;
-      if (segments != null && _scrollController.hasClients) {
-        _restoreAssetIndex = _getCurrentAssetIndex(segments);
-      }
+      _rememberAssetPosition();
     }
   }
 

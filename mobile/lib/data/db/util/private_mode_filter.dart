@@ -25,7 +25,9 @@ extension RemoteAlbumPrivateModeFilter on $RemoteAssetEntityTable {
 }
 
 extension RemoteAlbumEntityPrivateModeFilter on $RemoteAlbumEntityTable {
-  /// Albums themselves are only hidden when private and the mode is off
+  /// Album level predicate: `is_private = false OR privateMode`. A private album is hidden as a
+  /// whole while the mode is off (lists, counts, lookups and its timeline), matching the server
+  /// which omits it from GET /albums and rejects it with 400.
   Expression<bool> privateFilter(PrivateModeFilter filter) {
     if (filter.enabled) {
       return const Constant(true);
