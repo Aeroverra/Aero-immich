@@ -79,6 +79,20 @@ export enum AssetOrder {
 
 export const AssetOrderSchema = z.enum(AssetOrder).describe('Asset sort order').meta({ id: 'AssetOrder' });
 
+export enum DeletedReimportMode {
+  /** store the upload and move it to the trash right away */
+  Trash = 'trash',
+  /** reject the upload as a duplicate without storing it */
+  Skip = 'skip',
+  /** store the upload and add it to the "Previously deleted" album */
+  Album = 'album',
+}
+
+export const DeletedReimportModeSchema = z
+  .enum(DeletedReimportMode)
+  .describe('How an upload of a previously deleted file is handled')
+  .meta({ id: 'DeletedReimportMode' });
+
 export enum AssetOrderBy {
   TakenAt = 'takenAt',
   CreatedAt = 'createdAt',
