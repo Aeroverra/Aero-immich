@@ -183,6 +183,25 @@ export class AlbumRepository {
     return map;
   }
 
+  /** The users of every album the assets are in, so they can be told when an album follows its assets */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @ChunkedArray()
+  async getAlbumUserIdsByAssetIds(assetIds: string[]): Promise<{ albumId: string; userId: string }[]> {
+    if (assetIds.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .selectFrom('album_asset')
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
+      .innerJoin('album_user', 'album_user.albumId', 'album.id')
+      .select(['album.id as albumId', 'album_user.userId'])
+      .distinct()
+      .where('album_asset.assetId', 'in', assetIds)
+      .where('album.deletedAt', 'is', null)
+      .execute();
+  }
+
   @GenerateSql({ params: [[DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
   @ChunkedArray()
   async getMetadataForIds(ids: string[], scope: PrivateScope): Promise<AlbumAssetCount[]> {

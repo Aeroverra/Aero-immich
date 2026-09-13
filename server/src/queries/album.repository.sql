@@ -167,6 +167,18 @@ where
   and "album_asset"."assetId" in ($3)
   and "album"."deletedAt" is null
 
+-- AlbumRepository.getAlbumUserIdsByAssetIds
+select distinct
+  "album"."id" as "albumId",
+  "album_user"."userId"
+from
+  "album_asset"
+  inner join "album" on "album"."id" = "album_asset"."albumId"
+  inner join "album_user" on "album_user"."albumId" = "album"."id"
+where
+  "album_asset"."assetId" in ($1)
+  and "album"."deletedAt" is null
+
 -- AlbumRepository.getMetadataForIds
 select
   "album_asset"."albumId" as "albumId",
