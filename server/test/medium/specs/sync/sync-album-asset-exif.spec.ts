@@ -370,4 +370,56 @@ describe(SyncRequestType.AlbumAssetExifsV1, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
   });
+  describe('private albums and the includePrivate flag', () => {
+    it('should withhold the exif of every asset of a private album until the album is public', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { user: owner } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      const { asset: visible } = await ctx.newAsset({ ownerId: owner.id });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+      await ctx.newExif({ assetId: visible.id, make: 'Nikon' });
+      const { album } = await ctx.newAlbum({ ownerId: owner.id }, [hidden.id, visible.id]);
+      await ctx.newAlbumUser({ albumId: album.id, userId: auth.user.id, role: AlbumUserRole.Editor });
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AlbumAssetExifsV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AlbumAssetExifCreateV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumAssetExifsV1]);
+
+      await assetRepo.updateAll([hidden.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([hidden.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AlbumAssetExifsV1]);
+      expect(restored).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumAssetExifCreateV1,
+            data: expect.objectContaining({ assetId: hidden.id, make: 'Canon' }),
+          }),
+          expect.objectContaining({
+            type: SyncEntityType.AlbumAssetExifCreateV1,
+            data: expect.objectContaining({ assetId: visible.id, make: 'Nikon' }),
+          }),
+        ]),
+      );
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumAssetExifsV1]);
+    });
+
+    it('should carry the exif of a private album for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+      await ctx.newAlbum({ ownerId: auth.user.id }, [hidden.id]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AlbumAssetExifsV1], false, true)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumAssetExifCreateV1,
+            data: expect.objectContaining({ assetId: hidden.id, make: 'Canon' }),
+          }),
+        ]),
+      );
+    });
+  });
 });
