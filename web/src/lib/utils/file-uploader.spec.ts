@@ -1,5 +1,6 @@
 import { AssetMediaStatus, type AssetMediaResponseDto, type UserAdminResponseDto } from '@immich/sdk';
 import { modalManager } from '@immich/ui';
+import { mdiLockOutline } from '@mdi/js';
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
@@ -141,6 +142,77 @@ describe('fileUploader error handling', () => {
 
       expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ prompt: 'add_to_album_private_prompt' }),
+      );
+      expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ albumAddAssetsDto: { ids: ['existing-asset'], confirmPrivate: true } }),
+      );
+    });
+  });
+
+  describe('uploading into a private album', () => {
+    const privateAlbum = albumFactory.build({ id: 'album-2', albumName: 'Secret', isPrivate: true, assetCount: 1 });
+    const otherFile = new File(['more'], 'other.jpg', { type: 'image/jpeg' });
+
+    beforeEach(() => {
+      authManager.setUser(mockUserObject);
+      sdkMock.getAlbumInfo.mockResolvedValue(privateAlbum);
+      sdkMock.addAssetsToAlbum.mockResolvedValue([]);
+      vi.mocked(modalManager.showDialog).mockResolvedValue(true);
+    });
+
+    it('asks once for the whole batch and then uploads every file', async () => {
+      const upload = vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 200, data: mockUploadResponse });
+
+      await fileUploadHandler({ files: [mockFile, otherFile], albumId: privateAlbum.id });
+
+      expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith({
+        title: 'private_mode',
+        prompt: 'upload_to_private_album_prompt',
+        confirmText: 'upload_to_private_album_confirm',
+        confirmColor: 'primary',
+        icon: mdiLockOutline,
+      });
+      expect(upload).toHaveBeenCalledTimes(2);
+      expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledTimes(2);
+    });
+
+    it('uploads nothing when the batch is cancelled', async () => {
+      vi.mocked(modalManager.showDialog).mockResolvedValue(false);
+      const upload = vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 200, data: mockUploadResponse });
+
+      const result = await fileUploadHandler({ files: [mockFile, otherFile], albumId: privateAlbum.id });
+
+      expect(result).toEqual([]);
+      expect(upload).not.toHaveBeenCalled();
+      expect(sdkMock.addAssetsToAlbum).not.toHaveBeenCalled();
+      expect(get(uploadAssetsStore)).toHaveLength(0);
+    });
+
+    it('does not ask for a public album', async () => {
+      sdkMock.getAlbumInfo.mockResolvedValue(albumFactory.build({ id: 'album-3', isPrivate: false, assetCount: 1 }));
+      vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 200, data: mockUploadResponse });
+
+      await fileUploadHandler({ files: [mockFile], albumId: 'album-3' });
+
+      expect(modalManager.showDialog).not.toHaveBeenCalled();
+      expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledOnce();
+    });
+
+    it('folds the shared warning into the batch dialog and does not ask again per file', async () => {
+      sdkMock.getAlbumInfo.mockResolvedValue(
+        albumFactory.build({ id: 'album-4', albumName: 'Secret', isPrivate: true, shared: true, assetCount: 1 }),
+      );
+      // the upload resolves to an existing private asset, which would otherwise trigger the shared-album dialog
+      vi.spyOn(utils, 'uploadRequest').mockResolvedValue({
+        status: 200,
+        data: { id: 'existing-asset', status: AssetMediaStatus.Duplicate } as AssetMediaResponseDto,
+      });
+      sdkMock.getAssetInfo.mockResolvedValue(assetFactory.build({ id: 'existing-asset', isPrivate: true }));
+
+      await fileUploadHandler({ files: [mockFile], albumId: 'album-4' });
+
+      expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ prompt: 'upload_to_private_album_prompt add_to_album_shared_private_prompt' }),
       );
       expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ albumAddAssetsDto: { ids: ['existing-asset'], confirmPrivate: true } }),

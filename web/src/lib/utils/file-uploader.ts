@@ -9,7 +9,8 @@ import {
   type AlbumResponseDto,
   type AssetMediaResponseDto,
 } from '@immich/sdk';
-import { toastManager } from '@immich/ui';
+import { modalManager, toastManager } from '@immich/ui';
+import { mdiLockOutline } from '@mdi/js';
 import { tick } from 'svelte';
 import { t } from 'svelte-i18n';
 import { get } from 'svelte/store';
@@ -103,6 +104,27 @@ export const fileUploadHandler = async ({
     }
   }
 
+  // everything uploaded into a private album becomes private through the album, ask once for the whole batch
+  let acknowledgedPrivateAlbum = false;
+  if (album?.isPrivate) {
+    const $t = get(t);
+    const sentences = [$t('upload_to_private_album_prompt', { values: { album: album.albumName } })];
+    if (album.shared || album.hasSharedLink) {
+      sentences.push($t('add_to_album_shared_private_prompt', { values: { count: 1 } }));
+    }
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: sentences.join(' '),
+      confirmText: $t('upload_to_private_album_confirm'),
+      confirmColor: 'primary',
+      icon: mdiLockOutline,
+    });
+    if (!confirmed) {
+      return [];
+    }
+    acknowledgedPrivateAlbum = true;
+  }
+
   const promises = [];
   for (const file of files) {
     const name = file.name.toLowerCase();
@@ -111,7 +133,7 @@ export const fileUploadHandler = async ({
       uploadAssetsStore.addItem({ id: deviceAssetId, file, albumId });
       promises.push(
         uploadExecutionQueue.addTask(() =>
-          fileUploader({ deviceAssetId, assetFile: file, albumId, album, isLockedAssets }),
+          fileUploader({ deviceAssetId, assetFile: file, albumId, album, acknowledgedPrivateAlbum, isLockedAssets }),
         ),
       );
     } else {
@@ -157,6 +179,7 @@ type FileUploaderParams = {
   assetFile: File;
   albumId?: string;
   album?: AlbumResponseDto;
+  acknowledgedPrivateAlbum?: boolean;
   replaceAssetId?: string;
   isLockedAssets?: boolean;
   // TODO rework the asset uploader and remove this
@@ -169,6 +192,7 @@ async function fileUploader({
   deviceAssetId,
   albumId,
   album,
+  acknowledgedPrivateAlbum = false,
   isLockedAssets = false,
 }: FileUploaderParams): Promise<string | undefined> {
   const fileCreatedAt = new Date(assetFile.lastModified).toISOString();
@@ -250,6 +274,8 @@ async function fileUploader({
         notify: false,
         hasPrivate,
         albums: album ? [album] : [],
+        // the batch dialog already covered the shared-album consequences
+        confirmPrivate: acknowledgedPrivateAlbum ? true : undefined,
       });
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_added_to_album') });
     }
