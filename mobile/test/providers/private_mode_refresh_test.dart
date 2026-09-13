@@ -22,6 +22,7 @@ import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
+import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:mocktail/mocktail.dart';
@@ -275,6 +276,21 @@ void main() {
     await settle();
 
     verify(() => albumService.getAll(privateFilter: on)).called(1);
+  });
+
+  test('the album list is re-read once a remote sync completes', () async {
+    container.listen(remoteAlbumProvider, (_, _) {});
+    await settle();
+    verifyNever(() => albumService.getAll(privateFilter: any(named: 'privateFilter')));
+
+    container.read(syncStatusProvider.notifier).startRemoteSync();
+    await settle();
+    verifyNever(() => albumService.getAll(privateFilter: any(named: 'privateFilter')));
+
+    container.read(syncStatusProvider.notifier).completeRemoteSync();
+    await settle();
+
+    verify(() => albumService.getAll(privateFilter: off)).called(1);
   });
 
   test('the albums an asset appears in are re-queried with the new filter', () async {

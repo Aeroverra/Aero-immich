@@ -14,6 +14,7 @@ import 'package:immich_mobile/providers/album/pending_album_uploads.provider.dar
 import 'package:immich_mobile/providers/backup/asset_upload_progress.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
+import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:logging/logging.dart';
@@ -40,6 +41,12 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     _remoteAlbumService = ref.read(remoteAlbumServiceProvider);
     // Album asset counts depend on the private mode state
     ref.listen(privateModeFilterProvider, (previous, next) => refresh());
+    // A remote sync can bring or take away albums (a private album follows its assets), so the list is re-read after it
+    ref.listen(syncStatusProvider.select((state) => state.remoteSyncStatus), (previous, next) {
+      if (next == SyncStatus.success) {
+        unawaited(refresh());
+      }
+    });
     return const RemoteAlbumState(albums: []);
   }
 
