@@ -9,6 +9,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:openapi/api.dart';
 
 import '../service.mocks.dart';
+import '../unit/factories/local_asset_factory.dart';
 import '../unit/factories/remote_album_factory.dart';
 import '../unit/factories/remote_asset_factory.dart';
 import '../unit/presentation/presentation_context.dart';
@@ -57,14 +58,20 @@ void main() {
       final buildContext = await pumpContext(tester);
       final album = RemoteAlbumFactory.create(name: 'Trip');
 
-      expect(privateAddWarning(buildContext, album, [public, private]), t.add_to_album_private_prompt(album: 'Trip'));
+      expect(
+        privateAddWarning(buildContext, album, [public, private])?.text,
+        t.add_to_album_private_prompt(album: 'Trip'),
+      );
     });
 
     testWidgets('a private shared album is warned about the share only', (tester) async {
       final buildContext = await pumpContext(tester);
       final album = RemoteAlbumFactory.create(isShared: true, isPrivate: true);
 
-      expect(privateAddWarning(buildContext, album, [private]), t.add_private_assets_to_shared_album_confirmation);
+      expect(
+        privateAddWarning(buildContext, album, [private])?.text,
+        t.add_private_assets_to_shared_album_confirmation,
+      );
     });
 
     testWidgets('a public shared album folds both warnings into one text', (tester) async {
@@ -72,10 +79,45 @@ void main() {
       final album = RemoteAlbumFactory.create(name: 'Trip', isShared: true);
 
       expect(
-        privateAddWarning(buildContext, album, [private]),
+        privateAddWarning(buildContext, album, [private])?.text,
         '${t.add_to_album_private_prompt(album: 'Trip')}\n\n'
         '${t.add_private_assets_to_shared_album_confirmation}',
       );
+    });
+
+    testWidgets('device assets uploaded into a private album are warned about becoming private', (tester) async {
+      final buildContext = await pumpContext(tester);
+      final album = RemoteAlbumFactory.create(name: 'Trip', isPrivate: true);
+
+      final warning = privateAddWarning(buildContext, album, [LocalAssetFactory.create(), public]);
+      expect(warning?.text, t.upload_to_private_album_prompt(album: 'Trip'));
+      expect(warning?.upload, isTrue);
+    });
+
+    testWidgets('no upload warning for a public album or for device assets that are on the server already', (
+      tester,
+    ) async {
+      final buildContext = await pumpContext(tester);
+
+      expect(privateAddWarning(buildContext, RemoteAlbumFactory.create(), [LocalAssetFactory.create()]), isNull);
+      expect(
+        privateAddWarning(buildContext, RemoteAlbumFactory.create(isPrivate: true), [
+          LocalAssetFactory.create(remoteId: 'remote-1'),
+        ]),
+        isNull,
+      );
+    });
+
+    testWidgets('a private shared album folds the upload and the share warning into one text', (tester) async {
+      final buildContext = await pumpContext(tester);
+      final album = RemoteAlbumFactory.create(name: 'Trip', isPrivate: true, isShared: true);
+
+      final warning = privateAddWarning(buildContext, album, [LocalAssetFactory.create()]);
+      expect(
+        warning?.text,
+        '${t.upload_to_private_album_prompt(album: 'Trip')}\n\n${t.add_private_assets_to_shared_album_confirmation}',
+      );
+      expect(warning?.upload, isTrue);
     });
   });
 
@@ -171,12 +213,12 @@ void main() {
   group('addWithPrivateShareConfirmation', () {
     final serverRefusal = ApiException(400, '{"message":"Album contains private assets, confirmPrivate is required"}');
 
-    /// Renders a button that runs the helper and records what it returned
-    const warning = 'Trip will become private';
+    const warning = PrivateAddWarning(text: 'Trip will become private');
 
+    /// Renders a button that runs the helper and records what it returned
     Future<void> pumpRunner(
       WidgetTester tester, {
-      required String? warning,
+      required PrivateAddWarning? warning,
       required Future<String> Function({required bool confirmPrivate}) add,
       required void Function(String? result) onDone,
     }) => tester.pumpTestWidget(
@@ -189,13 +231,20 @@ void main() {
       ),
     );
 
-    Future<void> answerDialog(WidgetTester tester, {required bool confirm, String? expectedText}) async {
+    Future<void> answerDialog(
+      WidgetTester tester, {
+      required bool confirm,
+      String? expectedText,
+      String? okLabel,
+    }) async {
       await tester.pumpUntilFound(find.byType(ConfirmDialog));
       expect(
         find.text(expectedText ?? StaticTranslations.instance.add_private_assets_to_shared_album_confirmation),
         findsOneWidget,
       );
-      await tester.tap(find.text(confirm ? StaticTranslations.instance.confirm : StaticTranslations.instance.cancel));
+      await tester.tap(
+        find.text(confirm ? okLabel ?? StaticTranslations.instance.confirm : StaticTranslations.instance.cancel),
+      );
       await tester.pumpAndSettle();
     }
 
@@ -234,10 +283,46 @@ void main() {
       );
 
       await tester.tap(find.text('run'));
-      await answerDialog(tester, confirm: true, expectedText: warning);
+      await answerDialog(tester, confirm: true, expectedText: warning.text);
 
       expect(calls, [true]);
       expect(result, 'added');
+    });
+
+    testWidgets('an upload warning is shown once for the batch with an Upload button, cancel uploads nothing', (
+      tester,
+    ) async {
+      final calls = <bool>[];
+      String? result = 'untouched';
+      final uploadWarning = PrivateAddWarning(
+        text: StaticTranslations.instance.upload_to_private_album_prompt(album: 'Trip'),
+        upload: true,
+      );
+      await pumpRunner(
+        tester,
+        warning: uploadWarning,
+        add: ({required confirmPrivate}) async {
+          calls.add(confirmPrivate);
+          return 'uploaded';
+        },
+        onDone: (value) => result = value,
+      );
+
+      await tester.tap(find.text('run'));
+      await answerDialog(tester, confirm: false, expectedText: uploadWarning.text);
+      expect(find.byType(ConfirmDialog), findsNothing);
+      expect(calls, isEmpty, reason: 'nothing starts uploading after a cancel');
+      expect(result, isNull);
+
+      await tester.tap(find.text('run'));
+      await answerDialog(
+        tester,
+        confirm: true,
+        expectedText: uploadWarning.text,
+        okLabel: StaticTranslations.instance.upload_to_private_album_confirm,
+      );
+      expect(calls, [true], reason: 'one acknowledgement covers the whole batch');
+      expect(result, 'uploaded');
     });
 
     testWidgets('adds nothing when the user declines up front', (tester) async {
@@ -254,7 +339,7 @@ void main() {
       );
 
       await tester.tap(find.text('run'));
-      await answerDialog(tester, confirm: false, expectedText: warning);
+      await answerDialog(tester, confirm: false, expectedText: warning.text);
 
       expect(calls, isEmpty);
       expect(result, isNull);
