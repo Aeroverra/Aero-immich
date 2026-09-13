@@ -281,7 +281,9 @@ jobs:
           set -uo pipefail
           name=e2e-private-mode
           echo "::group::$name: prepare cli and e2e packages"
-          if ! { mise run //packages/cli:install && mise run //packages/cli:build && mise run //e2e:install; } 2>&1 | tee "$AERO_LOGS/$name.log"; then
+          # the e2e suite uploads fixtures from the test-assets submodule, which the
+          # integrate checkout does not fetch (upstream's test.yml checks out with submodules)
+          if ! { git submodule update --init --depth 1 e2e/test-assets && mise run //packages/cli:install && mise run //packages/cli:build && mise run //e2e:install; } 2>&1 | tee "$AERO_LOGS/$name.log"; then
             echo "::endgroup::"
             echo "- \`$name\`: FAILED (setup)" >> "$AERO_LOGS/summary.txt"
             echo "failed_check=$name" >> "$GITHUB_OUTPUT"
