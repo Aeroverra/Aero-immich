@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Kysely, sql } from 'kysely';
+import { ExpressionBuilder, Kysely, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
@@ -10,6 +10,7 @@ export type SyncBackfillOptions = {
   nowId: string;
   afterUpdateId?: string;
   beforeUpdateId: string;
+  includePrivate?: boolean;
 };
 
 const dummyBackfillOptions = {
@@ -34,6 +35,7 @@ export type SyncQueryOptions = {
   nowId: string;
   userId: string;
   ack?: SyncAck;
+  includePrivate?: boolean;
 };
 
 const dummyQueryOptions = {
@@ -96,6 +98,11 @@ export class SyncRepository {
     this.userMetadata = new UserMetadataSync(this.db);
   }
 }
+
+/** rows whose asset is not private; used to keep private metadata out of streams that did not opt in */
+const privateAssetPredicate =
+  (assetIdRef: 'album_asset.assetId' | 'asset_exif.assetId') => (eb: ExpressionBuilder<DB, any>) =>
+    eb(assetIdRef, 'in', eb.selectFrom('asset').select('asset.id').where('asset.isPrivate', '=', false));
 
 export class BaseSync {
   constructor(protected db: Kysely<DB>) {}
@@ -214,6 +221,7 @@ class AlbumAssetSync extends BaseSync {
       )
       .select('album_asset.updateId')
       .where('album_asset.albumId', '=', albumId)
+      .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
       .stream();
   }
 
@@ -269,6 +277,7 @@ class AlbumAssetExifSync extends BaseSync {
       .select(columns.syncAssetExif)
       .select('album_asset.updateId')
       .where('album_asset.albumId', '=', albumId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
       .stream();
   }
 
@@ -282,6 +291,7 @@ class AlbumAssetExifSync extends BaseSync {
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send exif updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('asset_exif.assetId')))
       .stream();
   }
 
@@ -295,6 +305,7 @@ class AlbumAssetExifSync extends BaseSync {
       .innerJoin('album', 'album.id', 'album_asset.albumId')
       .leftJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
       .stream();
   }
 }
@@ -505,7 +516,13 @@ class AssetExifSync extends BaseSync {
     return this.upsertQuery('asset_exif', options)
       .select(columns.syncAssetExif)
       .select('asset_exif.updateId')
-      .where('assetId', 'in', (eb) => eb.selectFrom('asset').select('id').where('ownerId', '=', options.userId))
+      .where('assetId', 'in', (eb) =>
+        eb
+          .selectFrom('asset')
+          .select('id')
+          .where('ownerId', '=', options.userId)
+          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false)),
+      )
       .stream();
   }
 }
@@ -637,6 +654,7 @@ class PartnerAssetsSync extends BaseSync {
       .select(sql.val(false).as('isFavorite'))
       .select('asset.updateId')
       .where('ownerId', '=', partnerId)
+      .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
       .stream();
   }
 
@@ -671,6 +689,7 @@ class PartnerAssetExifsSync extends BaseSync {
       .select('asset_exif.updateId')
       .innerJoin('asset', 'asset.id', 'asset_exif.assetId')
       .where('asset.ownerId', '=', partnerId)
+      .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
       .stream();
   }
 
@@ -685,7 +704,8 @@ class PartnerAssetExifsSync extends BaseSync {
           .select('id')
           .where('ownerId', 'in', (eb) =>
             eb.selectFrom('partner').select(['sharedById']).where('sharedWithId', '=', options.userId),
-          ),
+          )
+          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false)),
       )
       .stream();
   }

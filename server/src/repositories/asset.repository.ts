@@ -317,6 +317,24 @@ export class AssetRepository {
 
   @GenerateSql({ params: [[DummyValue.UUID], { model: DummyValue.STRING }] })
   @Chunked()
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @Chunked()
+  async touchExif(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    // the updatedAt trigger assigns a fresh updateId, which re-emits the rows on the sync stream
+    await this.db
+      .updateTable('asset_exif')
+      .set({ updatedAt: new Date() })
+      .where(
+        'assetId',
+        'in',
+        ids.map((id) => asUuid(id)),
+      )
+      .execute();
+  }
+
   async updateAllExif(ids: string[], options: Updateable<AssetExifTable>): Promise<void> {
     if (ids.length === 0) {
       return;
