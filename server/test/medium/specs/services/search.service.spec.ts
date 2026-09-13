@@ -462,6 +462,25 @@ describe(SearchService.name, () => {
   });
 
   describe('private mode', () => {
+    it('should filter the legacy metadata search by the private flag while the mode is on', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.newExif({ assetId: plain.id, make: 'Canon' });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      const onlyPrivate = await sut.searchMetadata(auth, { isPrivate: true, size: 10 });
+      expect(onlyPrivate.assets.items.map(({ id }) => id)).toEqual([hidden.id]);
+
+      const noPrivate = await sut.searchMetadata(auth, { isPrivate: false, size: 10 });
+      expect(noPrivate.assets.items.map(({ id }) => id)).toEqual([plain.id]);
+
+      const random = await sut.searchRandom(auth, { isPrivate: true, size: 10 });
+      expect(random.map(({ id }) => id)).toEqual([hidden.id]);
+    });
+
     it('should hide private assets from the legacy search endpoints outside private mode', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();
