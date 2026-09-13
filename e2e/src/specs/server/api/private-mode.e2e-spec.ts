@@ -16,6 +16,7 @@ import {
   getActivities,
   getActivityStatistics,
   getAlbumInfo,
+  getAlbumStatistics,
   getAllPeople,
   getAssetDuplicates,
   getAssetInfo,
@@ -54,6 +55,7 @@ const bucketDate = '2020-06-15T12:00:00.000Z';
 const bucketPrefix = '2020-06';
 
 const asAuth = (accessToken: string) => ({ headers: asBearerAuth(accessToken) });
+const authHeader = (accessToken: string) => ({ Authorization: `Bearer ${accessToken}` });
 const enable = (accessToken: string) => enablePrivateMode({ sessionUnlockDto: { pinCode } }, asAuth(accessToken));
 const disable = (accessToken: string) => disablePrivateMode(asAuth(accessToken));
 const markPrivate = (accessToken: string, id: string) =>
@@ -270,28 +272,81 @@ describe('private mode', () => {
   });
 
   describe('PUT /assets/:id (isPrivate)', () => {
-    it('should require the mode to mark an asset private', async () => {
-      const asset = await utils.createAsset(user1.accessToken);
+    it('should mark an asset private without the mode and hide it from the session', async () => {
+      const asset = await utils.createAsset(user1.accessToken, { fileCreatedAt: bucketDate });
+      await utils.waitForWebsocketEvent({ event: 'assetUpload', id: asset.id });
+      const before = await findBucket(user1.accessToken);
+      const visible = await getTimeBucket({ timeBucket: before!.timeBucket }, asAuth(user1.accessToken));
+      expect(visible.id).toContain(asset.id);
 
       const { status, body } = await request(app)
         .put(`/assets/${asset.id}`)
         .set('Authorization', `Bearer ${user1.accessToken}`)
         .send({ isPrivate: true });
-      expect(status).toBe(401);
-      expect(body).toEqual(expect.objectContaining({ message: 'Private mode is required' }));
+      expect(status).toBe(200);
+      expect(body).toEqual(expect.objectContaining({ id: asset.id, isPrivate: true }));
 
+      // the asset vanishes from this session until the mode is on
+      const hidden = await request(app).get(`/assets/${asset.id}`).set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(hidden.status).toBe(400);
+      const after = await findBucket(user1.accessToken);
+      expect(after!.count).toBe(before!.count - 1);
+      const bucket = await getTimeBucket({ timeBucket: after!.timeBucket }, asAuth(user1.accessToken));
+      expect(bucket.id).not.toContain(asset.id);
+
+      await enable(user1.accessToken);
       const info = await getAssetInfo({ id: asset.id }, asAuth(user1.accessToken));
-      expect(info.isPrivate).toBe(false);
+      expect(info.isPrivate).toBe(true);
     });
 
-    it('should require the mode for the bulk update', async () => {
-      const asset = await utils.createAsset(user1.accessToken);
+    it('should bulk mark assets private without the mode', async () => {
+      const [asset1, asset2] = await Promise.all([
+        utils.createAsset(user1.accessToken),
+        utils.createAsset(user1.accessToken),
+      ]);
 
       const { status } = await request(app)
         .put('/assets')
         .set('Authorization', `Bearer ${user1.accessToken}`)
-        .send({ ids: [asset.id], isPrivate: true });
-      expect(status).toBe(401);
+        .send({ ids: [asset1.id, asset2.id], isPrivate: true });
+      expect(status).toBe(204);
+
+      for (const { id } of [asset1, asset2]) {
+        const hidden = await request(app).get(`/assets/${id}`).set('Authorization', `Bearer ${user1.accessToken}`);
+        expect(hidden.status).toBe(400);
+      }
+
+      await enable(user1.accessToken);
+      const [info1, info2] = await Promise.all([
+        getAssetInfo({ id: asset1.id }, asAuth(user1.accessToken)),
+        getAssetInfo({ id: asset2.id }, asAuth(user1.accessToken)),
+      ]);
+      expect(info1.isPrivate).toBe(true);
+      expect(info2.isPrivate).toBe(true);
+    });
+
+    it('should require the mode to unmark an asset private', async () => {
+      const asset = await utils.createAsset(user1.accessToken);
+      await markPrivate(user1.accessToken, asset.id);
+
+      const { status } = await request(app)
+        .put(`/assets/${asset.id}`)
+        .set('Authorization', `Bearer ${user1.accessToken}`)
+        .send({ isPrivate: false });
+      expect(status).toBe(400);
+
+      const bulk = await request(app)
+        .put('/assets')
+        .set('Authorization', `Bearer ${user1.accessToken}`)
+        .send({ ids: [asset.id], isPrivate: false });
+      expect(bulk.status).toBe(400);
+
+      await enable(user1.accessToken);
+      const unmarked = await updateAsset(
+        { id: asset.id, updateAssetDto: { isPrivate: false } },
+        asAuth(user1.accessToken),
+      );
+      expect(unmarked.isPrivate).toBe(false);
     });
 
     it('should mark and unmark an asset private with the mode on', async () => {
@@ -783,20 +838,62 @@ describe('private mode', () => {
       expect(info.isPrivate).toBe(true);
     });
 
-    it('should hide the private asset, its count and the cover with the mode off', async () => {
-      const info = await getAlbumInfo({ id: album.id }, asAuth(user1.accessToken));
-      expect(info.isPrivate).toBe(true);
-      expect(info.assetCount).toBe(0);
-      expect(info.albumThumbnailAssetId).toBeNull();
-      await expect(albumAssetIds(album.id, user1)).resolves.toEqual([]);
+    it('should hide the private album as a whole with the mode off', async () => {
+      const { status, body } = await request(app)
+        .get(`/albums/${album.id}`)
+        .set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Not found or no album.read access'));
 
-      const { status, body } = await request(app).get('/albums').set('Authorization', `Bearer ${user1.accessToken}`);
-      expect(status).toBe(200);
-      expect(body).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ id: album.id, isPrivate: true, assetCount: 0, albumThumbnailAssetId: null }),
-        ]),
-      );
+      const list = await request(app).get('/albums').set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(list.status).toBe(200);
+      expect(list.body).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: album.id })]));
+
+      const byAsset = await request(app)
+        .get('/albums')
+        .query({ assetId: firstAsset.id })
+        .set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(byAsset.status).toBe(200);
+      expect(byAsset.body).toEqual([]);
+
+      const buckets = await request(app)
+        .get('/timeline/buckets')
+        .query({ albumId: album.id })
+        .set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(buckets.status).toBe(400);
+      expect(buckets.body).toEqual(errorDto.badRequest('Not found or no album.read access'));
+    });
+
+    it('should leave the private album out of the album statistics with the mode off', async () => {
+      const off = await getAlbumStatistics(asAuth(user1.accessToken));
+      await enable(user1.accessToken);
+      const on = await getAlbumStatistics(asAuth(user1.accessToken));
+      expect(on.owned).toBe(off.owned + 1);
+      expect(on.notShared).toBe(off.notShared + 1);
+      expect(on.shared).toBe(off.shared);
+    });
+
+    it('should refuse to update, share or delete a hidden private album with the mode off', async () => {
+      const auth = { Authorization: `Bearer ${user1.accessToken}` };
+      const update = await request(app).patch(`/albums/${album.id}`).set(auth).send({ albumName: 'renamed' });
+      expect(update.status).toBe(400);
+      expect(update.body).toEqual(errorDto.badRequest('Not found or no album.update access'));
+
+      const share = await request(app)
+        .put(`/albums/${album.id}/users`)
+        .set(auth)
+        .send({ albumUsers: [{ userId: user2.userId, role: AlbumUserRole.Editor }], confirmPrivate: true });
+      expect(share.status).toBe(400);
+      expect(share.body).toEqual(errorDto.badRequest('Not found or no album.share access'));
+
+      const remove = await request(app).delete(`/albums/${album.id}`).set(auth);
+      expect(remove.status).toBe(400);
+      expect(remove.body).toEqual(errorDto.badRequest('Not found or no album.delete access'));
+
+      await enable(user1.accessToken);
+      const info = await getAlbumInfo({ id: album.id }, asAuth(user1.accessToken));
+      expect(info.albumName).toBe('private flag');
+      expect(info.albumUsers).toHaveLength(1);
     });
 
     it('should show the private asset, its count and the cover with the mode on', async () => {
@@ -808,14 +905,22 @@ describe('private mode', () => {
       await expect(albumAssetIds(album.id, user1)).resolves.toEqual([firstAsset.id]);
     });
 
-    it('should require the mode to add assets to a private album', async () => {
+    it('should refuse to add assets to a hidden private album with the mode off', async () => {
       secondAsset = await utils.createAsset(user1.accessToken);
 
-      const { status } = await request(app)
+      const { status, body } = await request(app)
         .put(`/albums/${album.id}/assets`)
         .set('Authorization', `Bearer ${user1.accessToken}`)
         .send({ ids: [secondAsset.id] });
-      expect(status).toBe(401);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Not found or no albumAsset.create access'));
+
+      const bulk = await request(app)
+        .put('/albums/assets')
+        .set('Authorization', `Bearer ${user1.accessToken}`)
+        .send({ albumIds: [album.id], assetIds: [secondAsset.id] });
+      expect(bulk.status).toBe(200);
+      expect(bulk.body).toEqual({ success: false, error: 'no_permission' });
 
       const info = await getAssetInfo({ id: secondAsset.id }, asAuth(user1.accessToken));
       expect(info.isPrivate).toBe(false);
@@ -824,7 +929,7 @@ describe('private mode', () => {
     it('should make a plain asset private when it is added to a private album', async () => {
       await enable(user1.accessToken);
       const results = await addAssetsToAlbum(
-        { id: album.id, bulkIdsDto: { ids: [secondAsset.id] } },
+        { id: album.id, albumAddAssetsDto: { ids: [secondAsset.id] } },
         asAuth(user1.accessToken),
       );
       expect(results).toEqual([expect.objectContaining({ id: secondAsset.id, success: true })]);
@@ -842,7 +947,10 @@ describe('private mode', () => {
       expect(other.isPrivate).toBe(false);
 
       await enable(user1.accessToken);
-      await addAssetsToAlbum({ id: other.id, bulkIdsDto: { ids: [privateAsset.id] } }, asAuth(user1.accessToken));
+      await addAssetsToAlbum(
+        { id: other.id, albumAddAssetsDto: { ids: [privateAsset.id] } },
+        asAuth(user1.accessToken),
+      );
 
       const info = await getAlbumInfo({ id: other.id }, asAuth(user1.accessToken));
       expect(info.isPrivate).toBe(true);
@@ -852,11 +960,10 @@ describe('private mode', () => {
       const member = await getAssetInfo({ id: plainMember.id }, asAuth(user1.accessToken));
       expect(member.isPrivate).toBe(false);
 
+      // the whole album disappears from a session without the mode
       await disable(user1.accessToken);
-      const hidden = await getAlbumInfo({ id: other.id }, asAuth(user1.accessToken));
-      expect(hidden.assetCount).toBe(1);
-      expect(hidden.albumThumbnailAssetId).toBe(plainMember.id);
-      await expect(albumAssetIds(other.id, user1)).resolves.toEqual([plainMember.id]);
+      const hidden = await request(app).get(`/albums/${other.id}`).set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(hidden.status).toBe(400);
     });
 
     it('should clear the album flag when the last private asset is removed', async () => {
@@ -938,6 +1045,8 @@ describe('private mode', () => {
     });
 
     it('should require confirmPrivate to share a private album', async () => {
+      // a private album can only be shared from a session with the mode on, it is hidden otherwise
+      await enable(user1.accessToken);
       const { status, body } = await request(app)
         .put(`/albums/${shared.id}/users`)
         .set('Authorization', `Bearer ${user1.accessToken}`)
@@ -947,6 +1056,7 @@ describe('private mode', () => {
     });
 
     it('should share a private album with confirmPrivate', async () => {
+      await enable(user1.accessToken);
       const { status, body } = await request(app)
         .put(`/albums/${shared.id}/users`)
         .set('Authorization', `Bearer ${user1.accessToken}`)
@@ -957,29 +1067,48 @@ describe('private mode', () => {
       );
     });
 
-    it('should hide the private asset from a co-viewer whose own mode is off', async () => {
-      const info = await getAlbumInfo({ id: shared.id }, asAuth(user2.accessToken));
-      expect(info.isPrivate).toBe(true);
-      expect(info.assetCount).toBe(1);
-      await expect(albumAssetIds(shared.id, user2)).resolves.toEqual([plainAsset.id]);
+    it('should hide the shared private album from a co-viewer whose own mode is off', async () => {
+      const { status, body } = await request(app)
+        .get(`/albums/${shared.id}`)
+        .set('Authorization', `Bearer ${user2.accessToken}`);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Not found or no album.read access'));
 
-      const { status } = await request(app)
+      const list = await request(app).get('/albums').set('Authorization', `Bearer ${user2.accessToken}`);
+      expect(list.status).toBe(200);
+      expect(list.body).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: shared.id })]));
+
+      const stats = await getAlbumStatistics(asAuth(user2.accessToken));
+      expect(stats.shared).toBe(0);
+
+      const buckets = await request(app)
+        .get('/timeline/buckets')
+        .query({ albumId: shared.id })
+        .set('Authorization', `Bearer ${user2.accessToken}`);
+      expect(buckets.status).toBe(400);
+
+      const asset = await request(app)
         .get(`/assets/${privateAsset.id}`)
+        .set('Authorization', `Bearer ${user2.accessToken}`);
+      expect(asset.status).toBe(400);
+    });
+
+    it('should still hide the shared private album from the co-viewer when only the owner mode is on', async () => {
+      await enable(user1.accessToken);
+      const { status } = await request(app)
+        .get(`/albums/${shared.id}`)
         .set('Authorization', `Bearer ${user2.accessToken}`);
       expect(status).toBe(400);
     });
 
-    it('should still hide the private asset from the co-viewer when only the owner mode is on', async () => {
-      await enable(user1.accessToken);
-      const info = await getAlbumInfo({ id: shared.id }, asAuth(user2.accessToken));
-      expect(info.assetCount).toBe(1);
-      await expect(albumAssetIds(shared.id, user2)).resolves.toEqual([plainAsset.id]);
-    });
-
-    it('should show the private asset to a co-viewer whose own mode is on', async () => {
+    it('should show the shared private album to a co-viewer whose own mode is on', async () => {
       await enable(user2.accessToken);
       const info = await getAlbumInfo({ id: shared.id }, asAuth(user2.accessToken));
       expect(info.assetCount).toBe(2);
+      const list = await request(app).get('/albums').set('Authorization', `Bearer ${user2.accessToken}`);
+      expect(list.body).toEqual(expect.arrayContaining([expect.objectContaining({ id: shared.id, assetCount: 2 })]));
+      const stats = await getAlbumStatistics(asAuth(user2.accessToken));
+      expect(stats.shared).toBe(1);
       const ids = await albumAssetIds(shared.id, user2);
       expect(ids).toHaveLength(2);
       expect(ids).toEqual(expect.arrayContaining([plainAsset.id, privateAsset.id]));
@@ -994,21 +1123,153 @@ describe('private mode', () => {
     it('should require the editor mode to add assets to a private album', async () => {
       const editorAsset = await utils.createAsset(user2.accessToken);
 
-      const { status } = await request(app)
+      const { status, body } = await request(app)
         .put(`/albums/${shared.id}/assets`)
         .set('Authorization', `Bearer ${user2.accessToken}`)
         .send({ ids: [editorAsset.id] });
-      expect(status).toBe(401);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Not found or no albumAsset.create access'));
 
       await enable(user2.accessToken);
       const results = await addAssetsToAlbum(
-        { id: shared.id, bulkIdsDto: { ids: [editorAsset.id] } },
+        { id: shared.id, albumAddAssetsDto: { ids: [editorAsset.id] } },
         asAuth(user2.accessToken),
       );
       expect(results).toEqual([expect.objectContaining({ id: editorAsset.id, success: true })]);
 
       const info = await getAssetInfo({ id: editorAsset.id }, asAuth(user2.accessToken));
       expect(info.isPrivate).toBe(true);
+    });
+  });
+
+  describe('sharing private assets (confirmPrivate)', () => {
+    const editor = { userId: '', role: AlbumUserRole.Editor };
+
+    beforeAll(() => {
+      editor.userId = user2.userId;
+    });
+
+    it('should require confirmPrivate to create an album with other users and private assets', async () => {
+      await enable(user1.accessToken);
+      const { status, body } = await request(app)
+        .post('/albums')
+        .set(authHeader(user1.accessToken))
+        .send({ albumName: 'confirm create', albumUsers: [editor], assetIds: [plainAsset.id, privateAsset.id] });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Album contains private assets, confirmPrivate is required'));
+
+      const created = await request(app)
+        .post('/albums')
+        .set(authHeader(user1.accessToken))
+        .send({
+          albumName: 'confirm create',
+          albumUsers: [editor],
+          assetIds: [plainAsset.id, privateAsset.id],
+          confirmPrivate: true,
+        });
+      expect(created.status).toBe(201);
+      expect(created.body.albumUsers).toEqual(
+        expect.arrayContaining([expect.objectContaining({ user: expect.objectContaining({ id: user2.userId }) })]),
+      );
+      await enable(user2.accessToken);
+      const info = await getAlbumInfo({ id: created.body.id }, asAuth(user2.accessToken));
+      expect(info.assetCount).toBe(2);
+    });
+
+    it('should not require confirmPrivate to create an album with private assets and no other users', async () => {
+      await enable(user1.accessToken);
+      const { status, body } = await request(app)
+        .post('/albums')
+        .set(authHeader(user1.accessToken))
+        .send({ albumName: 'confirm create alone', assetIds: [privateAsset.id] });
+      expect(status).toBe(201);
+      expect(body.albumUsers).toHaveLength(1);
+    });
+
+    it('should require confirmPrivate to add private assets to an album shared with other users', async () => {
+      await enable(user1.accessToken);
+      const target = await utils.createAlbum(user1.accessToken, { albumName: 'confirm add', albumUsers: [editor] });
+
+      const { status, body } = await request(app)
+        .put(`/albums/${target.id}/assets`)
+        .set(authHeader(user1.accessToken))
+        .send({ ids: [plainAsset.id, privateAsset.id] });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Album contains private assets, confirmPrivate is required'));
+      await expect(getAlbumInfo({ id: target.id }, asAuth(user1.accessToken))).resolves.toMatchObject({
+        assetCount: 0,
+      });
+
+      const plainOnly = await request(app)
+        .put(`/albums/${target.id}/assets`)
+        .set(authHeader(user1.accessToken))
+        .send({ ids: [plainAsset.id] });
+      expect(plainOnly.status).toBe(200);
+      expect(plainOnly.body).toEqual([expect.objectContaining({ id: plainAsset.id, success: true })]);
+
+      const confirmed = await request(app)
+        .put(`/albums/${target.id}/assets`)
+        .set(authHeader(user1.accessToken))
+        .send({ ids: [privateAsset.id], confirmPrivate: true });
+      expect(confirmed.status).toBe(200);
+      expect(confirmed.body).toEqual([expect.objectContaining({ id: privateAsset.id, success: true })]);
+      await expect(getAlbumInfo({ id: target.id }, asAuth(user1.accessToken))).resolves.toMatchObject({
+        isPrivate: true,
+        assetCount: 2,
+      });
+    });
+
+    it('should require confirmPrivate to add private assets to an album behind a shared link', async () => {
+      await enable(user1.accessToken);
+      const target = await utils.createAlbum(user1.accessToken, { albumName: 'confirm link' });
+      await utils.createSharedLink(user1.accessToken, { type: SharedLinkType.Album, albumId: target.id });
+
+      const { status, body } = await request(app)
+        .put(`/albums/${target.id}/assets`)
+        .set(authHeader(user1.accessToken))
+        .send({ ids: [privateAsset.id] });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Album contains private assets, confirmPrivate is required'));
+
+      const confirmed = await request(app)
+        .put(`/albums/${target.id}/assets`)
+        .set(authHeader(user1.accessToken))
+        .send({ ids: [privateAsset.id], confirmPrivate: true });
+      expect(confirmed.status).toBe(200);
+      expect(confirmed.body).toEqual([expect.objectContaining({ id: privateAsset.id, success: true })]);
+    });
+
+    it('should require confirmPrivate to add private assets to shared albums in bulk', async () => {
+      await enable(user1.accessToken);
+      const target = await utils.createAlbum(user1.accessToken, { albumName: 'confirm bulk', albumUsers: [editor] });
+      const mine = await utils.createAlbum(user1.accessToken, { albumName: 'confirm bulk alone' });
+
+      const { status, body } = await request(app)
+        .put('/albums/assets')
+        .set(authHeader(user1.accessToken))
+        .send({ albumIds: [target.id, mine.id], assetIds: [privateAsset.id] });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Album contains private assets, confirmPrivate is required'));
+      // nothing was written to either album
+      await expect(getAlbumInfo({ id: mine.id }, asAuth(user1.accessToken))).resolves.toMatchObject({ assetCount: 0 });
+
+      const alone = await request(app)
+        .put('/albums/assets')
+        .set(authHeader(user1.accessToken))
+        .send({ albumIds: [mine.id], assetIds: [privateAsset.id] });
+      expect(alone.status).toBe(200);
+      expect(alone.body).toEqual({ success: true });
+
+      const confirmed = await request(app)
+        .put('/albums/assets')
+        .set(authHeader(user1.accessToken))
+        .send({ albumIds: [target.id], assetIds: [privateAsset.id], confirmPrivate: true });
+      expect(confirmed.status).toBe(200);
+      expect(confirmed.body).toEqual({ success: true });
+      await expect(getAlbumInfo({ id: target.id }, asAuth(user1.accessToken))).resolves.toMatchObject({
+        isPrivate: true,
+        assetCount: 1,
+      });
     });
   });
 
@@ -1056,6 +1317,8 @@ describe('private mode', () => {
     });
 
     it('should require confirmPrivate for an album link on a private album', async () => {
+      // the album is hidden without the mode, so the link can only be created with it on
+      await enable(user1.accessToken);
       const { status, body } = await request(app)
         .post('/shared-links')
         .set('Authorization', `Bearer ${user1.accessToken}`)
@@ -1065,6 +1328,7 @@ describe('private mode', () => {
     });
 
     it('should create an album link with confirmPrivate and always return the private asset', async () => {
+      await enable(user1.accessToken);
       const { status, body } = await request(app)
         .post('/shared-links')
         .set('Authorization', `Bearer ${user1.accessToken}`)
@@ -1094,12 +1358,13 @@ describe('private mode', () => {
       expect(ids).toEqual(expect.arrayContaining([plainAsset.id, privateAsset.id]));
     });
 
-    it('should scope the owner album download by the owner mode', async () => {
-      const hidden = await getDownloadInfo(
-        { downloadInfoDto: { albumId: privateAlbum.id } },
-        asAuth(user1.accessToken),
-      );
-      expect(hidden.archives.flatMap(({ assetIds }) => assetIds)).toEqual([plainAsset.id]);
+    it('should refuse the owner album download with the mode off and serve it with the mode on', async () => {
+      const { status, body } = await request(app)
+        .post('/download/info')
+        .set('Authorization', `Bearer ${user1.accessToken}`)
+        .send({ albumId: privateAlbum.id });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.badRequest('Not found or no album.download access'));
 
       await enable(user1.accessToken);
       const shown = await getDownloadInfo({ downloadInfoDto: { albumId: privateAlbum.id } }, asAuth(user1.accessToken));
@@ -1143,18 +1408,24 @@ describe('private mode', () => {
       await disable(user1.accessToken);
     });
 
-    it('should hide activity on a private asset with the mode off', async () => {
-      const activities = await getActivities({ albumId: album.id }, asAuth(user1.accessToken));
-      expect(activities.map(({ assetId }) => assetId)).toEqual([plainAsset.id]);
+    it('should refuse activity on a private album with the mode off', async () => {
+      const auth = { Authorization: `Bearer ${user1.accessToken}` };
+      const list = await request(app).get('/activities').query({ albumId: album.id }).set(auth);
+      expect(list.status).toBe(400);
+      expect(list.body).toEqual(errorDto.badRequest('Not found or no album.read access'));
 
-      const stats = await getActivityStatistics(
-        { albumId: album.id, assetId: privateAsset.id },
-        asAuth(user1.accessToken),
-      );
-      expect(stats).toEqual({ comments: 0, likes: 0 });
+      const stats = await request(app).get('/activities/statistics').query({ albumId: album.id }).set(auth);
+      expect(stats.status).toBe(400);
+
+      const create = await request(app)
+        .post('/activities')
+        .set(auth)
+        .send({ albumId: album.id, type: ReactionType.Comment, comment: 'blind' });
+      expect(create.status).toBe(400);
+      expect(create.body).toEqual(errorDto.badRequest('Not found or no activity.create access'));
     });
 
-    it('should show activity on a private asset with the mode on', async () => {
+    it('should show activity on the private album with the mode on', async () => {
       await enable(user1.accessToken);
       const activities = await getActivities({ albumId: album.id }, asAuth(user1.accessToken));
       const assetIds = activities.map(({ assetId }) => assetId);

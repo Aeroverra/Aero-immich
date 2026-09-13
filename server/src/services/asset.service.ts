@@ -43,7 +43,7 @@ import {
   onBeforeLink,
   onBeforeUnlink,
 } from 'src/utils/asset.util';
-import { updateLockedColumns } from 'src/utils/database';
+import { type PrivateScope, updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
 import { batched, findOrFail } from 'src/utils/misc';
 import { transformOcrBoundingBox } from 'src/utils/transform';
@@ -65,7 +65,14 @@ export class AssetService extends BaseService {
 
   async get(auth: AuthDto, id: string): Promise<AssetResponseDto | SanitizedAssetResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
+    return this.getResponse(auth, id, toPrivateScope(auth));
+  }
 
+  private async getResponse(
+    auth: AuthDto,
+    id: string,
+    scope: PrivateScope,
+  ): Promise<AssetResponseDto | SanitizedAssetResponseDto> {
     const asset = await this.assetRepository.getById(
       id,
       {
@@ -76,7 +83,7 @@ export class AssetService extends BaseService {
         edits: true,
         tags: true,
       },
-      toPrivateScope(auth),
+      scope,
     );
 
     if (!asset) {
@@ -106,10 +113,6 @@ export class AssetService extends BaseService {
     const { description, dateTimeOriginal, latitude, longitude, rating, ...rest } = dto;
     const repos = { asset: this.assetRepository, event: this.eventRepository };
 
-    if (rest.isPrivate !== undefined) {
-      requirePrivateMode(auth);
-    }
-
     let previousMotion: { id: string } | null = null;
     if (rest.livePhotoVideoId) {
       await onBeforeLink(repos, { userId: auth.user.id, livePhotoVideoId: rest.livePhotoVideoId });
@@ -136,7 +139,10 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found');
     }
 
-    return this.get(auth, id) as Promise<AssetResponseDto>;
+    // marking the asset private hides it from a session without private mode, but the
+    // update itself was allowed, so the caller still gets the updated asset back once
+    const scope = rest.isPrivate ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
+    return this.getResponse(auth, id, scope) as Promise<AssetResponseDto>;
   }
 
   async updateAll(auth: AuthDto, dto: AssetBulkUpdateDto): Promise<void> {
@@ -154,9 +160,6 @@ export class AssetService extends BaseService {
       dateTimeRelative,
       timeZone,
     } = dto;
-    if (isPrivate !== undefined) {
-      requirePrivateMode(auth);
-    }
 
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids });
 

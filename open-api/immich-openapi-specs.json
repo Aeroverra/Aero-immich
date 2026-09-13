@@ -2727,7 +2727,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BulkIdsDto"
+                "$ref": "#/components/schemas/AlbumAddAssetsDto"
               }
             }
           },
@@ -19560,6 +19560,27 @@
         ],
         "type": "object"
       },
+      "AlbumAddAssetsDto": {
+        "properties": {
+          "confirmPrivate": {
+            "description": "Required to be true when private assets are added to a shared album, acknowledging they will be shared",
+            "type": "boolean"
+          },
+          "ids": {
+            "description": "IDs to process",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "AlbumResponseDto": {
         "properties": {
           "albumName": {
@@ -19783,6 +19804,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "confirmPrivate": {
+            "description": "Required to be true when private assets are added to a shared album, acknowledging they will be shared",
+            "type": "boolean"
           }
         },
         "required": [
@@ -21647,6 +21672,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "confirmPrivate": {
+            "description": "Required to be true when the album is created with other users and contains private assets, acknowledging they will be shared",
+            "type": "boolean"
           },
           "description": {
             "description": "Album description",

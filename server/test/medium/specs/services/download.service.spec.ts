@@ -32,16 +32,16 @@ beforeAll(async () => {
 
 describe(DownloadService.name, () => {
   describe('getDownloadInfo', () => {
-    it('should exclude private assets from an album download outside private mode', async () => {
+    it('should refuse an album download for a private album outside private mode', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();
       const plain = await newSizedAsset(ctx, user.id, false);
       const hidden = await newSizedAsset(ctx, user.id, true);
       const { album } = await ctx.newAlbum({ ownerId: user.id }, [plain.id, hidden.id]);
 
-      const off = await sut.getDownloadInfo(factory.auth({ user }), { albumId: album.id });
-      expect(off.archives.flatMap(({ assetIds }) => assetIds)).toEqual([plain.id]);
-      expect(Number(off.totalSize)).toBe(1000);
+      await expect(sut.getDownloadInfo(factory.auth({ user }), { albumId: album.id })).rejects.toThrow(
+        'Not found or no album.download access',
+      );
 
       const on = await sut.getDownloadInfo(factory.auth({ user, session: { privateMode: true } }), {
         albumId: album.id,
