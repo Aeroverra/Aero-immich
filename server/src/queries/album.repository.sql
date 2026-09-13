@@ -133,15 +133,16 @@ from
   "album"
   inner join "album_asset" on "album_asset"."albumId" = "album"."id"
 where
-  exists (
+  "album"."isPrivate" = $2
+  and exists (
     select
     from
       "album_user"
     where
       "album_user"."albumId" = "album"."id"
-      and "album_user"."userId" = $2
+      and "album_user"."userId" = $3
   )
-  and "album_asset"."assetId" = $3
+  and "album_asset"."assetId" = $4
   and "album"."deletedAt" is null
 order by
   "album"."createdAt" desc
@@ -154,15 +155,16 @@ from
   "album"
   inner join "album_asset" on "album_asset"."albumId" = "album"."id"
 where
-  exists (
+  "album"."isPrivate" = $1
+  and exists (
     select
     from
       "album_user"
     where
       "album_user"."albumId" = "album"."id"
-      and "album_user"."userId" = $1
+      and "album_user"."userId" = $2
   )
-  and "album_asset"."assetId" in ($2)
+  and "album_asset"."assetId" in ($3)
   and "album"."deletedAt" is null
 
 -- AlbumRepository.getMetadataForIds
@@ -175,16 +177,7 @@ select
     ("asset"."localDateTime" AT TIME ZONE 'UTC'::text)::date
   ) as "endDate",
   max("asset"."updatedAt") as "lastModifiedAssetTimestamp",
-  count("asset"."id")::int as "assetCount",
-  (
-    select
-      "thumbnail"."isPrivate"
-    from
-      "album"
-      inner join "asset" as "thumbnail" on "thumbnail"."id" = "album"."albumThumbnailAssetId"
-    where
-      "album"."id" = "album_asset"."albumId"
-  ) as "thumbnailIsPrivate"
+  count("asset"."id")::int as "assetCount"
 from
   "asset"
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
@@ -254,7 +247,8 @@ from
   inner join "album_user" on "album_user"."albumId" = "album"."id"
   and "album_user"."userId" = $2
 where
-  "album"."deletedAt" is null
+  "album"."isPrivate" = $3
+  and "album"."deletedAt" is null
   and "album_user"."role" = 'owner'
   and (
     exists (
@@ -284,7 +278,8 @@ from
   inner join "album_user" on "album_user"."albumId" = "album"."id"
   and "album_user"."userId" = $1
 where
-  "album"."deletedAt" is null
+  "album"."isPrivate" = $2
+  and "album"."deletedAt" is null
   and "album_user"."role" = 'owner'
   and (
     exists (

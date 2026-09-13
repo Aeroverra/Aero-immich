@@ -218,6 +218,24 @@ describe(AssetService.name, () => {
       expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isFavorite: true });
     });
 
+    it('should mark an asset private without private mode and read the response back as the owner', async () => {
+      const asset = AssetFactory.create();
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await expect(sut.update(auth, asset.id, { isPrivate: true })).resolves.toEqual(
+        expect.objectContaining({ id: asset.id }),
+      );
+
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: true });
+      expect(mocks.asset.getById).toHaveBeenCalledWith(asset.id, expect.anything(), {
+        privateMode: true,
+        userId: auth.user.id,
+      });
+    });
+
     it('should update the exif description', async () => {
       const asset = AssetFactory.create();
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
@@ -403,6 +421,15 @@ describe(AssetService.name, () => {
     it('should require asset write access for all ids', async () => {
       const auth = AuthFactory.create();
       await expect(sut.updateAll(auth, { ids: ['asset-1'] })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should bulk mark assets private without private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1', 'asset-2']));
+
+      await sut.updateAll(auth, { ids: ['asset-1', 'asset-2'], isPrivate: true });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1', 'asset-2'], { isPrivate: true });
     });
 
     it('should update all assets', async () => {
