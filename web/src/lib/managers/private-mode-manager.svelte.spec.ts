@@ -121,6 +121,26 @@ describe('PrivateModeManager', () => {
     });
   });
 
+  describe('invalidate', () => {
+    it('emits the current state and reloads the pages, like a toggle', async () => {
+      sdkMock.getAuthStatus.mockResolvedValue(authStatus({ privateMode: true }));
+      await privateModeManager.load();
+
+      privateModeManager.invalidate();
+
+      expect(onPrivateModeChange).toHaveBeenCalledExactlyOnceWith(true);
+      expect(invalidateAll).toHaveBeenCalledOnce();
+      expect(privateModeManager.enabled).toBe(true);
+    });
+
+    it('does nothing before the first status load', () => {
+      privateModeManager.invalidate();
+
+      expect(onPrivateModeChange).not.toHaveBeenCalled();
+      expect(invalidateAll).not.toHaveBeenCalled();
+    });
+  });
+
   describe('disable', () => {
     it('turns the mode off and emits the change', async () => {
       sdkMock.getAuthStatus.mockResolvedValue(authStatus({ privateMode: true }));
