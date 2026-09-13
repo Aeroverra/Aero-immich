@@ -23,6 +23,7 @@ import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { ApiKeyRepository } from 'src/repositories/api-key.repository';
+import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
@@ -474,6 +475,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case ActivityRepository:
     case ApiKeyRepository:
     case AssetRepository:
+    case AssetDeletedChecksumRepository:
     case AssetEditRepository:
     case AssetFileRepository:
     case AssetJobRepository:
@@ -558,6 +560,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case ActivityRepository:
     case AlbumRepository:
     case AssetRepository:
+    case AssetDeletedChecksumRepository:
     case AssetJobRepository:
     case ConfigRepository:
     case CryptoRepository:
