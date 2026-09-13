@@ -192,6 +192,9 @@ export enum Permission {
 
   UserConfigRead = 'userConfig.read',
 
+  DeletedChecksumRead = 'deletedChecksum.read',
+  DeletedChecksumDelete = 'deletedChecksum.delete',
+
   DuplicateRead = 'duplicate.read',
   DuplicateDelete = 'duplicate.delete',
 
@@ -392,6 +395,8 @@ export const UserMetadataKeySchema = z
 
 export enum AssetMetadataKey {
   MobileApp = 'mobile-app',
+  /** why an upload was trashed or added to an album right away, see DeletedReimportMode */
+  DeletedReimport = 'deleted-reimport',
 }
 
 export enum UserAvatarColor {
@@ -904,6 +909,7 @@ export enum JobName {
   NotifyUserSignup = 'NotifyUserSignup',
   NotifyAlbumInvite = 'NotifyAlbumInvite',
   NotifyAlbumUpdate = 'NotifyAlbumUpdate',
+  NotifyDeletedReimport = 'NotifyDeletedReimport',
 
   UserDelete = 'UserDelete',
   UserDeleteCheck = 'UserDeleteCheck',

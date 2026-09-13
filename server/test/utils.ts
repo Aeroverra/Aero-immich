@@ -326,7 +326,7 @@ export const getMocks = () => {
     album: automock(AlbumRepository, { strict: false }),
     albumUser: automock(AlbumUserRepository),
     asset: newAssetRepositoryMock(),
-    assetDeletedChecksum: automock(AssetDeletedChecksumRepository),
+    assetDeletedChecksum: automock(AssetDeletedChecksumRepository, { strict: false }),
     assetEdit: automock(AssetEditRepository),
     assetFile: automock(AssetFileRepository),
     assetJob: automock(AssetJobRepository),
