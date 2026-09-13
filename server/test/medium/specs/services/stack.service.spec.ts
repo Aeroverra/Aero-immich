@@ -43,6 +43,51 @@ describe(StackService.name, () => {
   });
 
   describe('private mode', () => {
+    it('should mark every member private when a stack is created with a private member', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.newExif({ assetId: plain.id, make: 'Canon' });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+
+      const stack = await sut.create(factory.auth({ user, session: { privateMode: true } }), {
+        assetIds: [plain.id, hidden.id],
+      });
+
+      expect(stack.assets).toHaveLength(2);
+      expect(stack.assets.every(({ isPrivate }) => isPrivate)).toBe(true);
+      const rows = await ctx.database
+        .selectFrom('asset')
+        .select(['id', 'isPrivate'])
+        .where('id', 'in', [plain.id, hidden.id])
+        .execute();
+      expect(rows).toEqual(
+        expect.arrayContaining([
+          { id: plain.id, isPrivate: true },
+          { id: hidden.id, isPrivate: true },
+        ]),
+      );
+
+      // the stack is now fully private, so it is hidden outside private mode
+      await expect(sut.search(factory.auth({ user }), {})).resolves.toEqual([]);
+    });
+
+    it('should not touch the private flag when no member is private', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: first } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: second } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: first.id, make: 'Canon' });
+      await ctx.newExif({ assetId: second.id, make: 'Canon' });
+
+      const stack = await sut.create(factory.auth({ user }), { assetIds: [first.id, second.id] });
+
+      expect(stack.assets.map(({ isPrivate }) => isPrivate)).toEqual([false, false]);
+    });
+
     it('should omit a stack whose primary asset is private outside private mode', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();

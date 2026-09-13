@@ -1,14 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import {
-  AssetFileType,
-  AssetMetadataKey,
-  AssetStatus,
-  CalendarHeatmapType,
-  JobName,
-  SharedLinkType,
-} from 'src/enum';
+import { AssetFileType, AssetMetadataKey, AssetStatus, CalendarHeatmapType, JobName, SharedLinkType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
@@ -527,7 +520,71 @@ describe(AssetService.name, () => {
     });
   });
 
+  describe('update (stacks)', () => {
+    it('should apply the private flag to every member of the stack', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: sibling } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: primary.id, make: 'Canon' });
+      await ctx.newExif({ assetId: sibling.id, make: 'Canon' });
+      await ctx.newStack({ ownerId: user.id }, [primary.id, sibling.id]);
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+      const flags = () =>
+        ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate'])
+          .where('id', 'in', [primary.id, sibling.id])
+          .orderBy('id')
+          .execute();
+
+      await sut.update(off, sibling.id, { isPrivate: true });
+      expect(await flags()).toEqual([primary.id, sibling.id].sort().map((id) => ({ id, isPrivate: true })));
+      await expect(sut.get(off, primary.id)).rejects.toThrow('Not found or no asset.read access');
+
+      await sut.update(on, primary.id, { isPrivate: false });
+      expect(await flags()).toEqual([primary.id, sibling.id].sort().map((id) => ({ id, isPrivate: false })));
+      await expect(sut.get(off, sibling.id)).resolves.toMatchObject({ id: sibling.id, isPrivate: false });
+    });
+  });
+
   describe('updateAll', () => {
+    it('should apply the private flag to every member of the affected stacks', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: sibling } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: loose } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: primary.id, make: 'Canon' });
+      await ctx.newExif({ assetId: sibling.id, make: 'Canon' });
+      await ctx.newStack({ ownerId: user.id }, [primary.id, sibling.id]);
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+      const flags = () =>
+        ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate'])
+          .where('ownerId', '=', user.id)
+          .orderBy('id')
+          .execute();
+
+      await sut.updateAll(off, { ids: [sibling.id], isPrivate: true });
+      expect(await flags()).toEqual(
+        expect.arrayContaining([
+          { id: primary.id, isPrivate: true },
+          { id: sibling.id, isPrivate: true },
+          { id: loose.id, isPrivate: false },
+        ]),
+      );
+
+      await sut.updateAll(on, { ids: [primary.id], isPrivate: false });
+      const unmarked = await flags();
+      expect(unmarked.every(({ isPrivate }) => !isPrivate)).toBe(true);
+    });
+
     it('should bulk mark assets private outside private mode and hide them until the mode is on', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();

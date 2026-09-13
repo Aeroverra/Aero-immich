@@ -236,6 +236,63 @@ describe(AssetService.name, () => {
       });
     });
 
+    it('should mark every member of the stack private along with the asset', async () => {
+      const asset = AssetFactory.create();
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set([asset.id]))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: asset.id, isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+        { id: 'sibling-2', isPrivate: true },
+      ]);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(auth, asset.id, { isPrivate: true });
+
+      expect(mocks.asset.getStackMembers).toHaveBeenCalledWith(auth.user.id, [asset.id]);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
+        auth.user.id,
+        new Set(['sibling-1']),
+        expect.objectContaining({ privateMode: false }),
+      );
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: true });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: true });
+    });
+
+    it('should unmark every member of the stack private along with the asset', async () => {
+      const asset = AssetFactory.create({ isPrivate: true });
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set([asset.id]))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: asset.id, isPrivate: true },
+        { id: 'sibling-1', isPrivate: true },
+      ]);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(auth, asset.id, { isPrivate: false });
+
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: false });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: false });
+    });
+
+    it('should not look up stack members when the private flag is not part of the update', async () => {
+      const asset = AssetFactory.create();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(authStub.admin, asset.id, { isFavorite: true });
+
+      expect(mocks.asset.getStackMembers).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+    });
+
     it('should update the exif description', async () => {
       const asset = AssetFactory.create();
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
@@ -430,6 +487,65 @@ describe(AssetService.name, () => {
       await sut.updateAll(auth, { ids: ['asset-1', 'asset-2'], isPrivate: true });
 
       expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1', 'asset-2'], { isPrivate: true });
+    });
+
+    it('should bulk mark every member of the affected stacks private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set(['asset-1']))
+        .mockResolvedValueOnce(new Set(['sibling-1', 'sibling-2']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+        { id: 'sibling-2', isPrivate: false },
+      ]);
+
+      await sut.updateAll(auth, { ids: ['asset-1'], isPrivate: true });
+
+      expect(mocks.asset.getStackMembers).toHaveBeenCalledWith(auth.user.id, ['asset-1']);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
+        auth.user.id,
+        new Set(['sibling-1', 'sibling-2']),
+        expect.objectContaining({ privateMode: false }),
+      );
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1'], { isPrivate: true });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1', 'sibling-2'], { isPrivate: true });
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([
+        { name: JobName.SidecarWrite, data: { id: 'asset-1' } },
+        { name: JobName.SidecarWrite, data: { id: 'sibling-1' } },
+        { name: JobName.SidecarWrite, data: { id: 'sibling-2' } },
+      ]);
+    });
+
+    it('should bulk unmark every member of the affected stacks private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set(['asset-1']))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: true },
+        { id: 'sibling-1', isPrivate: true },
+      ]);
+
+      await sut.updateAll(auth, { ids: ['asset-1'], isPrivate: false });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1'], { isPrivate: false });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: false });
+    });
+
+    it('should reject the bulk update when a stack member is not accessible', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValueOnce(new Set(['asset-1'])).mockResolvedValueOnce(new Set());
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+      ]);
+
+      await expect(sut.updateAll(auth, { ids: ['asset-1'], isPrivate: true })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
     });
 
     it('should update all assets', async () => {

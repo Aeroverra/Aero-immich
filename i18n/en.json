@@ -1713,6 +1713,8 @@
   "primary": "Primary",
   "privacy": "Privacy",
   "private": "Private",
+  "private_memories": "Include private photos in memories",
+  "private_memories_description": "Let newly generated memories contain private photos and videos. A memory with any private photo is shown only while private mode is on.",
   "private_mode": "Private mode",
   "private_mode_disable": "Turn off private mode",
   "private_mode_enable": "Turn on private mode",
