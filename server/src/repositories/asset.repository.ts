@@ -315,26 +315,56 @@ export class AssetRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [[DummyValue.UUID], { model: DummyValue.STRING }] })
-  @Chunked()
+  /**
+   * Bump every row that hangs off these assets and is withheld from sync clients that did not opt in to private
+   * assets. The updatedAt triggers assign fresh updateIds, so the rows are re-emitted once the asset is public again.
+   */
   @GenerateSql({ params: [[DummyValue.UUID]] })
   @Chunked()
-  async touchExif(ids: string[]): Promise<void> {
+  async touchPrivateRelations(ids: string[]): Promise<void> {
     if (ids.length === 0) {
       return;
     }
-    // the updatedAt trigger assigns a fresh updateId, which re-emits the rows on the sync stream
+    const assetIds = ids.map((id) => asUuid(id));
+    const touchedAt = new Date();
+    await this.db.updateTable('asset_exif').set({ updatedAt: touchedAt }).where('assetId', 'in', assetIds).execute();
+    await this.db.updateTable('asset_face').set({ updatedAt: touchedAt }).where('assetId', 'in', assetIds).execute();
+    await this.db.updateTable('asset_ocr').set({ updatedAt: touchedAt }).where('assetId', 'in', assetIds).execute();
     await this.db
-      .updateTable('asset_exif')
-      .set({ updatedAt: new Date() })
-      .where(
-        'assetId',
-        'in',
-        ids.map((id) => asUuid(id)),
+      .updateTable('asset_metadata')
+      .set({ updatedAt: touchedAt })
+      .where('assetId', 'in', assetIds)
+      .execute();
+    await this.db.updateTable('asset_edit').set({ updatedAt: touchedAt }).where('assetId', 'in', assetIds).execute();
+    await this.db.updateTable('stack').set({ updatedAt: touchedAt }).where('primaryAssetId', 'in', assetIds).execute();
+    // a memory is private as a whole while it holds any private asset, so the memory and all of its links are re-evaluated
+    const memoryIds = this.db.selectFrom('memory_asset').select('memoriesId').where('assetId', 'in', assetIds);
+    await this.db.updateTable('memory').set({ updatedAt: touchedAt }).where('id', 'in', memoryIds).execute();
+    await this.db
+      .updateTable('memory_asset')
+      .set({ updatedAt: touchedAt })
+      .where('memoriesId', 'in', memoryIds)
+      .execute();
+    // people are private only while all their faces are, so they are re-evaluated whenever one of their assets flips
+    await this.db
+      .updateTable('person')
+      .set({ updatedAt: touchedAt })
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('asset_face')
+            .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+            .select('asset_face.id')
+            .whereRef('asset_face.personGroupId', '=', 'person.personGroupId')
+            .whereRef('asset.ownerId', '=', 'person.ownerId')
+            .where('asset_face.assetId', 'in', assetIds),
+        ),
       )
       .execute();
   }
 
+  @GenerateSql({ params: [[DummyValue.UUID], { model: DummyValue.STRING }] })
+  @Chunked()
   async updateAllExif(ids: string[], options: Updateable<AssetExifTable>): Promise<void> {
     if (ids.length === 0) {
       return;
