@@ -14,27 +14,35 @@ const setup = async (db?: Kysely<DB>) => {
   return { auth, user, session, ctx };
 };
 
+/** two stacked assets, one of them in an album, synced and acked once; then one member turns private */
+const stackedInAlbum = async (includePrivate: boolean) => {
+  const { auth, ctx } = await setup();
+  const { asset: inAlbum } = await ctx.newAsset({ ownerId: auth.user.id });
+  const { asset: loose } = await ctx.newAsset({ ownerId: auth.user.id });
+  const { album } = await ctx.newAlbum({ ownerId: auth.user.id }, [inAlbum.id]);
+  await ctx.newStack({ ownerId: auth.user.id }, [inAlbum.id, loose.id]);
+  const types = [SyncRequestType.AssetsV2, SyncRequestType.AlbumsV2];
+  await ctx.syncAckAll(auth, await ctx.syncStream(auth, types, false, includePrivate));
+  await ctx.assertSyncIsComplete(auth, types);
+
+  // the flag lands on the targeted asset first and on the rest of its stack afterwards, like the asset service does
+  const assetRepo = ctx.get(AssetRepository);
+  await assetRepo.updateAll([loose.id], { isPrivate: true });
+  await assetRepo.updateAll([inAlbum.id], { isPrivate: true });
+  await assetRepo.touchPrivateRelations([loose.id, inAlbum.id]);
+
+  return { auth, ctx, inAlbum, loose, album, types };
+};
+
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
 
 describe(SyncEntityType.AssetV2, () => {
   it('should sync every member of a stack and the album holding one of them once another member turns private', async () => {
-    const { auth, ctx } = await setup();
-    const assetRepo = ctx.get(AssetRepository);
-    const { asset: inAlbum } = await ctx.newAsset({ ownerId: auth.user.id });
-    const { asset: loose } = await ctx.newAsset({ ownerId: auth.user.id });
-    const { album } = await ctx.newAlbum({ ownerId: auth.user.id }, [inAlbum.id]);
-    await ctx.newStack({ ownerId: auth.user.id }, [inAlbum.id, loose.id]);
-    const types = [SyncRequestType.AssetsV2, SyncRequestType.AlbumsV2];
-    await ctx.syncAckAll(auth, await ctx.syncStream(auth, types));
-    await ctx.assertSyncIsComplete(auth, types);
+    const { auth, ctx, inAlbum, loose, album, types } = await stackedInAlbum(true);
 
-    // the flag lands on the targeted asset first and on the rest of its stack afterwards, like the asset service does
-    await assetRepo.updateAll([loose.id], { isPrivate: true });
-    await assetRepo.updateAll([inAlbum.id], { isPrivate: true });
-
-    const response = await ctx.syncStream(auth, types);
+    const response = await ctx.syncStream(auth, types, false, true);
     expect(response).toHaveLength(4);
     expect(response).toEqual(
       expect.arrayContaining([
@@ -53,6 +61,25 @@ describe(SyncEntityType.AssetV2, () => {
         expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
       ]),
     );
+
+    await ctx.syncAckAll(auth, response);
+    await ctx.assertSyncIsComplete(auth, types);
+  });
+
+  it('should replace every member of a stack and the album holding one of them with deletes for a client that did not opt in', async () => {
+    const { auth, ctx, inAlbum, loose, album, types } = await stackedInAlbum(false);
+
+    const response = await ctx.syncStream(auth, types);
+    expect(response).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: SyncEntityType.AssetDeleteV1, data: { assetId: loose.id } }),
+        expect.objectContaining({ type: SyncEntityType.AssetDeleteV1, data: { assetId: inAlbum.id } }),
+        expect.objectContaining({ type: SyncEntityType.AlbumDeleteV1, data: { albumId: album.id } }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]),
+    );
+    expect(response.map(({ type }) => type)).not.toContain(SyncEntityType.AssetV2);
+    expect(response.map(({ type }) => type)).not.toContain(SyncEntityType.AlbumV2);
 
     await ctx.syncAckAll(auth, response);
     await ctx.assertSyncIsComplete(auth, types);
