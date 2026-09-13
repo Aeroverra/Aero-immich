@@ -4,6 +4,7 @@
   import { getAllTags, type TagResponseDto } from '@immich/sdk';
   import { Button, Text } from '@immich/ui';
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { t } from 'svelte-i18n';
   import { mdiClose } from '@mdi/js';
   import { getSearchTagsTitle } from './search-bar-utils';
@@ -69,7 +70,19 @@
       />
     </form>
 
-    {#if selectedTags?.size}
+    {#if selectedTags === null}
+      <section class="flex flex-wrap gap-2 pt-5">
+        <Button
+          size="small"
+          shape="round"
+          color="primary"
+          variant="outline"
+          onclick={() => (searchManager.filter.tagIds = new SvelteSet())}
+          trailingIcon={mdiClose}
+          >{$t('untagged')}
+        </Button>
+      </section>
+    {:else if selectedTags.size}
       <section class="flex flex-wrap gap-2 pt-5">
         {#each selectedTags as tagId (tagId)}
           {@const tag = tagMap[tagId]}
