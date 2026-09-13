@@ -370,4 +370,38 @@ describe(SyncRequestType.AlbumAssetsV2, () => {
       );
     });
   });
+  describe('private albums and the includePrivate flag', () => {
+    it('should withhold every asset of a private album, public ones included, until the album is public', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { user: owner } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      const { asset: visible } = await ctx.newAsset({ ownerId: owner.id });
+      const { album } = await ctx.newAlbum({ ownerId: owner.id }, [hidden.id, visible.id]);
+      await ctx.newAlbumUser({ albumId: album.id, userId: auth.user.id, role: AlbumUserRole.Editor });
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AlbumAssetsV2]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AlbumAssetCreateV2);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumAssetsV2]);
+
+      await assetRepo.updateAll([hidden.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([hidden.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AlbumAssetsV2]);
+      expect(restored).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumAssetCreateV2,
+            data: expect.objectContaining({ id: hidden.id, isPrivate: false }),
+          }),
+          expect.objectContaining({
+            type: SyncEntityType.AlbumAssetCreateV2,
+            data: expect.objectContaining({ id: visible.id }),
+          }),
+        ]),
+      );
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumAssetsV2]);
+    });
+  });
 });

@@ -100,9 +100,38 @@ export class SyncRepository {
 }
 
 /** rows whose asset is not private; used to keep private metadata out of streams that did not opt in */
-const privateAssetPredicate =
-  (assetIdRef: 'album_asset.assetId' | 'asset_exif.assetId') => (eb: ExpressionBuilder<DB, any>) =>
-    eb(assetIdRef, 'in', eb.selectFrom('asset').select('asset.id').where('asset.isPrivate', '=', false));
+const privateAssetPredicate = (assetIdRef: string) => (eb: ExpressionBuilder<DB, any>) =>
+  eb(eb.ref(assetIdRef), 'in', eb.selectFrom('asset').select('asset.id').where('asset.isPrivate', '=', false));
+
+/** rows whose album is not private; a client that did not opt in was told the album was deleted */
+const privateAlbumPredicate = (albumIdRef: string) => (eb: ExpressionBuilder<DB, any>) =>
+  eb(eb.ref(albumIdRef), 'in', eb.selectFrom('album').select('album.id').where('album.isPrivate', '=', false));
+
+/** a memory is private as a whole while it holds any private asset */
+const isMemoryPrivate = (eb: ExpressionBuilder<DB, any>, memoryIdRef: string) =>
+  eb
+    .exists(
+      eb
+        .selectFrom('memory_asset')
+        .innerJoin('asset', 'asset.id', 'memory_asset.assetId')
+        .select('memory_asset.assetId')
+        .whereRef('memory_asset.memoriesId', '=', eb.ref(memoryIdRef))
+        .where('asset.isPrivate', '=', true),
+    )
+    .$castTo<boolean>();
+
+/** the visible faces of a person on assets of the given privacy, mirroring the people list */
+const visiblePersonFaces = (eb: ExpressionBuilder<DB, 'person'>, isPrivate: boolean) =>
+  eb
+    .selectFrom('asset_face')
+    .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+    .select('asset_face.id')
+    .whereRef('asset_face.personGroupId', '=', 'person.personGroupId')
+    .whereRef('asset.ownerId', '=', 'person.ownerId')
+    .where('asset_face.deletedAt', 'is', null)
+    .where('asset_face.isVisible', '=', true)
+    .where('asset.deletedAt', 'is', null)
+    .where('asset.isPrivate', '=', isPrivate);
 
 export class BaseSync {
   constructor(protected db: Kysely<DB>) {}
@@ -222,6 +251,7 @@ class AlbumAssetSync extends BaseSync {
       .select('album_asset.updateId')
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
+      .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .stream();
   }
 
@@ -230,6 +260,7 @@ class AlbumAssetSync extends BaseSync {
     const userId = options.userId;
     return this.upsertQuery('asset', options)
       .innerJoin('album_asset', 'album_asset.assetId', 'asset.id')
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select(columns.syncAlbumAsset)
       .select((eb) =>
         eb
@@ -241,6 +272,7 @@ class AlbumAssetSync extends BaseSync {
           .as('isFavorite'),
       )
       .select('asset.updateId')
+      .select('album.isPrivate as isAlbumPrivate')
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
@@ -253,6 +285,7 @@ class AlbumAssetSync extends BaseSync {
     return this.upsertQuery('album_asset', options)
       .select('album_asset.updateId')
       .innerJoin('asset', 'asset.id', 'album_asset.assetId')
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select(columns.syncAlbumAsset)
       .select((eb) =>
         eb
@@ -263,6 +296,7 @@ class AlbumAssetSync extends BaseSync {
           .end()
           .as('isFavorite'),
       )
+      .select('album.isPrivate as isAlbumPrivate')
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -278,6 +312,7 @@ class AlbumAssetExifSync extends BaseSync {
       .select('album_asset.updateId')
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
+      .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .stream();
   }
 
@@ -286,8 +321,10 @@ class AlbumAssetExifSync extends BaseSync {
     const userId = options.userId;
     return this.upsertQuery('asset_exif', options)
       .innerJoin('album_asset', 'album_asset.assetId', 'asset_exif.assetId')
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select(columns.syncAssetExif)
       .select('asset_exif.updateId')
+      .select('album.isPrivate as isAlbumPrivate')
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send exif updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
@@ -303,6 +340,7 @@ class AlbumAssetExifSync extends BaseSync {
       .innerJoin('asset_exif', 'asset_exif.assetId', 'album_asset.assetId')
       .select(columns.syncAssetExif)
       .innerJoin('album', 'album.id', 'album_asset.albumId')
+      .select('album.isPrivate as isAlbumPrivate')
       .leftJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
@@ -316,6 +354,7 @@ class AlbumToAssetSync extends BaseSync {
     return this.backfillQuery('album_asset', options)
       .select(['album_asset.assetId as assetId', 'album_asset.albumId as albumId', 'album_asset.updateId'])
       .where('album_asset.albumId', '=', albumId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .stream();
   }
 
@@ -343,6 +382,8 @@ class AlbumToAssetSync extends BaseSync {
     const userId = options.userId;
     return this.upsertQuery('album_asset', options)
       .select(['album_asset.assetId as assetId', 'album_asset.albumId as albumId', 'album_asset.updateId'])
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
+      .select('album.isPrivate as isAlbumPrivate')
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -356,6 +397,7 @@ class AlbumUserSync extends BaseSync {
       .select(columns.syncAlbumUser)
       .select('album_user.updateId')
       .where('albumId', '=', albumId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_user.albumId')))
       .stream();
   }
 
@@ -384,6 +426,8 @@ class AlbumUserSync extends BaseSync {
     return this.upsertQuery('album_user', options)
       .select(columns.syncAlbumUser)
       .select('album_user.updateId')
+      .innerJoin('album', 'album.id', 'album_user.albumId')
+      .select('album.isPrivate as isAlbumPrivate')
       .where((eb) =>
         eb(
           'album_user.albumId',
@@ -447,22 +491,31 @@ class PersonSync extends BaseSync {
 
   @GenerateSql({ params: [dummyQueryOptions], stream: true })
   getUpserts(options: SyncQueryOptions) {
-    return this.upsertQuery('person', options)
-      .select([
-        'personGroupId as id',
-        'createdAt',
-        'updatedAt',
-        'ownerId',
-        'name',
-        'birthDate',
-        'isHidden',
-        'isFavorite',
-        'color',
-        'updateId',
-        'faceAssetId',
-      ])
-      .where('ownerId', '=', options.userId)
-      .stream();
+    return (
+      this.upsertQuery('person', options)
+        .select([
+          'personGroupId as id',
+          'createdAt',
+          'updatedAt',
+          'ownerId',
+          'name',
+          'birthDate',
+          'isHidden',
+          'isFavorite',
+          'color',
+          'updateId',
+          'faceAssetId',
+        ])
+        // same rule as the people list: a person is private when every visible face sits on a private asset
+        .select((eb) =>
+          eb
+            .and([eb.exists(visiblePersonFaces(eb, true)), eb.not(eb.exists(visiblePersonFaces(eb, false)))])
+            .$castTo<boolean>()
+            .as('isPrivate'),
+        )
+        .where('ownerId', '=', options.userId)
+        .stream()
+    );
   }
 }
 
@@ -504,7 +557,8 @@ class AssetFaceSync extends BaseSync {
         'asset_face.deletedAt',
         'asset_face.updateId',
       ])
-      .leftJoin('asset', 'asset.id', 'asset_face.assetId')
+      .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+      .select('asset.isPrivate as isAssetPrivate')
       .where('asset.ownerId', '=', options.userId)
       .stream();
   }
@@ -546,6 +600,7 @@ class AssetEditSync extends BaseSync {
     return this.upsertQuery('asset_edit', options)
       .select([...columns.syncAssetEdit, 'asset_edit.updateId'])
       .innerJoin('asset', 'asset.id', 'asset_edit.assetId')
+      .select('asset.isPrivate as isAssetPrivate')
       .where('asset.ownerId', '=', options.userId)
       .stream();
   }
@@ -582,6 +637,7 @@ class MemorySync extends BaseSync {
         'hideAt',
       ])
       .select('updateId')
+      .select((eb) => isMemoryPrivate(eb, 'memory.id').as('isPrivate'))
       .where('ownerId', '=', options.userId)
       .stream();
   }
@@ -605,6 +661,7 @@ class MemoryToAssetSync extends BaseSync {
     return this.upsertQuery('memory_asset', options)
       .select(['memoriesId as memoryId', 'assetId as assetId'])
       .select('updateId')
+      .select((eb) => isMemoryPrivate(eb, 'memory_asset.memoriesId').as('isMemoryPrivate'))
       .where('memoriesId', 'in', (eb) => eb.selectFrom('memory').select('id').where('ownerId', '=', options.userId))
       .stream();
   }
@@ -728,8 +785,10 @@ class StackSync extends BaseSync {
   getUpserts(options: SyncQueryOptions) {
     return this.upsertQuery('stack', options)
       .select(columns.syncStack)
-      .select('updateId')
-      .where('ownerId', '=', options.userId)
+      .select('stack.updateId')
+      .innerJoin('asset', 'asset.id', 'stack.primaryAssetId')
+      .select('asset.isPrivate as isAssetPrivate')
+      .where('stack.ownerId', '=', options.userId)
       .stream();
   }
 }
@@ -751,6 +810,7 @@ class PartnerStackSync extends BaseSync {
       .select(columns.syncStack)
       .select('updateId')
       .where('ownerId', '=', partnerId)
+      .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('stack.primaryAssetId')))
       .stream();
   }
 
@@ -758,8 +818,10 @@ class PartnerStackSync extends BaseSync {
   getUpserts(options: SyncQueryOptions) {
     return this.upsertQuery('stack', options)
       .select(columns.syncStack)
-      .select('updateId')
-      .where('ownerId', 'in', (eb) =>
+      .select('stack.updateId')
+      .innerJoin('asset', 'asset.id', 'stack.primaryAssetId')
+      .select('asset.isPrivate as isAssetPrivate')
+      .where('stack.ownerId', 'in', (eb) =>
         eb.selectFrom('partner').select(['sharedById']).where('sharedWithId', '=', options.userId),
       )
       .stream();
@@ -823,6 +885,7 @@ class AssetMetadataSync extends BaseSync {
     return this.upsertQuery('asset_metadata', options)
       .select(['assetId', 'key', 'value', 'asset_metadata.updateId'])
       .innerJoin('asset', 'asset.id', 'asset_metadata.assetId')
+      .select('asset.isPrivate as isAssetPrivate')
       .where('asset.ownerId', '=', userId)
       .stream();
   }
@@ -847,6 +910,7 @@ class AssetOcrSync extends BaseSync {
     return this.upsertQuery('asset_ocr', options)
       .select(columns.syncAssetOcr)
       .innerJoin('asset', 'asset.id', 'asset_ocr.assetId')
+      .select('asset.isPrivate as isAssetPrivate')
       .where('asset.ownerId', '=', userId)
       .stream();
   }
