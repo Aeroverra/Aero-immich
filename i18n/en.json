@@ -1716,7 +1716,6 @@
   "private_mode_disable": "Turn off private mode",
   "private_mode_enable": "Turn on private mode",
   "private_mode_enable_description": "Enter your PIN code to show private photos and videos in this session.",
-  "private_mode_settings_description": "Manage how long private mode stays on",
   "private_mode_timeout": "Private mode timeout (minutes)",
   "private_mode_timeout_description": "Private mode turns off automatically after this many minutes of inactivity (1 to 1440).",
   "private_page_feature_description": "Photos and videos marked as private, shown only while private mode is on",

@@ -4,7 +4,6 @@
   import DownloadSettings from './DownloadSettings.svelte';
   import FeatureSettings from './FeatureSettings.svelte';
   import NotificationsSettings from './NotificationsSettings.svelte';
-  import PrivateModeSettings from './PrivateModeSettings.svelte';
   import UserPurchaseSettings from './UserPurchaseSettings.svelte';
   import UserUsageStatistic from './UserUsageStatistic.svelte';
   import { OpenQueryParam, QueryParameter } from '$lib/constants';
@@ -22,7 +21,6 @@
     mdiFeatureSearchOutline,
     mdiFormTextboxPassword,
     mdiKeyOutline,
-    mdiLockOutline,
     mdiLockSmart,
     mdiServerOutline,
     mdiTwoFactorAuthentication,
@@ -129,15 +127,6 @@
   subtitle={$t('change_your_password')}
 >
   <ChangePasswordSettings />
-</SettingAccordion>
-
-<SettingAccordion
-  icon={mdiLockOutline}
-  key="private-mode-settings"
-  title={$t('private_mode')}
-  subtitle={$t('private_mode_settings_description')}
->
-  <PrivateModeSettings />
 </SettingAccordion>
 
 <SettingAccordion
