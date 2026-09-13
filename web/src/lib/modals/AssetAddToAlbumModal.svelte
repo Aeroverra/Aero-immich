@@ -19,8 +19,7 @@
       return;
     }
 
-    const isShared = (albums ?? []).some((album) => album.shared || album.hasSharedLink);
-    const success = await addAssetsToAlbums(albumIds, assetIds, { notify: true, hasPrivate, isShared });
+    const success = await addAssetsToAlbums(albumIds, assetIds, { notify: true, hasPrivate, albums });
     if (success) {
       onClose();
     }

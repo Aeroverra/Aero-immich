@@ -6,6 +6,7 @@ import {
   getAlbumInfo,
   getAssetInfo,
   getBaseUrl,
+  type AlbumResponseDto,
   type AssetMediaResponseDto,
 } from '@immich/sdk';
 import { toastManager } from '@immich/ui';
@@ -92,12 +93,11 @@ export const fileUploadHandler = async ({
 }: FileUploadHandlerParams): Promise<string[]> => {
   const extensions = uploadManager.getExtensions();
 
-  // adding a private asset to a shared album needs an acknowledgement, so find out once whether the album is shared
-  let isSharedAlbum = false;
+  // adding a private asset to an album needs an acknowledgement (it turns private, or it is shared), so fetch it once
+  let album: AlbumResponseDto | undefined;
   if (albumId && !authManager.isSharedLink) {
     try {
-      const album = await getAlbumInfo({ id: albumId });
-      isSharedAlbum = album.shared || album.hasSharedLink;
+      album = await getAlbumInfo({ id: albumId });
     } catch {
       // the add-to-album request reports its own error
     }
@@ -111,7 +111,7 @@ export const fileUploadHandler = async ({
       uploadAssetsStore.addItem({ id: deviceAssetId, file, albumId });
       promises.push(
         uploadExecutionQueue.addTask(() =>
-          fileUploader({ deviceAssetId, assetFile: file, albumId, isSharedAlbum, isLockedAssets }),
+          fileUploader({ deviceAssetId, assetFile: file, albumId, album, isLockedAssets }),
         ),
       );
     } else {
@@ -156,7 +156,7 @@ function hashFile(file: File): Promise<string> {
 type FileUploaderParams = {
   assetFile: File;
   albumId?: string;
-  isSharedAlbum?: boolean;
+  album?: AlbumResponseDto;
   replaceAssetId?: string;
   isLockedAssets?: boolean;
   // TODO rework the asset uploader and remove this
@@ -168,7 +168,7 @@ async function fileUploader({
   assetFile,
   deviceAssetId,
   albumId,
-  isSharedAlbum = false,
+  album,
   isLockedAssets = false,
 }: FileUploaderParams): Promise<string | undefined> {
   const fileCreatedAt = new Date(assetFile.lastModified).toISOString();
@@ -241,12 +241,16 @@ async function fileUploader({
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_adding_to_album') });
       // an upload can resolve to an existing asset, and that one may be private
       const hasPrivate =
-        isSharedAlbum && responseData.status === AssetMediaStatus.Duplicate
+        album && responseData.status === AssetMediaStatus.Duplicate
           ? await getAssetInfo({ id: responseData.id })
               .then((asset) => asset.isPrivate)
               .catch(() => false)
           : false;
-      await addAssetsToAlbums([albumId], [responseData.id], { notify: false, hasPrivate, isShared: isSharedAlbum });
+      await addAssetsToAlbums([albumId], [responseData.id], {
+        notify: false,
+        hasPrivate,
+        albums: album ? [album] : [],
+      });
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_added_to_album') });
     }
 
