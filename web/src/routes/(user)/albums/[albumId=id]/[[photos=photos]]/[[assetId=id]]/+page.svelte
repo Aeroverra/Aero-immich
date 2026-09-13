@@ -34,7 +34,6 @@
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { eventManager } from '$lib/managers/event-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
-  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { TimelineManager } from '$lib/managers/timeline-manager/timeline-manager.svelte';
   import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
   import AlbumOptionsModal from '$lib/modals/AlbumOptionsModal.svelte';
@@ -42,6 +41,7 @@
   import {
     getAlbumActions,
     getAlbumAssetsActions,
+    handleAlbumPrivateModeChange,
     handleDeleteAlbum,
     handleDownloadAlbum,
   } from '$lib/services/album.service';
@@ -322,6 +322,9 @@
     await invalidate('album:data');
   };
 
+  // a private album is hidden as a whole once the mode is off, so leave the page
+  const onPrivateModeChange = (enabled: boolean) => handleAlbumPrivateModeChange(album, enabled);
+
   const { Cast } = $derived(getGlobalActions($t));
   const { Share } = $derived(getAlbumActions($t, album));
   const { AddAssets, Upload } = $derived(getAlbumAssetsActions($t, album, timelineMultiSelectManager.assets));
@@ -344,6 +347,7 @@
   {onAlbumUserUpdate}
   onAlbumUserDelete={refreshAlbum}
   {onAlbumUpdate}
+  {onPrivateModeChange}
 />
 <CommandPaletteDefaultProvider name={$t('album')} actions={[AddAssets, Upload, Close]} />
 
@@ -473,12 +477,11 @@
             removeFavorite={assetMultiSelectManager.isAllFavorite}
             onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
           ></FavoriteAction>
-          {#if privateModeManager.enabled}
-            <SetPrivateAction
-              unmark={assetMultiSelectManager.isAllPrivate}
-              onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-            />
-          {/if}
+          <SetPrivateAction
+            unmark={assetMultiSelectManager.isAllPrivate}
+            onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+            onRemove={handleSetVisibility}
+          />
         {/if}
         <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')} offset={{ x: 175, y: 25 }}>
           <DownloadAction menuItem filename={album.albumName} />
@@ -490,6 +493,11 @@
               menuItem
               unarchive={assetMultiSelectManager.isAllArchived}
               onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
+            />
+            <SetPrivateAction
+              menuItem
+              onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+              onRemove={handleSetVisibility}
             />
             <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
           {/if}
