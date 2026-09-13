@@ -25,7 +25,7 @@ import {
 import { AssetOrder, AssetVisibility, Permission } from 'src/enum';
 import { AssetSearchScope } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
-import { requireElevatedPermission, toPrivateScope } from 'src/utils/access';
+import { requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
 import { PrivateScope } from 'src/utils/database';
 import { isSmartSearchEnabled } from 'src/utils/misc';
@@ -82,6 +82,10 @@ export class SearchService extends BaseService {
       requireElevatedPermission(auth);
     }
 
+    if (dto.isPrivate !== undefined) {
+      requirePrivateMode(auth);
+    }
+
     let checksum: Buffer | undefined;
     if (dto.checksum) {
       const encoding = dto.checksum.length === 28 ? 'base64' : 'hex';
@@ -126,6 +130,10 @@ export class SearchService extends BaseService {
       requireElevatedPermission(auth);
     }
 
+    if (dto.isPrivate !== undefined) {
+      requirePrivateMode(auth);
+    }
+
     return await this.searchRepository.searchStatistics({
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -144,6 +152,10 @@ export class SearchService extends BaseService {
       requireElevatedPermission(auth);
     }
 
+    if (dto.isPrivate !== undefined) {
+      requirePrivateMode(auth);
+    }
+
     const userIds = await this.getUserIdsToSearch(auth, dto.visibility);
     const items = await this.searchRepository.searchRandom(dto.size, {
       ...dto,
@@ -158,6 +170,10 @@ export class SearchService extends BaseService {
   async searchLargeAssets(auth: AuthDto, dto: LargeAssetSearchDto): Promise<AssetResponseDto[]> {
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
+    }
+
+    if (dto.isPrivate !== undefined) {
+      requirePrivateMode(auth);
     }
 
     const userIds = await this.getUserIdsToSearch(auth, dto.visibility);
@@ -178,6 +194,10 @@ export class SearchService extends BaseService {
 
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
+    }
+
+    if (dto.isPrivate !== undefined) {
+      requirePrivateMode(auth);
     }
 
     const { machineLearning } = await this.getConfig({ withCache: false });

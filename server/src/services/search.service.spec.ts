@@ -292,6 +292,15 @@ describe(SearchService.name, () => {
       );
     });
 
+    it('should reject an isPrivate filter outside private mode on the legacy endpoints', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      await expect(sut.searchMetadata(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchMetadata(auth, { isPrivate: false })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchRandom(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchLargeAssets(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchStatistics(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
     it('should reject an unelevated session whose filter could match locked assets', async () => {
       const filter = { visibility: { in: [AssetVisibility.Locked, AssetVisibility.Timeline] } };
       await expect(sut.searchMetadata(AuthFactory.create(), { size: 250, filter })).rejects.toBeInstanceOf(

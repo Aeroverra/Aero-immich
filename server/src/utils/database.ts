@@ -557,6 +557,7 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
     )
     .$if(!!options.type, (qb) => qb.where('asset.type', '=', options.type!))
     .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
+    .$if(options.isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', options.isPrivate!))
     .$if(options.isOffline !== undefined, (qb) => qb.where('asset.isOffline', '=', options.isOffline!))
     .$if(options.isEncoded !== undefined, (qb) =>
       qb.where((eb) => {

@@ -11680,6 +11680,31 @@
             }
           },
           {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Filter by private status (requires private mode)",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "lensModel",
             "required": false,
             "in": "query",
@@ -23787,6 +23812,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "lensModel": {
             "deprecated": true,
             "description": "Filter by lens model",
@@ -26236,6 +26281,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "lensModel": {
             "deprecated": true,
             "description": "Filter by lens model",
@@ -28440,6 +28505,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "language": {
             "description": "Search language code",
             "type": "string"
@@ -29191,6 +29276,26 @@
           "isOffline": {
             "deprecated": true,
             "description": "Filter by offline status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
             "type": "boolean",
             "x-immich-history": [
               {

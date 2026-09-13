@@ -27,6 +27,11 @@ const BaseSearchSchema = z.object({
   type: AssetTypeSchema.optional().meta(DEPRECATED_FLAT_FIELD),
   isEncoded: z.boolean().optional().describe('Filter by encoded status').meta(DEPRECATED_FLAT_FIELD),
   isFavorite: z.boolean().optional().describe('Filter by favorite status').meta(DEPRECATED_FLAT_FIELD),
+  isPrivate: z
+    .boolean()
+    .optional()
+    .describe('Filter by private status (requires private mode)')
+    .meta(DEPRECATED_FLAT_FIELD),
   isMotion: z.boolean().optional().describe('Filter by motion photo status').meta(DEPRECATED_FLAT_FIELD),
   isOffline: z.boolean().optional().describe('Filter by offline status').meta(DEPRECATED_FLAT_FIELD),
   visibility: AssetVisibilitySchema.optional().meta(DEPRECATED_FLAT_FIELD),
