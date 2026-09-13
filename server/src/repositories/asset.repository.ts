@@ -463,8 +463,12 @@ export class AssetRepository {
     return ids.map(({ id }) => id);
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { year: 2000, day: 1, month: 1 }] })
-  getByDayOfYear(ownerIds: string[], { year, day, month }: YearMonthDay) {
+  @GenerateSql({ params: [DummyValue.UUID, { year: 2000, day: 1, month: 1 }, { includePrivate: false }] })
+  getByDayOfYear(
+    ownerIds: string[],
+    { year, day, month }: YearMonthDay,
+    { includePrivate }: { includePrivate: boolean },
+  ) {
     return this.db
       .with('res', (qb) =>
         qb
@@ -490,6 +494,7 @@ export class AssetRepository {
                 .where(sql`(asset."localDateTime" at time zone 'UTC')::date`, '=', sql`today.date`)
                 .where('asset.ownerId', '=', anyUuid(ownerIds))
                 .where('asset.visibility', '=', AssetVisibility.Timeline)
+                .$if(!includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
                 .where((eb) =>
                   eb.exists((qb) =>
                     qb
@@ -511,6 +516,27 @@ export class AssetRepository {
       .select((eb) => eb.fn.jsonAgg(eb.table('res')).as('assets'))
       .groupBy(sql`("localDateTime" at time zone 'UTC')::date`)
       .orderBy(sql`("localDateTime" at time zone 'UTC')::date`, 'desc')
+      .execute();
+  }
+
+  /**
+   * Every asset in every stack the given assets belong to (the given assets included), owned
+   * by the owner, so that a private flag can be applied to whole stacks at a time.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  @ChunkedArray({ paramIndex: 1 })
+  getStackMembers(ownerId: string, ids: string[]) {
+    return this.db
+      .selectFrom('asset')
+      .select(['asset.id', 'asset.isPrivate'])
+      .where('asset.ownerId', '=', ownerId)
+      .where('asset.stackId', 'in', (eb) =>
+        eb
+          .selectFrom('asset as target')
+          .select('target.stackId')
+          .where('target.id', '=', anyUuid(ids))
+          .where('target.stackId', 'is not', null),
+      )
       .execute();
   }
 

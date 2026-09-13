@@ -25543,6 +25543,10 @@
       },
       "PrivateModeResponse": {
         "properties": {
+          "includeInMemories": {
+            "description": "Whether private assets are included in generated memories",
+            "type": "boolean"
+          },
           "sidebarWeb": {
             "description": "Whether the private page appears in the web sidebar",
             "type": "boolean"
@@ -25555,6 +25559,7 @@
           }
         },
         "required": [
+          "includeInMemories",
           "sidebarWeb",
           "timeoutMinutes"
         ],
@@ -25562,6 +25567,10 @@
       },
       "PrivateModeUpdate": {
         "properties": {
+          "includeInMemories": {
+            "description": "Whether private assets are included in generated memories",
+            "type": "boolean"
+          },
           "sidebarWeb": {
             "description": "Whether the private page appears in the web sidebar",
             "type": "boolean"

@@ -147,6 +147,28 @@ export function withPrivateAlbumVisibility<O>(scope: Pick<PrivateScope, 'private
   return (qb: SelectQueryBuilder<DB, 'album', O>) => (scope.privateMode ? qb : qb.where('album.isPrivate', '=', false));
 }
 
+/**
+ * Memory listings and reads: a memory that contains any private asset is private as a
+ * whole and hidden while the caller's session is not in private mode, for the owner too.
+ */
+export function withPrivateMemoryVisibility<O>(scope: Pick<PrivateScope, 'privateMode'>) {
+  return (qb: SelectQueryBuilder<DB, 'memory', O>) =>
+    scope.privateMode
+      ? qb
+      : qb.where((eb) =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('memory_asset')
+                .innerJoin('asset', 'asset.id', 'memory_asset.assetId')
+                .select((eb) => eb.val(1).as('one'))
+                .whereRef('memory_asset.memoriesId', '=', 'memory.id')
+                .where('asset.isPrivate', '=', true),
+            ),
+          ),
+        );
+}
+
 const selectExifInfo = (eb: AssetExpressionBuilder) =>
   eb.fn
     .toJson(eb.table('asset_exif'))
