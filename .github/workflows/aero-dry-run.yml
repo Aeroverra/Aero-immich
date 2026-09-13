@@ -35,7 +35,7 @@ jobs:
       contents: read
       issues: write
     env:
-      AERO_STATE: ${{ github.workspace }}/../aero-state
+      AERO_STATE: /home/runner/work/${{ github.event.repository.name }}/aero-state
       GIT_AUTHOR_NAME: aero-sync
       GIT_AUTHOR_EMAIL: aero-sync@users.noreply.github.com
       GIT_COMMITTER_NAME: aero-sync
