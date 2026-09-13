@@ -19,7 +19,6 @@
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { languageManager } from '$lib/managers/language-manager.svelte';
-  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { getAlbumAssetActions } from '$lib/services/album.service';
   import { getGlobalActions } from '$lib/services/app.service';
   import { getAssetActions } from '$lib/services/asset.service';
@@ -178,8 +177,8 @@
         {#if isOwner && !isLocked}
           <ArchiveAction {asset} {onAction} {preAction} />
         {/if}
-        {#if isOwner && privateModeManager.enabled}
-          <SetPrivateAction {asset} />
+        {#if isOwner}
+          <SetPrivateAction {asset} {onAction} {preAction} />
         {/if}
         <ActionMenuItem action={Actions.ViewInTimeline} />
         <ActionMenuItem action={Actions.ViewSimilar} />
