@@ -309,7 +309,11 @@ export class StorageTemplateService extends BaseService {
       if (this.template.needsAlbum) {
         // For motion videos, use the still photo's album information since motion videos
         // don't have album metadata attached directly
-        const albums = await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id);
+        // storage paths are the owner's own files, so a private album still names the folder
+        const albums = await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id, {
+          privateMode: true,
+          userId: assetForMetadata.ownerId,
+        });
         const album = albums?.[0];
         if (album) {
           albumName = album.albumName || null;

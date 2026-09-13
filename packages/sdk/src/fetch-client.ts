@@ -910,6 +910,8 @@ export type CreateAlbumDto = {
     albumUsers?: AlbumUserCreateDto[];
     /** Initial asset IDs */
     assetIds?: string[];
+    /** Required to be true when the album is created with other users and contains private assets, acknowledging they will be shared */
+    confirmPrivate?: boolean;
     /** Album description */
     description?: string | null;
 };
@@ -918,6 +920,8 @@ export type AlbumsAddAssetsDto = {
     albumIds: string[];
     /** Asset IDs */
     assetIds: string[];
+    /** Required to be true when private assets are added to a shared album, acknowledging they will be shared */
+    confirmPrivate?: boolean;
 };
 export type AlbumsAddAssetsResponseDto = {
     error?: BulkIdErrorReason;
@@ -954,6 +958,12 @@ export type BulkIdResponseDto = {
     id: string;
     /** Whether operation succeeded */
     success: boolean;
+};
+export type AlbumAddAssetsDto = {
+    /** Required to be true when private assets are added to a shared album, acknowledging they will be shared */
+    confirmPrivate?: boolean;
+    /** IDs to process */
+    ids: string[];
 };
 export type MapMarkerResponseDto = {
     /** City name */
@@ -4396,9 +4406,9 @@ export function removeAssetFromAlbum({ id, bulkIdsDto }: {
 /**
  * Add assets to an album
  */
-export function addAssetsToAlbum({ id, bulkIdsDto }: {
+export function addAssetsToAlbum({ id, albumAddAssetsDto }: {
     id: string;
-    bulkIdsDto: BulkIdsDto;
+    albumAddAssetsDto: AlbumAddAssetsDto;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
         status: 200;
@@ -4406,7 +4416,7 @@ export function addAssetsToAlbum({ id, bulkIdsDto }: {
     }>(`/albums/${encodeURIComponent(id)}/assets`, oazapfts.json({
         ...opts,
         method: "PUT",
-        body: bulkIdsDto
+        body: albumAddAssetsDto
     })));
 }
 /**

@@ -18,8 +18,14 @@ import { AlbumUserRole } from 'src/enum';
 import { DB } from 'src/schema';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { PrivateScope } from 'src/utils/database';
-import { asUuid, dummy, withDefaultVisibility, withPrivateAlbumScope } from 'src/utils/database';
+import {
+  asUuid,
+  dummy,
+  PrivateScope,
+  withDefaultVisibility,
+  withPrivateAlbumScope,
+  withPrivateAlbumVisibility,
+} from 'src/utils/database';
 
 export interface AlbumAssetCount {
   albumId: string;
@@ -27,7 +33,13 @@ export interface AlbumAssetCount {
   startDate: Date | null;
   endDate: Date | null;
   lastModifiedAssetTimestamp: Date | null;
-  thumbnailIsPrivate: boolean | null;
+}
+
+export interface AlbumListOptions {
+  isOwned?: boolean;
+  isShared?: boolean;
+  /** Private albums are listed only while the caller's session is in private mode; defaults to hidden. */
+  privateMode?: boolean;
 }
 
 export interface AlbumInfoOptions {
@@ -113,10 +125,11 @@ export class AlbumRepository {
       .executeTakeFirst();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
-  getByAssetId(ownerId: string, assetId: string) {
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getByAssetId(ownerId: string, assetId: string, scope: PrivateScope) {
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility(scope))
       .selectAll('album')
       .innerJoin('album_asset', 'album_asset.albumId', 'album.id')
       .where((eb) =>
@@ -134,15 +147,16 @@ export class AlbumRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
   @ChunkedSet({ paramIndex: 1 })
-  async getByAssetIds(ownerId: string, assetIds: string[]): Promise<Map<string, string[]>> {
+  async getByAssetIds(ownerId: string, assetIds: string[], scope: PrivateScope): Promise<Map<string, string[]>> {
     if (assetIds.length === 0) {
       return new Map();
     }
 
     const results = await this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility(scope))
       .select('album.id')
       .innerJoin('album_asset', 'album_asset.albumId', 'album.id')
       .where((eb) =>
@@ -189,15 +203,6 @@ export class AlbumRepository {
         // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
         .select((eb) => eb.fn.max('asset.updatedAt').as('lastModifiedAssetTimestamp'))
         .select((eb) => sql<number>`${eb.fn.count('asset.id')}::int`.as('assetCount'))
-        // whether the album's current cover is a private asset (null when no cover is set)
-        .select((eb) =>
-          eb
-            .selectFrom('album')
-            .innerJoin('asset as thumbnail', 'thumbnail.id', 'album.albumThumbnailAssetId')
-            .select('thumbnail.isPrivate')
-            .whereRef('album.id', '=', 'album_asset.albumId')
-            .as('thumbnailIsPrivate'),
-        )
         .where('album_asset.albumId', 'in', ids)
         .where('asset.deletedAt', 'is', null)
         .groupBy('album_asset.albumId')
@@ -205,9 +210,10 @@ export class AlbumRepository {
     );
   }
 
-  private buildAlbumBaseQuery(ownerId: string, { isOwned, isShared }: { isOwned?: boolean; isShared?: boolean }) {
+  private buildAlbumBaseQuery(ownerId: string, { isOwned, isShared, privateMode }: AlbumListOptions) {
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility({ privateMode: privateMode ?? false }))
       .innerJoin('album_user', (join) =>
         join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', ownerId),
       )
@@ -230,11 +236,8 @@ export class AlbumRepository {
       );
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true }] })
-  getAll(
-    ownerId: string,
-    options: { id?: string; isOwned?: boolean; isShared?: boolean; name?: string } = {},
-  ): Promise<MapAlbumDto[]> {
+  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true, privateMode: false }] })
+  getAll(ownerId: string, options: AlbumListOptions & { id?: string; name?: string } = {}): Promise<MapAlbumDto[]> {
     return this.buildAlbumBaseQuery(ownerId, options)
       .selectAll('album')
       .select(withAlbumUsers(ownerId))
@@ -245,8 +248,8 @@ export class AlbumRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true }] })
-  async getAllIds(ownerId: string, options: { isOwned?: boolean; isShared?: boolean } = {}): Promise<string[]> {
+  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true, privateMode: false }] })
+  async getAllIds(ownerId: string, options: AlbumListOptions = {}): Promise<string[]> {
     const rows = await this.buildAlbumBaseQuery(ownerId, options)
       .select('album.id')
       .orderBy('album.createdAt', 'desc')

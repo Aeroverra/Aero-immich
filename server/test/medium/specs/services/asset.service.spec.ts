@@ -416,6 +416,30 @@ describe(AssetService.name, () => {
       );
     });
 
+    it('should mark an asset private outside private mode and hide it until the mode is on', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+
+      await expect(sut.update(off, asset.id, { isPrivate: true })).resolves.toMatchObject({
+        id: asset.id,
+        isPrivate: true,
+      });
+
+      // the asset is now hidden from the session that marked it, and stays private until unmarked in the mode
+      await expect(sut.get(off, asset.id)).rejects.toThrow('Not found or no asset.read access');
+      await expect(sut.update(off, asset.id, { isPrivate: false })).rejects.toThrow(
+        'Not found or no asset.update access',
+      );
+      await expect(sut.get(on, asset.id)).resolves.toMatchObject({ id: asset.id, isPrivate: true });
+      await expect(sut.update(on, asset.id, { isPrivate: false })).resolves.toMatchObject({ isPrivate: false });
+      await expect(sut.get(off, asset.id)).resolves.toMatchObject({ id: asset.id, isPrivate: false });
+    });
+
     it('should automatically lock lockable columns', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queue.mockResolvedValue();
@@ -504,6 +528,26 @@ describe(AssetService.name, () => {
   });
 
   describe('updateAll', () => {
+    it('should bulk mark assets private outside private mode and hide them until the mode is on', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: first } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: second } = await ctx.newAsset({ ownerId: user.id });
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+
+      await sut.updateAll(off, { ids: [first.id, second.id], isPrivate: true });
+
+      await expect(sut.getStatistics(off, {})).resolves.toEqual({ images: 0, total: 0, videos: 0 });
+      await expect(sut.updateAll(off, { ids: [first.id, second.id], isPrivate: false })).rejects.toThrow(
+        'Not found or no asset.update access',
+      );
+      await expect(sut.getStatistics(on, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+      await sut.updateAll(on, { ids: [first.id, second.id], isPrivate: false });
+      await expect(sut.getStatistics(off, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+    });
+
     it('should automatically lock lockable columns', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
