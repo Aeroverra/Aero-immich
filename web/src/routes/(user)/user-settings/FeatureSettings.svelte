@@ -44,6 +44,7 @@
 
   // Private page
   let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
+  let privateTimeout = $state(authManager.preferences.privateMode?.timeoutMinutes ?? 30);
 
   const handleSave = async () => {
     try {
@@ -58,7 +59,7 @@
           tags: { enabled: tagsEnabled, sidebarWeb: tagsSidebar },
           cast: { gCastEnabled },
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
-          privateMode: { sidebarWeb: privateSidebar },
+          privateMode: { sidebarWeb: privateSidebar, timeoutMinutes: privateTimeout },
         },
       });
 
@@ -201,6 +202,10 @@
           <div class="mt-4 flex flex-col gap-4 sm:ms-4">
             <Field label={$t('sidebar')} description={$t('private_page_sidebar')}>
               <Switch bind:checked={privateSidebar} />
+            </Field>
+
+            <Field label={$t('private_mode_timeout')} description={$t('private_mode_timeout_description')}>
+              <NumberInput bind:value={privateTimeout} min={1} max={1440} />
             </Field>
           </div>
         </SettingAccordion>
