@@ -19,6 +19,7 @@ import 'package:immich_mobile/presentation/widgets/album/album_selector.widget.d
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_sheet.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class FavoriteBottomSheet extends ConsumerWidget {
@@ -35,10 +36,14 @@ class FavoriteBottomSheet extends ConsumerWidget {
       }
 
       final remoteAssets = selectedAssets.whereType<RemoteAsset>();
-      final result = await ref
-          .read(remoteAlbumProvider.notifier)
-          .addAssets(album.id, remoteAssets.map((e) => e.id).toList());
-      if (!context.mounted) {
+      final result = await addWithPrivateShareConfirmation(
+        context,
+        needsConfirmation: needsPrivateShareConfirmation(album, remoteAssets),
+        add: ({required confirmPrivate}) => ref
+            .read(remoteAlbumProvider.notifier)
+            .addAssets(album.id, remoteAssets.map((e) => e.id).toList(), confirmPrivate: confirmPrivate),
+      );
+      if (result == null || !context.mounted) {
         return;
       }
 

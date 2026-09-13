@@ -25,7 +25,7 @@ class PrivateFolderBottomSheet extends StatelessWidget {
         .new(action: DeleteAction(source: .timeline)),
         .new(action: FavoriteAction(source: .timeline)),
         .new(action: ArchiveAction(source: .timeline)),
-        .new(action: PrivateAction(source: .timeline)),
+        .new(action: UnmarkPrivateAction(source: .timeline)),
       ],
     );
   }

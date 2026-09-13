@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/store.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_album.repository.dart';
@@ -48,14 +49,27 @@ class SyncLinkedAlbumService {
           return;
         }
 
-        final remoteAlbum = await _remoteAlbumRepository.get(linkedRemoteAlbumId);
+        // The backup must see the linked album whatever the private mode state is
+        final remoteAlbum = await _remoteAlbumRepository.get(linkedRemoteAlbumId, privateFilter: PrivateModeFilter.all);
         if (remoteAlbum == null) {
           _log.warning("Linked remote album not found for ID: $linkedRemoteAlbumId");
           return;
         }
 
         // get assets that are uploaded but not in the remote album
-        final assetIds = await _remoteAlbumRepository.getLinkedAssetIds(userId, localAlbum.id, linkedRemoteAlbumId);
+        var assetIds = await _remoteAlbumRepository.getLinkedAssetIds(userId, localAlbum.id, linkedRemoteAlbumId);
+        // Private assets never flow into a shared album on their own: adding them would show them to the
+        // other members, and the server rejects the add without an explicit confirmation. Nobody is
+        // there to confirm during a background upload, so they are skipped and logged instead.
+        if (remoteAlbum.isShared) {
+          final privateIds = await _remoteAlbumRepository.getPrivateAssetIds(assetIds);
+          if (privateIds.isNotEmpty) {
+            _log.warning(
+              "Skipping ${privateIds.length} private assets for shared album ${remoteAlbum.name}, add them manually to share them",
+            );
+            assetIds = assetIds.where((assetId) => !privateIds.contains(assetId)).toList();
+          }
+        }
         _log.fine("Syncing ${assetIds.length} assets to remote album: ${remoteAlbum.name}");
         if (assetIds.isNotEmpty) {
           final album = await _albumApiRepository.addAssets(
@@ -93,7 +107,7 @@ class SyncLinkedAlbumService {
   /// Handles albums that are already linked to a remote album
   Future<void> _handleLinkedAlbum(LocalAlbum localAlbum) async {
     final remoteAlbumId = localAlbum.linkedRemoteAlbumId!;
-    final remoteAlbum = await _remoteAlbumRepository.get(remoteAlbumId);
+    final remoteAlbum = await _remoteAlbumRepository.get(remoteAlbumId, privateFilter: PrivateModeFilter.all);
 
     final remoteAlbumExists = remoteAlbum != null;
     if (!remoteAlbumExists) {

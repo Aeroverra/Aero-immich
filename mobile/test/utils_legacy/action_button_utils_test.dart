@@ -134,18 +134,15 @@ void main() {
         isInPrivateView: isInPrivateView,
       );
 
-      test('both stay hidden while private mode is off', () {
-        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false)), isFalse);
-        expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: false, isPrivate: true)), isFalse);
-      });
-
-      test('markPrivate shows for an owned public remote asset when the mode is on', () {
+      test('markPrivate shows for an owned public remote asset whether the mode is on or off', () {
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false)), isTrue);
         expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true)), isTrue);
         expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true)), isFalse);
       });
 
-      test('unmarkPrivate shows for a private asset and markPrivate does not', () {
+      test('unmarkPrivate shows for a private asset only while the mode is on', () {
         expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true)), isTrue);
+        expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: false, isPrivate: true)), isFalse);
         expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true)), isFalse);
       });
 
@@ -163,12 +160,21 @@ void main() {
       });
 
       test('both are hidden for non-owners and inside the locked view', () {
-        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true, isOwner: false)), isFalse);
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false, isOwner: false)), isFalse);
         expect(
           ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true, isOwner: false)),
           isFalse,
         );
-        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true, isInLockedView: true)), isFalse);
+        expect(
+          ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false, isInLockedView: true)),
+          isFalse,
+        );
+        expect(
+          ActionButtonType.unmarkPrivate.shouldShow(
+            contextFor(isPrivateMode: true, isPrivate: true, isInLockedView: true),
+          ),
+          isFalse,
+        );
       });
 
       test('both are hidden for a local-only asset', () {
