@@ -114,6 +114,20 @@ abstract class SearchDisplayFilters with _$SearchDisplayFilters {
       _SearchDisplayFilters;
 }
 
+/// Which private assets a search returns; only meaningful while the session's private mode is on
+enum SearchPrivateFilter {
+  all,
+  onlyPrivate,
+  notPrivate;
+
+  /// The `isPrivate` value the search DTOs expect: null = no filter, true = only private, false = exclude private
+  bool? get isPrivate => switch (this) {
+    SearchPrivateFilter.all => null,
+    SearchPrivateFilter.onlyPrivate => true,
+    SearchPrivateFilter.notPrivate => false,
+  };
+}
+
 @freezed
 abstract class SearchFilter with _$SearchFilter {
   const SearchFilter._();
@@ -133,6 +147,7 @@ abstract class SearchFilter with _$SearchFilter {
     required SearchRatingFilter rating,
     required SearchDisplayFilters display,
     required AssetType mediaType,
+    @Default(SearchPrivateFilter.all) SearchPrivateFilter private,
   }) = _SearchFilter;
 
   bool get isEmpty {
@@ -154,6 +169,7 @@ abstract class SearchFilter with _$SearchFilter {
         display.isArchive == false &&
         display.isFavorite == false &&
         rating.rating.isNone &&
-        mediaType == AssetType.other;
+        mediaType == AssetType.other &&
+        private == SearchPrivateFilter.all;
   }
 }
