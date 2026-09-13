@@ -131,8 +131,8 @@ export class AssetService extends BaseService {
 
     if (rest.isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate: rest.isPrivate });
-      // clients that did not opt in to private assets never received the exif rows; bump them so they sync when the asset comes back
-      await this.assetRepository.touchExif([id, ...stackMemberIds]);
+      // clients that did not opt in to private assets never received the related rows; bump them so they sync when the asset comes back
+      await this.assetRepository.touchPrivateRelations([id, ...stackMemberIds]);
     }
 
     if (previousMotion && asset) {
@@ -204,8 +204,8 @@ export class AssetService extends BaseService {
 
     if (isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate });
-      // clients that did not opt in to private assets never received the exif rows; bump them so they sync when the asset comes back
-      await this.assetRepository.touchExif([...ids, ...stackMemberIds]);
+      // clients that did not opt in to private assets never received the related rows; bump them so they sync when the asset comes back
+      await this.assetRepository.touchPrivateRelations([...ids, ...stackMemberIds]);
     }
 
     if (visibility === AssetVisibility.Locked) {
