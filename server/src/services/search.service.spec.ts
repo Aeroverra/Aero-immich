@@ -294,10 +294,16 @@ describe(SearchService.name, () => {
 
     it('should reject an isPrivate filter outside private mode on the legacy endpoints', async () => {
       const auth = AuthFactory.from().session({ privateMode: false }).build();
-      await expect(sut.searchMetadata(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
-      await expect(sut.searchMetadata(auth, { isPrivate: false })).rejects.toBeInstanceOf(UnauthorizedException);
-      await expect(sut.searchRandom(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
-      await expect(sut.searchLargeAssets(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchMetadata(auth, { isPrivate: true, size: 10 })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      await expect(sut.searchMetadata(auth, { isPrivate: false, size: 10 })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+      await expect(sut.searchRandom(auth, { isPrivate: true, size: 10 })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.searchLargeAssets(auth, { isPrivate: true, size: 10 })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
       await expect(sut.searchStatistics(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
