@@ -1,5 +1,5 @@
 import { createZodDto } from 'nestjs-zod';
-import { AssetOrderSchema, UserAvatarColorSchema } from 'src/enum';
+import { AssetOrderSchema, DeletedReimportModeSchema, UserAvatarColorSchema } from 'src/enum';
 import { UserPreferences } from 'src/types';
 import z from 'zod';
 
@@ -115,11 +115,19 @@ const PrivateModeUpdateSchema = z
   .optional()
   .meta({ id: 'PrivateModeUpdate' });
 
+const DeletedReimportUpdateSchema = z
+  .object({
+    mode: DeletedReimportModeSchema.optional(),
+  })
+  .optional()
+  .meta({ id: 'DeletedReimportUpdate' });
+
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
     avatar: AvatarUpdateSchema,
     cast: CastUpdateSchema,
+    deletedReimport: DeletedReimportUpdateSchema,
     download: DownloadUpdateSchema,
     emailNotifications: EmailNotificationsUpdateSchema,
     folders: FoldersUpdateSchema,
@@ -225,6 +233,16 @@ const PrivateModeResponseSchema = z
   })
   .meta({ id: 'PrivateModeResponse' });
 
+const DeletedReimportResponseSchema = z
+  .object({
+    mode: DeletedReimportModeSchema,
+    albumId: z
+      .uuidv4()
+      .nullable()
+      .describe('The "Previously deleted" album re-uploads are added to in album mode, once it exists'),
+  })
+  .meta({ id: 'DeletedReimportResponse' });
+
 const UserPreferencesResponseSchema = z
   .object({
     albums: AlbumsResponseSchema,
@@ -240,10 +258,18 @@ const UserPreferencesResponseSchema = z
     cast: CastResponseSchema,
     recentlyAdded: RecentlyAddedResponseSchema,
     privateMode: PrivateModeResponseSchema,
+    deletedReimport: DeletedReimportResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });
 
+const DeletedChecksumStatisticsResponseSchema = z
+  .object({
+    count: z.int().describe('Number of remembered checksums of permanently deleted files'),
+  })
+  .meta({ id: 'DeletedChecksumStatisticsResponseDto' });
+
 export class UserPreferencesUpdateDto extends createZodDto(UserPreferencesUpdateSchema) {}
+export class DeletedChecksumStatisticsResponseDto extends createZodDto(DeletedChecksumStatisticsResponseSchema) {}
 export class UserPreferencesResponseDto extends createZodDto(UserPreferencesResponseSchema) {}
 
 export const mapPreferences = (preferences: UserPreferences): UserPreferencesResponseDto => {
