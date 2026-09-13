@@ -2,8 +2,10 @@
   import PinCodeCreateForm from '$lib/components/user-settings-page/PinCodeCreateForm.svelte';
   import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { handleError } from '$lib/utils/handle-error';
-  import { Icon, Modal, ModalBody, PinInput } from '@immich/ui';
+  import { getAuthStatus } from '@immich/sdk';
+  import { Icon, LoadingSpinner, Modal, ModalBody, PinInput } from '@immich/ui';
   import { mdiLockOpenVariantOutline, mdiLockOutline, mdiLockSmart } from '@mdi/js';
+  import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
   import { fade } from 'svelte/transition';
 
@@ -16,6 +18,18 @@
   let pinCode = $state('');
   let isVerified = $state(false);
   let isBadPinCode = $state(false);
+  // undefined until the server has answered, so the create form is never shown on a stale cached value
+  let hasPinCode = $state<boolean>();
+
+  onMount(async () => {
+    try {
+      const status = await getAuthStatus();
+      hasPinCode = status.pinCode;
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_load_private_mode'));
+      onClose();
+    }
+  });
 
   const handleEnable = async (code: string) => {
     try {
@@ -34,7 +48,9 @@
 <Modal title={$t('private_mode')} icon={mdiLockOutline} onClose={() => onClose()} size="small">
   <ModalBody>
     <div class="flex flex-col items-center justify-center gap-6 py-2">
-      {#if privateModeManager.hasPinCode}
+      {#if hasPinCode === undefined}
+        <LoadingSpinner />
+      {:else if hasPinCode}
         {#if isVerified}
           <div in:fade={{ duration: 200 }}>
             <Icon icon={mdiLockOpenVariantOutline} size="64" class="text-success/90" />
@@ -53,7 +69,7 @@
           <Icon icon={mdiLockSmart} size="64" />
         </div>
         <p class="mb-4 text-center text-sm" style="text-wrap: pretty;">
-          {$t('new_pin_code_subtitle')}
+          {$t('private_mode_create_pin_code_description')}
         </p>
         <PinCodeCreateForm showLabel={false} onCreated={(code) => handleEnable(code)} />
       {/if}
