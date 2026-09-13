@@ -5,6 +5,7 @@ import {
   AlbumUserRole,
   BulkIdErrorReason,
   deleteAlbum,
+  getAlbumInfo,
   removeUserFromAlbum,
   updateAlbumInfo,
   updateAlbumUser,
@@ -26,9 +27,10 @@ import {
   mdiUpload,
 } from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
-import { goto } from '$app/navigation';
+import { goto, invalidateAll } from '$app/navigation';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
 import AlbumAddUsersModal from '$lib/modals/AlbumAddUsersModal.svelte';
 import AlbumOptionsModal from '$lib/modals/AlbumOptionsModal.svelte';
@@ -391,4 +393,25 @@ export const handleAlbumPrivateModeChange = async (album: AlbumResponseDto, enab
 
   await goto(Route.albums());
   return true;
+};
+
+/**
+ * The server announced that an album changed (on_album_update): another user edited it, or one of its assets
+ * turned private and took the album with it. Reloading it updates the album page, the lists and the recent
+ * albums in place; when it is no longer visible to this user (a private album while the mode is off answers 400,
+ * an unshared one 404) everything derived from the private flag reloads instead, which drops it from every
+ * list and sends its page back to the albums list.
+ */
+export const handleAlbumRemoteUpdate = async (id: string) => {
+  let album: AlbumResponseDto;
+  try {
+    album = await getAlbumInfo({ id });
+  } catch {
+    privateModeManager.invalidate();
+    return;
+  }
+
+  eventManager.emit('AlbumUpdate', album);
+  // the lists only patch albums they already show; a reload also adds one that became visible again
+  await invalidateAll();
 };

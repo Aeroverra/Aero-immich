@@ -55,6 +55,19 @@ class PrivateModeManager {
     await this.load();
   }
 
+  /**
+   * The server changed the private flag of assets behind this client's back (the flag spread to stack members
+   * or turned an album private): everything derived from it reloads exactly as it does on a toggle.
+   */
+  invalidate() {
+    if (!this.#initialized) {
+      return;
+    }
+
+    eventManager.emit('PrivateModeChange', this.enabled);
+    void invalidateAll();
+  }
+
   reset() {
     this.enabled = false;
     this.expiresAt = undefined;
