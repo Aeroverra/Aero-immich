@@ -122,18 +122,20 @@ export const addAssetsToAlbums = async (
     notify,
     hasPrivate = false,
     albums = [],
+    confirmPrivate,
   }: {
     notify: boolean;
     /** whether any of the assets is private */
     hasPrivate?: boolean;
     /** the target albums, when known: a non-private one turns private, a shared one exposes the assets */
     albums?: AlbumResponseDto[];
+    /** set when the caller already had the user acknowledge the private/shared consequences */
+    confirmPrivate?: boolean;
   },
 ) => {
   const $t = await getFormatter();
 
-  let confirmPrivate: boolean | undefined;
-  if (hasPrivate) {
+  if (hasPrivate && !confirmPrivate) {
     // an empty album (e.g. one created for this selection) is private from the start, nothing gets hidden
     const becomingPrivate = albums.filter((album) => !album.isPrivate && album.assetCount > 0);
     const shared = albums.filter((album) => album.shared || album.hasSharedLink);
