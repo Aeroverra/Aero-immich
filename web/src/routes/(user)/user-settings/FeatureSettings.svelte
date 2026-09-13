@@ -42,6 +42,9 @@
   // Recently added
   let recentlyAddedSidebar = $state(authManager.preferences.recentlyAdded?.sidebarWeb ?? false);
 
+  // Private page
+  let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
+
   const handleSave = async () => {
     try {
       const response = await updateMyPreferences({
@@ -55,6 +58,7 @@
           tags: { enabled: tagsEnabled, sidebarWeb: tagsSidebar },
           cast: { gCastEnabled },
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
+          privateMode: { sidebarWeb: privateSidebar },
         },
       });
 
@@ -185,6 +189,18 @@
           <div class="mt-4 flex flex-col gap-4 sm:ms-4">
             <Field label={$t('sidebar')} description={$t('sidebar_display_description')}>
               <Switch bind:checked={recentlyAddedSidebar} />
+            </Field>
+          </div>
+        </SettingAccordion>
+
+        <SettingAccordion
+          key="privateMode"
+          title={$t('private_photos')}
+          subtitle={$t('private_page_feature_description')}
+        >
+          <div class="mt-4 flex flex-col gap-4 sm:ms-4">
+            <Field label={$t('sidebar')} description={$t('private_page_sidebar')}>
+              <Switch bind:checked={privateSidebar} />
             </Field>
           </div>
         </SettingAccordion>

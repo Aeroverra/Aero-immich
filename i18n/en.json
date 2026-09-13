@@ -1719,6 +1719,8 @@
   "private_mode_settings_description": "Manage how long private mode stays on",
   "private_mode_timeout": "Private mode timeout (minutes)",
   "private_mode_timeout_description": "Private mode turns off automatically after this many minutes of inactivity (1 to 1440).",
+  "private_page_feature_description": "Photos and videos marked as private, shown only while private mode is on",
+  "private_page_sidebar": "Display a link to the private page in the sidebar while private mode is on",
   "private_photos": "Private",
   "profile": "Profile",
   "profile_drawer_app_logs": "Logs",
