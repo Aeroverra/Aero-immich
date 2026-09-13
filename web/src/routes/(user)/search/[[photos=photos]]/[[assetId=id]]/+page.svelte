@@ -23,7 +23,6 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
-  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { searchManager } from '$lib/managers/search-manager.svelte';
   import type { Viewport } from '$lib/managers/timeline-manager/types';
   import { Route } from '$lib/route';
@@ -116,6 +115,15 @@
   const handleSetVisibility = (assetIds: string[]) => {
     assetMultiSelectManager.clear();
     onAssetDelete(assetIds);
+  };
+
+  const handleSetPrivate = (ids: string[], isPrivate: boolean) => {
+    for (const id of ids) {
+      const asset = searchResultAssets.find((asset) => asset.id === id);
+      if (asset) {
+        asset.isPrivate = isPrivate;
+      }
+    }
   };
 
   const handleSelectAll = () => {
@@ -372,19 +380,11 @@
               }}
             />
 
-            {#if privateModeManager.enabled}
-              <SetPrivateAction
-                unmark={assetMultiSelectManager.isAllPrivate}
-                onSetPrivate={(ids, isPrivate) => {
-                  for (const id of ids) {
-                    const asset = searchResultAssets.find((asset) => asset.id === id);
-                    if (asset) {
-                      asset.isPrivate = isPrivate;
-                    }
-                  }
-                }}
-              />
-            {/if}
+            <SetPrivateAction
+              unmark={assetMultiSelectManager.isAllPrivate}
+              onSetPrivate={handleSetPrivate}
+              onRemove={handleSetVisibility}
+            />
 
             <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
               <ActionMenuItem action={Actions.AddToAlbum} />
@@ -393,6 +393,7 @@
               <ChangeDescription menuItem />
               <ChangeLocation menuItem />
               <ArchiveAction menuItem unarchive={assetMultiSelectManager.isAllArchived} />
+              <SetPrivateAction menuItem onSetPrivate={handleSetPrivate} onRemove={handleSetVisibility} />
               <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
               {#if authManager.preferences.tags.enabled}
                 <TagAction menuItem />

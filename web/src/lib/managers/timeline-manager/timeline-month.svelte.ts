@@ -275,6 +275,10 @@ export class TimelineMonth {
     const index = timelineManager.months.indexOf(this);
     const heightDelta = height - this.#height;
     this.#height = height;
+    if (index === -1) {
+      // a month that was dropped from the timeline (e.g. by a reload) must not shift the months that replaced it
+      return;
+    }
     const previousTimelineMonth = timelineManager.months[index - 1];
     if (previousTimelineMonth) {
       const newTop = previousTimelineMonth.#top + previousTimelineMonth.#height;

@@ -35,5 +35,7 @@ eventManager.on({
   AlbumCreate: () => resetRecentAlbums(),
   AlbumUpdate: () => resetRecentAlbums(),
   AlbumDelete: () => resetRecentAlbums(),
+  // private albums are hidden as a whole while the mode is off
+  PrivateModeChange: () => resetRecentAlbums(),
   AuthLogout: () => reset(),
 });
