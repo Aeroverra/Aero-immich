@@ -7,64 +7,100 @@ import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
+import 'package:immich_mobile/services/toast.service.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
 
-typedef _State = ({bool shouldMarkPrivate, List<String> assetIds});
-
-/// The server only accepts isPrivate changes while the session's private mode is on, so the
-/// action stays hidden otherwise. Inside the private folder every asset is private already,
-/// so only "remove from private" is offered there; outside it only "mark as private".
-final _stateProvider = Provider.family.autoDispose<_State?, ActionSource>((ref, source) {
-  if (!ref.watch(isPrivateModeProvider) || ref.watch(inLockedViewProvider)) {
-    return null;
+/// Owned remote assets of the selection that are not private yet. Marking never needs private mode
+/// (like moving to the locked folder), it is only withheld inside the locked and private folders.
+final _markTargetsProvider = Provider.family.autoDispose<List<String>, ActionSource>((ref, source) {
+  if (ref.watch(inLockedViewProvider) || ref.watch(inPrivateViewProvider)) {
+    return const [];
   }
 
-  final assets = ref.watch(ownedAssetsActionProvider(source));
-  if (assets.isEmpty) {
-    return null;
-  }
-
-  final shouldMarkPrivate = !ref.watch(inPrivateViewProvider) && assets.private(isPrivate: false).isNotEmpty;
-  final assetIds = assets.private(isPrivate: !shouldMarkPrivate).map((asset) => asset.id).toList(growable: false);
-  return assetIds.isEmpty ? null : (shouldMarkPrivate: shouldMarkPrivate, assetIds: assetIds);
+  return ref.watch(ownedAssetsActionProvider(source)).private(isPrivate: false).map((asset) => asset.id).toList();
 }, dependencies: [ownedAssetsActionProvider]);
 
-class PrivateAction extends AssetActionBuilder {
-  const PrivateAction({required super.source});
+/// Owned private assets of the selection. The server only accepts unmarking while the session's
+/// private mode is on, and private assets are only listed then anyway.
+final _unmarkTargetsProvider = Provider.family.autoDispose<List<String>, ActionSource>((ref, source) {
+  if (!ref.watch(isPrivateModeProvider) || ref.watch(inLockedViewProvider)) {
+    return const [];
+  }
+
+  return ref.watch(ownedAssetsActionProvider(source)).private().map((asset) => asset.id).toList();
+}, dependencies: [ownedAssetsActionProvider]);
+
+class MarkPrivateAction extends AssetActionBuilder {
+  const MarkPrivateAction({required super.source});
 
   @override
   ActionItem? create(BuildContext context, WidgetRef ref) {
-    final shouldMarkPrivate = ref.watch(_stateProvider(source).select((state) => state?.shouldMarkPrivate));
-    if (shouldMarkPrivate == null) {
+    if (ref.watch(_markTargetsProvider(source).select((ids) => ids.isEmpty))) {
       return null;
     }
 
-    return .new(
-      icon: shouldMarkPrivate ? Icons.lock_person_outlined : Icons.lock_open_rounded,
-      label: shouldMarkPrivate ? context.t.mark_private : context.t.unmark_private,
-      onAction: () => _setPrivate(context, ref),
-    );
+    return .new(icon: Icons.lock_person_outlined, label: context.t.mark_private, onAction: () => _mark(context, ref));
   }
 
-  Future<void> _setPrivate(BuildContext context, WidgetRef ref) async {
-    final state = ref.read(_stateProvider(source));
-    if (state == null) {
+  Future<void> _mark(BuildContext context, WidgetRef ref) async {
+    final assetIds = ref.read(_markTargetsProvider(source));
+    if (assetIds.isEmpty) {
       return;
     }
 
-    final (:shouldMarkPrivate, :assetIds) = state;
-    final message = shouldMarkPrivate ? context.t.mark_private : context.t.unmark_private;
     final assetService = ref.read(assetServiceProvider);
     final toastService = ref.read(toastServiceProvider);
     final clearSelection = ref.read(clearSelectionProvider(source));
+    // Removing the private flag again needs private mode, so the undo is only offered while it is on.
+    // With the mode off the local rows flip to private and the filtered queries drop them right away.
+    final canUndo = ref.read(isPrivateModeProvider);
+    final message = context.t.marked_private(count: assetIds.length);
 
     try {
-      await assetService.update(assetIds, isPrivate: .some(shouldMarkPrivate));
-      Future<void> undo() => assetService.update(assetIds, isPrivate: .some(!shouldMarkPrivate));
-      toastService.success(message, toast: .new(onUndo: undo));
+      await assetService.update(assetIds, isPrivate: const .some(true));
+      final toast = canUndo
+          ? ToastOption(onUndo: () => assetService.update(assetIds, isPrivate: const .some(false)))
+          : null;
+      toastService.success(message, toast: toast);
       clearSelection();
     } catch (error, stack) {
-      handleError(error, stack: stack, description: "Failed to update the private status for assets");
+      handleError(error, stack: stack, description: "Failed to mark assets as private");
+    }
+  }
+}
+
+class UnmarkPrivateAction extends AssetActionBuilder {
+  const UnmarkPrivateAction({required super.source});
+
+  @override
+  ActionItem? create(BuildContext context, WidgetRef ref) {
+    if (ref.watch(_unmarkTargetsProvider(source).select((ids) => ids.isEmpty))) {
+      return null;
+    }
+
+    return .new(icon: Icons.lock_open_rounded, label: context.t.unmark_private, onAction: () => _unmark(context, ref));
+  }
+
+  Future<void> _unmark(BuildContext context, WidgetRef ref) async {
+    final assetIds = ref.read(_unmarkTargetsProvider(source));
+    if (assetIds.isEmpty) {
+      return;
+    }
+
+    final assetService = ref.read(assetServiceProvider);
+    final toastService = ref.read(toastServiceProvider);
+    final clearSelection = ref.read(clearSelectionProvider(source));
+    final message = context.t.unmarked_private(count: assetIds.length);
+
+    try {
+      await assetService.update(assetIds, isPrivate: const .some(false));
+      toastService.success(
+        message,
+        toast: ToastOption(onUndo: () => assetService.update(assetIds, isPrivate: const .some(true))),
+      );
+      clearSelection();
+    } catch (error, stack) {
+      handleError(error, stack: stack, description: "Failed to remove the private flag from assets");
     }
   }
 }
