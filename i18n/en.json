@@ -2281,6 +2281,8 @@
   "upload_status_duplicates": "Duplicates",
   "upload_status_errors": "Errors",
   "upload_status_uploaded": "Uploaded",
+  "upload_to_private_album_confirm": "Upload",
+  "upload_to_private_album_prompt": "{album} is private. Everything you upload to it will be marked private.",
   "upload_success": "Upload success, refresh the page to see new upload assets.",
   "upload_to_album_body": "For users that don't utilize the manual upload feature, you can now choose to add local photos directly into an album as you upload them, no need to upload then add to an album later anymore.",
   "upload_to_album_title": "Upload straight to an album",
