@@ -380,11 +380,7 @@
               }}
             />
 
-            <SetPrivateAction
-              unmark={assetMultiSelectManager.isAllPrivate}
-              onSetPrivate={handleSetPrivate}
-              onRemove={handleSetVisibility}
-            />
+            <SetPrivateAction onSetPrivate={handleSetPrivate} onRemove={handleSetVisibility} />
 
             <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
               <ActionMenuItem action={Actions.AddToAlbum} />
@@ -393,7 +389,6 @@
               <ChangeDescription menuItem />
               <ChangeLocation menuItem />
               <ArchiveAction menuItem unarchive={assetMultiSelectManager.isAllArchived} />
-              <SetPrivateAction menuItem onSetPrivate={handleSetPrivate} onRemove={handleSetVisibility} />
               <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
               {#if authManager.preferences.tags.enabled}
                 <TagAction menuItem />

@@ -76,13 +76,12 @@
       removeFavorite={assetMultiSelectManager.isAllFavorite}
       onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
     />
+    <SetPrivateAction
+      onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+      onRemove={handleSetVisibility}
+    />
     <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
       <DownloadAction menuItem />
-      <SetPrivateAction
-        menuItem
-        onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-        onRemove={handleSetVisibility}
-      />
       <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
       <DeleteAssets menuItem onAssetDelete={(assetIds) => timelineManager.removeAssets(assetIds)} />
     </ButtonContextMenu>
