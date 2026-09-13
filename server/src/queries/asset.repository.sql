@@ -16,19 +16,12 @@ set
     '{}'
   )
 
--- AssetRepository.updateAllExif
+-- AssetRepository.touchExif
 update "asset_exif"
 set
-  "model" = $1,
-  "lockedProperties" = nullif(
-    array(
-      select distinct
-        unnest("asset_exif"."lockedProperties" || $2)
-    ),
-    '{}'
-  )
+  "updatedAt" = $1
 where
-  "assetId" in ($3)
+  "assetId" in ($2::uuid)
 
 -- AssetRepository.updateDateTimeOriginal
 update "asset_exif"
