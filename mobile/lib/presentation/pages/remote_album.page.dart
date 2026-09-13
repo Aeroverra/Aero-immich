@@ -66,7 +66,7 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
 
     final added = await addWithPrivateShareConfirmation(
       context,
-      needsConfirmation: needsPrivateShareConfirmation(album ?? _album, newAssets),
+      warning: privateAddWarning(context, album ?? _album, newAssets),
       add: ({required confirmPrivate}) =>
           notifier.addAssetsToAlbum(_album.id, newAssets, confirmPrivate: confirmPrivate),
     );

@@ -3,6 +3,8 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.dart';
+import 'package:immich_mobile/presentation/widgets/album/private_albums_dialog.widget.dart';
+import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
@@ -49,6 +51,7 @@ class MarkPrivateAction extends AssetActionBuilder {
     }
 
     final assetService = ref.read(assetServiceProvider);
+    final albumService = ref.read(remoteAlbumServiceProvider);
     final toastService = ref.read(toastServiceProvider);
     final clearSelection = ref.read(clearSelectionProvider(source));
     // Removing the private flag again needs private mode, so the undo is only offered while it is on.
@@ -57,6 +60,28 @@ class MarkPrivateAction extends AssetActionBuilder {
     final message = context.t.marked_private(count: assetIds.length);
 
     try {
+      // A private asset makes every album it is in private, and those albums are hidden while the
+      // mode is off. Say so first, and offer to take the assets out of the albums instead.
+      final albums = await albumService.getAlbumsContainingAssets(
+        assetIds,
+        privateFilter: ref.read(privateModeFilterProvider),
+      );
+      final publicAlbums = albums.where((album) => !album.isPrivate).toList();
+      if (publicAlbums.isNotEmpty) {
+        if (!context.mounted) {
+          return;
+        }
+        final choice = await showPrivateAlbumsDialog(context, publicAlbums);
+        if (choice == null) {
+          return;
+        }
+        if (choice == PrivateAlbumsChoice.remove) {
+          for (final album in publicAlbums) {
+            await albumService.removeAssets(albumId: album.id, assetIds: assetIds);
+          }
+        }
+      }
+
       await assetService.update(assetIds, isPrivate: const .some(true));
       final toast = canUndo
           ? ToastOption(onUndo: () => assetService.update(assetIds, isPrivate: const .some(false)))

@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/tag.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/platform/native_sync_api.g.dart';
@@ -190,6 +191,7 @@ class ServiceMocks {
 
   void _stubRemoteAlbumService() {
     when(album.removeAssets).thenAnswer((_) async => 0);
+    when(album.getAlbumsContainingAssets).thenAnswer((_) async => const []);
     when(album.updateAlbum).thenAnswer((_) async => RemoteAlbumFactory.create());
   }
 
@@ -234,6 +236,7 @@ void _registerFallbacks() {
   registerFallbackValue(<BaseAsset>[]);
   registerFallbackValue(<RemoteAsset>[]);
   registerFallbackValue(<LocalAsset>[]);
+  registerFallbackValue(PrivateModeFilter.off);
   registerFallbackValue(ShareAssetType.original);
   registerFallbackValue(const UploadCallbacks());
   registerFallbackValue(_FakeBuildContext());
@@ -385,6 +388,9 @@ extension type const RemoteAlbumServiceStub(MockRemoteAlbumService service) impl
 
   Future<RemoteAlbum> Function() get updateAlbum =>
       () => service.updateAlbum(any(), thumbnailAssetId: any(named: 'thumbnailAssetId'));
+
+  Future<List<RemoteAlbum>> Function() get getAlbumsContainingAssets =>
+      () => service.getAlbumsContainingAssets(any(), privateFilter: any(named: 'privateFilter'));
 }
 
 extension type const CleanupServiceStub(MockCleanupService service) implements Stub<MockCleanupService> {

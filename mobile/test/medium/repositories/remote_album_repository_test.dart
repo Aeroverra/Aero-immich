@@ -112,6 +112,33 @@ void main() {
       expect((await sut.getAll(privateFilter: PrivateModeFilter.all)).single.id, album.id);
     });
 
+    test(
+      'getAlbumsContainingAssets lists each album holding any of the assets once, private ones only when on',
+      () async {
+        final user = await ctx.newUser();
+        final trip = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Trip');
+        final family = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Family');
+        final secrets = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Secrets', isPrivate: true);
+        await ctx.newRemoteAlbum(ownerId: user.id, name: 'Unrelated');
+        final first = await ctx.newRemoteAsset(ownerId: user.id);
+        final second = await ctx.newRemoteAsset(ownerId: user.id);
+        await ctx.newRemoteAlbumAsset(albumId: trip.id, assetId: first.id);
+        await ctx.newRemoteAlbumAsset(albumId: trip.id, assetId: second.id);
+        await ctx.newRemoteAlbumAsset(albumId: family.id, assetId: second.id);
+        await ctx.newRemoteAlbumAsset(albumId: secrets.id, assetId: first.id);
+
+        final off = await sut.getAlbumsContainingAssets([first.id, second.id]);
+        expect(off.map((album) => album.name), unorderedEquals(['Trip', 'Family']));
+
+        final on = await sut.getAlbumsContainingAssets([
+          first.id,
+          second.id,
+        ], privateFilter: PrivateModeFilter(enabled: true, userId: user.id));
+        expect(on.map((album) => album.name), unorderedEquals(['Trip', 'Family', 'Secrets']));
+        expect(await sut.getAlbumsContainingAssets(const []), isEmpty);
+      },
+    );
+
     test('getPrivateAssetIds returns the private subset of the given ids', () async {
       final user = await ctx.newUser();
       final public = await ctx.newRemoteAsset(ownerId: user.id);
