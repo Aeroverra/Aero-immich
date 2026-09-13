@@ -16,7 +16,15 @@ import {
   type UserResponseDto,
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
-import { mdiImageOutline, mdiLink, mdiPlus, mdiPlusBoxOutline, mdiShareVariantOutline, mdiUpload } from '@mdi/js';
+import {
+  mdiImageOutline,
+  mdiLink,
+  mdiLockOutline,
+  mdiPlus,
+  mdiPlusBoxOutline,
+  mdiShareVariantOutline,
+  mdiUpload,
+} from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
 import { goto } from '$app/navigation';
 import { authManager } from '$lib/managers/auth-manager.svelte';
@@ -63,7 +71,7 @@ export const getAlbumActions = ($t: MessageFormatter, album: AlbumResponseDto) =
     title: $t('create_link'),
     icon: mdiLink,
     color: 'primary',
-    onAction: () => modalManager.show(SharedLinkCreateModal, { albumId: album.id }),
+    onAction: () => modalManager.show(SharedLinkCreateModal, { albumId: album.id, hasPrivate: album.isPrivate }),
   };
 
   return { Share, AddUsers, CreateSharedLink };
@@ -89,7 +97,11 @@ export const getAlbumAssetsActions = ($t: MessageFormatter, album: AlbumResponse
       addAssetsToAlbums(
         [album.id],
         assets.map(({ id }) => id),
-        { notify: true },
+        {
+          notify: true,
+          hasPrivate: assets.some((asset) => asset.isPrivate),
+          albums: [album],
+        },
       ).then(() => undefined),
   };
 
@@ -103,20 +115,77 @@ export const getAlbumAssetsActions = ($t: MessageFormatter, album: AlbumResponse
   return { AddAssets, Upload };
 };
 
-export const addAssetsToAlbums = async (albumIds: string[], assetIds: string[], { notify }: { notify: boolean }) => {
+export const addAssetsToAlbums = async (
+  albumIds: string[],
+  assetIds: string[],
+  {
+    notify,
+    hasPrivate = false,
+    albums = [],
+    confirmPrivate,
+  }: {
+    notify: boolean;
+    /** whether any of the assets is private */
+    hasPrivate?: boolean;
+    /** the target albums, when known: a non-private one turns private, a shared one exposes the assets */
+    albums?: AlbumResponseDto[];
+    /** set when the caller already had the user acknowledge the private/shared consequences */
+    confirmPrivate?: boolean;
+  },
+) => {
   const $t = await getFormatter();
+
+  if (hasPrivate && !confirmPrivate) {
+    // an empty album (e.g. one created for this selection) is private from the start, nothing gets hidden
+    const becomingPrivate = albums.filter((album) => !album.isPrivate && album.assetCount > 0);
+    const shared = albums.filter((album) => album.shared || album.hasSharedLink);
+    const sentences = [];
+    if (becomingPrivate.length > 0) {
+      sentences.push(
+        $t('add_to_album_private_prompt', {
+          values: { album: becomingPrivate.map(({ albumName }) => albumName).join(', ') },
+        }),
+      );
+    }
+    if (shared.length > 0) {
+      sentences.push($t('add_to_album_shared_private_prompt', { values: { count: shared.length } }));
+    }
+
+    if (sentences.length > 0) {
+      const confirmed = await modalManager.showDialog({
+        title: $t('private_mode'),
+        prompt: sentences.join(' '),
+        confirmText: $t('add_to_album_private_confirm'),
+        confirmColor: 'primary',
+        icon: mdiLockOutline,
+      });
+
+      if (!confirmed) {
+        return false;
+      }
+
+      confirmPrivate = true;
+    }
+  }
 
   try {
     if (albumIds.length === 1) {
       const albumId = albumIds[0];
-      const results = await addToAlbum({ ...authManager.params, id: albumId, bulkIdsDto: { ids: assetIds } });
+      const results = await addToAlbum({
+        ...authManager.params,
+        id: albumId,
+        albumAddAssetsDto: { ids: assetIds, confirmPrivate },
+      });
       if (notify) {
         notifyAddToAlbum($t, albumId, assetIds, results);
       }
     }
 
     if (albumIds.length > 1) {
-      const results = await addToAlbums({ ...authManager.params, albumsAddAssetsDto: { albumIds, assetIds } });
+      const results = await addToAlbums({
+        ...authManager.params,
+        albumsAddAssetsDto: { albumIds, assetIds, confirmPrivate },
+      });
       if (notify) {
         notifyAddToAlbums($t, albumIds, assetIds, results);
       }
@@ -196,8 +265,26 @@ export const handleUpdateUserAlbumRole = async ({
 export const handleAddUsersToAlbum = async (album: AlbumResponseDto, users: UserResponseDto[]) => {
   const $t = await getFormatter();
 
+  let confirmPrivate: boolean | undefined;
+  if (album.isPrivate) {
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: $t('share_private_album_confirmation'),
+      confirmText: $t('share'),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    confirmPrivate = true;
+  }
+
   try {
-    await addUsersToAlbum({ id: album.id, addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id })) } });
+    await addUsersToAlbum({
+      id: album.id,
+      addUsersDto: { albumUsers: users.map(({ id }) => ({ userId: id })), confirmPrivate },
+    });
     eventManager.emit('AlbumShare');
     return true;
   } catch (error) {
@@ -291,4 +378,17 @@ export const handleDeleteAlbum = async (album: AlbumResponseDto, options?: { pro
 
 export const handleDownloadAlbum = async (album: AlbumResponseDto) => {
   await downloadArchive(album.albumName, { albumId: album.id });
+};
+
+/**
+ * A private album is hidden as a whole while private mode is off, so its page cannot stay open.
+ * Returns true when the user was sent back to the albums list.
+ */
+export const handleAlbumPrivateModeChange = async (album: AlbumResponseDto, enabled: boolean) => {
+  if (enabled || !album.isPrivate) {
+    return false;
+  }
+
+  await goto(Route.albums());
+  return true;
 };

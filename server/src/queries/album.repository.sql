@@ -78,6 +78,7 @@ select
           "album_asset"."albumId" = "album"."id"
           and "asset"."deletedAt" is null
           and "asset"."visibility" in ('archive', 'timeline')
+          and "asset"."isPrivate" = $3
         order by
           "asset"."fileCreatedAt" desc
       ) as "asset"
@@ -85,7 +86,7 @@ select
 from
   "album"
 where
-  "album"."id" = $3
+  "album"."id" = $4
   and "album"."deletedAt" is null
 
 -- AlbumRepository.getByAssetId
@@ -132,15 +133,16 @@ from
   "album"
   inner join "album_asset" on "album_asset"."albumId" = "album"."id"
 where
-  exists (
+  "album"."isPrivate" = $2
+  and exists (
     select
     from
       "album_user"
     where
       "album_user"."albumId" = "album"."id"
-      and "album_user"."userId" = $2
+      and "album_user"."userId" = $3
   )
-  and "album_asset"."assetId" = $3
+  and "album_asset"."assetId" = $4
   and "album"."deletedAt" is null
 order by
   "album"."createdAt" desc
@@ -153,15 +155,16 @@ from
   "album"
   inner join "album_asset" on "album_asset"."albumId" = "album"."id"
 where
-  exists (
+  "album"."isPrivate" = $1
+  and exists (
     select
     from
       "album_user"
     where
       "album_user"."albumId" = "album"."id"
-      and "album_user"."userId" = $1
+      and "album_user"."userId" = $2
   )
-  and "album_asset"."assetId" in ($2)
+  and "album_asset"."assetId" in ($3)
   and "album"."deletedAt" is null
 
 -- AlbumRepository.getMetadataForIds
@@ -180,7 +183,8 @@ from
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
 where
   "asset"."visibility" in ('archive', 'timeline')
-  and "album_asset"."albumId" in ($1)
+  and "asset"."isPrivate" = $1
+  and "album_asset"."albumId" in ($2)
   and "asset"."deletedAt" is null
 group by
   "album_asset"."albumId"
@@ -243,7 +247,8 @@ from
   inner join "album_user" on "album_user"."albumId" = "album"."id"
   and "album_user"."userId" = $2
 where
-  "album"."deletedAt" is null
+  "album"."isPrivate" = $3
+  and "album"."deletedAt" is null
   and "album_user"."role" = 'owner'
   and (
     exists (
@@ -273,7 +278,8 @@ from
   inner join "album_user" on "album_user"."albumId" = "album"."id"
   and "album_user"."userId" = $1
 where
-  "album"."deletedAt" is null
+  "album"."isPrivate" = $2
+  and "album"."deletedAt" is null
   and "album_user"."role" = 'owner'
   and (
     exists (
@@ -430,6 +436,7 @@ from
 where
   "asset"."deletedAt" is null
   and "album_asset"."albumId" = $1
+  and "asset"."isPrivate" = $2
 group by
   "asset"."ownerId"
 order by

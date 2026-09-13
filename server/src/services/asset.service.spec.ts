@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { DateTime } from 'luxon';
 import { AssetJobName, AssetStatsResponseDto } from 'src/dtos/asset.dto';
 import { AssetEditAction } from 'src/dtos/editing.dto';
@@ -42,30 +42,67 @@ describe(AssetService.name, () => {
       const auth = AuthFactory.create();
       mocks.asset.getStatistics.mockResolvedValue(stats);
       await expect(sut.getStatistics(auth, { visibility: AssetVisibility.Timeline })).resolves.toEqual(statResponse);
-      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(auth.user.id, { visibility: AssetVisibility.Timeline });
+      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(
+        auth.user.id,
+        { visibility: AssetVisibility.Timeline },
+        {
+          privateMode: false,
+          userId: auth.user.id,
+        },
+      );
     });
 
     it('should get the statistics for a user for archived assets', async () => {
       const auth = AuthFactory.create();
       mocks.asset.getStatistics.mockResolvedValue(stats);
       await expect(sut.getStatistics(auth, { visibility: AssetVisibility.Archive })).resolves.toEqual(statResponse);
-      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(auth.user.id, {
-        visibility: AssetVisibility.Archive,
-      });
+      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(
+        auth.user.id,
+        { visibility: AssetVisibility.Archive },
+        { privateMode: false, userId: auth.user.id },
+      );
     });
 
     it('should get the statistics for a user for favorite assets', async () => {
       const auth = AuthFactory.create();
       mocks.asset.getStatistics.mockResolvedValue(stats);
       await expect(sut.getStatistics(auth, { isFavorite: true })).resolves.toEqual(statResponse);
-      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(auth.user.id, { isFavorite: true });
+      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(
+        auth.user.id,
+        { isFavorite: true },
+        {
+          privateMode: false,
+          userId: auth.user.id,
+        },
+      );
     });
 
     it('should get the statistics for a user for all assets', async () => {
       const auth = AuthFactory.create();
       mocks.asset.getStatistics.mockResolvedValue(stats);
       await expect(sut.getStatistics(auth, {})).resolves.toEqual(statResponse);
-      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(auth.user.id, {});
+      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(
+        auth.user.id,
+        {},
+        { privateMode: false, userId: auth.user.id },
+      );
+    });
+
+    it('should require private mode for private statistics', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      await expect(sut.getStatistics(auth, { isPrivate: true })).rejects.toThrow(UnauthorizedException);
+      expect(mocks.asset.getStatistics).not.toHaveBeenCalled();
+    });
+
+    it('should get the statistics for private assets in private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.asset.getStatistics.mockResolvedValue(stats);
+      await expect(sut.getStatistics(auth, { isPrivate: true })).resolves.toEqual(statResponse);
+      expect(mocks.asset.getStatistics).toHaveBeenCalledWith(
+        auth.user.id,
+        { isPrivate: true },
+        { privateMode: true, userId: auth.user.id },
+      );
     });
   });
 
@@ -77,11 +114,10 @@ describe(AssetService.name, () => {
 
       await sut.get(authStub.admin, asset.id);
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        undefined,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
     });
 
     it('should allow shared link access', async () => {
@@ -132,7 +168,11 @@ describe(AssetService.name, () => {
 
       await sut.get(authStub.admin, asset.id);
 
-      expect(mocks.access.asset.checkAlbumAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]));
+      expect(mocks.access.asset.checkAlbumAccess).toHaveBeenCalledWith(
+        authStub.admin.user.id,
+        new Set([asset.id]),
+        false,
+      );
     });
 
     it('should throw an error for no access', async () => {
@@ -176,6 +216,81 @@ describe(AssetService.name, () => {
       await sut.update(authStub.admin, asset.id, { isFavorite: true });
 
       expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isFavorite: true });
+    });
+
+    it('should mark an asset private without private mode and read the response back as the owner', async () => {
+      const asset = AssetFactory.create();
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await expect(sut.update(auth, asset.id, { isPrivate: true })).resolves.toEqual(
+        expect.objectContaining({ id: asset.id }),
+      );
+
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: true });
+      expect(mocks.asset.getById).toHaveBeenCalledWith(asset.id, expect.anything(), {
+        privateMode: true,
+        userId: auth.user.id,
+      });
+    });
+
+    it('should mark every member of the stack private along with the asset', async () => {
+      const asset = AssetFactory.create();
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set([asset.id]))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: asset.id, isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+        { id: 'sibling-2', isPrivate: true },
+      ]);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(auth, asset.id, { isPrivate: true });
+
+      expect(mocks.asset.getStackMembers).toHaveBeenCalledWith(auth.user.id, [asset.id]);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
+        auth.user.id,
+        new Set(['sibling-1']),
+        expect.objectContaining({ privateMode: false }),
+      );
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: true });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: true });
+    });
+
+    it('should unmark every member of the stack private along with the asset', async () => {
+      const asset = AssetFactory.create({ isPrivate: true });
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set([asset.id]))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: asset.id, isPrivate: true },
+        { id: 'sibling-1', isPrivate: true },
+      ]);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(auth, asset.id, { isPrivate: false });
+
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: false });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: false });
+    });
+
+    it('should not look up stack members when the private flag is not part of the update', async () => {
+      const asset = AssetFactory.create();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.update.mockResolvedValue(getForAsset(asset));
+
+      await sut.update(authStub.admin, asset.id, { isFavorite: true });
+
+      expect(mocks.asset.getStackMembers).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
     });
 
     it('should update the exif description', async () => {
@@ -363,6 +478,74 @@ describe(AssetService.name, () => {
     it('should require asset write access for all ids', async () => {
       const auth = AuthFactory.create();
       await expect(sut.updateAll(auth, { ids: ['asset-1'] })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should bulk mark assets private without private mode', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1', 'asset-2']));
+
+      await sut.updateAll(auth, { ids: ['asset-1', 'asset-2'], isPrivate: true });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1', 'asset-2'], { isPrivate: true });
+    });
+
+    it('should bulk mark every member of the affected stacks private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set(['asset-1']))
+        .mockResolvedValueOnce(new Set(['sibling-1', 'sibling-2']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+        { id: 'sibling-2', isPrivate: false },
+      ]);
+
+      await sut.updateAll(auth, { ids: ['asset-1'], isPrivate: true });
+
+      expect(mocks.asset.getStackMembers).toHaveBeenCalledWith(auth.user.id, ['asset-1']);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
+        auth.user.id,
+        new Set(['sibling-1', 'sibling-2']),
+        expect.objectContaining({ privateMode: false }),
+      );
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1'], { isPrivate: true });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1', 'sibling-2'], { isPrivate: true });
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([
+        { name: JobName.SidecarWrite, data: { id: 'asset-1' } },
+        { name: JobName.SidecarWrite, data: { id: 'sibling-1' } },
+        { name: JobName.SidecarWrite, data: { id: 'sibling-2' } },
+      ]);
+    });
+
+    it('should bulk unmark every member of the affected stacks private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set(['asset-1']))
+        .mockResolvedValueOnce(new Set(['sibling-1']));
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: true },
+        { id: 'sibling-1', isPrivate: true },
+      ]);
+
+      await sut.updateAll(auth, { ids: ['asset-1'], isPrivate: false });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1'], { isPrivate: false });
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: false });
+    });
+
+    it('should reject the bulk update when a stack member is not accessible', async () => {
+      const auth = AuthFactory.from().session({ privateMode: false }).build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValueOnce(new Set(['asset-1'])).mockResolvedValueOnce(new Set());
+      mocks.asset.getStackMembers.mockResolvedValue([
+        { id: 'asset-1', isPrivate: false },
+        { id: 'sibling-1', isPrivate: false },
+      ]);
+
+      await expect(sut.updateAll(auth, { ids: ['asset-1'], isPrivate: true })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
     });
 
     it('should update all assets', async () => {
@@ -661,11 +844,10 @@ describe(AssetService.name, () => {
 
       await expect(sut.getOcr(authStub.admin, asset.id)).resolves.toEqual([ocr1, ocr2]);
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        undefined,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.ocr.getByAssetId).toHaveBeenCalledWith(asset.id);
     });
 

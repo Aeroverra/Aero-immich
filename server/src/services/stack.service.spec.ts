@@ -30,10 +30,13 @@ describe(StackService.name, () => {
       mocks.stack.search.mockResolvedValue([getForStack(stack)]);
 
       await sut.search(auth, { primaryAssetId: asset.id });
-      expect(mocks.stack.search).toHaveBeenCalledWith({
-        ownerId: auth.user.id,
-        primaryAssetId: asset.id,
-      });
+      expect(mocks.stack.search).toHaveBeenCalledWith(
+        {
+          ownerId: auth.user.id,
+          primaryAssetId: asset.id,
+        },
+        { privateMode: false, userId: expect.any(String) },
+      );
     });
   });
 
@@ -72,6 +75,33 @@ describe(StackService.name, () => {
         userId: auth.user.id,
       });
       expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+    });
+
+    it('should mark every member private when one member is private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      const [primaryAsset, asset] = [
+        AssetFactory.from().exif().build(),
+        AssetFactory.from({ isPrivate: true }).exif().build(),
+      ];
+      const stack = StackFactory.from()
+        .primaryAsset(primaryAsset, (builder) => builder.exif())
+        .asset(asset, (builder) => builder.exif())
+        .build();
+
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([primaryAsset.id, asset.id]));
+      mocks.stack.create.mockResolvedValue(getForStack(stack));
+
+      await expect(sut.create(auth, { assetIds: [primaryAsset.id, asset.id] })).resolves.toEqual({
+        id: stack.id,
+        primaryAssetId: primaryAsset.id,
+        assets: [
+          expect.objectContaining({ id: primaryAsset.id, isPrivate: true }),
+          expect.objectContaining({ id: asset.id, isPrivate: true }),
+        ],
+      });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith([primaryAsset.id], { isPrivate: true });
     });
   });
 
@@ -90,7 +120,7 @@ describe(StackService.name, () => {
       await expect(sut.get(authStub.admin, 'stack-id')).rejects.toBeInstanceOf(BadRequestException);
 
       expect(mocks.access.stack.checkOwnerAccess).toHaveBeenCalled();
-      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id');
+      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id', { privateMode: false, userId: expect.any(String) });
     });
 
     it('should get stack', async () => {
@@ -110,7 +140,7 @@ describe(StackService.name, () => {
         assets: [expect.objectContaining({ id: primaryAsset.id }), expect.objectContaining({ id: asset.id })],
       });
       expect(mocks.access.stack.checkOwnerAccess).toHaveBeenCalled();
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
     });
   });
 
@@ -129,7 +159,7 @@ describe(StackService.name, () => {
 
       await expect(sut.update(AuthFactory.create(), 'stack-id', {})).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id');
+      expect(mocks.stack.getById).toHaveBeenCalledWith('stack-id', { privateMode: false, userId: expect.any(String) });
       expect(mocks.stack.update).not.toHaveBeenCalled();
       expect(mocks.event.emit).not.toHaveBeenCalled();
     });
@@ -148,7 +178,7 @@ describe(StackService.name, () => {
         BadRequestException,
       );
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
       expect(mocks.stack.update).not.toHaveBeenCalled();
       expect(mocks.event.emit).not.toHaveBeenCalled();
     });
@@ -167,11 +197,15 @@ describe(StackService.name, () => {
 
       await sut.update(auth, stack.id, { primaryAssetId: asset.id });
 
-      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id);
-      expect(mocks.stack.update).toHaveBeenCalledWith(stack.id, {
-        id: stack.id,
-        primaryAssetId: asset.id,
-      });
+      expect(mocks.stack.getById).toHaveBeenCalledWith(stack.id, { privateMode: false, userId: expect.any(String) });
+      expect(mocks.stack.update).toHaveBeenCalledWith(
+        stack.id,
+        {
+          id: stack.id,
+          primaryAssetId: asset.id,
+        },
+        { privateMode: false, userId: expect.any(String) },
+      );
       expect(mocks.event.emit).toHaveBeenCalledWith('StackUpdate', {
         stackId: stack.id,
         userId: auth.user.id,

@@ -4,24 +4,42 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { StackCreateDto, StackResponseDto, StackSearchDto, StackUpdateDto, mapStack } from 'src/dtos/stack.dto';
 import { Permission } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
+import { toPrivateScope } from 'src/utils/access';
 import { findOrFail } from 'src/utils/misc';
 import { UUIDAssetIDParamDto } from 'src/validation';
 
 @Injectable()
 export class StackService extends BaseService {
   async search(auth: AuthDto, dto: StackSearchDto): Promise<StackResponseDto[]> {
-    const stacks = await this.stackRepository.search({
-      ownerId: auth.user.id,
-      primaryAssetId: dto.primaryAssetId,
-    });
+    const stacks = await this.stackRepository.search(
+      {
+        ownerId: auth.user.id,
+        primaryAssetId: dto.primaryAssetId,
+      },
+      toPrivateScope(auth),
+    );
 
-    return stacks.map((stack) => mapStack(stack, { auth }));
+    return (
+      stacks
+        // a stack whose primary asset is hidden by private mode is hidden as a whole
+        .filter((stack) => stack.assets.some(({ id }) => id === stack.primaryAssetId))
+        .map((stack) => mapStack(stack, { auth }))
+    );
   }
 
   async create(auth: AuthDto, dto: StackCreateDto): Promise<StackResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: dto.assetIds });
 
-    const stack = await this.stackRepository.create({ ownerId: auth.user.id }, dto.assetIds);
+    const stack = await this.stackRepository.create({ ownerId: auth.user.id }, dto.assetIds, toPrivateScope(auth));
+
+    // a stack is never half private: one private member makes every member private
+    if (stack.assets.some(({ isPrivate }) => isPrivate)) {
+      const assetIds = stack.assets.filter(({ isPrivate }) => !isPrivate).map(({ id }) => id);
+      await this.assetRepository.updateAll(assetIds, { isPrivate: true });
+      for (const asset of stack.assets) {
+        asset.isPrivate = true;
+      }
+    }
 
     await this.eventRepository.emit('StackCreate', { stackId: stack.id, userId: auth.user.id });
 
@@ -30,18 +48,22 @@ export class StackService extends BaseService {
 
   async get(auth: AuthDto, id: string): Promise<StackResponseDto> {
     await this.requireAccess({ auth, permission: Permission.StackRead, ids: [id] });
-    const stack = await this.findOrFail(id);
+    const stack = await this.findOrFail(id, auth);
     return mapStack(stack, { auth });
   }
 
   async update(auth: AuthDto, id: string, dto: StackUpdateDto): Promise<StackResponseDto> {
     await this.requireAccess({ auth, permission: Permission.StackUpdate, ids: [id] });
-    const stack = await this.findOrFail(id);
+    const stack = await this.findOrFail(id, auth);
     if (dto.primaryAssetId && stack.assets.every(({ id }) => id !== dto.primaryAssetId)) {
       throw new BadRequestException('Primary asset must be in the stack');
     }
 
-    const updatedStack = await this.stackRepository.update(id, { id, primaryAssetId: dto.primaryAssetId });
+    const updatedStack = await this.stackRepository.update(
+      id,
+      { id, primaryAssetId: dto.primaryAssetId },
+      toPrivateScope(auth),
+    );
 
     await this.eventRepository.emit('StackUpdate', { stackId: id, userId: auth.user.id });
 
@@ -78,7 +100,7 @@ export class StackService extends BaseService {
     await this.eventRepository.emit('StackUpdate', { stackId, userId: auth.user.id });
   }
 
-  private findOrFail(id: string) {
-    return findOrFail(() => this.stackRepository.getById(id), 'Asset stack');
+  private findOrFail(id: string, auth: AuthDto) {
+    return findOrFail(() => this.stackRepository.getById(id, toPrivateScope(auth)), 'Asset stack');
   }
 }

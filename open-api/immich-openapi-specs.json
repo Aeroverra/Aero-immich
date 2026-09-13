@@ -2094,6 +2094,15 @@
             }
           },
           {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Only private assets",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "isTrashed",
             "required": false,
             "in": "query",
@@ -2718,7 +2727,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BulkIdsDto"
+                "$ref": "#/components/schemas/AlbumAddAssetsDto"
               }
             }
           },
@@ -4213,6 +4222,15 @@
             "required": false,
             "in": "query",
             "description": "Filter by favorite status",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Only private assets",
             "schema": {
               "type": "boolean"
             }
@@ -5949,6 +5967,98 @@
           }
         ],
         "summary": "Lock auth session",
+        "tags": [
+          "Authentication"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Beta"
+          },
+          {
+            "version": "v2",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-state": "Stable"
+      }
+    },
+    "/auth/session/private-mode": {
+      "delete": {
+        "description": "Turn off private mode for the current session. Assets marked private are hidden again.",
+        "operationId": "disablePrivateMode",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Disable private mode",
+        "tags": [
+          "Authentication"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v1",
+            "state": "Added"
+          },
+          {
+            "version": "v1",
+            "state": "Beta"
+          },
+          {
+            "version": "v2",
+            "state": "Stable"
+          }
+        ],
+        "x-immich-state": "Stable"
+      },
+      "post": {
+        "description": "Turn on private mode for the current session by providing the correct PIN code. While enabled, assets marked private are included in all responses.",
+        "operationId": "enablePrivateMode",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUnlockDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Enable private mode",
         "tags": [
           "Authentication"
         ],
@@ -11504,6 +11614,31 @@
             }
           },
           {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Filter by private status (requires private mode)",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "lensModel",
             "required": false,
             "in": "query",
@@ -15878,6 +16013,15 @@
             }
           },
           {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Only private assets (requires private mode)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "isTrashed",
             "required": false,
             "in": "query",
@@ -16072,6 +16216,15 @@
             "required": false,
             "in": "query",
             "description": "Filter by favorite status (true for favorites only, false for non-favorites only)",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "isPrivate",
+            "required": false,
+            "in": "query",
+            "description": "Only private assets (requires private mode)",
             "schema": {
               "type": "boolean"
             }
@@ -18199,6 +18352,10 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "confirmPrivate": {
+            "description": "Required to be true when the album contains private assets, acknowledging they will be shared",
+            "type": "boolean"
           }
         },
         "required": [
@@ -19428,6 +19585,27 @@
         ],
         "type": "object"
       },
+      "AlbumAddAssetsDto": {
+        "properties": {
+          "confirmPrivate": {
+            "description": "Required to be true when private assets are added to a shared album, acknowledging they will be shared",
+            "type": "boolean"
+          },
+          "ids": {
+            "description": "IDs to process",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
       "AlbumResponseDto": {
         "properties": {
           "albumName": {
@@ -19500,6 +19678,10 @@
             "description": "Activity feed enabled",
             "type": "boolean"
           },
+          "isPrivate": {
+            "description": "Album contains at least one private asset",
+            "type": "boolean"
+          },
           "lastModifiedAssetTimestamp": {
             "description": "Last modified asset timestamp",
             "format": "date-time",
@@ -19533,6 +19715,7 @@
           "hasSharedLink",
           "id",
           "isActivityEnabled",
+          "isPrivate",
           "shared",
           "updatedAt"
         ],
@@ -19646,6 +19829,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "confirmPrivate": {
+            "description": "Required to be true when private assets are added to a shared album, acknowledging they will be shared",
+            "type": "boolean"
           }
         },
         "required": [
@@ -19885,6 +20072,10 @@
           },
           "isFavorite": {
             "description": "Mark as favorite",
+            "type": "boolean"
+          },
+          "isPrivate": {
+            "description": "Mark as private (requires private mode)",
             "type": "boolean"
           },
           "latitude": {
@@ -20945,6 +21136,10 @@
             "description": "Is offline",
             "type": "boolean"
           },
+          "isPrivate": {
+            "description": "Is private",
+            "type": "boolean"
+          },
           "isTrashed": {
             "description": "Is trashed",
             "type": "boolean"
@@ -21070,6 +21265,7 @@
           "isEdited",
           "isFavorite",
           "isOffline",
+          "isPrivate",
           "isTrashed",
           "localDateTime",
           "originalFileName",
@@ -21198,12 +21394,21 @@
           "pinExpiresAt": {
             "description": "PIN expiration date",
             "type": "string"
+          },
+          "privateMode": {
+            "description": "Is private mode enabled for this session",
+            "type": "boolean"
+          },
+          "privateModeExpiresAt": {
+            "description": "Private mode expiration date",
+            "type": "string"
           }
         },
         "required": [
           "isElevated",
           "password",
-          "pinCode"
+          "pinCode",
+          "privateMode"
         ],
         "type": "object"
       },
@@ -21492,6 +21697,10 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "confirmPrivate": {
+            "description": "Required to be true when the album is created with other users and contains private assets, acknowledging they will be shared",
+            "type": "boolean"
           },
           "description": {
             "description": "Album description",
@@ -23537,6 +23746,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "lensModel": {
             "deprecated": true,
             "description": "Filter by lens model",
@@ -25312,6 +25541,49 @@
         ],
         "type": "object"
       },
+      "PrivateModeResponse": {
+        "properties": {
+          "includeInMemories": {
+            "description": "Whether private assets are included in generated memories",
+            "type": "boolean"
+          },
+          "sidebarWeb": {
+            "description": "Whether the private page appears in the web sidebar",
+            "type": "boolean"
+          },
+          "timeoutMinutes": {
+            "description": "Minutes of inactivity before private mode turns off",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "includeInMemories",
+          "sidebarWeb",
+          "timeoutMinutes"
+        ],
+        "type": "object"
+      },
+      "PrivateModeUpdate": {
+        "properties": {
+          "includeInMemories": {
+            "description": "Whether private assets are included in generated memories",
+            "type": "boolean"
+          },
+          "sidebarWeb": {
+            "description": "Whether the private page appears in the web sidebar",
+            "type": "boolean"
+          },
+          "timeoutMinutes": {
+            "description": "Minutes of inactivity before private mode turns off",
+            "maximum": 1440,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "PublicConfigDto": {
         "description": "Configuration properties that are visible to everyone",
         "properties": {
@@ -25935,6 +26207,26 @@
           "isOffline": {
             "deprecated": true,
             "description": "Filter by offline status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
             "type": "boolean",
             "x-immich-history": [
               {
@@ -26758,6 +27050,9 @@
           "isOffline": {
             "$ref": "#/components/schemas/BoolFilter"
           },
+          "isPrivate": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
           "lensModel": {
             "$ref": "#/components/schemas/StringFilterNullable"
           },
@@ -26865,6 +27160,9 @@
             "$ref": "#/components/schemas/BoolFilter"
           },
           "isOffline": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "isPrivate": {
             "$ref": "#/components/schemas/BoolFilter"
           },
           "lensModel": {
@@ -27676,6 +27974,10 @@
             },
             "type": "array"
           },
+          "confirmPrivate": {
+            "description": "Required to be true when the link would expose private assets, acknowledging they will be shared",
+            "type": "boolean"
+          },
           "description": {
             "description": "Link description",
             "nullable": true,
@@ -28129,6 +28431,26 @@
           "isOffline": {
             "deprecated": true,
             "description": "Filter by offline status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
             "type": "boolean",
             "x-immich-history": [
               {
@@ -28914,6 +29236,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "isPrivate": {
+            "deprecated": true,
+            "description": "Filter by private status (requires private mode)",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "lensModel": {
             "deprecated": true,
             "description": "Filter by lens model",
@@ -29658,6 +30000,10 @@
             "description": "Is activity enabled",
             "type": "boolean"
           },
+          "isPrivate": {
+            "description": "Album contains at least one private asset",
+            "type": "boolean"
+          },
           "name": {
             "description": "Album name",
             "type": "string"
@@ -29683,6 +30029,7 @@
           "description",
           "id",
           "isActivityEnabled",
+          "isPrivate",
           "name",
           "order",
           "thumbnailAssetId",
@@ -30477,6 +30824,10 @@
             "description": "Is favorite",
             "type": "boolean"
           },
+          "isPrivate": {
+            "description": "Is private",
+            "type": "boolean"
+          },
           "libraryId": {
             "description": "Library ID",
             "nullable": true,
@@ -30540,6 +30891,7 @@
           "id",
           "isEdited",
           "isFavorite",
+          "isPrivate",
           "libraryId",
           "livePhotoVideoId",
           "localDateTime",
@@ -31570,6 +31922,13 @@
             },
             "type": "array"
           },
+          "isPrivate": {
+            "description": "Array indicating whether each asset is private",
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
           "isTrashed": {
             "description": "Array indicating whether each asset is in the trash",
             "items": {
@@ -31670,6 +32029,7 @@
           "id",
           "isFavorite",
           "isImage",
+          "isPrivate",
           "isTrashed",
           "livePhotoVideoId",
           "localOffsetHours",
@@ -31809,6 +32169,10 @@
           },
           "isFavorite": {
             "description": "Mark as favorite",
+            "type": "boolean"
+          },
+          "isPrivate": {
+            "description": "Mark as private (requires private mode)",
             "type": "boolean"
           },
           "latitude": {
@@ -32634,6 +32998,9 @@
           "people": {
             "$ref": "#/components/schemas/PeopleResponse"
           },
+          "privateMode": {
+            "$ref": "#/components/schemas/PrivateModeResponse"
+          },
           "purchase": {
             "$ref": "#/components/schemas/PurchaseResponse"
           },
@@ -32658,6 +33025,7 @@
           "folders",
           "memories",
           "people",
+          "privateMode",
           "purchase",
           "ratings",
           "recentlyAdded",
@@ -32691,6 +33059,9 @@
           },
           "people": {
             "$ref": "#/components/schemas/PeopleUpdate"
+          },
+          "privateMode": {
+            "$ref": "#/components/schemas/PrivateModeUpdate"
           },
           "purchase": {
             "$ref": "#/components/schemas/PurchaseUpdate"
