@@ -32,6 +32,15 @@ export class StackService extends BaseService {
 
     const stack = await this.stackRepository.create({ ownerId: auth.user.id }, dto.assetIds, toPrivateScope(auth));
 
+    // a stack is never half private: one private member makes every member private
+    if (stack.assets.some(({ isPrivate }) => isPrivate)) {
+      const assetIds = stack.assets.filter(({ isPrivate }) => !isPrivate).map(({ id }) => id);
+      await this.assetRepository.updateAll(assetIds, { isPrivate: true });
+      for (const asset of stack.assets) {
+        asset.isPrivate = true;
+      }
+    }
+
     await this.eventRepository.emit('StackCreate', { stackId: stack.id, userId: auth.user.id });
 
     return mapStack(stack, { auth });

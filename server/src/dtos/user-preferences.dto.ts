@@ -110,6 +110,7 @@ const PrivateModeUpdateSchema = z
   .object({
     timeoutMinutes: z.int().min(1).max(1440).optional().describe('Minutes of inactivity before private mode turns off'),
     sidebarWeb: z.boolean().optional().describe('Whether the private page appears in the web sidebar'),
+    includeInMemories: z.boolean().optional().describe('Whether private assets are included in generated memories'),
   })
   .optional()
   .meta({ id: 'PrivateModeUpdate' });
@@ -220,6 +221,7 @@ const PrivateModeResponseSchema = z
   .object({
     timeoutMinutes: z.int().describe('Minutes of inactivity before private mode turns off'),
     sidebarWeb: z.boolean().describe('Whether the private page appears in the web sidebar'),
+    includeInMemories: z.boolean().describe('Whether private assets are included in generated memories'),
   })
   .meta({ id: 'PrivateModeResponse' });
 

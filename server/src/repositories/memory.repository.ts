@@ -9,8 +9,7 @@ import { AssetOrderWithRandom, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { MemoryTable } from 'src/schema/tables/memory.table';
 import { IBulkAsset } from 'src/types';
-import { PrivateScope } from 'src/utils/database';
-import { withPrivateScope } from 'src/utils/database';
+import { PrivateScope, withPrivateMemoryVisibility, withPrivateScope } from 'src/utils/database';
 
 @Injectable()
 export class MemoryRepository implements IBulkAsset {
@@ -52,11 +51,15 @@ export class MemoryRepository implements IBulkAsset {
   }
 
   @GenerateSql(
-    { params: [DummyValue.UUID, {}] },
-    { name: 'date filter', params: [DummyValue.UUID, { for: DummyValue.DATE }] },
+    { params: [DummyValue.UUID, {}, { privateMode: false, userId: DummyValue.UUID }] },
+    {
+      name: 'date filter',
+      params: [DummyValue.UUID, { for: DummyValue.DATE }, { privateMode: false, userId: DummyValue.UUID }],
+    },
   )
-  statistics(ownerId: string, dto: MemorySearchDto) {
+  statistics(ownerId: string, dto: MemorySearchDto, scope: PrivateScope) {
     return this.searchBuilder(ownerId, dto)
+      .$call(withPrivateMemoryVisibility(scope))
       .select((qb) => qb.fn.countAll<number>().as('total'))
       .executeTakeFirstOrThrow();
   }
@@ -78,6 +81,7 @@ export class MemoryRepository implements IBulkAsset {
   )
   search(ownerId: string, dto: MemorySearchDto, scope: PrivateScope) {
     return this.searchBuilder(ownerId, dto)
+      .$call(withPrivateMemoryVisibility(scope))
       .select((eb) =>
         jsonArrayFrom(
           eb
@@ -126,7 +130,7 @@ export class MemoryRepository implements IBulkAsset {
 
   @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
   get(id: string, scope: PrivateScope) {
-    return this.getByIdBuilder(id, scope).executeTakeFirst();
+    return this.getByIdBuilder(id, scope).$call(withPrivateMemoryVisibility(scope)).executeTakeFirst();
   }
 
   async create(memory: Insertable<MemoryTable>, assetIds: Set<string>) {

@@ -8,6 +8,16 @@ from
 where
   "deletedAt" is null
   and "ownerId" = $1
+  and not exists (
+    select
+      $2 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $3
+  )
 
 -- MemoryRepository.statistics (date filter)
 select
@@ -25,6 +35,16 @@ where
   )
   and "deletedAt" is null
   and "ownerId" = $3
+  and not exists (
+    select
+      $4 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $5
+  )
 
 -- MemoryRepository.search
 select
@@ -64,6 +84,16 @@ from
 where
   "deletedAt" is null
   and "ownerId" = $4
+  and not exists (
+    select
+      $5 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $6
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -114,6 +144,16 @@ where
   )
   and "deletedAt" is null
   and "ownerId" = $6
+  and not exists (
+    select
+      $7 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $8
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -157,6 +197,16 @@ where
   "showAt" > $4
   and "deletedAt" is null
   and "ownerId" = $5
+  and not exists (
+    select
+      $6 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $7
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -203,6 +253,16 @@ where
   )
   and "deletedAt" is null
   and "ownerId" = $5
+  and not exists (
+    select
+      $6 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $7
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -234,6 +294,16 @@ from
 where
   "id" = $2
   and "deletedAt" is null
+  and not exists (
+    select
+      $3 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $4
+  )
 
 -- MemoryRepository.update
 update "memory"

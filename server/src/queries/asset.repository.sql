@@ -137,19 +137,20 @@ with
           (asset."localDateTime" at time zone 'UTC')::date = today.date
           and "asset"."ownerId" = any ($4::uuid[])
           and "asset"."visibility" = $5
+          and "asset"."isPrivate" = $6
           and exists (
             select
             from
               "asset_file"
             where
               "assetId" = "asset"."id"
-              and "asset_file"."type" = $6
+              and "asset_file"."type" = $7
           )
           and "asset"."deletedAt" is null
         order by
           (asset."localDateTime" at time zone 'UTC')::date desc
         limit
-          $7
+          $8
       ) as "a" on true
   )
 select
@@ -164,6 +165,24 @@ group by
   ("localDateTime" at time zone 'UTC')::date
 order by
   ("localDateTime" at time zone 'UTC')::date desc
+
+-- AssetRepository.getStackMembers
+select
+  "asset"."id",
+  "asset"."isPrivate"
+from
+  "asset"
+where
+  "asset"."ownerId" = $1
+  and "asset"."stackId" in (
+    select
+      "target"."stackId"
+    from
+      "asset" as "target"
+    where
+      "target"."id" = any ($2::uuid[])
+      and "target"."stackId" is not null
+  )
 
 -- AssetRepository.getByIds
 select

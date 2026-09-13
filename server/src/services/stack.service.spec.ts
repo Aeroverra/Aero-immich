@@ -75,6 +75,33 @@ describe(StackService.name, () => {
         userId: auth.user.id,
       });
       expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+    });
+
+    it('should mark every member private when one member is private', async () => {
+      const auth = AuthFactory.from().session({ privateMode: true }).build();
+      const [primaryAsset, asset] = [
+        AssetFactory.from().exif().build(),
+        AssetFactory.from({ isPrivate: true }).exif().build(),
+      ];
+      const stack = StackFactory.from()
+        .primaryAsset(primaryAsset, (builder) => builder.exif())
+        .asset(asset, (builder) => builder.exif())
+        .build();
+
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([primaryAsset.id, asset.id]));
+      mocks.stack.create.mockResolvedValue(getForStack(stack));
+
+      await expect(sut.create(auth, { assetIds: [primaryAsset.id, asset.id] })).resolves.toEqual({
+        id: stack.id,
+        primaryAssetId: primaryAsset.id,
+        assets: [
+          expect.objectContaining({ id: primaryAsset.id, isPrivate: true }),
+          expect.objectContaining({ id: asset.id, isPrivate: true }),
+        ],
+      });
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith([primaryAsset.id], { isPrivate: true });
     });
   });
 

@@ -25,11 +25,13 @@ import {
   getAuthStatus,
   getDownloadInfo,
   getMapMarkers,
+  getMemory,
   getMyPreferences,
   getMySharedLink,
   getTimeBucket,
   getTimeBuckets,
   getUniqueOriginalPaths,
+  memoriesStatistics,
   removeAssetFromAlbum,
   searchAssetStatistics,
   searchMemories,
@@ -226,18 +228,31 @@ describe('private mode', () => {
     });
   });
 
-  describe('PUT /users/me/preferences (privateMode.timeoutMinutes)', () => {
-    it('should default to 30 minutes', async () => {
+  describe('PUT /users/me/preferences (privateMode)', () => {
+    it('should default to 30 minutes, the sidebar link and no private memories', async () => {
       const preferences = await getMyPreferences(asAuth(user2.accessToken));
-      expect(preferences.privateMode).toEqual({ timeoutMinutes: 30 });
+      expect(preferences.privateMode).toEqual({ timeoutMinutes: 30, sidebarWeb: true, includeInMemories: false });
+    });
+
+    it('should round trip includeInMemories', async () => {
+      const updated = await utils.updateMyPreferences(user2.accessToken, {
+        privateMode: { includeInMemories: true },
+      });
+      expect(updated.privateMode).toMatchObject({ includeInMemories: true });
+
+      const preferences = await getMyPreferences(asAuth(user2.accessToken));
+      expect(preferences.privateMode).toMatchObject({ includeInMemories: true });
+
+      const reset = await utils.updateMyPreferences(user2.accessToken, { privateMode: { includeInMemories: false } });
+      expect(reset.privateMode).toMatchObject({ includeInMemories: false });
     });
 
     it('should round trip a valid timeout and apply it to the next enable', async () => {
       const updated = await utils.updateMyPreferences(user2.accessToken, { privateMode: { timeoutMinutes: 1 } });
-      expect(updated.privateMode).toEqual({ timeoutMinutes: 1 });
+      expect(updated.privateMode).toMatchObject({ timeoutMinutes: 1 });
 
       const preferences = await getMyPreferences(asAuth(user2.accessToken));
-      expect(preferences.privateMode).toEqual({ timeoutMinutes: 1 });
+      expect(preferences.privateMode).toMatchObject({ timeoutMinutes: 1 });
 
       await enable(user2.accessToken);
       const status = await getAuthStatus(asAuth(user2.accessToken));
@@ -248,7 +263,7 @@ describe('private mode', () => {
       await disable(user2.accessToken);
 
       const reset = await utils.updateMyPreferences(user2.accessToken, { privateMode: { timeoutMinutes: 30 } });
-      expect(reset.privateMode).toEqual({ timeoutMinutes: 30 });
+      expect(reset.privateMode).toMatchObject({ timeoutMinutes: 30 });
     });
 
     it('should reject 0 minutes', async () => {
@@ -267,7 +282,86 @@ describe('private mode', () => {
       expect(status).toBe(400);
 
       const preferences = await getMyPreferences(asAuth(user2.accessToken));
-      expect(preferences.privateMode).toEqual({ timeoutMinutes: 30 });
+      expect(preferences.privateMode).toMatchObject({ timeoutMinutes: 30 });
+    });
+  });
+
+  describe('PUT /assets (isPrivate on a stack)', () => {
+    it('should apply the private flag to every member of the stack', async () => {
+      const [primary, secondary] = await Promise.all([
+        utils.createAsset(user1.accessToken),
+        utils.createAsset(user1.accessToken),
+      ]);
+      const stack = await utils.createStack(user1.accessToken, [primary.id, secondary.id]);
+      expect(stack.assets).toHaveLength(2);
+
+      // marking one member marks the whole stack, and the stack vanishes from this session
+      await markPrivate(user1.accessToken, secondary.id);
+      for (const { id } of [primary, secondary]) {
+        const hidden = await request(app).get(`/assets/${id}`).set('Authorization', `Bearer ${user1.accessToken}`);
+        expect(hidden.status).toBe(400);
+      }
+      const stacks = await searchStacks({ primaryAssetId: primary.id }, asAuth(user1.accessToken));
+      expect(stacks).toEqual([]);
+
+      await enable(user1.accessToken);
+      const [privatePrimary, privateSecondary] = await Promise.all([
+        getAssetInfo({ id: primary.id }, asAuth(user1.accessToken)),
+        getAssetInfo({ id: secondary.id }, asAuth(user1.accessToken)),
+      ]);
+      expect(privatePrimary.isPrivate).toBe(true);
+      expect(privateSecondary.isPrivate).toBe(true);
+
+      // unmarking one member unmarks the whole stack
+      await updateAsset({ id: primary.id, updateAssetDto: { isPrivate: false } }, asAuth(user1.accessToken));
+      await disable(user1.accessToken);
+      const [plainPrimary, plainSecondary] = await Promise.all([
+        getAssetInfo({ id: primary.id }, asAuth(user1.accessToken)),
+        getAssetInfo({ id: secondary.id }, asAuth(user1.accessToken)),
+      ]);
+      expect(plainPrimary.isPrivate).toBe(false);
+      expect(plainSecondary.isPrivate).toBe(false);
+    });
+
+    it('should apply the private flag to every member of the stack on a bulk update', async () => {
+      const [primary, secondary] = await Promise.all([
+        utils.createAsset(user1.accessToken),
+        utils.createAsset(user1.accessToken),
+      ]);
+      await utils.createStack(user1.accessToken, [primary.id, secondary.id]);
+
+      await updateAssets({ assetBulkUpdateDto: { ids: [secondary.id], isPrivate: true } }, asAuth(user1.accessToken));
+
+      await enable(user1.accessToken);
+      const [privatePrimary, privateSecondary] = await Promise.all([
+        getAssetInfo({ id: primary.id }, asAuth(user1.accessToken)),
+        getAssetInfo({ id: secondary.id }, asAuth(user1.accessToken)),
+      ]);
+      expect(privatePrimary.isPrivate).toBe(true);
+      expect(privateSecondary.isPrivate).toBe(true);
+
+      await updateAssets({ assetBulkUpdateDto: { ids: [primary.id], isPrivate: false } }, asAuth(user1.accessToken));
+      const [plainPrimary, plainSecondary] = await Promise.all([
+        getAssetInfo({ id: primary.id }, asAuth(user1.accessToken)),
+        getAssetInfo({ id: secondary.id }, asAuth(user1.accessToken)),
+      ]);
+      expect(plainPrimary.isPrivate).toBe(false);
+      expect(plainSecondary.isPrivate).toBe(false);
+    });
+
+    it('should mark every member private when a stack is created with a private member', async () => {
+      const [plain, hidden] = await Promise.all([
+        utils.createAsset(user1.accessToken),
+        utils.createAsset(user1.accessToken),
+      ]);
+      await enable(user1.accessToken);
+      await markPrivate(user1.accessToken, hidden.id);
+
+      const stack = await utils.createStack(user1.accessToken, [plain.id, hidden.id]);
+      expect(stack.assets.map(({ isPrivate }) => isPrivate)).toEqual([true, true]);
+
+      const info = await getAssetInfo({ id: plain.id }, asAuth(user1.accessToken));
+      expect(info.isPrivate).toBe(true);
     });
   });
 
@@ -647,6 +741,37 @@ describe('private mode', () => {
       const memory = memories.find(({ id }) => id === memoryId);
       expect(memory).toBeDefined();
       expect(memory!.assets.map(({ id }) => id)).toEqual([privateAsset.id]);
+    });
+
+    it('should hide a memory with one private asset as a whole with the mode off', async () => {
+      await enable(user1.accessToken);
+      const mixed = await createMemory(
+        {
+          memoryCreateDto: {
+            type: MemoryType.OnThisDay,
+            data: { year: 2021 },
+            memoryAt: bucketDate,
+            assetIds: [plainAsset.id, privateAsset.id],
+          },
+        },
+        asAuth(user1.accessToken),
+      );
+      expect(mixed.assets).toHaveLength(2);
+      const onCount = await memoriesStatistics({}, asAuth(user1.accessToken));
+      await disable(user1.accessToken);
+
+      const memories = await searchMemories({}, asAuth(user1.accessToken));
+      expect(memories.map(({ id }) => id)).not.toContain(mixed.id);
+      const { status } = await request(app)
+        .get(`/memories/${mixed.id}`)
+        .set('Authorization', `Bearer ${user1.accessToken}`);
+      expect(status).toBe(400);
+      const offCount = await memoriesStatistics({}, asAuth(user1.accessToken));
+      expect(offCount.total).toBe(onCount.total - 2);
+
+      await enable(user1.accessToken);
+      const visible = await getMemory({ id: mixed.id }, asAuth(user1.accessToken));
+      expect(visible.assets).toHaveLength(2);
     });
   });
 
