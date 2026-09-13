@@ -126,7 +126,7 @@ describe(SyncEntityType.AssetV2, () => {
     const { auth, ctx } = await setup();
     const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
 
-    const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+    const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2], false, true);
     expect(response).toEqual([
       {
         ack: expect.any(String),
@@ -135,5 +135,82 @@ describe(SyncEntityType.AssetV2, () => {
       },
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should leave a private asset out of the stream for a client that did not opt in', async () => {
+      const { auth, ctx } = await setup();
+      await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+
+      const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(response.map(({ type }) => type)).not.toContain(SyncEntityType.AssetV2);
+
+      await ctx.syncAckAll(auth, response);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+    });
+
+    it('should carry a private asset for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetsV2], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: asset.id, isPrivate: true }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+
+    it('should send a delete when an asset becomes private, and the asset again when it becomes public', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id });
+      const assetRepo = ctx.get(AssetRepository);
+
+      const initial = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(initial).toEqual([
+        expect.objectContaining({ type: SyncEntityType.AssetV2, data: expect.objectContaining({ id: asset.id }) }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, initial);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: true });
+      const hidden = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(hidden).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: SyncEntityType.AssetDeleteV1, data: { assetId: asset.id } }),
+        ]),
+      );
+      expect(hidden.map(({ type }) => type)).not.toContain(SyncEntityType.AssetV2);
+      await ctx.syncAckAll(auth, hidden);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: asset.id, isPrivate: false }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+    });
+
+    it('should keep sending a private asset as an upsert to a client that opted in when it changes', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id });
+      const assetRepo = ctx.get(AssetRepository);
+      await ctx.syncAckAll(auth, await ctx.syncStream(auth, [SyncRequestType.AssetsV2], false, true));
+
+      await assetRepo.updateAll([asset.id], { isPrivate: true });
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetsV2], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: asset.id, isPrivate: true }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
