@@ -690,6 +690,8 @@ export type PeopleResponse = {
     sidebarWeb: boolean;
 };
 export type PrivateModeResponse = {
+    /** Whether the private page appears in the web sidebar */
+    sidebarWeb: boolean;
     /** Minutes of inactivity before private mode turns off */
     timeoutMinutes: number;
 };
@@ -781,6 +783,8 @@ export type PeopleUpdate = {
     sidebarWeb?: boolean;
 };
 export type PrivateModeUpdate = {
+    /** Whether the private page appears in the web sidebar */
+    sidebarWeb?: boolean;
     /** Minutes of inactivity before private mode turns off */
     timeoutMinutes?: number;
 };

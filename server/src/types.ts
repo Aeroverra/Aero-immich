@@ -600,6 +600,7 @@ export type UserPreferences = {
   };
   privateMode: {
     timeoutMinutes: number;
+    sidebarWeb: boolean;
   };
 };
 
