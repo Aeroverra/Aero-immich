@@ -18,6 +18,7 @@ class AlbumApiRepository extends ApiRepository {
     UserDto owner, {
     required Iterable<String> assetIds,
     String? description,
+    bool confirmPrivate = false,
   }) async {
     final responseDto = await checkNull(
       _api.createAlbum(
@@ -27,6 +28,7 @@ class AlbumApiRepository extends ApiRepository {
               ? const Optional.absent()
               : Optional.present(description.isEmpty ? null : description),
           assetIds: Optional.present(assetIds.toList()),
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
         ),
       ),
     );
@@ -52,9 +54,17 @@ class AlbumApiRepository extends ApiRepository {
     String albumId,
     Iterable<String> assetIds, {
     Future<void>? abortTrigger,
+    bool confirmPrivate = false,
   }) async {
     final response = await checkNull(
-      _api.addAssetsToAlbum(albumId, BulkIdsDto(ids: assetIds.toList()), abortTrigger: abortTrigger),
+      _api.addAssetsToAlbum(
+        albumId,
+        AlbumAddAssetsDto(
+          ids: assetIds.toList(),
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
+        ),
+        abortTrigger: abortTrigger,
+      ),
     );
     final List<String> added = [];
     final List<String> failed = [];

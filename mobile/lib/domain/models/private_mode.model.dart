@@ -12,6 +12,10 @@ class PrivateModeFilter {
 
   static const off = PrivateModeFilter(enabled: false);
 
+  /// Shows private albums and their assets regardless of the session state. Only for background
+  /// work that must see the full album list (the linked album backup), never for anything rendered.
+  static const all = PrivateModeFilter(enabled: true);
+
   bool get showsOwnPrivate => enabled && userId != null;
 
   @override

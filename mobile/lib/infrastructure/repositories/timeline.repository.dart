@@ -215,19 +215,31 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
   }) {
+    // A private album is hidden as a whole while the mode is off: no album row, no buckets
+    final visibleAlbum = _db.remoteAlbumEntity.select()
+      ..where((row) => row.id.equals(albumId) & row.privateFilter(privateFilter));
+
     if (groupBy == GroupAssetsBy.none) {
       final visibleAssetIds = _db.remoteAssetEntity.selectOnly()
         ..addColumns([_db.remoteAssetEntity.id])
         ..where(_db.remoteAssetEntity.albumPrivateFilter(privateFilter));
-      return _db.remoteAlbumAssetEntity
-          .count(where: (row) => row.albumId.equals(albumId) & row.assetId.isInQuery(visibleAssetIds))
-          .map(_generateBuckets)
+      return visibleAlbum
           .watch()
-          .map((results) => results.isNotEmpty ? results.first : const <Bucket>[])
+          .switchMap((albums) {
+            if (albums.isEmpty) {
+              return Stream.value(const <Bucket>[]);
+            }
+
+            return _db.remoteAlbumAssetEntity
+                .count(where: (row) => row.albumId.equals(albumId) & row.assetId.isInQuery(visibleAssetIds))
+                .map(_generateBuckets)
+                .watch()
+                .map((results) => results.isNotEmpty ? results.first : const <Bucket>[]);
+          })
           .handleError((error) => const <Bucket>[]);
     }
 
-    return (_db.remoteAlbumEntity.select()..where((row) => row.id.equals(albumId)))
+    return visibleAlbum
         .watch()
         .switchMap((albums) {
           if (albums.isEmpty) {
@@ -278,9 +290,12 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
   }) async {
-    final albumData = await (_db.remoteAlbumEntity.select()..where((row) => row.id.equals(albumId))).getSingleOrNull();
+    final albumData =
+        await (_db.remoteAlbumEntity.select()
+              ..where((row) => row.id.equals(albumId) & row.privateFilter(privateFilter)))
+            .getSingleOrNull();
 
-    // If album doesn't exist (was deleted), return empty list
+    // If album doesn't exist (was deleted) or is private while the mode is off, return empty list
     if (albumData == null) {
       return const <BaseAsset>[];
     }
