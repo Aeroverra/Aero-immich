@@ -25564,6 +25564,10 @@
       },
       "PrivateModeResponse": {
         "properties": {
+          "sidebarWeb": {
+            "description": "Whether the private page appears in the web sidebar",
+            "type": "boolean"
+          },
           "timeoutMinutes": {
             "description": "Minutes of inactivity before private mode turns off",
             "maximum": 9007199254740991,
@@ -25572,12 +25576,17 @@
           }
         },
         "required": [
+          "sidebarWeb",
           "timeoutMinutes"
         ],
         "type": "object"
       },
       "PrivateModeUpdate": {
         "properties": {
+          "sidebarWeb": {
+            "description": "Whether the private page appears in the web sidebar",
+            "type": "boolean"
+          },
           "timeoutMinutes": {
             "description": "Minutes of inactivity before private mode turns off",
             "maximum": 1440,
