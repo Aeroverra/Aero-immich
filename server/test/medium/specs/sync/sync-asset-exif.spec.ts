@@ -105,7 +105,7 @@ describe(SyncRequestType.AssetExifsV1, () => {
       await ctx.syncAckAll(auth, await ctx.syncStream(auth, [SyncRequestType.AssetExifsV1]));
 
       await assetRepo.updateAll([asset.id], { isPrivate: false });
-      await assetRepo.touchExif([asset.id]);
+      await assetRepo.touchPrivateRelations([asset.id]);
 
       await expect(ctx.syncStream(auth, [SyncRequestType.AssetExifsV1])).resolves.toEqual([
         expect.objectContaining({
