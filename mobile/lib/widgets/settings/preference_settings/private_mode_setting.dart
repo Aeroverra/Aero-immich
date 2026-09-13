@@ -5,7 +5,8 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
-import 'package:immich_ui/immich_ui.dart';
+import 'package:immich_mobile/widgets/settings/setting_group_title.dart';
+import 'package:immich_mobile/widgets/settings/setting_list_tile.dart';
 import 'package:logging/logging.dart';
 
 const int kPrivateModeTimeoutMin = 1;
