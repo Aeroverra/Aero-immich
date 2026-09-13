@@ -131,6 +131,10 @@ export class AssetService extends BaseService {
 
     if (rest.isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate: rest.isPrivate });
+      await this.eventRepository.emit('AssetPrivateUpdateAll', {
+        assetIds: [id, ...stackMemberIds],
+        userId: auth.user.id,
+      });
     }
 
     if (previousMotion && asset) {
@@ -202,6 +206,10 @@ export class AssetService extends BaseService {
 
     if (isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate });
+      await this.eventRepository.emit('AssetPrivateUpdateAll', {
+        assetIds: [...ids, ...stackMemberIds],
+        userId: auth.user.id,
+      });
     }
 
     if (visibility === AssetVisibility.Locked) {

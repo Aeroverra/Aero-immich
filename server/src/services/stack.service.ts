@@ -35,7 +35,10 @@ export class StackService extends BaseService {
     // a stack is never half private: one private member makes every member private
     if (stack.assets.some(({ isPrivate }) => isPrivate)) {
       const assetIds = stack.assets.filter(({ isPrivate }) => !isPrivate).map(({ id }) => id);
-      await this.assetRepository.updateAll(assetIds, { isPrivate: true });
+      if (assetIds.length > 0) {
+        await this.assetRepository.updateAll(assetIds, { isPrivate: true });
+        await this.eventRepository.emit('AssetPrivateUpdateAll', { assetIds, userId: auth.user.id });
+      }
       for (const asset of stack.assets) {
         asset.isPrivate = true;
       }

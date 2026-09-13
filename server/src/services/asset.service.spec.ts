@@ -260,6 +260,10 @@ describe(AssetService.name, () => {
       );
       expect(mocks.asset.update).toHaveBeenCalledWith({ id: asset.id, isPrivate: true });
       expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1'], { isPrivate: true });
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetPrivateUpdateAll', {
+        assetIds: [asset.id, 'sibling-1'],
+        userId: auth.user.id,
+      });
     });
 
     it('should unmark every member of the stack private along with the asset', async () => {
@@ -291,6 +295,7 @@ describe(AssetService.name, () => {
 
       expect(mocks.asset.getStackMembers).not.toHaveBeenCalled();
       expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalledWith('AssetPrivateUpdateAll', expect.anything());
     });
 
     it('should update the exif description', async () => {
@@ -510,6 +515,10 @@ describe(AssetService.name, () => {
       );
       expect(mocks.asset.updateAll).toHaveBeenCalledWith(['asset-1'], { isPrivate: true });
       expect(mocks.asset.updateAll).toHaveBeenCalledWith(['sibling-1', 'sibling-2'], { isPrivate: true });
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetPrivateUpdateAll', {
+        assetIds: ['asset-1', 'sibling-1', 'sibling-2'],
+        userId: auth.user.id,
+      });
       expect(mocks.job.queueAll).toHaveBeenCalledWith([
         { name: JobName.SidecarWrite, data: { id: 'asset-1' } },
         { name: JobName.SidecarWrite, data: { id: 'sibling-1' } },

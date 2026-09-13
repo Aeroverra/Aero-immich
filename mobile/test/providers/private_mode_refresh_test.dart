@@ -146,10 +146,12 @@ void main() {
       () => albumService.watchDateRange(any(), privateFilter: any(named: 'privateFilter')),
     ).thenAnswer((_) => Stream.value((DateTime(2026), DateTime(2026))));
     // a private album exists for the session only while the mode is on
-    when(() => albumService.get('album-1', privateFilter: any(named: 'privateFilter'))).thenAnswer(
-      (invocation) async => (invocation.namedArguments[#privateFilter] as PrivateModeFilter).enabled
-          ? RemoteAlbumFactory.create(id: 'album-1')
-          : null,
+    when(() => albumService.watchAlbum('album-1', privateFilter: any(named: 'privateFilter'))).thenAnswer(
+      (invocation) => Stream.value(
+        (invocation.namedArguments[#privateFilter] as PrivateModeFilter).enabled
+            ? RemoteAlbumFactory.create(id: 'album-1')
+            : null,
+      ),
     );
 
     final drift = MockDrift();
