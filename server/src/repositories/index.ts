@@ -4,6 +4,7 @@ import { AlbumUserRepository } from 'src/repositories/album-user.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { ApiKeyRepository } from 'src/repositories/api-key.repository';
 import { AppRepository } from 'src/repositories/app.repository';
+import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
@@ -62,6 +63,7 @@ export const repositories = [
   ApiKeyRepository,
   AppRepository,
   AssetRepository,
+  AssetDeletedChecksumRepository,
   AssetEditRepository,
   AssetFileRepository,
   AssetJobRepository,
