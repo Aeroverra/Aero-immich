@@ -411,6 +411,7 @@ describe(AssetService.name, () => {
 
     it('should mark an asset private outside private mode and hide it until the mode is on', async () => {
       const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
       ctx.getMock(JobRepository).queue.mockResolvedValue();
       const { user } = await ctx.newUser();
       const { asset } = await ctx.newAsset({ ownerId: user.id });
@@ -523,6 +524,7 @@ describe(AssetService.name, () => {
   describe('update (stacks)', () => {
     it('should apply the private flag to every member of the stack', async () => {
       const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
       ctx.getMock(JobRepository).queue.mockResolvedValue();
       const { user } = await ctx.newUser();
       const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
@@ -548,11 +550,54 @@ describe(AssetService.name, () => {
       expect(await flags()).toEqual([primary.id, sibling.id].sort().map((id) => ({ id, isPrivate: false })));
       await expect(sut.get(off, sibling.id)).resolves.toMatchObject({ id: sibling.id, isPrivate: false });
     });
+
+    it('should bump every member and the album holding one of them, and tell the clients', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: inAlbum } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: loose } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: inAlbum.id, make: 'Canon' });
+      await ctx.newExif({ assetId: loose.id, make: 'Canon' });
+      const { album } = await ctx.newAlbum({ ownerId: user.id }, [inAlbum.id]);
+      await ctx.newStack({ ownerId: user.id }, [inAlbum.id, loose.id]);
+      const snapshot = async () => ({
+        assets: await ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate', 'updateId'])
+          .where('id', 'in', [inAlbum.id, loose.id])
+          .orderBy('id')
+          .execute(),
+        album: await ctx.database
+          .selectFrom('album')
+          .select(['isPrivate', 'updateId'])
+          .where('id', '=', album.id)
+          .executeTakeFirstOrThrow(),
+      });
+      const before = await snapshot();
+
+      // marking the member outside the album flags its stack sibling, and the album follows the sibling
+      await sut.update(factory.auth({ user }), loose.id, { isPrivate: true });
+
+      const after = await snapshot();
+      expect(after.assets.map(({ isPrivate }) => isPrivate)).toEqual([true, true]);
+      for (const [index, asset] of after.assets.entries()) {
+        expect(asset.updateId > before.assets[index].updateId).toBe(true);
+      }
+      expect(after.album.isPrivate).toBe(true);
+      expect(after.album.updateId > before.album.updateId).toBe(true);
+      expect(ctx.getMock(EventRepository).emit).toHaveBeenCalledWith('AssetPrivateUpdateAll', {
+        assetIds: [loose.id, inAlbum.id],
+        userId: user.id,
+      });
+    });
   });
 
   describe('updateAll', () => {
     it('should apply the private flag to every member of the affected stacks', async () => {
       const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       const { user } = await ctx.newUser();
       const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
@@ -587,6 +632,7 @@ describe(AssetService.name, () => {
 
     it('should bulk mark assets private outside private mode and hide them until the mode is on', async () => {
       const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       const { user } = await ctx.newUser();
       const { asset: first } = await ctx.newAsset({ ownerId: user.id });

@@ -320,11 +320,14 @@ final remoteAlbumDateRangeProvider = StreamProvider.autoDispose.family<(DateTime
 });
 
 /// Whether the album can be shown in this session. A private album is hidden as a whole while
-/// private mode is off, so this flips to false when the mode turns off on an open album page.
-final remoteAlbumVisibleProvider = FutureProvider.autoDispose.family<bool, String>((ref, albumId) async {
+/// private mode is off, so this flips to false when the mode turns off on an open album page, or
+/// when a sync marks the album private (it follows its assets) while the mode is off.
+final remoteAlbumVisibleProvider = StreamProvider.autoDispose.family<bool, String>((ref, albumId) {
   final privateFilter = ref.watch(privateModeFilterProvider);
-  final album = await ref.watch(remoteAlbumServiceProvider).get(albumId, privateFilter: privateFilter);
-  return album != null;
+  return ref
+      .watch(remoteAlbumServiceProvider)
+      .watchAlbum(albumId, privateFilter: privateFilter)
+      .map((album) => album != null);
 });
 
 final remoteAlbumSharedUsersProvider = FutureProvider.autoDispose.family<List<UserDto>, String>((ref, albumId) async {
