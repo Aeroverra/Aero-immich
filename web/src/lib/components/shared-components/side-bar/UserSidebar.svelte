@@ -116,7 +116,7 @@
 
   <NavbarItem title={$t('locked_folder')} href={Route.locked()} icon={mdiLockOutline} activeIcon={mdiLock} />
 
-  {#if privateModeManager.enabled}
+  {#if authManager.preferences.privateMode.sidebarWeb && privateModeManager.enabled}
     <NavbarItem
       title={$t('private_photos')}
       href={Route.private()}
