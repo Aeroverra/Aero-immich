@@ -91,7 +91,7 @@ describe('fileUploader error handling', () => {
   });
 
   describe('uploading into a shared album', () => {
-    const album = albumFactory.build({ id: 'album-1', shared: true });
+    const album = albumFactory.build({ id: 'album-1', shared: true, isPrivate: false, assetCount: 2 });
     const duplicateResponse = { id: 'existing-asset', status: AssetMediaStatus.Duplicate } as AssetMediaResponseDto;
 
     beforeEach(() => {
@@ -107,11 +107,12 @@ describe('fileUploader error handling', () => {
 
       await fileUploadHandler({ files: [mockFile], albumId: album.id });
 
-      expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith({
-        title: 'private_mode',
-        prompt: 'share_private_assets_album_confirmation',
-        confirmText: 'add',
-      });
+      expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          prompt: 'add_to_album_private_prompt add_to_album_shared_private_prompt',
+          confirmText: 'add_to_album_private_confirm',
+        }),
+      );
       expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ id: album.id, albumAddAssetsDto: { ids: ['existing-asset'], confirmPrivate: true } }),
       );
@@ -129,15 +130,21 @@ describe('fileUploader error handling', () => {
       );
     });
 
-    it('does not ask when the album is not shared', async () => {
-      sdkMock.getAlbumInfo.mockResolvedValue(albumFactory.build({ id: album.id, shared: false, hasSharedLink: false }));
+    it('asks about a public album turning private even when it is not shared', async () => {
+      sdkMock.getAlbumInfo.mockResolvedValue(
+        albumFactory.build({ id: album.id, shared: false, hasSharedLink: false, isPrivate: false, assetCount: 2 }),
+      );
+      sdkMock.getAssetInfo.mockResolvedValue(assetFactory.build({ id: 'existing-asset', isPrivate: true }));
       vi.spyOn(utils, 'uploadRequest').mockResolvedValue({ status: 200, data: duplicateResponse });
 
       await fileUploadHandler({ files: [mockFile], albumId: album.id });
 
-      expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
-      expect(modalManager.showDialog).not.toHaveBeenCalled();
-      expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledOnce();
+      expect(modalManager.showDialog).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ prompt: 'add_to_album_private_prompt' }),
+      );
+      expect(sdkMock.addAssetsToAlbum).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ albumAddAssetsDto: { ids: ['existing-asset'], confirmPrivate: true } }),
+      );
     });
   });
 });
