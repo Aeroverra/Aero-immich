@@ -2,7 +2,8 @@ import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthSharedLink } from 'src/database';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { AlbumUserRole, Permission } from 'src/enum';
-import { AccessRepository } from 'src/repositories/access.repository';
+import { AccessRepository, type AssetAccessOptions } from 'src/repositories/access.repository';
+import { PrivateScope } from 'src/utils/database';
 import { areSetsEqual, isSetSuperset, setDifference, setUnion } from 'src/utils/set';
 
 export type GrantedRequest = {
@@ -97,13 +98,18 @@ const checkSharedLinkAccess = async (
   }
 };
 
+const toAssetAccessOptions = (auth: AuthDto): AssetAccessOptions => ({
+  hasElevatedPermission: !!auth.session?.hasElevatedPermission,
+  privateMode: !!auth.session?.privateMode,
+});
+
 const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRequest): Promise<Set<string>> => {
   const { auth, permission, ids } = request;
 
   switch (permission) {
     // uses album id
     case Permission.ActivityCreate: {
-      return await access.activity.checkCreateAccess(auth.user.id, ids);
+      return await access.activity.checkCreateAccess(auth.user.id, ids, isPrivateMode(auth));
     }
 
     // uses activity id
@@ -114,125 +120,146 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
     }
 
     case Permission.AssetRead: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
-      const isAlbum = await access.asset.checkAlbumAccess(auth.user.id, setDifference(ids, isOwner));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isAlbum = await access.asset.checkAlbumAccess(
+        auth.user.id,
+        setDifference(ids, isOwner),
+        isPrivateMode(auth),
+      );
       const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
     case Permission.AssetShare: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, false);
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, {
+        hasElevatedPermission: false,
+        privateMode: isPrivateMode(auth),
+      });
       const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner));
       return setUnion(isOwner, isPartner);
     }
 
     case Permission.AssetFileDownload: {
-      return access.assetFile.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetView: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
-      const isAlbum = await access.asset.checkAlbumAccess(auth.user.id, setDifference(ids, isOwner));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isAlbum = await access.asset.checkAlbumAccess(
+        auth.user.id,
+        setDifference(ids, isOwner),
+        isPrivateMode(auth),
+      );
       const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
     case Permission.AssetDownload: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
-      const isAlbum = await access.asset.checkAlbumAccess(auth.user.id, setDifference(ids, isOwner));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isAlbum = await access.asset.checkAlbumAccess(
+        auth.user.id,
+        setDifference(ids, isOwner),
+        isPrivateMode(auth),
+      );
       const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
     case Permission.AssetUpdate: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetDelete: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetCopy: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetEditGet: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetEditCreate: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetEditDelete: {
-      return await access.asset.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AssetFileRead:
     case Permission.AssetFileDelete: {
-      return await access.assetFile.checkOwnerAccess(auth.user.id, ids, auth.session?.hasElevatedPermission);
+      return await access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AlbumRead: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Viewer,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
 
     case Permission.AlbumAssetCreate: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Editor,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
 
     case Permission.AlbumUpdate: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Editor,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
 
     case Permission.AlbumDelete: {
-      return await access.album.checkOwnerAccess(auth.user.id, ids);
+      return await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
     }
 
     case Permission.AlbumShare: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Editor,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
 
     case Permission.AlbumDownload: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Viewer,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
 
     case Permission.AlbumAssetDelete: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids);
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Editor,
+        isPrivateMode(auth),
       );
       return setUnion(isOwner, isShared);
     }
@@ -370,3 +397,16 @@ export const requireElevatedPermission = (auth: AuthDto) => {
     throw new UnauthorizedException('Elevated permission is required');
   }
 };
+
+export const requirePrivateMode = (auth: AuthDto) => {
+  if (!auth.session?.privateMode) {
+    throw new UnauthorizedException('Private mode is required');
+  }
+};
+
+export const isPrivateMode = (auth: AuthDto) => !!auth.session?.privateMode;
+
+export const toPrivateScope = (auth: AuthDto): PrivateScope => ({
+  privateMode: !!auth.session?.privateMode,
+  userId: auth.user.id,
+});

@@ -26,6 +26,34 @@ describe('AssetMultiSelectManager', () => {
     expect(sut.isAllFavorite).toBe(true);
   });
 
+  it('tracks private and non-private assets separately so mixed selections can go both ways', () => {
+    sut.selectAsset(timelineAssetFactory.build({ isPrivate: true }));
+    expect(sut.isAllPrivate).toBe(true);
+    expect(sut.hasPrivate).toBe(true);
+    expect(sut.hasNonPrivate).toBe(false);
+
+    sut.selectAsset(timelineAssetFactory.build({ isPrivate: false }));
+    expect(sut.isAllPrivate).toBe(false);
+    expect(sut.hasPrivate).toBe(true);
+    expect(sut.hasNonPrivate).toBe(true);
+  });
+
+  it('only counts owned assets for hasPrivate and hasNonPrivate', () => {
+    const [user, partner] = userAdminFactory.buildList(2);
+    sut.selectAsset(timelineAssetFactory.build({ ownerId: user.id, isPrivate: false }));
+    sut.selectAsset(timelineAssetFactory.build({ ownerId: partner.id, isPrivate: true }));
+
+    const cleanup = $effect.root(() => {
+      authManager.setUser(user);
+      authManager.setPreferences(preferencesFactory.build());
+      expect(sut.hasNonPrivate).toBe(true);
+      expect(sut.hasPrivate).toBe(false);
+    });
+
+    cleanup();
+    authManager.reset();
+  });
+
   it('updates isAllUserOwned when the active user changes', () => {
     const [user1, user2] = userAdminFactory.buildList(2);
     sut.selectAsset(timelineAssetFactory.build({ ownerId: user1.id }));
