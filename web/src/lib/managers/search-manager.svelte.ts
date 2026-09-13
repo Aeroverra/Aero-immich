@@ -3,12 +3,25 @@ import type { DateTime } from 'luxon';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
 import { MediaType, QueryType, validQueryTypes } from '$lib/constants';
+import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { Route } from '$lib/route';
 import type { SearchFilter } from '$lib/types';
 import { asLocalTimeISO, parseUtcDate } from '$lib/utils/date-time';
 
 class SearchManager {
   #filter = $state<SearchFilter>(this.#fromQuery({}));
+
+  constructor() {
+    eventManager.on({
+      // the server rejects an explicit private filter while the mode is off, and keeping it would leak the choice
+      PrivateModeChange: (enabled) => {
+        if (!enabled) {
+          this.#filter.isPrivate = undefined;
+        }
+      },
+    });
+  }
 
   get filter() {
     return this.#filter;
@@ -75,6 +88,7 @@ class SearchManager {
             ? MediaType.Video
             : MediaType.All,
       rating: searchQuery.rating,
+      isPrivate: privateModeManager.enabled ? searchQuery.isPrivate : undefined,
     };
   }
 
@@ -114,6 +128,7 @@ class SearchManager {
       tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
       type,
       rating: this.filter.rating,
+      isPrivate: privateModeManager.enabled ? this.filter.isPrivate : undefined,
     };
   }
 
