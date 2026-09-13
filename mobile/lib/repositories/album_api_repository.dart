@@ -18,6 +18,7 @@ class AlbumApiRepository extends ApiRepository {
     UserDto owner, {
     required Iterable<String> assetIds,
     String? description,
+    bool confirmPrivate = false,
   }) async {
     final responseDto = await checkNull(
       _api.createAlbum(
@@ -27,6 +28,7 @@ class AlbumApiRepository extends ApiRepository {
               ? const Optional.absent()
               : Optional.present(description.isEmpty ? null : description),
           assetIds: Optional.present(assetIds.toList()),
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
         ),
       ),
     );
@@ -52,9 +54,17 @@ class AlbumApiRepository extends ApiRepository {
     String albumId,
     Iterable<String> assetIds, {
     Future<void>? abortTrigger,
+    bool confirmPrivate = false,
   }) async {
     final response = await checkNull(
-      _api.addAssetsToAlbum(albumId, BulkIdsDto(ids: assetIds.toList()), abortTrigger: abortTrigger),
+      _api.addAssetsToAlbum(
+        albumId,
+        AlbumAddAssetsDto(
+          ids: assetIds.toList(),
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
+        ),
+        abortTrigger: abortTrigger,
+      ),
     );
     final List<String> added = [];
     final List<String> failed = [];
@@ -107,9 +117,17 @@ class AlbumApiRepository extends ApiRepository {
     return _api.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers(String albumId, Iterable<String> userIds) async {
+  Future<void> addUsers(String albumId, Iterable<String> userIds, {bool confirmPrivate = false}) async {
     final albumUsers = userIds.map((userId) => AlbumUserAddDto(userId: userId)).toList();
-    await checkNull(_api.addUsersToAlbum(albumId, AddUsersDto(albumUsers: albumUsers)));
+    await checkNull(
+      _api.addUsersToAlbum(
+        albumId,
+        AddUsersDto(
+          albumUsers: albumUsers,
+          confirmPrivate: confirmPrivate ? const Optional.present(true) : const Optional.absent(),
+        ),
+      ),
+    );
   }
 
   Future<void> removeUser(String albumId, {required String userId}) async {
@@ -139,6 +157,7 @@ extension on AlbumResponseDto {
       order: order.orElse(null) == AssetOrder.asc ? AlbumAssetOrder.asc : AlbumAssetOrder.desc,
       assetCount: assetCount,
       isShared: albumUsers.length > 2,
+      isPrivate: isPrivate,
     );
   }
 }

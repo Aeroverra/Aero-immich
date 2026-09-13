@@ -58,6 +58,10 @@ class MemoryManager {
     eventManager.on({
       AuthLogout: () => this.clearCache(),
       AuthUserLoaded: () => this.initialize(),
+      PrivateModeChange: () => {
+        this.clearCache();
+        void this.loadNextPage();
+      },
     });
 
     // loaded event might have already happened

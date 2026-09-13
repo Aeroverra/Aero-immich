@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_udid/flutter_udid.dart';
@@ -12,6 +13,7 @@ import 'package:immich_mobile/models/auth/login_response.model.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/services/api.service.dart';
 import 'package:immich_mobile/services/auth.service.dart';
 import 'package:immich_mobile/services/background_upload.service.dart';
@@ -88,6 +90,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     try {
+      await _ref.read(privateModeProvider.notifier).disable();
       await _secureStorageService.delete(kSecuredPinCode);
       await _widgetService.clearCredentials();
 
@@ -174,6 +177,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       isAdmin: user.isAdmin,
     );
 
+    // Mirror the server-side private mode state of this session
+    unawaited(_ref.read(privateModeProvider.notifier).refresh());
+
     return true;
   }
 
@@ -205,6 +211,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<bool> unlockPinCode(String pinCode) {
     return _authService.unlockPinCode(pinCode);
+  }
+
+  Future<bool> enablePrivateMode(String pinCode) {
+    return _ref.read(privateModeProvider.notifier).enable(pinCode);
+  }
+
+  Future<void> disablePrivateMode() {
+    return _ref.read(privateModeProvider.notifier).disable();
   }
 
   Future<void> lockPinCode() {

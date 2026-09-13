@@ -9,7 +9,18 @@ class ConfirmDialog extends StatelessWidget {
   final String? cancel;
   final String? ok;
 
-  const ConfirmDialog({super.key, this.onOk, required this.title, required this.content, this.cancel, this.ok});
+  /// Extra widgets shown below [content], e.g. a list or a checkbox
+  final Widget? body;
+
+  const ConfirmDialog({
+    super.key,
+    this.onOk,
+    required this.title,
+    required this.content,
+    this.cancel,
+    this.ok,
+    this.body,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -21,7 +32,13 @@ class ConfirmDialog extends StatelessWidget {
     return AlertDialog(
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
       title: Text(title),
-      content: Text(content),
+      content: body == null
+          ? Text(content)
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [Text(content), const SizedBox(height: 12), body!],
+            ),
       actions: [
         TextButton(
           onPressed: () => context.pop(false),

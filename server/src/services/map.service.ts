@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { MapMarkerDto, MapMarkerResponseDto, MapReverseGeocodeDto } from 'src/dtos/map.dto';
 import { BaseService } from 'src/services/base.service';
+import { isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
 
 @Injectable()
@@ -13,9 +14,11 @@ export class MapService extends BaseService {
       userIds.push(...partnerIds);
     }
 
-    const albumIds = options.withSharedAlbums ? await this.albumRepository.getAllIds(auth.user.id) : [];
+    const albumIds = options.withSharedAlbums
+      ? await this.albumRepository.getAllIds(auth.user.id, { privateMode: isPrivateMode(auth) })
+      : [];
 
-    return this.mapRepository.getMapMarkers(auth.user.id, userIds, albumIds, options);
+    return this.mapRepository.getMapMarkers(auth.user.id, userIds, albumIds, options, toPrivateScope(auth));
   }
 
   async reverseGeocode(dto: MapReverseGeocodeDto) {
