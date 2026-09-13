@@ -3,6 +3,8 @@ import {
   AssetUploadAction,
   AssetVisibility,
   checkBulkUpload,
+  getAlbumInfo,
+  getAssetInfo,
   getBaseUrl,
   type AssetMediaResponseDto,
 } from '@immich/sdk';
@@ -89,6 +91,18 @@ export const fileUploadHandler = async ({
   isLockedAssets = false,
 }: FileUploadHandlerParams): Promise<string[]> => {
   const extensions = uploadManager.getExtensions();
+
+  // adding a private asset to a shared album needs an acknowledgement, so find out once whether the album is shared
+  let isSharedAlbum = false;
+  if (albumId && !authManager.isSharedLink) {
+    try {
+      const album = await getAlbumInfo({ id: albumId });
+      isSharedAlbum = album.shared || album.hasSharedLink;
+    } catch {
+      // the add-to-album request reports its own error
+    }
+  }
+
   const promises = [];
   for (const file of files) {
     const name = file.name.toLowerCase();
@@ -96,7 +110,9 @@ export const fileUploadHandler = async ({
       const deviceAssetId = getDeviceAssetId(file);
       uploadAssetsStore.addItem({ id: deviceAssetId, file, albumId });
       promises.push(
-        uploadExecutionQueue.addTask(() => fileUploader({ deviceAssetId, assetFile: file, albumId, isLockedAssets })),
+        uploadExecutionQueue.addTask(() =>
+          fileUploader({ deviceAssetId, assetFile: file, albumId, isSharedAlbum, isLockedAssets }),
+        ),
       );
     } else {
       toastManager.warning(get(t)('unsupported_file_type', { values: { file: file.name, type: file.type } }), {
@@ -140,6 +156,7 @@ function hashFile(file: File): Promise<string> {
 type FileUploaderParams = {
   assetFile: File;
   albumId?: string;
+  isSharedAlbum?: boolean;
   replaceAssetId?: string;
   isLockedAssets?: boolean;
   // TODO rework the asset uploader and remove this
@@ -151,6 +168,7 @@ async function fileUploader({
   assetFile,
   deviceAssetId,
   albumId,
+  isSharedAlbum = false,
   isLockedAssets = false,
 }: FileUploaderParams): Promise<string | undefined> {
   const fileCreatedAt = new Date(assetFile.lastModified).toISOString();
@@ -221,7 +239,14 @@ async function fileUploader({
 
     if (albumId && !authManager.isSharedLink) {
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_adding_to_album') });
-      await addAssetsToAlbums([albumId], [responseData.id], { notify: false });
+      // an upload can resolve to an existing asset, and that one may be private
+      const hasPrivate =
+        isSharedAlbum && responseData.status === AssetMediaStatus.Duplicate
+          ? await getAssetInfo({ id: responseData.id })
+              .then((asset) => asset.isPrivate)
+              .catch(() => false)
+          : false;
+      await addAssetsToAlbums([albumId], [responseData.id], { notify: false, hasPrivate, isShared: isSharedAlbum });
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_added_to_album') });
     }
 

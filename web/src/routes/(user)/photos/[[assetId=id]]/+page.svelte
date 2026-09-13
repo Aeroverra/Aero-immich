@@ -24,7 +24,6 @@
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { memoryManager } from '$lib/managers/memory-manager.svelte';
-  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { TimelineManager } from '$lib/managers/timeline-manager/timeline-manager.svelte';
   import { Route } from '$lib/route';
   import { getAssetBulkActions } from '$lib/services/asset.service';
@@ -131,12 +130,11 @@
         onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
       />
 
-      {#if privateModeManager.enabled}
-        <SetPrivateAction
-          unmark={assetMultiSelectManager.isAllPrivate}
-          onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-        />
-      {/if}
+      <SetPrivateAction
+        unmark={assetMultiSelectManager.isAllPrivate}
+        onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+        onRemove={handleSetVisibility}
+      />
 
       <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
         <DownloadAction menuItem />
@@ -161,6 +159,11 @@
         <ArchiveAction
           menuItem
           onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
+        />
+        <SetPrivateAction
+          menuItem
+          onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+          onRemove={handleSetVisibility}
         />
         {#if authManager.preferences.tags.enabled}
           <TagAction menuItem />
