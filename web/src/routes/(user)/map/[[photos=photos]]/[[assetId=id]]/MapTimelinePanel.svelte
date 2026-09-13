@@ -138,6 +138,10 @@
           onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
         />
 
+        <SetPrivateAction
+          onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+          onRemove={handleSetVisibility}
+        />
         <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
           <DownloadAction menuItem />
           {#if assetMultiSelectManager.assets.length > 1 || isAssetStackSelected}
@@ -162,11 +166,6 @@
             menuItem
             unarchive={assetMultiSelectManager.isAllArchived}
             onArchive={(ids, visibility) => timelineManager.update(ids, (asset) => (asset.visibility = visibility))}
-          />
-          <SetPrivateAction
-            menuItem
-            onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
-            onRemove={handleSetVisibility}
           />
           {#if authManager.preferences.tags.enabled}
             <TagAction menuItem />

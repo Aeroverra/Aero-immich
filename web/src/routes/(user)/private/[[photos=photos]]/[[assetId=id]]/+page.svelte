@@ -74,7 +74,7 @@
 {#if assetMultiSelectManager.selectionActive}
   <AssetSelectControlBar>
     <SelectAllAssets withText {timelineManager} assetInteraction={assetMultiSelectManager} />
-    <SetPrivateAction unmark onSetPrivate={handleUnmarkPrivate} />
+    <SetPrivateAction onSetPrivate={handleUnmarkPrivate} />
     <FavoriteAction
       removeFavorite={assetMultiSelectManager.isAllFavorite}
       onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}

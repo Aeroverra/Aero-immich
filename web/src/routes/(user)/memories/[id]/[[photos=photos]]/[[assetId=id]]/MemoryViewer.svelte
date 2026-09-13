@@ -292,13 +292,13 @@
 
       <FavoriteAction removeFavorite={assetMultiSelectManager.isAllFavorite} />
 
+      <SetPrivateAction onSetPrivate={handleSetPrivate} onRemove={handleHideAssets} />
       <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
         <DownloadAction menuItem />
         <ChangeDate menuItem />
         <ChangeDescription menuItem />
         <ChangeLocation menuItem />
         <ArchiveAction menuItem unarchive={assetMultiSelectManager.isAllArchived} onArchive={handleHideAssets} />
-        <SetPrivateAction menuItem onSetPrivate={handleSetPrivate} onRemove={handleHideAssets} />
         {#if authManager.preferences.tags.enabled && assetMultiSelectManager.isAllUserOwned}
           <TagAction menuItem />
         {/if}
