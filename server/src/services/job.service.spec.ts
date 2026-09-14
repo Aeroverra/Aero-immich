@@ -116,6 +116,7 @@ describe(JobService.name, () => {
 
     it('should analyze video frames after face detection of an upload when enabled', async () => {
       mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoFrameAnalysis: { enabled: true } } });
+      mocks.asset.getByIds.mockResolvedValue([AssetFactory.create({ id: 'asset-1', type: AssetType.Video })]);
       mocks.job.run.mockResolvedValue(JobStatus.Success);
 
       await sut.onJobRun(QueueName.FaceDetection, {
@@ -152,6 +153,19 @@ describe(JobService.name, () => {
       });
 
       expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.AutoStack, data: { id: 'asset-1', refresh: true } });
+    });
+
+    it('should not analyze video frames of an uploaded photo', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoFrameAnalysis: { enabled: true } } });
+      mocks.asset.getByIds.mockResolvedValue([AssetFactory.create({ id: 'asset-1' })]);
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.FaceDetection, {
+        name: JobName.AssetDetectFaces,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+
+      expect(mocks.job.queue).not.toHaveBeenCalledWith(expect.objectContaining({ name: JobName.AssetAnalyzeVideoFrames }));
     });
 
     for (const { item, jobs, stub } of tests) {

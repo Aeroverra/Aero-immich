@@ -42,6 +42,9 @@ export class VideoFrameAnalysisService extends BaseService {
       return JobStatus.Skipped;
     }
 
+    // faces found in the thumbnails must exist first, so people already on a video are not added twice
+    await this.jobRepository.waitForQueueCompletion(QueueName.ThumbnailGeneration, QueueName.FaceDetection);
+
     for await (const assets of batched(this.assetJobRepository.streamForVideoFrameAnalysis(force))) {
       await this.jobRepository.queueAll(
         assets.map((asset) => ({ name: JobName.AssetAnalyzeVideoFrames, data: { id: asset.id } })),
