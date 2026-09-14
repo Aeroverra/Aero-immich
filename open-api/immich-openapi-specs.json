@@ -27757,6 +27757,10 @@
             "description": "Whether smart search is enabled",
             "type": "boolean"
           },
+          "stackSource": {
+            "description": "Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it.",
+            "type": "boolean"
+          },
           "trash": {
             "description": "Whether trash feature is enabled",
             "type": "boolean"

@@ -2832,6 +2832,8 @@ export type ServerFeaturesDto = {
     sidecar: boolean;
     /** Whether smart search is enabled */
     smartSearch: boolean;
+    /** Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it. */
+    stackSource?: boolean;
     /** Whether trash feature is enabled */
     trash: boolean;
 };

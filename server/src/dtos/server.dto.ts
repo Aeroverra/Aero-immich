@@ -147,6 +147,12 @@ const ServerFeaturesSchema = z
     email: z.boolean().describe('Whether email notifications are enabled'),
     ocr: z.boolean().describe('Whether OCR is enabled'),
     realtimeTranscoding: z.boolean().describe('Whether real-time transcoding is enabled'),
+    stackSource: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it.',
+      ),
   })
   .meta({ id: 'ServerFeaturesDto' });
 
