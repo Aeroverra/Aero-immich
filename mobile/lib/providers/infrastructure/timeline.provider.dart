@@ -4,6 +4,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.state.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 
@@ -28,6 +29,7 @@ final timelineFactoryProvider = Provider<TimelineFactory>(
     timelineRepository: ref.watch(driftProvider).timelineRepository,
     settingsRepository: ref.watch(settingsProvider),
     privateFilter: ref.watch(privateModeFilterProvider),
+    groupAutoStacks: ref.watch(groupAutoStacksProvider),
   ),
 );
 
