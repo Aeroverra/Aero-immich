@@ -25,6 +25,7 @@ import {
   JobName,
   MemoryType,
   QueueName,
+  StackActionMode,
   StorageFolder,
   SyncEntityType,
   SystemMetadataKey,
@@ -633,6 +634,9 @@ export type UserPreferences = {
     mode: DeletedReimportMode;
     /** the "Previously deleted" album, created on the first re-upload in album mode */
     albumId: string | null;
+  };
+  stackActions: {
+    mode: StackActionMode;
   };
 };
 
