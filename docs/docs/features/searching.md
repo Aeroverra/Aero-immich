@@ -37,6 +37,20 @@ Use this mode when you know a folder name or part of the original asset path.
 
 Example: for /John/Projects/3D_Printing/2026-07-01/IMG_0001.jpg, searches like Projects, 3D, Printing, or 2026 match the asset.
 
+## Enhanced video analysis
+
+By default, Smart Search and face detection only look at the thumbnail of a video, so anything that happens later in the video cannot be found. Enhanced video analysis samples frames across each video, adds a Smart Search entry for every distinct frame, and detects faces in them. A video then matches a search as well as its best matching frame and is still listed once.
+
+It is disabled by default because extracting and analyzing frames uses a lot of extra CPU. Enable it under `Administration > Settings > Machine Learning Settings > Enhanced video analysis`.
+
+- **Frame density**: the number of frames grows with the square root of the video length. With the default of 1.2, a 10 second video gets 4 frames, a 1 minute video 9, a 3 minute video 16 and a 10 minute video 29.
+- **Minimum seconds between frames**: short videos never get frames closer together than this.
+- **Maximum frames per video**: limits the work for long videos.
+- **Detect faces**: detects faces in the sampled frames. The same person seen in several frames is added once, and people already on the video are skipped.
+- **Create new people**: when disabled (the default), faces found only in video frames never create new people. They stay unassigned and are matched once a person exists, for example after running _Missing_ for Facial Recognition.
+
+New uploads are analyzed automatically. To analyze existing videos, click _Missing_ next to "Video frame analysis" on the [Job Status page][job-status-page]. _All_ analyzes every video again, for example after changing the frame settings; it replaces the stored frames but never removes existing faces. Changing the CLIP model clears the stored frames, so run _Missing_ again afterwards.
+
 ## Configuration
 
 Navigating to `Administration > Settings > Machine Learning Settings > Smart Search` will show the options available.
