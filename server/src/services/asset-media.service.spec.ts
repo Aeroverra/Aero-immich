@@ -9,19 +9,31 @@ import { AssetMediaStatus, AssetRejectReason, AssetUploadAction } from 'src/dtos
 import { AssetMediaCreateDto, AssetMediaSize, UploadFieldName } from 'src/dtos/asset-media.dto';
 import { MapAsset } from 'src/dtos/asset-response.dto';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import { AssetFileType, AssetType, AssetVisibility, CacheControl, JobName } from 'src/enum';
+import {
+  AlbumUserRole,
+  AssetFileType,
+  AssetMetadataKey,
+  AssetStatus,
+  AssetType,
+  AssetVisibility,
+  CacheControl,
+  DeletedReimportMode,
+  JobName,
+  UserMetadataKey,
+} from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
 import { AssetMediaService } from 'src/services/asset-media.service';
 import { UploadBody } from 'src/types';
 import { ASSET_CHECKSUM_CONSTRAINT } from 'src/utils/database';
 import { ImmichFileResponse } from 'src/utils/file';
+import { AlbumFactory } from 'test/factories/album.factory';
 import { AssetFileFactory } from 'test/factories/asset-file.factory';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { AuthFactory } from 'test/factories/auth.factory';
 import { authStub } from 'test/fixtures/auth.stub';
 import { fileStub } from 'test/fixtures/file.stub';
 import { userStub } from 'test/fixtures/user.stub';
-import { getForAsset } from 'test/mappers';
+import { getForAlbum, getForAsset } from 'test/mappers';
 import { newTestService, ServiceMocks } from 'test/utils';
 
 const file1 = Buffer.from('d2947b871a706081be194569951b7db246907957', 'hex');
@@ -168,6 +180,10 @@ const assetEntity = Object.freeze({
   },
   livePhotoVideoId: null,
 } as MapAsset);
+
+const deletedReimportPreferences = (mode: DeletedReimportMode, albumId?: string) => [
+  { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode, albumId } } },
+];
 
 describe(AssetMediaService.name, () => {
   let sut: AssetMediaService;
@@ -788,6 +804,7 @@ describe(AssetMediaService.name, () => {
         { id: 'asset-1', checksum: file1, deletedAt: null },
         { id: 'asset-2', checksum: file2, deletedAt: null },
       ]);
+      mocks.assetDeletedChecksum.getByChecksums.mockResolvedValue([]);
 
       await expect(
         sut.bulkUploadCheck(authStub.admin, {
@@ -823,6 +840,7 @@ describe(AssetMediaService.name, () => {
       const file2 = Buffer.from('53be335e99f18a66ff12e9a901c7a6171dd76573', 'hex');
 
       mocks.asset.getByChecksums.mockResolvedValue([{ id: 'asset-1', checksum: file1, deletedAt: null }]);
+      mocks.assetDeletedChecksum.getByChecksums.mockResolvedValue([]);
 
       await expect(
         sut.bulkUploadCheck(authStub.admin, {
@@ -874,6 +892,233 @@ describe(AssetMediaService.name, () => {
       expect(mocks.job.queue).toHaveBeenCalledWith({
         name: JobName.FileDelete,
         data: { files: [expect.stringContaining('/data/upload/user-id/ra/nd/random-uuid.jpg')] },
+      });
+    });
+  });
+
+  describe('uploadAsset of a previously deleted file', () => {
+    const file = {
+      uuid: 'random-uuid',
+      originalPath: 'fake_path/asset_1.jpeg',
+      mimeType: 'image/jpeg',
+      checksum: Buffer.from('file hash', 'utf8'),
+      originalName: 'asset_1.jpeg',
+      size: 42,
+    };
+    const remembered = { assetId: 'deleted-asset-id', originalFileName: 'asset_1.jpeg', deletedAt: new Date() };
+
+    it('should store the file like any other when it was never deleted', async () => {
+      mocks.assetDeletedChecksum.get.mockResolvedValue(undefined);
+      mocks.asset.create.mockResolvedValue(assetEntity);
+
+      await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
+        id: 'id_1',
+        status: AssetMediaStatus.CREATED,
+      });
+
+      expect(mocks.assetDeletedChecksum.get).toHaveBeenCalledWith(authStub.user1.user.id, file.checksum);
+      expect(mocks.user.getMetadata).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).not.toHaveBeenCalled();
+    });
+
+    it('should never check the motion part of a live photo', async () => {
+      mocks.asset.create.mockResolvedValue(assetEntity);
+
+      await sut.uploadAsset(authStub.user1, { ...createDto, visibility: AssetVisibility.Hidden }, file);
+
+      expect(mocks.assetDeletedChecksum.get).not.toHaveBeenCalled();
+    });
+
+    it('should store the file and move it to the trash in trash mode', async () => {
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+      mocks.user.getMetadata.mockResolvedValue(deletedReimportPreferences(DeletedReimportMode.Trash));
+      mocks.asset.create.mockResolvedValue(assetEntity);
+
+      await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
+        id: 'id_1',
+        status: AssetMediaStatus.CREATED,
+      });
+
+      expect(mocks.asset.create).toHaveBeenCalled();
+      expect(mocks.asset.upsertMetadata).toHaveBeenCalledWith(assetEntity.id, [
+        {
+          key: AssetMetadataKey.DeletedReimport,
+          value: { mode: DeletedReimportMode.Trash, reimportedAt: expect.any(String) },
+        },
+      ]);
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith([assetEntity.id], {
+        deletedAt: expect.any(Date),
+        status: AssetStatus.Trashed,
+      });
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetTrashAll', {
+        assetIds: [assetEntity.id],
+        userId: authStub.user1.user.id,
+      });
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledWith(
+        authStub.user1.user.id,
+        assetEntity.checksum,
+        DeletedReimportMode.Trash,
+      );
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetDeletedReimport', { userId: authStub.user1.user.id });
+      expect(mocks.album.addAssetIds).not.toHaveBeenCalled();
+    });
+
+    it('should not store the file and answer with a duplicate in skip mode', async () => {
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+      mocks.user.getMetadata.mockResolvedValue(deletedReimportPreferences(DeletedReimportMode.Skip));
+
+      await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
+        id: remembered.assetId,
+        status: AssetMediaStatus.DUPLICATE,
+      });
+
+      expect(mocks.asset.create).not.toHaveBeenCalled();
+      expect(mocks.job.queue).toHaveBeenCalledExactlyOnceWith({
+        name: JobName.FileDelete,
+        data: { files: [file.originalPath, undefined] },
+      });
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledWith(
+        authStub.user1.user.id,
+        file.checksum,
+        DeletedReimportMode.Skip,
+      );
+      expect(mocks.event.emit).toHaveBeenCalledExactlyOnceWith('AssetDeletedReimport', {
+        userId: authStub.user1.user.id,
+      });
+    });
+
+    it('should add the file to the existing "Previously deleted" album in album mode', async () => {
+      const album = AlbumFactory.from().owner({ id: authStub.user1.user.id }).build();
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+      mocks.user.getMetadata.mockResolvedValue(deletedReimportPreferences(DeletedReimportMode.Album, album.id));
+      mocks.asset.create.mockResolvedValue(assetEntity);
+      mocks.album.getById.mockResolvedValue(getForAlbum(album));
+
+      await expect(sut.uploadAsset(authStub.user1, createDto, file)).resolves.toEqual({
+        id: 'id_1',
+        status: AssetMediaStatus.CREATED,
+      });
+
+      expect(mocks.album.getById).toHaveBeenCalledWith(album.id, { withAssets: false });
+      expect(mocks.album.create).not.toHaveBeenCalled();
+      expect(mocks.album.addAssetIds).toHaveBeenCalledWith(album.id, [assetEntity.id]);
+      expect(mocks.event.emit).toHaveBeenCalledWith('AlbumUpdate', {
+        id: album.id,
+        userIds: [authStub.user1.user.id],
+        recipientIds: [],
+      });
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledWith(
+        authStub.user1.user.id,
+        assetEntity.checksum,
+        DeletedReimportMode.Album,
+      );
+    });
+
+    it('should create the "Previously deleted" album when the remembered one is gone', async () => {
+      const album = AlbumFactory.from().owner({ id: authStub.user1.user.id }).build();
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+      mocks.user.getMetadata.mockResolvedValue(
+        deletedReimportPreferences(DeletedReimportMode.Album, 'deleted-album-id'),
+      );
+      mocks.asset.create.mockResolvedValue(assetEntity);
+      mocks.album.getById.mockResolvedValue(undefined);
+      mocks.album.create.mockResolvedValue(getForAlbum(album));
+
+      await sut.uploadAsset(authStub.user1, createDto, file);
+
+      expect(mocks.album.create).toHaveBeenCalledWith(
+        expect.objectContaining({ albumName: 'Previously deleted' }),
+        [],
+        [{ userId: authStub.user1.user.id, role: AlbumUserRole.Owner }],
+        authStub.user1.user.id,
+      );
+      expect(mocks.user.upsertMetadata).toHaveBeenCalledWith(authStub.user1.user.id, {
+        key: UserMetadataKey.Preferences,
+        value: expect.objectContaining({ deletedReimport: { mode: DeletedReimportMode.Album, albumId: album.id } }),
+      });
+      expect(mocks.album.addAssetIds).toHaveBeenCalledWith(album.id, [assetEntity.id]);
+    });
+
+    it('should not reuse an album the user does not own anymore', async () => {
+      const album = AlbumFactory.from().owner({ id: 'someone-else' }).build();
+      const created = AlbumFactory.from().owner({ id: authStub.user1.user.id }).build();
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+      mocks.user.getMetadata.mockResolvedValue(deletedReimportPreferences(DeletedReimportMode.Album, album.id));
+      mocks.asset.create.mockResolvedValue(assetEntity);
+      mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.album.create.mockResolvedValue(getForAlbum(created));
+
+      await sut.uploadAsset(authStub.user1, createDto, file);
+
+      expect(mocks.album.create).toHaveBeenCalled();
+      expect(mocks.album.addAssetIds).toHaveBeenCalledWith(created.id, [assetEntity.id]);
+    });
+  });
+
+  describe('bulkUploadCheck of previously deleted files', () => {
+    const file1 = Buffer.from('d2947b871a706081be194569951b7db246907957', 'hex');
+    const file2 = Buffer.from('53be335e99f18a66ff12e9a901c7a6171dd76573', 'hex');
+    const assets = [
+      { id: '1', checksum: file1.toString('hex') },
+      { id: '2', checksum: file2.toString('hex') },
+    ];
+
+    it('should reject remembered files in skip mode', async () => {
+      mocks.asset.getByChecksums.mockResolvedValue([]);
+      mocks.assetDeletedChecksum.getByChecksums.mockResolvedValue([{ checksum: file1, assetId: 'deleted-1' }]);
+      mocks.user.getMetadata.mockResolvedValue([
+        { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode: DeletedReimportMode.Skip } } },
+      ]);
+
+      await expect(sut.bulkUploadCheck(authStub.admin, { assets })).resolves.toEqual({
+        results: [
+          {
+            id: '1',
+            assetId: 'deleted-1',
+            action: AssetUploadAction.REJECT,
+            reason: AssetRejectReason.DUPLICATE,
+            isTrashed: false,
+          },
+          { id: '2', action: AssetUploadAction.ACCEPT },
+        ],
+      });
+
+      expect(mocks.assetDeletedChecksum.getByChecksums).toHaveBeenCalledWith(authStub.admin.user.id, [file1, file2]);
+    });
+
+    it('should let the client upload remembered files in trash mode', async () => {
+      mocks.asset.getByChecksums.mockResolvedValue([]);
+      mocks.assetDeletedChecksum.getByChecksums.mockResolvedValue([{ checksum: file1, assetId: 'deleted-1' }]);
+      mocks.user.getMetadata.mockResolvedValue([]);
+
+      await expect(sut.bulkUploadCheck(authStub.admin, { assets })).resolves.toEqual({
+        results: [
+          { id: '1', action: AssetUploadAction.ACCEPT },
+          { id: '2', action: AssetUploadAction.ACCEPT },
+        ],
+      });
+    });
+
+    it('should prefer the existing asset over the remembered one', async () => {
+      mocks.asset.getByChecksums.mockResolvedValue([{ id: 'asset-1', checksum: file1, deletedAt: new Date() }]);
+      mocks.assetDeletedChecksum.getByChecksums.mockResolvedValue([{ checksum: file1, assetId: 'deleted-1' }]);
+      mocks.user.getMetadata.mockResolvedValue([
+        { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode: DeletedReimportMode.Skip } } },
+      ]);
+
+      await expect(sut.bulkUploadCheck(authStub.admin, { assets })).resolves.toEqual({
+        results: [
+          {
+            id: '1',
+            assetId: 'asset-1',
+            action: AssetUploadAction.REJECT,
+            reason: AssetRejectReason.DUPLICATE,
+            isTrashed: true,
+          },
+          { id: '2', action: AssetUploadAction.ACCEPT },
+        ],
       });
     });
   });
