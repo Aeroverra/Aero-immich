@@ -46,6 +46,15 @@ describe(TrashService.name, () => {
       expect(mocks.trash.restoreAll).toHaveBeenCalledWith(['asset1', 'asset2']);
       expect(mocks.job.queue.mock.calls).toEqual([]);
     });
+
+    it('should forget the checksums of the restored assets', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset1']));
+      mocks.trash.restoreAll.mockResolvedValue(1);
+
+      await sut.restoreAssets(authStub.user1, { ids: ['asset1'] });
+
+      expect(mocks.assetDeletedChecksum.forgetAssets).toHaveBeenCalledWith(['asset1']);
+    });
   });
 
   describe('restore', () => {
@@ -61,6 +70,17 @@ describe(TrashService.name, () => {
       mocks.trash.restore.mockResolvedValue(1);
       await expect(sut.restore(authStub.user1)).resolves.toEqual({ count: 1 });
       expect(mocks.trash.restore).toHaveBeenCalledWith('user-id');
+    });
+
+    it('should forget the checksums of the trashed assets before restoring them', async () => {
+      mocks.trash.restore.mockResolvedValue(1);
+
+      await sut.restore(authStub.user1);
+
+      expect(mocks.assetDeletedChecksum.forgetTrashed).toHaveBeenCalledWith('user-id');
+      expect(mocks.assetDeletedChecksum.forgetTrashed.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.trash.restore.mock.invocationCallOrder[0],
+      );
     });
   });
 
