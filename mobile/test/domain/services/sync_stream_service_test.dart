@@ -90,6 +90,7 @@ void main() {
       () => mockSyncApiRepo.streamChanges(
         any(),
         serverVersion: any(named: 'serverVersion'),
+        supportsStackSource: any(named: 'supportsStackSource'),
         abortSignal: any(named: 'abortSignal'),
       ),
     ).thenAnswer((invocation) async {
@@ -101,6 +102,7 @@ void main() {
         any(),
         onReset: any(named: 'onReset'),
         serverVersion: any(named: 'serverVersion'),
+        supportsStackSource: any(named: 'supportsStackSource'),
         abortSignal: any(named: 'abortSignal'),
       ),
     ).thenAnswer((invocation) async {
@@ -114,6 +116,7 @@ void main() {
     when(
       () => mockServerApi.getServerVersion(),
     ).thenAnswer((_) async => ServerVersionResponseDto(major: 1, minor: 132, patch_: 0, prerelease: null));
+    when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => null);
 
     when(() => mockSyncStreamRepo.updateUsersV1(any())).thenAnswer(successHandler);
     when(() => mockSyncStreamRepo.deleteUsersV1(any())).thenAnswer(successHandler);
@@ -617,6 +620,62 @@ void main() {
       await sut.sync();
 
       verifyNever(() => mockSyncMigrationRepo.v20260128CopyExifWidthHeightToAsset());
+    });
+  });
+
+  group('SyncStreamService - stack source', () {
+    ServerFeaturesDto features({Optional<bool?> stackSource = const Optional.absent()}) => ServerFeaturesDto(
+      configFile: false,
+      duplicateDetection: false,
+      email: false,
+      facialRecognition: false,
+      importFaces: false,
+      map: true,
+      oauth: false,
+      oauthAutoLaunch: false,
+      ocr: false,
+      passwordLogin: true,
+      realtimeTranscoding: false,
+      reverseGeocoding: false,
+      search: true,
+      sidecar: true,
+      smartSearch: false,
+      stackSource: stackSource,
+      trash: true,
+    );
+
+    Future<bool?> syncedWithStackSource() async {
+      await sut.sync();
+      return verify(
+            () => mockSyncApiRepo.streamChanges(
+              any(),
+              serverVersion: any(named: 'serverVersion'),
+              supportsStackSource: captureAny(named: 'supportsStackSource'),
+              onReset: any(named: 'onReset'),
+              abortSignal: any(named: 'abortSignal'),
+            ),
+          ).captured.single
+          as bool?;
+    }
+
+    test('syncs stacks with their source when the server reports the feature', () async {
+      when(
+        () => mockServerApi.getServerFeatures(),
+      ).thenAnswer((_) async => features(stackSource: const Optional.present(true)));
+
+      expect(await syncedWithStackSource(), isTrue);
+    });
+
+    test('keeps syncing stacks without their source on a server without the feature', () async {
+      when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => features());
+
+      expect(await syncedWithStackSource(), isFalse);
+    });
+
+    test('keeps syncing when the features cannot be read', () async {
+      when(() => mockServerApi.getServerFeatures()).thenThrow(Exception('offline'));
+
+      expect(await syncedWithStackSource(), isFalse);
     });
   });
 }
