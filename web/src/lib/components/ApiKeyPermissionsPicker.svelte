@@ -2,7 +2,7 @@
   import ApiKeyGrid from '$lib/components/user-settings-page/UserApiKeyGrid.svelte';
   import { isAllStandardPermissions, standardPermissions } from '$lib/utils/api-key-permissions';
   import { Permission } from '@immich/sdk';
-  import { Checkbox, IconButton, Input, Label, Text } from '@immich/ui';
+  import { Checkbox, IconButton, Input, Label } from '@immich/ui';
   import { mdiClose } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
@@ -12,8 +12,13 @@
 
   let { selectedPermissions = $bindable([]) }: Props = $props();
 
+  // privateMode.access is listed like every other permission, only "select all" leaves it out
   const permissions: Record<string, Permission[]> = {};
-  for (const permission of standardPermissions) {
+  for (const permission of Object.values(Permission)) {
+    if (permission === Permission.All) {
+      continue;
+    }
+
     const [group] = permission.split('.', 1);
     if (!Object.hasOwn(permissions, group)) {
       permissions[group] = [];
@@ -23,7 +28,6 @@
 
   let searchValue = $state('');
   let allItemsSelected = $derived(isAllStandardPermissions(selectedPermissions));
-  let privateModeAccess = $derived(selectedPermissions.includes(Permission.PrivateModeAccess));
 
   const matchFilter = (search: string) => {
     search = search.toLowerCase();
@@ -34,14 +38,8 @@
 
   // select all never touches privateMode.access, it is granted on its own
   const onCheckedAllChange = (checked: boolean) => {
-    const keep = privateModeAccess ? [Permission.PrivateModeAccess] : [];
+    const keep = selectedPermissions.includes(Permission.PrivateModeAccess) ? [Permission.PrivateModeAccess] : [];
     selectedPermissions = checked ? [...standardPermissions, ...keep] : keep;
-  };
-
-  const onPrivateModeAccessChange = (checked: boolean) => {
-    selectedPermissions = checked
-      ? [...selectedPermissions, Permission.PrivateModeAccess]
-      : selectedPermissions.filter((permission) => permission !== Permission.PrivateModeAccess);
   };
 
   const filteredResults = $derived(Object.entries(permissions).filter(matchFilter(searchValue)));
@@ -54,18 +52,6 @@
 </script>
 
 <Label label={$t('permission')} for="permission-container" />
-<div class="m-4 flex items-start gap-2">
-  <Checkbox
-    id="input-private-mode-access"
-    size="tiny"
-    checked={privateModeAccess}
-    onCheckedChange={onPrivateModeAccessChange}
-  />
-  <div class="flex flex-col">
-    <Label label={$t('api_key_private_mode_access')} for="input-private-mode-access" />
-    <Text size="small" color="muted">{$t('api_key_private_mode_access_description')}</Text>
-  </div>
-</div>
 <div class="m-4 flex items-center gap-2" id="permission-container">
   <Checkbox id="input-select-all" size="tiny" checked={allItemsSelected} onCheckedChange={onCheckedAllChange} />
   <Label label={$t('select_all')} for="input-select-all" />
@@ -89,6 +75,13 @@
     {/snippet}
   </Input>
   {#each filteredResults as [title, subItems] (title)}
-    <ApiKeyGrid {title} {subItems} selectedItems={selectedPermissions} {handleSelectItems} {handleDeselectItems} />
+    <ApiKeyGrid
+      {title}
+      {subItems}
+      description={title === 'privateMode' ? $t('api_key_private_mode_access_description') : undefined}
+      selectedItems={selectedPermissions}
+      {handleSelectItems}
+      {handleDeselectItems}
+    />
   {/each}
 </div>

@@ -29,7 +29,7 @@ The idle timeout is configured under **Account Settings** as *Private mode timeo
 
 An API key has no session, so it cannot unlock private mode with a PIN code. By default an API key therefore never sees private assets or private albums, even with the `all` permission.
 
-To let a key work with private assets, grant it the `privateMode.access` permission (**Account Settings > API Keys**, option *Private mode access*). A key with this permission behaves like a session with private mode on: it can read, change, mark and unmark private assets and private albums. It still needs the regular permissions for each action, for example `asset.read` or `asset.update`. `privateMode.access` is never included in `all` or in *Select all*, so it has to be granted on its own.
+To let a key work with private assets, grant it the `privateMode.access` permission (**Account Settings > API Keys**, the `privateMode` group). A key with this permission behaves like a session with private mode on: it can read, change, mark and unmark private assets and private albums. It still needs the regular permissions for each action, for example `asset.read` or `asset.update`. `privateMode.access` is never included in `all` or in *Select all*, so it has to be granted on its own.
 
 ## Relation to the locked folder
 
