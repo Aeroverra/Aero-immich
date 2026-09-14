@@ -1609,7 +1609,8 @@ describe('private mode', () => {
     });
 
     it('should not open private assets of other users', async () => {
-      const { secret } = await utils.createApiKey(user2.accessToken, [Permission.All, Permission.PrivateModeAccess]);
+      // counter shares nothing with user1 (user2 is a member of a shared private album, which legitimately grants access)
+      const { secret } = await utils.createApiKey(counter.accessToken, [Permission.All, Permission.PrivateModeAccess]);
 
       expect((await getAsset(secret, privateAsset.id)).status).toBe(400);
     });
