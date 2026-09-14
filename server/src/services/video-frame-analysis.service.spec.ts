@@ -233,7 +233,7 @@ describe(VideoFrameAnalysisService.name, () => {
             faces: [
               detectedFace([1, 0], { boundingBox: { x1: 0, y1: 0, x2: 20, y2: 20 } }),
               detectedFace([0, 1], { score: 0.5 }),
-              detectedFace([1, 1], { score: 0.8 }),
+              detectedFace([1, 1], { score: 0.75 }),
             ],
           })
           .mockResolvedValue({ imageWidth: 1920, imageHeight: 1080, faces: [] });

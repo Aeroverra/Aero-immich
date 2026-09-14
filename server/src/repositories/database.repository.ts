@@ -213,7 +213,6 @@ export class DatabaseRepository {
   }
 
   private async reindexVectors(indexName: VectorIndex, { lists }: { lists?: number } = {}): Promise<void> {
-    this.logger.log(`Reindexing ${indexName} (This may take a while, do not restart)`);
     const table = VECTOR_INDEX_TABLES[indexName];
     const vectorExtension = await getVectorExtension(this.db);
 
@@ -231,6 +230,7 @@ export class DatabaseRepository {
       );
       return;
     }
+    this.logger.log(`Reindexing ${indexName} (This may take a while, do not restart)`);
     const dimSize = await this.getDimensionSize(table);
     lists ||= this.targetListCount(await this.getRowCount(table));
     await this.db.transaction().execute(async (tx) => {
