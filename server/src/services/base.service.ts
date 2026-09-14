@@ -25,6 +25,7 @@ import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
 import { EmailRepository } from 'src/repositories/email.repository';
 import { EventRepository } from 'src/repositories/event.repository';
+import { FaceAttributeRepository } from 'src/repositories/face-attribute.repository';
 import { IntegrityRepository } from 'src/repositories/integrity.repository';
 import { JobRepository } from 'src/repositories/job.repository';
 import { LibraryRepository } from 'src/repositories/library.repository';
@@ -100,6 +101,7 @@ export const BASE_SERVICE_DEPENDENCIES = [
   NotificationRepository,
   OAuthRepository,
   OcrRepository,
+  FaceAttributeRepository,
   PartnerRepository,
   PersonRepository,
   PluginRepository,
@@ -163,6 +165,7 @@ export class BaseService {
     protected notificationRepository: NotificationRepository,
     protected oauthRepository: OAuthRepository,
     protected ocrRepository: OcrRepository,
+    protected faceAttributeRepository: FaceAttributeRepository,
     protected partnerRepository: PartnerRepository,
     protected personRepository: PersonRepository,
     protected pluginRepository: PluginRepository,
@@ -235,6 +238,7 @@ export class BaseService {
       ctx.notificationRepository,
       ctx.oauthRepository,
       ctx.ocrRepository,
+      ctx.faceAttributeRepository,
       ctx.partnerRepository,
       ctx.personRepository,
       ctx.pluginRepository,
