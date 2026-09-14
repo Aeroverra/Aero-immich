@@ -136,6 +136,7 @@
     searchManager.filter.display.isArchive ||
       searchManager.filter.display.isFavorite ||
       searchManager.filter.display.isNotInAlbum ||
+      searchManager.filter.tagIds === null ||
       searchManager.filter.rating ||
       searchManager.filter.isPrivate !== undefined,
   );
@@ -164,8 +165,13 @@
   });
 
   $effect(() => {
-    if (tags) {
-      tagsTitle = getSearchTagsTitle(tags, searchManager.filter.tagIds!);
+    const { tagIds } = searchManager.filter;
+    if (tagIds === null) {
+      tagsTitle = $t('untagged');
+    } else if (tags) {
+      tagsTitle = getSearchTagsTitle(tags, tagIds);
+    } else if (tagIds.size === 0) {
+      tagsTitle = undefined;
     }
   });
 
