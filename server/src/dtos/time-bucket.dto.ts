@@ -20,6 +20,11 @@ const TimeBucketQueryBaseSchema = z
     withStacked: stringToBool
       .optional()
       .describe('Include stacked assets in the response. When true, only primary assets from stacks are returned.'),
+    withAutoStacked: stringToBool
+      .optional()
+      .describe(
+        'Together with withStacked, whether stacks created automatically are collapsed as well (default true). When false, the assets of automatic stacks are returned individually and without stack information.',
+      ),
     withPartners: stringToBool.optional().describe('Include assets shared by partners'),
     order: AssetOrderSchema.optional().describe(
       'Sort order for assets within time buckets (ASC for oldest first, DESC for newest first)',

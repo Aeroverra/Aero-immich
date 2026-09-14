@@ -722,6 +722,10 @@ export type SharedLinksResponse = {
     /** Whether shared links appear in web sidebar */
     sidebarWeb: boolean;
 };
+export type StacksResponse = {
+    /** Whether stacks created automatically are shown grouped in the timeline, like manual stacks */
+    groupAuto: boolean;
+};
 export type TagsResponse = {
     /** Whether tags are enabled */
     enabled: boolean;
@@ -742,6 +746,7 @@ export type UserPreferencesResponseDto = {
     ratings: RatingsResponse;
     recentlyAdded: RecentlyAddedResponse;
     sharedLinks: SharedLinksResponse;
+    stacks: StacksResponse;
     tags: TagsResponse;
 };
 export type AlbumsUpdate = {
@@ -821,6 +826,10 @@ export type SharedLinksUpdate = {
     /** Whether shared links appear in web sidebar */
     sidebarWeb?: boolean;
 };
+export type StacksUpdate = {
+    /** Whether stacks created automatically are shown grouped in the timeline, like manual stacks */
+    groupAuto?: boolean;
+};
 export type TagsUpdate = {
     /** Whether tags are enabled */
     enabled?: boolean;
@@ -842,6 +851,7 @@ export type UserPreferencesUpdateDto = {
     ratings?: RatingsUpdate;
     recentlyAdded?: RecentlyAddedUpdate;
     sharedLinks?: SharedLinksUpdate;
+    stacks?: StacksUpdate;
     tags?: TagsUpdate;
 };
 export type SessionResponseDto = {
@@ -1285,6 +1295,7 @@ export type AssetStackResponseDto = {
     id: string;
     /** Primary asset ID */
     primaryAssetId: string;
+    source: StackSource;
 };
 export type TagResponseDto = {
     /** Tag color (hex) */
@@ -3034,6 +3045,7 @@ export type StackResponseDto = {
     id: string;
     /** Primary asset ID */
     primaryAssetId: string;
+    source: StackSource;
 };
 export type StackCreateDto = {
     /** Asset IDs (first becomes primary, min 2) */
@@ -3768,6 +3780,19 @@ export type SyncStackV1 = {
     ownerId: string;
     /** Primary asset ID */
     primaryAssetId: string;
+    /** Updated at */
+    updatedAt: string;
+};
+export type SyncStackV2 = {
+    /** Created at */
+    createdAt: string;
+    /** Stack ID */
+    id: string;
+    /** Owner ID */
+    ownerId: string;
+    /** Primary asset ID */
+    primaryAssetId: string;
+    source: StackSource;
     /** Updated at */
     updatedAt: string;
 };
@@ -7387,7 +7412,7 @@ export function tagAssets({ id, bulkIdsDto }: {
 /**
  * Get time bucket
  */
-export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, timeBucket, userId, visibility, withCoordinates, withPartners, withStacked }: {
+export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, timeBucket, userId, visibility, withAutoStacked, withCoordinates, withPartners, withStacked }: {
     albumId?: string;
     bbox?: string;
     isFavorite?: boolean;
@@ -7402,6 +7427,7 @@ export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed,
     timeBucket: string;
     userId?: string;
     visibility?: AssetVisibility;
+    withAutoStacked?: boolean;
     withCoordinates?: boolean;
     withPartners?: boolean;
     withStacked?: boolean;
@@ -7424,6 +7450,7 @@ export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed,
         timeBucket,
         userId,
         visibility,
+        withAutoStacked,
         withCoordinates,
         withPartners,
         withStacked
@@ -7434,7 +7461,7 @@ export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed,
 /**
  * Get time buckets
  */
-export function getTimeBuckets({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, userId, visibility, withCoordinates, withPartners, withStacked }: {
+export function getTimeBuckets({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, userId, visibility, withAutoStacked, withCoordinates, withPartners, withStacked }: {
     albumId?: string;
     bbox?: string;
     isFavorite?: boolean;
@@ -7448,6 +7475,7 @@ export function getTimeBuckets({ albumId, bbox, isFavorite, isPrivate, isTrashed
     tagId?: string;
     userId?: string;
     visibility?: AssetVisibility;
+    withAutoStacked?: boolean;
     withCoordinates?: boolean;
     withPartners?: boolean;
     withStacked?: boolean;
@@ -7469,6 +7497,7 @@ export function getTimeBuckets({ albumId, bbox, isFavorite, isPrivate, isTrashed
         tagId,
         userId,
         visibility,
+        withAutoStacked,
         withCoordinates,
         withPartners,
         withStacked
@@ -8249,6 +8278,10 @@ export enum AssetJobName {
     RegenerateThumbnail = "regenerate-thumbnail",
     TranscodeVideo = "transcode-video"
 }
+export enum StackSource {
+    Manual = "manual",
+    Auto = "auto"
+}
 export enum AssetTypeEnum {
     Image = "IMAGE",
     Video = "VIDEO",
@@ -8464,8 +8497,10 @@ export enum SyncEntityType {
     PartnerAssetExifV1 = "PartnerAssetExifV1",
     PartnerAssetExifBackfillV1 = "PartnerAssetExifBackfillV1",
     PartnerStackBackfillV1 = "PartnerStackBackfillV1",
+    PartnerStackBackfillV2 = "PartnerStackBackfillV2",
     PartnerStackDeleteV1 = "PartnerStackDeleteV1",
     PartnerStackV1 = "PartnerStackV1",
+    PartnerStackV2 = "PartnerStackV2",
     AlbumV1 = "AlbumV1",
     AlbumV2 = "AlbumV2",
     AlbumDeleteV1 = "AlbumDeleteV1",
@@ -8489,6 +8524,7 @@ export enum SyncEntityType {
     MemoryToAssetV1 = "MemoryToAssetV1",
     MemoryToAssetDeleteV1 = "MemoryToAssetDeleteV1",
     StackV1 = "StackV1",
+    StackV2 = "StackV2",
     StackDeleteV1 = "StackDeleteV1",
     PersonV1 = "PersonV1",
     PersonDeleteV1 = "PersonDeleteV1",
@@ -8523,7 +8559,9 @@ export enum SyncRequestType {
     PartnerAssetsV2 = "PartnerAssetsV2",
     PartnerAssetExifsV1 = "PartnerAssetExifsV1",
     PartnerStacksV1 = "PartnerStacksV1",
+    PartnerStacksV2 = "PartnerStacksV2",
     StacksV1 = "StacksV1",
+    StacksV2 = "StacksV2",
     UsersV1 = "UsersV1",
     PeopleV1 = "PeopleV1",
     AssetFacesV1 = "AssetFacesV1",
