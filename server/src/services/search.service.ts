@@ -25,7 +25,7 @@ import {
 import { AssetOrder, AssetVisibility, Permission } from 'src/enum';
 import { AssetSearchScope } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
-import { requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
+import { isPrivateMode, requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
 import { PrivateScope } from 'src/utils/database';
 import { isSmartSearchEnabled } from 'src/utils/misc';
@@ -355,7 +355,7 @@ export class SearchService extends BaseService {
       scope: {
         userIds,
         lockedOwnerId: auth.user.id,
-        privateOwnerId: auth.session?.privateMode ? auth.user.id : null,
+        privateOwnerId: isPrivateMode(auth) ? auth.user.id : null,
         viewingUserId: auth.user.id,
       },
     };

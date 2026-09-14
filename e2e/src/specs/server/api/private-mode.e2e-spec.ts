@@ -1565,6 +1565,56 @@ describe('private mode', () => {
     });
   });
 
+  describe('api keys (privateMode.access)', () => {
+    const getAsset = (key: string, id: string) => request(app).get(`/assets/${id}`).set('x-api-key', key);
+    const setPrivate = (key: string, id: string, isPrivate: boolean) =>
+      request(app).put(`/assets/${id}`).set('x-api-key', key).send({ isPrivate });
+    const status = (key: string) => request(app).get('/auth/status').set('x-api-key', key);
+
+    it('should not treat the all permission as private mode', async () => {
+      const { secret } = await utils.createApiKey(user1.accessToken, [Permission.All]);
+
+      expect((await status(secret)).body.privateMode).toBe(false);
+      expect((await getAsset(secret, plainAsset.id)).status).toBe(200);
+      expect((await getAsset(secret, privateAsset.id)).status).toBe(400);
+      expect((await setPrivate(secret, privateAsset.id, false)).status).toBe(400);
+    });
+
+    it('should give a key with privateMode.access the same access as an unlocked session', async () => {
+      const { secret } = await utils.createApiKey(user1.accessToken, [Permission.All, Permission.PrivateModeAccess]);
+
+      expect((await status(secret)).body.privateMode).toBe(true);
+
+      const { status: getStatus, body } = await getAsset(secret, privateAsset.id);
+      expect(getStatus).toBe(200);
+      expect(body).toEqual(expect.objectContaining({ id: privateAsset.id, isPrivate: true }));
+
+      const unmark = await setPrivate(secret, privateAsset.id, false);
+      expect(unmark.status).toBe(200);
+      expect(unmark.body.isPrivate).toBe(false);
+
+      const mark = await setPrivate(secret, privateAsset.id, true);
+      expect(mark.status).toBe(200);
+      expect(mark.body.isPrivate).toBe(true);
+    });
+
+    it('should still require the regular permissions next to privateMode.access', async () => {
+      const { secret } = await utils.createApiKey(user1.accessToken, [
+        Permission.AssetRead,
+        Permission.PrivateModeAccess,
+      ]);
+
+      expect((await getAsset(secret, privateAsset.id)).status).toBe(200);
+      expect((await setPrivate(secret, privateAsset.id, false)).status).toBe(403);
+    });
+
+    it('should not open private assets of other users', async () => {
+      const { secret } = await utils.createApiKey(user2.accessToken, [Permission.All, Permission.PrivateModeAccess]);
+
+      expect((await getAsset(secret, privateAsset.id)).status).toBe(400);
+    });
+  });
+
   describe('trash', () => {
     let trashedPrivate: AssetMediaResponseDto;
     let trashedPlain: AssetMediaResponseDto;

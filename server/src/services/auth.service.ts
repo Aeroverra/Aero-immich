@@ -24,7 +24,7 @@ import { UserAdminResponseDto, mapUserAdmin } from 'src/dtos/user.dto';
 import { AuthType, ImmichCookie, ImmichHeader, ImmichQuery, JobName, Permission } from 'src/enum';
 import { OAuthProfile } from 'src/repositories/oauth.repository';
 import { BaseService } from 'src/services/base.service';
-import { isGranted } from 'src/utils/access';
+import { isGranted, isPrivateMode } from 'src/utils/access';
 import { HumanReadableSize } from 'src/utils/bytes';
 import { getPreferences } from 'src/utils/preferences';
 import { generateProfileImage } from 'src/utils/profile-image';
@@ -714,7 +714,7 @@ export class AuthService extends BaseService {
       isElevated: !!auth.session?.hasElevatedPermission,
       expiresAt: session?.expiresAt?.toISOString(),
       pinExpiresAt: session?.pinExpiresAt?.toISOString(),
-      privateMode: !!auth.session?.privateMode,
+      privateMode: isPrivateMode(auth),
       privateModeExpiresAt: session?.privateModeExpiresAt?.toISOString(),
     };
   }

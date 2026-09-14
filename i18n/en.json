@@ -562,6 +562,8 @@
   "api_key": "API Key",
   "api_key_description": "This value will only be shown once. Please be sure to copy it before closing the window.",
   "api_key_empty": "Your API Key name shouldn't be empty",
+  "api_key_private_mode_access": "Private mode access",
+  "api_key_private_mode_access_description": "Lets this key see and change private assets and albums without unlocking private mode. It is not included in Select all, so grant it only to keys you trust.",
   "api_keys": "API Keys",
   "app_architecture_variant": "Variant (Architecture)",
   "app_bar_signout_dialog_content": "Are you sure you want to sign out?",

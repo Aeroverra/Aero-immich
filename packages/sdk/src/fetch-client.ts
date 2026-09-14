@@ -8098,6 +8098,7 @@ export enum Permission {
     PluginRead = "plugin.read",
     PluginUpdate = "plugin.update",
     PluginDelete = "plugin.delete",
+    PrivateModeAccess = "privateMode.access",
     ServerAbout = "server.about",
     ServerApkLinks = "server.apkLinks",
     ServerStorage = "server.storage",
