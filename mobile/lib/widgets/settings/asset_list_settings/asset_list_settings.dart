@@ -6,6 +6,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
+import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_auto_stack_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_group_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_layout_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_stack_settings.dart';
@@ -30,6 +31,7 @@ class AssetListSettings extends HookConsumerWidget {
         },
       ),
       const StackSettings(),
+      const AutoStackSettings(),
       const LayoutSettings(),
       const GroupSettings(),
     ];
