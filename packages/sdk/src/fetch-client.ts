@@ -200,6 +200,24 @@ export type AdminConfigLoggingDto = {
     enabled: boolean;
     level: LogLevel;
 };
+export type AdminConfigAutoStackDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Maximum number of photos in an automatic stack */
+    maxAssets: number;
+    /** Maximum smart search distance between any two photos of an automatic stack */
+    maxDistance: number;
+    /** Maximum movement of the largest face between two photos, as a fraction of the image */
+    maxFaceShift: number;
+    /** Maximum relative change in size of the largest face between two photos */
+    maxFaceSizeChange: number;
+    /** Maximum time between two consecutive photos of an automatic stack, in seconds */
+    maxGapSeconds: number;
+    /** Maximum time between the first and the last photo of an automatic stack, in seconds */
+    maxSpanSeconds: number;
+    /** Maximum change in head yaw of the largest face between two photos, in degrees */
+    maxYawChange: number;
+};
 export type AdminConfigMachineLearningAvailabilityChecksDto = {
     /** Enabled */
     enabled: boolean;
@@ -249,6 +267,7 @@ export type AdminConfigOcrDto = {
     modelName: string;
 };
 export type AdminConfigMachineLearningDto = {
+    autoStack: AdminConfigAutoStackDto;
     availabilityChecks: AdminConfigMachineLearningAvailabilityChecksDto;
     clip: AdminConfigClipDto;
     duplicateDetection: AdminConfigDuplicateDetectionDto;
@@ -281,6 +300,8 @@ export type AdminConfigNewVersionCheckDto = {
     enabled: boolean;
 };
 export type AdminConfigNightlyTasksDto = {
+    /** Automatic stacks for new photos that were not evaluated yet */
+    autoStack: boolean;
     /** Cluster new faces */
     clusterNewFaces: boolean;
     /** Database cleanup */
@@ -657,6 +678,10 @@ export type CalendarHeatmapResponseDto = {
 export type AlbumsResponse = {
     defaultAssetOrder: AssetOrder;
 };
+export type AutoStackResponse = {
+    /** Whether similar photos taken close together are stacked automatically */
+    enabled: boolean;
+};
 export type CastResponse = {
     /** Whether Google Cast is enabled */
     gCastEnabled: boolean;
@@ -742,6 +767,7 @@ export type TagsResponse = {
 };
 export type UserPreferencesResponseDto = {
     albums: AlbumsResponse;
+    autoStack: AutoStackResponse;
     cast: CastResponse;
     deletedReimport: DeletedReimportResponse;
     download: DownloadResponse;
@@ -759,6 +785,10 @@ export type UserPreferencesResponseDto = {
 };
 export type AlbumsUpdate = {
     defaultAssetOrder?: AssetOrder;
+};
+export type AutoStackUpdate = {
+    /** Whether similar photos taken close together are stacked automatically */
+    enabled?: boolean;
 };
 export type AvatarUpdate = {
     color?: UserAvatarColor;
@@ -846,6 +876,7 @@ export type TagsUpdate = {
 };
 export type UserPreferencesUpdateDto = {
     albums?: AlbumsUpdate;
+    autoStack?: AutoStackUpdate;
     avatar?: AvatarUpdate;
     cast?: CastUpdate;
     deletedReimport?: DeletedReimportUpdate;
@@ -1608,6 +1639,10 @@ export type UserConfigImageDto = {
     preview: UserConfigGeneratedImageDto;
     thumbnail: UserConfigGeneratedImageDto;
 };
+export type UserConfigAutoStackDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigClipDto = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -1631,6 +1666,7 @@ export type UserConfigOcrDto = {
     enabled: boolean;
 };
 export type UserConfigMachineLearningDto = {
+    autoStack: UserConfigAutoStackDto;
     clip: UserConfigClipDto;
     duplicateDetection: UserConfigDuplicateDetectionDto;
     /** Enabled */
@@ -1816,6 +1852,7 @@ export type QueueResponseLegacyDto = {
     queueStatus: QueueStatusLegacyDto;
 };
 export type QueuesResponseLegacyDto = {
+    autoStack: QueueResponseLegacyDto;
     backgroundTask: QueueResponseLegacyDto;
     backupDatabase: QueueResponseLegacyDto;
     duplicateDetection: QueueResponseLegacyDto;
@@ -8351,6 +8388,7 @@ export enum QueueName {
     FacialRecognition = "facialRecognition",
     SmartSearch = "smartSearch",
     DuplicateDetection = "duplicateDetection",
+    AutoStack = "autoStack",
     BackgroundTask = "backgroundTask",
     StorageTemplateMigration = "storageTemplateMigration",
     Migration = "migration",
@@ -8418,6 +8456,8 @@ export enum JobName {
     AssetFileMigration = "AssetFileMigration",
     AssetGenerateThumbnailsQueueAll = "AssetGenerateThumbnailsQueueAll",
     AssetGenerateThumbnails = "AssetGenerateThumbnails",
+    AutoStackQueueAll = "AutoStackQueueAll",
+    AutoStack = "AutoStack",
     AuditTableCleanup = "AuditTableCleanup",
     DatabaseBackup = "DatabaseBackup",
     FacialRecognitionQueueAll = "FacialRecognitionQueueAll",
