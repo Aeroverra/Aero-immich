@@ -127,11 +127,12 @@ const updatedConfig = Object.freeze<SystemConfig>({
       enabled: true,
       maxGapSeconds: 5,
       maxSpanSeconds: 30,
-      maxAssets: 10,
+      maxAssets: 100,
       maxDistance: 0.06,
       maxFaceShift: 0.1,
       maxFaceSizeChange: 0.25,
       maxYawChange: 15,
+      maxSmileChange: 0.4,
     },
     facialRecognition: {
       enabled: true,

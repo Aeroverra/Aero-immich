@@ -18562,6 +18562,13 @@
             "minimum": 0,
             "type": "number"
           },
+          "maxSmileChange": {
+            "description": "Maximum change in the smile score (0-1) of the largest face between two photos",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
           "maxSpanSeconds": {
             "description": "Maximum time between the first and the last photo of an automatic stack, in seconds",
             "format": "double",
@@ -18584,6 +18591,7 @@
           "maxFaceShift",
           "maxFaceSizeChange",
           "maxGapSeconds",
+          "maxSmileChange",
           "maxSpanSeconds",
           "maxYawChange"
         ],
