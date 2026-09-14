@@ -9,11 +9,13 @@ import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/local_auth.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/forms/pin_registration_form.dart';
 import 'package:immich_mobile/widgets/forms/pin_verification_form.dart';
 
-/// Asks for the PIN code to turn the session's private mode on.
+/// Turns the session's private mode on: with biometrics when the user enrolled them (the
+/// enrolment shared with the locked folder), otherwise by asking for the PIN code.
 ///
 /// With [openPrivateFolder] the page replaces itself with the private folder once the mode
 /// is on (used by the route guard); otherwise it just pops (used by the app bar toggle).
@@ -27,6 +29,7 @@ class PrivatePinAuthPage extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localAuthState = ref.watch(localAuthProvider);
     final showPinRegistrationForm = useState(false);
+    final isCheckingBiometrics = useState(true);
     final authStatus = useFuture(
       useMemoized(() => ref.read(apiServiceProvider).authenticationApi.getAuthStatus().catchError((_) => null)),
     );
@@ -50,6 +53,24 @@ class PrivatePinAuthPage extends HookConsumerWidget {
     Future<bool> enablePrivateMode(String pinCode) {
       return ref.read(authProvider.notifier).enablePrivateMode(pinCode);
     }
+
+    Future<void> enableWithBiometrics() async {
+      final result = await ref.read(privateModeProvider.notifier).enableWithBiometrics();
+      if (!context.mounted) {
+        return;
+      }
+
+      if (result == PrivateModeBiometricResult.enabled) {
+        await onEnabled();
+        return;
+      }
+      isCheckingBiometrics.value = false;
+    }
+
+    useEffect(() {
+      unawaited(enableWithBiometrics());
+      return null;
+    }, const []);
 
     Future<void> registerBiometric(String pinCode) async {
       final isRegistered = await ref.read(localAuthProvider.notifier).registerBiometric(context, pinCode);
@@ -107,7 +128,9 @@ class PrivatePinAuthPage extends HookConsumerWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 36.0),
-            child: showPinRegistrationForm.value
+            child: isCheckingBiometrics.value
+                ? const Center(child: CircularProgressIndicator())
+                : showPinRegistrationForm.value
                 ? Center(child: PinRegistrationForm(onDone: () => showPinRegistrationForm.value = false))
                 : Column(
                     children: [
