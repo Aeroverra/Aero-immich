@@ -24,6 +24,7 @@ import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart'
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/utils/system_ui.utils.dart';
 import 'package:immich_mobile/widgets/photo_view/photo_view.dart';
 
@@ -119,6 +120,14 @@ class _AssetViewerState extends ConsumerState<AssetViewer> {
     }
 
     _reloadSubscription = EventStream.shared.listen(_onEvent);
+    // The viewer holds on to the timeline service it was opened with, which is disposed rather than
+    // reloaded when private mode turns off (timeout, app pause), so a private asset would stay on screen
+    ref.listenManual(isPrivateModeProvider, (_, enabled) {
+      final current = ref.read(assetViewerProvider).currentAsset;
+      if (!enabled && current is RemoteAsset && current.isPrivate) {
+        unawaited(context.maybePop());
+      }
+    });
 
     WidgetsBinding.instance.addPostFrameCallback(_onAssetInit);
 

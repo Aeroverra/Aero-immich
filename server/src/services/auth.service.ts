@@ -26,6 +26,7 @@ import { OAuthProfile } from 'src/repositories/oauth.repository';
 import { BaseService } from 'src/services/base.service';
 import { isGranted } from 'src/utils/access';
 import { HumanReadableSize } from 'src/utils/bytes';
+import { getPreferences } from 'src/utils/preferences';
 import { generateProfileImage } from 'src/utils/profile-image';
 import { getUserAgentDetails } from 'src/utils/request';
 export interface LoginDetails {
@@ -573,11 +574,27 @@ export class AuthService extends BaseService {
         }
       }
 
+      // Private mode check (sliding window, renewed on activity)
+      let privateMode = false;
+
+      if (session.privateModeExpiresAt) {
+        const privateModeExpiresAt = DateTime.fromJSDate(session.privateModeExpiresAt);
+        privateMode = privateModeExpiresAt > now;
+
+        if (privateMode && now.plus({ minutes: 5 }) > privateModeExpiresAt) {
+          const timeoutMinutes = await this.getPrivateModeTimeout(session.user.id);
+          await this.sessionRepository.update(session.id, {
+            privateModeExpiresAt: DateTime.now().plus({ minutes: timeoutMinutes }).toJSDate(),
+          });
+        }
+      }
+
       return {
         user: session.user,
         session: {
           id: session.id,
           hasElevatedPermission,
+          privateMode,
         },
       };
     }
@@ -604,6 +621,33 @@ export class AuthService extends BaseService {
     }
 
     await this.sessionRepository.update(auth.session.id, { pinExpiresAt: null });
+  }
+
+  async enablePrivateMode(auth: AuthDto, dto: SessionUnlockDto): Promise<void> {
+    if (!auth.session) {
+      throw new BadRequestException('This endpoint can only be used with a session token');
+    }
+
+    const user = await this.userRepository.getForPinCode(auth.user.id);
+    this.validatePinCode(user, { pinCode: dto.pinCode });
+
+    const timeoutMinutes = await this.getPrivateModeTimeout(auth.user.id);
+    await this.sessionRepository.update(auth.session.id, {
+      privateModeExpiresAt: DateTime.now().plus({ minutes: timeoutMinutes }).toJSDate(),
+    });
+  }
+
+  async disablePrivateMode(auth: AuthDto): Promise<void> {
+    if (!auth.session) {
+      throw new BadRequestException('This endpoint can only be used with a session token');
+    }
+
+    await this.sessionRepository.update(auth.session.id, { privateModeExpiresAt: null });
+  }
+
+  private async getPrivateModeTimeout(userId: string): Promise<number> {
+    const metadata = await this.userRepository.getMetadata(userId);
+    return getPreferences(metadata).privateMode.timeoutMinutes;
   }
 
   private async createLoginResponse(
@@ -670,6 +714,8 @@ export class AuthService extends BaseService {
       isElevated: !!auth.session?.hasElevatedPermission,
       expiresAt: session?.expiresAt?.toISOString(),
       pinExpiresAt: session?.pinExpiresAt?.toISOString(),
+      privateMode: !!auth.session?.privateMode,
+      privateModeExpiresAt: session?.privateModeExpiresAt?.toISOString(),
     };
   }
 }

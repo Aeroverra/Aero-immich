@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   AddUsersDto,
+  AlbumAddAssetsDto,
   AlbumResponseDto,
   AlbumsAddAssetsDto,
   AlbumsAddAssetsResponseDto,
@@ -17,18 +18,29 @@ import { MapMarkerResponseDto } from 'src/dtos/map.dto';
 import { AlbumUserRole, Permission } from 'src/enum';
 import { AlbumAssetCount, AlbumInfoOptions } from 'src/repositories/album.repository';
 import { BaseService } from 'src/services/base.service';
+import { isPrivateMode, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
+import { PrivateScope } from 'src/utils/database';
 import { asDateTimeString } from 'src/utils/date';
 import { findOrFail } from 'src/utils/misc';
 import { getPreferences } from 'src/utils/preferences';
 
+// Shared-link viewers see everything the owner put behind the link, private assets included.
+const toAlbumScope = (auth: AuthDto): PrivateScope =>
+  auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
+
+// an album whose contents reach someone other than the owner: other album users or a shared link
+const isAlbumShared = (album: { albumUsers: unknown[]; sharedLinks: unknown[] }) =>
+  album.albumUsers.length > 1 || album.sharedLinks.length > 0;
+
 @Injectable()
 export class AlbumService extends BaseService {
   async getStatistics(auth: AuthDto): Promise<AlbumStatisticsResponseDto> {
+    const privateMode = isPrivateMode(auth);
     const [owned, shared, notShared] = await Promise.all([
-      this.albumRepository.getAll(auth.user.id, { isOwned: true }),
-      this.albumRepository.getAll(auth.user.id, { isShared: true }),
-      this.albumRepository.getAll(auth.user.id, { isOwned: true, isShared: false }),
+      this.albumRepository.getAll(auth.user.id, { isOwned: true, privateMode }),
+      this.albumRepository.getAll(auth.user.id, { isShared: true, privateMode }),
+      this.albumRepository.getAll(auth.user.id, { isOwned: true, isShared: false, privateMode }),
     ]);
 
     return {
@@ -38,12 +50,14 @@ export class AlbumService extends BaseService {
     };
   }
 
-  async getAll({ user: { id: ownerId } }: AuthDto, { assetId, ...rest }: GetAlbumsDto): Promise<AlbumResponseDto[]> {
+  async getAll(auth: AuthDto, { assetId, ...rest }: GetAlbumsDto): Promise<AlbumResponseDto[]> {
+    const ownerId = auth.user.id;
     await this.albumRepository.updateThumbnails();
 
+    const scope = toAlbumScope(auth);
     const albums = assetId
-      ? await this.albumRepository.getByAssetId(ownerId, assetId)
-      : await this.albumRepository.getAll(ownerId, rest);
+      ? await this.albumRepository.getByAssetId(ownerId, assetId, scope)
+      : await this.albumRepository.getAll(ownerId, { ...rest, privateMode: scope.privateMode });
 
     if (albums.length === 0) {
       return [];
@@ -51,7 +65,10 @@ export class AlbumService extends BaseService {
 
     // Get asset count for each album. Then map the result to an object:
     // { [albumId]: assetCount }
-    const results = await this.albumRepository.getMetadataForIds(albums.map((album) => album.id));
+    const results = await this.albumRepository.getMetadataForIds(
+      albums.map((album) => album.id),
+      scope,
+    );
     const albumMetadata: Record<string, AlbumAssetCount> = {};
     for (const metadata of results) {
       albumMetadata[metadata.albumId] = metadata;
@@ -72,7 +89,8 @@ export class AlbumService extends BaseService {
     await this.requireAccess({ auth, permission: Permission.AlbumRead, ids: [id] });
     await this.albumRepository.updateThumbnails();
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
-    const [albumMetadataForIds] = await this.albumRepository.getMetadataForIds([album.id]);
+    const scope = toAlbumScope(auth);
+    const [albumMetadataForIds] = await this.albumRepository.getMetadataForIds([album.id], scope);
 
     const hasSharedUsers = album.albumUsers && album.albumUsers.length > 1;
     const hasSharedLink = album.sharedLinks && album.sharedLinks.length > 0;
@@ -84,7 +102,7 @@ export class AlbumService extends BaseService {
       endDate: asDateTimeString(albumMetadataForIds?.endDate ?? undefined),
       assetCount: albumMetadataForIds?.assetCount ?? 0,
       lastModifiedAssetTimestamp: asDateTimeString(albumMetadataForIds?.lastModifiedAssetTimestamp ?? undefined),
-      contributorCounts: isShared ? await this.albumRepository.getContributorCounts(album.id) : undefined,
+      contributorCounts: isShared ? await this.albumRepository.getContributorCounts(album.id, scope) : undefined,
     };
   }
 
@@ -95,7 +113,7 @@ export class AlbumService extends BaseService {
       return [];
     }
 
-    return this.mapRepository.getAlbumMapMarkers(id);
+    return this.mapRepository.getAlbumMapMarkers(id, toAlbumScope(auth));
   }
 
   async create(auth: AuthDto, dto: CreateAlbumDto): Promise<AlbumResponseDto> {
@@ -116,6 +134,11 @@ export class AlbumService extends BaseService {
     });
     const assetIds = [...allowedAssetIdsSet].map((id) => id);
 
+    // creating a shared album with private assets shares them with the other users
+    if (albumUsers.length > 0 && !dto.confirmPrivate && (await this.sharedLinkRepository.hasPrivateAssets(assetIds))) {
+      throw new BadRequestException('Album contains private assets, confirmPrivate is required');
+    }
+
     const userMetadata = await this.userRepository.getMetadata(auth.user.id);
 
     const album = await this.albumRepository.create(
@@ -134,13 +157,16 @@ export class AlbumService extends BaseService {
       await this.eventRepository.emit('AlbumInvite', { id: album.id, userId, senderName: auth.user.name });
     }
 
-    return mapAlbum(album);
+    // the album_asset trigger derives isPrivate after the insert, so re-read the flag
+    const created = assetIds.length > 0 ? await this.albumRepository.getById(album.id, { withAssets: false }) : null;
+
+    return mapAlbum({ ...album, isPrivate: created?.isPrivate ?? album.isPrivate });
   }
 
   async update(auth: AuthDto, id: string, dto: UpdateAlbumDto): Promise<AlbumResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AlbumUpdate, ids: [id] });
 
-    const album = await this.findOrFail(id, auth.user.id, { withAssets: true });
+    const album = await this.findOrFail(id, auth.user.id, { withAssets: true, scope: toAlbumScope(auth) });
 
     if (dto.albumThumbnailAssetId) {
       const results = await this.albumRepository.getAssetIds(id, [dto.albumThumbnailAssetId]);
@@ -169,9 +195,22 @@ export class AlbumService extends BaseService {
     await this.albumRepository.delete(id);
   }
 
-  async addAssets(auth: AuthDto, id: string, dto: BulkIdsDto): Promise<BulkIdResponseDto[]> {
+  async addAssets(auth: AuthDto, id: string, dto: AlbumAddAssetsDto): Promise<BulkIdResponseDto[]> {
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
     await this.requireAccess({ auth, permission: Permission.AlbumAssetCreate, ids: [id] });
+
+    // adding into a private album makes the new assets private, which needs an unlocked session
+    if (album.isPrivate) {
+      requirePrivateMode(auth);
+    }
+
+    // adding private assets to a shared album shares them with the other users and link viewers
+    if (!dto.confirmPrivate && isAlbumShared(album)) {
+      const shareable = await this.checkAccess({ auth, permission: Permission.AssetShare, ids: dto.ids });
+      if (await this.sharedLinkRepository.hasPrivateAssets([...shareable])) {
+        throw new BadRequestException('Album contains private assets, confirmPrivate is required');
+      }
+    }
 
     const results = await addAssets(
       auth,
@@ -221,8 +260,10 @@ export class AlbumService extends BaseService {
       return results;
     }
 
+    // every album is checked before anything is written, so a refused album leaves the others untouched
+    let hasPrivateAssets: boolean | undefined;
+    const pending: { albumId: string; albumThumbnailAssetId: string; albumUsers: { user: { id: string } }[] }[] = [];
     const albumAssetValues: { albumId: string; assetId: string }[] = [];
-    const events: { id: string; userIds: string[]; recipientIds: string[] }[] = [];
     for (const albumId of allowedAlbumIds) {
       const existingAssetIds = await this.albumRepository.getAssetIds(albumId, [...allowedAssetIds]);
       const notPresentAssetIds = [...allowedAssetIds.difference(existingAssetIds)];
@@ -230,22 +271,38 @@ export class AlbumService extends BaseService {
         continue;
       }
       const album = await this.findOrFail(albumId, auth.user.id, { withAssets: false });
-      results.error = undefined;
-      results.success = true;
+      // adding into a private album makes the new assets private, which needs an unlocked session
+      if (album.isPrivate) {
+        requirePrivateMode(auth);
+      }
+      // adding private assets to a shared album shares them with the other users and link viewers
+      if (!dto.confirmPrivate && isAlbumShared(album)) {
+        hasPrivateAssets ??= await this.sharedLinkRepository.hasPrivateAssets([...allowedAssetIds]);
+        if (hasPrivateAssets) {
+          throw new BadRequestException('Album contains private assets, confirmPrivate is required');
+        }
+      }
 
       for (const assetId of notPresentAssetIds) {
         albumAssetValues.push({ albumId, assetId });
       }
+      pending.push({
+        albumId,
+        albumThumbnailAssetId: album.albumThumbnailAssetId ?? notPresentAssetIds[0],
+        albumUsers: album.albumUsers,
+      });
+    }
+
+    const events: { id: string; userIds: string[]; recipientIds: string[] }[] = [];
+    for (const { albumId, albumThumbnailAssetId, albumUsers } of pending) {
+      results.error = undefined;
+      results.success = true;
       await this.albumRepository.update(
         albumId,
-        {
-          id: albumId,
-          updatedAt: new Date(),
-          albumThumbnailAssetId: album.albumThumbnailAssetId ?? notPresentAssetIds[0],
-        },
+        { id: albumId, updatedAt: new Date(), albumThumbnailAssetId },
         auth.user.id,
       );
-      const userIds = album.albumUsers.map(({ user }) => user.id);
+      const userIds = albumUsers.map(({ user }) => user.id);
       const recipientIds = userIds.filter((userId) => userId !== auth.user.id);
       events.push({ id: albumId, userIds, recipientIds });
     }
@@ -284,10 +341,14 @@ export class AlbumService extends BaseService {
     return results;
   }
 
-  async addUsers(auth: AuthDto, id: string, { albumUsers }: AddUsersDto): Promise<AlbumResponseDto> {
+  async addUsers(auth: AuthDto, id: string, { albumUsers, confirmPrivate }: AddUsersDto): Promise<AlbumResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AlbumShare, ids: [id] });
 
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
+
+    if (album.isPrivate && !confirmPrivate) {
+      throw new BadRequestException('Album contains private assets, confirmPrivate is required');
+    }
 
     for (const { userId, role } of albumUsers) {
       if (role === AlbumUserRole.Owner) {
@@ -309,7 +370,7 @@ export class AlbumService extends BaseService {
       await this.eventRepository.emit('AlbumInvite', { id, userId, senderName: auth.user.name });
     }
 
-    return mapAlbum(await this.findOrFail(id, auth.user.id, { withAssets: true }));
+    return mapAlbum(await this.findOrFail(id, auth.user.id, { withAssets: true, scope: toAlbumScope(auth) }));
   }
 
   async removeUser(auth: AuthDto, id: string, userId: string | 'me'): Promise<void> {
