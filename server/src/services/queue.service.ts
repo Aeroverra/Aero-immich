@@ -213,6 +213,10 @@ export class QueueService extends BaseService {
         return this.jobRepository.queue({ name: JobName.AssetDetectDuplicatesQueueAll, data: { force } });
       }
 
+      case QueueName.AutoStack: {
+        return this.jobRepository.queue({ name: JobName.AutoStackQueueAll, data: { force } });
+      }
+
       case QueueName.MetadataExtraction: {
         return this.jobRepository.queue({ name: JobName.AssetExtractMetadataQueueAll, data: { force } });
       }
@@ -260,6 +264,7 @@ export class QueueService extends BaseService {
       QueueName.FacialRecognition,
       QueueName.StorageTemplateMigration,
       QueueName.DuplicateDetection,
+      QueueName.AutoStack,
       QueueName.BackupDatabase,
     ].includes(name);
   }
@@ -290,6 +295,10 @@ export class QueueService extends BaseService {
 
     if (config.nightlyTasks.missingThumbnails) {
       jobs.push({ name: JobName.AssetGenerateThumbnailsQueueAll, data: { force: false } });
+    }
+
+    if (config.nightlyTasks.autoStack) {
+      jobs.push({ name: JobName.AutoStackQueueAll, data: { force: false } });
     }
 
     if (config.nightlyTasks.clusterNewFaces) {

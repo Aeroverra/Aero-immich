@@ -287,7 +287,10 @@ export interface INotifyAlbumUpdateJob extends IEntityJob, IDelayedJob {
   recipientId: string;
 }
 
-export interface IAutoStackJob extends IEntityJob, IDelayedJob {}
+export interface IAutoStackJob extends IEntityJob, IDelayedJob {
+  /** evaluate again when the asset is in an automatic stack, even though it was evaluated before */
+  refresh?: boolean;
+}
 
 export interface INotifyDeletedReimportJob extends IDelayedJob {
   userId: string;

@@ -6,6 +6,9 @@ import { AssetType, AssetVisibility } from 'src/enum';
  * be tested without a database.
  */
 
+/** how long a new upload waits before its neighbourhood is evaluated, so the rest of a burst can arrive */
+export const AUTO_STACK_UPLOAD_DELAY = 30_000;
+
 export type AutoStackOptions = {
   /** Largest time between two consecutive photos of a stack */
   maxGapSeconds: number;

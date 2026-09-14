@@ -26,32 +26,32 @@ const withAutoStackEnabled = (eb: ExpressionBuilder<DB, 'asset'>) =>
       .where(sql`user_metadata.value -> 'autoStack' ->> 'enabled'`, '=', 'true'),
   );
 
-/**
- * true when the automatic stack job must leave the asset alone: the user took it out of an automatic stack before, or
- * it is in a stack the job does not own (a manual stack or an automatic stack the user changed)
- */
-const withIsLocked = (eb: ExpressionBuilder<DB, 'asset'>) =>
+/** the user took the asset out of a stack or changed the automatic stack it is in */
+const withIsExcluded = (eb: ExpressionBuilder<DB, 'asset'>) =>
   eb
-    .or([
-      eb.exists(eb.selectFrom('stack_auto_exclusion').whereRef('stack_auto_exclusion.assetId', '=', 'asset.id')),
-      eb.exists(
-        eb
-          .selectFrom('stack')
-          .whereRef('stack.id', '=', 'asset.stackId')
-          .where((eb) =>
-            eb.or([
-              eb('stack.source', '!=', sql.lit(StackSource.Auto)),
-              eb.exists(
-                eb
-                  .selectFrom('asset as member')
-                  .innerJoin('stack_auto_exclusion', 'stack_auto_exclusion.assetId', 'member.id')
-                  .whereRef('member.stackId', '=', 'stack.id'),
-              ),
-            ]),
-          ),
-      ),
-    ])
-    .as('isLocked');
+    .exists(eb.selectFrom('stack_auto_exclusion').whereRef('stack_auto_exclusion.assetId', '=', 'asset.id'))
+    .as('isExcluded');
+
+/** the asset is in a stack the job does not own: a manual stack or an automatic stack the user changed */
+const withIsInUserStack = (eb: ExpressionBuilder<DB, 'asset'>) =>
+  eb
+    .exists(
+      eb
+        .selectFrom('stack')
+        .whereRef('stack.id', '=', 'asset.stackId')
+        .where((eb) =>
+          eb.or([
+            eb('stack.source', '!=', sql.lit(StackSource.Auto)),
+            eb.exists(
+              eb
+                .selectFrom('asset as member')
+                .innerJoin('stack_auto_exclusion', 'stack_auto_exclusion.assetId', 'member.id')
+                .whereRef('member.stackId', '=', 'stack.id'),
+            ),
+          ]),
+        ),
+    )
+    .as('isInUserStack');
 
 @Injectable()
 export class AutoStackRepository {
@@ -63,9 +63,11 @@ export class AutoStackRepository {
       .selectFrom('asset')
       .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
       .leftJoin('asset_job_status', 'asset_job_status.assetId', 'asset.id')
+      .leftJoin('stack', 'stack.id', 'asset.stackId')
       .select([
         'asset.id',
         'asset.ownerId',
+        'stack.source as stackSource',
         'asset.type',
         'asset.visibility',
         'asset.deletedAt',
@@ -92,6 +94,7 @@ export class AutoStackRepository {
       .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
       .leftJoin('smart_search', 'smart_search.assetId', 'asset.id')
       .leftJoin('asset_job_status', 'asset_job_status.assetId', 'asset.id')
+      .leftJoin('asset_quality', 'asset_quality.assetId', 'asset.id')
       .select([
         'asset.id',
         'asset.type',
@@ -107,13 +110,24 @@ export class AutoStackRepository {
         'smart_search.embedding',
         'asset_job_status.facesRecognizedAt',
         'asset_job_status.autoStackedAt',
+        'asset_quality.sharpness',
+        'asset_quality.exposureClipped',
       ])
-      .select(withIsLocked)
+      .select((eb) => eb('asset_quality.assetId', 'is not', null).as('hasQuality'))
+      .select(withIsExcluded)
+      .select(withIsInUserStack)
       .select((eb) =>
         jsonArrayFrom(
           eb
             .selectFrom('asset_face')
+            .leftJoin('asset_face_attribute', 'asset_face_attribute.faceId', 'asset_face.id')
             .select([
+              'asset_face_attribute.detected',
+              'asset_face_attribute.eyeBlinkLeft',
+              'asset_face_attribute.eyeBlinkRight',
+              'asset_face_attribute.smile',
+              'asset_face_attribute.yaw',
+              'asset_face_attribute.sharpness',
               'asset_face.personGroupId',
               'asset_face.imageWidth',
               'asset_face.imageHeight',
