@@ -21,6 +21,8 @@
     actions?: Array<HeaderButtonActionItem | MenuItemType>;
     sidebar?: Snippet;
     buttons?: Snippet;
+    /** buttons shown in the top navigation bar */
+    navbarButtons?: Snippet;
     children?: Snippet;
   }
 
@@ -33,6 +35,7 @@
     actions = [],
     sidebar,
     buttons,
+    navbarButtons,
     children,
   }: Props = $props();
 
@@ -48,7 +51,7 @@
 
 <header>
   {#if !hideNavbar}
-    <NavigationBar onUploadClick={() => openFileUploadDialog()} />
+    <NavigationBar onUploadClick={() => openFileUploadDialog()} buttons={navbarButtons} />
   {/if}
 </header>
 <div
