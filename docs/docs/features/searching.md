@@ -26,14 +26,14 @@ You can search the following types of content:
 | Camera                              | make, model and lens model                            |
 | Time frame                          | Start and end date of a specific time bucket          |
 | Media type                          | Image or video or both                                |
-| Display options                     | In Archive, in Favorites, Not in any album or No tags |
+| Display options                     | In Archive, in Favorites, Not in any album (mobile app: also No tags) |
 | Star rating                         | User-assigned star rating                             |
 
 <img src={require('./img/advanced-search-filters.webp').default} width="70%" title='Advanced search filters' />
 
-### Not in any album and No tags
+### Not in any album and untagged assets
 
-The display options include two filters for finding assets that still need organizing. "Not in any album" only returns assets that are not part of any album, and "No tags" only returns assets without a tag. Both can be combined with the other filters, for example to list untagged videos or favorites that are not in an album yet. The "No tags" option is only shown when tags are enabled in your user settings.
+Two filters help find assets that still need organizing. "Not in any album" in the display options only returns assets that are not part of any album. "Untagged" in the tags section of the web search (and "No tags" in the display options of the mobile app) only returns assets without a tag. Both can be combined with the other filters, for example to list untagged videos or favorites that are not in an album yet. The untagged filter is only shown when tags are enabled in your user settings.
 
 ### Full path or folder
 
