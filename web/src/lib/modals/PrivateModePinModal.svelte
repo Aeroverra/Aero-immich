@@ -20,6 +20,15 @@
   let isBadPinCode = $state(false);
   // undefined until the server has answered, so the create form is never shown on a stale cached value
   let hasPinCode = $state<boolean>();
+  let pinInputContainer = $state<HTMLElement>();
+
+  // the autofocus attribute is ignored for inputs added after the page loaded, so focus the PIN field once it renders
+  $effect(() => {
+    const input = pinInputContainer?.querySelector('input');
+    if (input) {
+      requestAnimationFrame(() => input.focus());
+    }
+  });
 
   onMount(async () => {
     try {
@@ -63,7 +72,9 @@
 
         <p class="text-center text-sm" style="text-wrap: pretty;">{$t('private_mode_enable_description')}</p>
 
-        <PinInput password autofocus bind:value={pinCode} onComplete={handleEnable} />
+        <div bind:this={pinInputContainer}>
+          <PinInput password autofocus bind:value={pinCode} onComplete={handleEnable} />
+        </div>
       {:else}
         <div class="text-primary">
           <Icon icon={mdiLockSmart} size="64" />

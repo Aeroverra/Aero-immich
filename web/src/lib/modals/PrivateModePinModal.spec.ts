@@ -48,6 +48,15 @@ describe('PrivateModePinModal component', () => {
     expect(sdkMock.getAuthStatus).toHaveBeenCalledOnce();
   });
 
+  it('focuses the pin field so the code can be typed right away', async () => {
+    sdkMock.getAuthStatus.mockResolvedValue(authStatus({ pinCode: true }));
+
+    render(PrivateModePinModal, { props: { onClose } });
+
+    await screen.findByText('Enter your PIN code to show private photos and videos in this session.');
+    await waitFor(() => expect(document.activeElement?.tagName).toBe('INPUT'));
+  });
+
   it('shows the create form only when the server says there is no pin code', async () => {
     sdkMock.getAuthStatus.mockResolvedValue(authStatus({ pinCode: false }));
 
