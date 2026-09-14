@@ -30,7 +30,8 @@ export type TimelineAsset = {
   isPrivate: boolean;
   isVideo: boolean;
   isImage: boolean;
-  stack: AssetStackResponseDto | null;
+  /** time buckets do not carry the stack source */
+  stack: Omit<AssetStackResponseDto, 'source'> | null;
   duration: number | null;
   projectionType: string | null;
   livePhotoVideoId: string | null;
