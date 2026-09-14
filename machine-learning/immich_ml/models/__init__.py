@@ -3,6 +3,8 @@ from typing import Any
 from immich_ml.models.base import InferenceModel
 from immich_ml.models.clip.textual import MClipTextualEncoder, OpenClipTextualEncoder
 from immich_ml.models.clip.visual import OpenClipVisualEncoder
+from immich_ml.models.face_attributes.landmarks import FaceLandmarker
+from immich_ml.models.image_quality.laplacian import LaplacianImageQuality
 from immich_ml.models.ocr.detection import TextDetector
 from immich_ml.models.ocr.recognition import TextRecognizer
 from immich_ml.schemas import ModelSource, ModelTask, ModelType
@@ -29,6 +31,12 @@ def get_model_class(model_name: str, model_type: ModelType, model_task: ModelTas
 
         case ModelSource.INSIGHTFACE, ModelType.RECOGNITION, ModelTask.FACIAL_RECOGNITION:
             return FaceRecognizer
+
+        case ModelSource.MEDIAPIPE, ModelType.LANDMARKS, ModelTask.FACE_ATTRIBUTES:
+            return FaceLandmarker
+
+        case ModelSource.OPENCV, ModelType.QUALITY, ModelTask.IMAGE_QUALITY:
+            return LaplacianImageQuality
 
         case ModelSource.PADDLE, ModelType.DETECTION, ModelTask.OCR:
             return TextDetector
