@@ -2,6 +2,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/services/user.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/memory.repository.dart';
@@ -43,11 +44,15 @@ void main() {
     return container;
   }
 
+  setUpAll(() => registerFallbackValue(PrivateModeFilter.off));
+
   setUp(() {
     memoryRepository = MockMemoryRepository();
     userService = MockUserService();
 
-    when(() => memoryRepository.getAll('user-1')).thenAnswer((_) async => []);
+    when(
+      () => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter')),
+    ).thenAnswer((_) async => []);
     when(() => userService.tryGetMyUser()).thenReturn(user());
     when(() => userService.watchMyUser()).thenAnswer((_) => const Stream.empty());
   });
@@ -59,15 +64,17 @@ void main() {
         container.listen(memoryLaneProvider, (_, _) {});
         async.flushMicrotasks();
 
-        verify(() => memoryRepository.getAll('user-1')).called(1);
+        verify(() => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter'))).called(1);
 
         async.elapse(const Duration(seconds: 4));
         async.flushMicrotasks();
-        verifyNever(() => memoryRepository.getAll('user-1'));
+        verifyNever(() => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter')));
 
         async.elapse(const Duration(hours: 25));
         async.flushMicrotasks();
-        verify(() => memoryRepository.getAll('user-1')).called(greaterThanOrEqualTo(1));
+        verify(
+          () => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter')),
+        ).called(greaterThanOrEqualTo(1));
       });
     });
 
@@ -76,13 +83,13 @@ void main() {
         final container = makeContainer();
         final subscription = container.listen(memoryLaneProvider, (_, _) {});
         async.flushMicrotasks();
-        verify(() => memoryRepository.getAll('user-1')).called(1);
+        verify(() => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter'))).called(1);
 
         subscription.close();
         async.elapse(const Duration(hours: 25));
         async.flushMicrotasks();
 
-        verifyNever(() => memoryRepository.getAll('user-1'));
+        verifyNever(() => memoryRepository.getAll('user-1', privateFilter: any(named: 'privateFilter')));
       });
     });
 
