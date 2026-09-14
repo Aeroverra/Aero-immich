@@ -2,8 +2,10 @@ import 'package:drift/drift.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/services/map.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/map.repository.drift.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
@@ -14,11 +16,16 @@ class MapRepository extends DatabaseAccessor<Drift> with $MapRepositoryMixin {
 
   Drift get _db => attachedDatabase;
 
-  MapQuery remote(List<String> ownerIds, TimelineMapOptions options) => _mapQueryBuilder(
+  MapQuery remote(
+    List<String> ownerIds,
+    TimelineMapOptions options, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => _mapQueryBuilder(
     assetFilter: (row) {
       Expression<bool> condition =
           row.deletedAt.isNull() &
           row.ownerId.isIn(ownerIds) &
+          row.privateFilter(privateFilter) &
           _db.remoteAssetEntity.visibility.isIn([
             AssetVisibility.timeline.index,
             if (options.includeArchived) AssetVisibility.archive.index,

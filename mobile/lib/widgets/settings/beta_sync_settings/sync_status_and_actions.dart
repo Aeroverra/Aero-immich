@@ -16,6 +16,7 @@ import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/storage.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/trash_sync.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/services/app_settings.service.dart';
@@ -229,7 +230,7 @@ class _SyncStatsCounts extends ConsumerWidget {
     Future<List<dynamic>> loadCounts() async {
       final assetCounts = assetService.getAssetCounts();
       final localAlbumCounts = localAlbumService.getCount();
-      final remoteAlbumCounts = remoteAlbumService.getCount();
+      final remoteAlbumCounts = remoteAlbumService.getCount(privateFilter: ref.read(privateModeFilterProvider));
       final memoryCount = memoryService.getCount();
       final getLocalHashedCount = assetService.getLocalHashedCount();
 
