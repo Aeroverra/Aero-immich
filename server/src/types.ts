@@ -604,6 +604,9 @@ export type UserPreferences = {
   recentlyAdded: {
     sidebarWeb: boolean;
   };
+  stacks: {
+    groupAuto: boolean;
+  };
   privateMode: {
     timeoutMinutes: number;
     sidebarWeb: boolean;
