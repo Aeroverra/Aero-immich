@@ -8,6 +8,7 @@ import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:logging/logging.dart';
 
@@ -46,8 +47,10 @@ Future<List<RemoteAsset>?> resolveStackedAssets(
 
   final drift = ref.read(driftProvider);
   final selectedIds = selected.map((asset) => asset.id).toSet();
+  // automatic stacks shown ungrouped are separate photos, nothing is hidden behind them
   final stacked = (await drift.remoteAssetRepository.getStackAssets(
     stackIds,
+    includeAutoStacks: ref.read(groupAutoStacksProvider),
   )).where((asset) => !selectedIds.contains(asset.id)).toList(growable: false);
   if (stacked.isEmpty) {
     return const [];
