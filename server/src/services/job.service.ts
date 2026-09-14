@@ -275,7 +275,12 @@ export class JobService extends BaseService {
         }
 
         const { machineLearning } = await this.getConfig({ withCache: true });
-        if (isVideoFrameAnalysisEnabled(machineLearning)) {
+        if (!isVideoFrameAnalysisEnabled(machineLearning)) {
+          break;
+        }
+
+        const [asset] = await this.assetRepository.getByIds([item.data.id]);
+        if (asset?.type === AssetType.Video) {
           await this.jobRepository.queue({ name: JobName.AssetAnalyzeVideoFrames, data: item.data });
         }
         break;
