@@ -200,6 +200,7 @@ export type ConcurrentQueueName = Exclude<
   | QueueName.StorageTemplateMigration
   | QueueName.FacialRecognition
   | QueueName.DuplicateDetection
+  | QueueName.AutoStack
   | QueueName.BackupDatabase
 >;
 
@@ -285,6 +286,8 @@ export interface INotifyAlbumInviteJob extends IEntityJob {
 export interface INotifyAlbumUpdateJob extends IEntityJob, IDelayedJob {
   recipientId: string;
 }
+
+export interface IAutoStackJob extends IEntityJob, IDelayedJob {}
 
 export interface INotifyDeletedReimportJob extends IDelayedJob {
   userId: string;
@@ -399,6 +402,10 @@ export type JobItem =
   // Duplicate Detection
   | { name: JobName.AssetDetectDuplicatesQueueAll; data: IBaseJob }
   | { name: JobName.AssetDetectDuplicates; data: IEntityJob }
+
+  // Automatic stacks
+  | { name: JobName.AutoStackQueueAll; data: IBaseJob }
+  | { name: JobName.AutoStack; data: IAutoStackJob }
 
   // Memories
   | { name: JobName.MemoryCleanup; data?: IBaseJob }
@@ -615,6 +622,9 @@ export type UserPreferences = {
     timeoutMinutes: number;
     sidebarWeb: boolean;
     includeInMemories: boolean;
+  };
+  autoStack: {
+    enabled: boolean;
   };
   deletedReimport: {
     mode: DeletedReimportMode;
