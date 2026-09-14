@@ -9,6 +9,7 @@ import {
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem, type IconLike } from '@immich/ui';
 import {
+  mdiCameraBurst,
   mdiClose,
   mdiCog,
   mdiContentDuplicate,
@@ -208,6 +209,11 @@ export const asQueueItem = ($t: MessageFormatter, queue: { name: QueueName }): Q
       icon: mdiEmoticonHappyOutline,
       title: $t('admin.machine_learning_face_attributes'),
       subtitle: $t('admin.face_attributes_job_description'),
+    },
+    [QueueName.AutoStack]: {
+      icon: mdiCameraBurst,
+      title: $t('admin.machine_learning_auto_stack'),
+      subtitle: $t('admin.auto_stack_job_description'),
     },
     [QueueName.Ocr]: {
       icon: mdiOcr,
