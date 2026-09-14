@@ -10,6 +10,7 @@ import 'package:immich_mobile/presentation/actions/delete.action.dart';
 import 'package:immich_mobile/presentation/actions/favorite.action.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/utils/option.dart';
 import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_ui/immich_ui.dart';
@@ -54,21 +55,33 @@ void main() {
     primary = RemoteAssetFactory.create(ownerId: context.currentUser.id, stackId: 'stack-1');
     member = RemoteAssetFactory.create(ownerId: context.currentUser.id, stackId: 'stack-1');
     plain = RemoteAssetFactory.create(ownerId: context.currentUser.id);
-    when(() => remoteAssetRepository.getStackAssets(any())).thenAnswer((_) async => [primary, member]);
+    when(
+      () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: any(named: 'includeAutoStacks')),
+    ).thenAnswer((_) async => [primary, member]);
   });
 
   tearDown(() async {
     await context.dispose();
   });
 
-  List<Override> overrides(Set<BaseAsset> selection) => [
+  List<Override> overrides(Set<BaseAsset> selection, {bool groupAutoStacks = true}) => [
     ...context.selected(selection),
     driftProvider.overrideWithValue(drift),
     userApiRepositoryProvider.overrideWithValue(userApiRepository),
+    groupAutoStacksProvider.overrideWithValue(groupAutoStacks),
   ];
 
-  Future<void> tapAction(WidgetTester tester, ActionBuilder action, Set<BaseAsset> selection) async {
-    await tester.pumpTestWidget(context, ActionIconButton(action: action), overrides: overrides(selection));
+  Future<void> tapAction(
+    WidgetTester tester,
+    ActionBuilder action,
+    Set<BaseAsset> selection, {
+    bool groupAutoStacks = true,
+  }) async {
+    await tester.pumpTestWidget(
+      context,
+      ActionIconButton(action: action),
+      overrides: overrides(selection, groupAutoStacks: groupAutoStacks),
+    );
     await tester.tap(find.byType(ImmichIconButton));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
@@ -133,6 +146,37 @@ void main() {
 
       expect(find.byType(StackSelectionDialog), findsNothing);
       verify(() => assetService.update([primary.id, member.id], isFavorite: const Option.some(true))).called(1);
+    });
+
+    testWidgets('asks for stacks while automatic stacks are grouped', (tester) async {
+      await tapAction(tester, const FavoriteAction(source: .timeline), {primary});
+
+      expect(find.byType(StackSelectionDialog), findsOneWidget);
+      verify(() => remoteAssetRepository.getStackAssets({'stack-1'}, includeAutoStacks: true)).called(1);
+    });
+
+    testWidgets('does not ask for automatic stacks shown as separate photos', (tester) async {
+      // the repository leaves out automatic stacks, so only manual stacks can hide assets
+      when(
+        () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: false),
+      ).thenAnswer((_) async => const []);
+
+      await tapAction(tester, const FavoriteAction(source: .timeline), {primary}, groupAutoStacks: false);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StackSelectionDialog), findsNothing);
+      verify(() => remoteAssetRepository.getStackAssets({'stack-1'}, includeAutoStacks: false)).called(1);
+      verify(() => assetService.update([primary.id], isFavorite: const Option.some(true))).called(1);
+    });
+
+    testWidgets('still asks for manual stacks while automatic stacks are shown as separate photos', (tester) async {
+      when(
+        () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: false),
+      ).thenAnswer((_) async => [primary, member]);
+
+      await tapAction(tester, const FavoriteAction(source: .timeline), {primary}, groupAutoStacks: false);
+
+      expect(find.byType(StackSelectionDialog), findsOneWidget);
     });
 
     testWidgets('trashes and restores the stacked assets with the selection', (tester) async {
