@@ -502,6 +502,7 @@ export class VideoFrameConfig extends BaseConfig {
   }
 
   getFrameCommand(timestampMs: number, videoStream: VideoStreamInfo) {
+    const filters = this.getFilterOptions(videoStream);
     return {
       inputOptions: [
         '-ss',
@@ -516,8 +517,8 @@ export class VideoFrameConfig extends BaseConfig {
         '-frames:v',
         '1',
         '-an',
-        '-vf',
-        this.getFilterOptions(videoStream).join(','),
+        // ffmpeg rejects an empty filter graph, which is the case for 8-bit videos that need no scaling
+        ...(filters.length > 0 ? ['-vf', filters.join(',')] : []),
         '-f',
         'image2pipe',
         '-c:v',

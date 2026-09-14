@@ -29,7 +29,7 @@ const DUPLICATE_FRAME_MAX_DISTANCE = 0.03;
 /** faces of one video closer than this are treated as the same person */
 const FACE_GROUP_MAX_DISTANCE = 0.4;
 /** a person seen in only one sampled frame needs a clearer detection than usual */
-const SINGLE_FRAME_FACE_MIN_SCORE = 0.85;
+const SINGLE_FRAME_FACE_MIN_SCORE = 0.8;
 /** the smallest face kept, relative to the shorter side of the frame */
 const MIN_FACE_SIZE_RATIO = 0.03;
 
