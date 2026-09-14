@@ -22,6 +22,13 @@ class SearchApiRepository extends ApiRepository {
         ? const Optional.absent()
         : Optional.present(filter.private.isPrivate);
 
+    // a null tagIds asks the server for assets without any tag
+    final Optional<List<String>?> tagIds = filter.display.hasNoTags
+        ? const Optional.present(null)
+        : filter.tagIds == null
+        ? const Optional.absent()
+        : Optional.present(filter.tagIds);
+
     if ((filter.context != null && filter.context!.isNotEmpty) ||
         (filter.assetId != null && filter.assetId!.isNotEmpty)) {
       return _api.searchSmart(
@@ -48,7 +55,7 @@ class SearchApiRepository extends ApiRepository {
           isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
           isPrivate: isPrivate,
           personIds: Optional.present(filter.people.map((e) => e.id).toList()),
-          tagIds: filter.tagIds == null ? const Optional.absent() : Optional.present(filter.tagIds),
+          tagIds: tagIds,
           type: type == null ? const Optional.absent() : Optional.present(type),
           page: Optional.present(page),
           size: const Optional.present(100),
@@ -80,7 +87,7 @@ class SearchApiRepository extends ApiRepository {
         isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
         isPrivate: isPrivate,
         personIds: Optional.present(filter.people.map((e) => e.id).toList()),
-        tagIds: filter.tagIds == null ? const Optional.absent() : Optional.present(filter.tagIds),
+        tagIds: tagIds,
         type: type == null ? const Optional.absent() : Optional.present(type),
         page: Optional.present(page),
         size: const Optional.present(1000),
