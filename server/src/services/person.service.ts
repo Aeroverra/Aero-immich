@@ -46,7 +46,7 @@ import { isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getDimensions } from 'src/utils/asset.util';
 import { ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
-import { batched, findOrFail, isFacialRecognitionEnabled } from 'src/utils/misc';
+import { batched, findOrFail, isFacialRecognitionEnabled, isVideoFrameAnalysisEnabled } from 'src/utils/misc';
 import { Point, transformPoints } from 'src/utils/transform';
 
 const personKey = ({ ownerId, personGroupId }: PersonId) => `${ownerId}/${personGroupId}`;
@@ -321,6 +321,11 @@ export class PersonService extends BaseService {
       await this.jobRepository.queue({ name: JobName.PersonCleanup });
     }
 
+    if (force && isVideoFrameAnalysisEnabled(machineLearning) && machineLearning.videoFrameAnalysis.detectFaces) {
+      // removing all machine learning faces also removed the faces found in video frames
+      await this.jobRepository.queue({ name: JobName.AssetAnalyzeVideoFramesQueueAll, data: { force: true } });
+    }
+
     return JobStatus.Success;
   }
 
@@ -350,15 +355,17 @@ export class PersonService extends BaseService {
     const facesToAdd: (Insertable<AssetFaceTable> & { id: string })[] = [];
     const embeddings: FaceSearchTable[] = [];
     const mlFaceIds = new Set<string>();
+    // faces found in other frames of a video are managed by the video frame analysis, never matched or removed here
+    const previewFaces = asset.faces.filter((face) => face.frameTimestamp === null);
 
-    for (const face of asset.faces) {
+    for (const face of previewFaces) {
       if (face.sourceType === SourceType.MachineLearning) {
         mlFaceIds.add(face.id);
       }
     }
 
-    const heightScale = imageHeight / (asset.faces[0]?.imageHeight || 1);
-    const widthScale = imageWidth / (asset.faces[0]?.imageWidth || 1);
+    const heightScale = imageHeight / (previewFaces[0]?.imageHeight || 1);
+    const widthScale = imageWidth / (previewFaces[0]?.imageWidth || 1);
     for (const { boundingBox, embedding } of faces) {
       const scaledBox = {
         x1: boundingBox.x1 * widthScale,
@@ -366,7 +373,7 @@ export class PersonService extends BaseService {
         x2: boundingBox.x2 * widthScale,
         y2: boundingBox.y2 * heightScale,
       };
-      const match = asset.faces.find((face) => this.iou(face, scaledBox) > 0.5);
+      const match = previewFaces.find((face) => this.iou(face, scaledBox) > 0.5);
 
       if (match && !mlFaceIds.delete(match.id)) {
         embeddings.push({ faceId: match.id, embedding });
@@ -551,7 +558,9 @@ export class PersonService extends BaseService {
       personGroupId = matchWithPerson?.personGroupId ?? undefined;
     }
 
-    if (!personGroupId && isCore) {
+    // faces found only in video frames wait for a matching person unless creating people from them is allowed
+    const canCreatePerson = face.frameTimestamp === null || machineLearning.videoFrameAnalysis.createPeople;
+    if (!personGroupId && isCore && canCreatePerson) {
       const group = await this.personRepository.createGroup(ownerId);
       personGroupId = group.id;
       this.logger.log(`Created person group ${personGroupId} for face ${id}`);
