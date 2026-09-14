@@ -6,7 +6,7 @@ import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/domain/services/user.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/user_metadata.repository.dart';
-import 'package:immich_mobile/models/server_info/server_version.model.dart';
+import 'package:immich_mobile/models/server_info/server_features.model.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
@@ -26,8 +26,8 @@ class _MockUserMetadataRepository extends Mock implements UserMetadataRepository
 
 void main() {
   const userId = 'user-1';
-  const supported = ServerVersion(major: 3, minor: 2, patch: 1);
-  const unsupported = ServerVersion(major: 3, minor: 2, patch: 0);
+  const supported = ServerFeatures(map: true, trash: true, oauthEnabled: false, passwordLogin: true, stackSource: true);
+  const unsupported = ServerFeatures(map: true, trash: true, oauthEnabled: false, passwordLogin: true);
 
   late MockUserApiRepository userApi;
   late _MockUserMetadataRepository userMetadata;
@@ -50,7 +50,7 @@ void main() {
     await preferences.close();
   });
 
-  Future<void> pump(WidgetTester tester, {ServerVersion version = supported}) {
+  Future<void> pump(WidgetTester tester, {ServerFeatures features = supported}) {
     final userService = _MockUserService();
     final user = UserDto(id: userId, email: 'user@test.dev', name: 'user', profileChangedAt: DateTime(2026));
     when(() => userService.tryGetMyUser()).thenReturn(user);
@@ -61,7 +61,7 @@ void main() {
     return tester.pumpConsumerWidget(
       const StackSettings(),
       overrides: [
-        serverInfoProvider.overrideWith((ref) => StubServerInfoNotifier(MockServerInfoService(), version: version)),
+        serverInfoProvider.overrideWith((ref) => StubServerInfoNotifier(MockServerInfoService(), features: features)),
         currentUserProvider.overrideWith((ref) => CurrentUserProvider(userService)),
         userApiRepositoryProvider.overrideWithValue(userApi),
         driftProvider.overrideWithValue(drift),
@@ -72,7 +72,7 @@ void main() {
   bool switchValue(WidgetTester tester) => tester.widget<Switch>(find.byType(Switch)).value;
 
   testWidgets('is hidden for servers without the stack source', (tester) async {
-    await pump(tester, version: unsupported);
+    await pump(tester, features: unsupported);
 
     expect(find.byType(Switch), findsNothing);
   });

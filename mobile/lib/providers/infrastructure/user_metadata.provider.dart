@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 
 final userMetadataProvider = FutureProvider<List<UserMetadata>>((ref) async {
@@ -31,6 +32,17 @@ final groupAutoStacksStreamProvider = StreamProvider<bool>((ref) {
 /// Grouped until the preference is known
 final groupAutoStacksProvider = Provider<bool>(
   (ref) => ref.watch(groupAutoStacksStreamProvider.select((value) => value.valueOrNull ?? true)),
+);
+
+/// Saves stacks.groupAuto on the server, then in the local preferences so the timeline follows before the next sync
+final updateGroupAutoStacksProvider = Provider<Future<void> Function(bool groupAuto)>(
+  (ref) => (groupAuto) async {
+    await ref.read(userApiRepositoryProvider).updateGroupAutoStacks(groupAuto);
+    final userId = ref.read(currentUserProvider)?.id;
+    if (userId != null) {
+      await ref.read(driftProvider).userMetadataRepository.setGroupAutoStacks(userId, groupAuto);
+    }
+  },
 );
 
 final userMetadataPreferencesProvider = FutureProvider<Preferences?>((ref) async {
