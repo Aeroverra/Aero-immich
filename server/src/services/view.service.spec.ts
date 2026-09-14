@@ -25,7 +25,10 @@ describe(ViewService.name, () => {
       const result = await sut.getUniqueOriginalPaths(authStub.admin);
 
       expect(result).toEqual(mockPaths);
-      expect(mocks.view.getUniqueOriginalPaths).toHaveBeenCalledWith(authStub.admin.user.id);
+      expect(mocks.view.getUniqueOriginalPaths).toHaveBeenCalledWith(authStub.admin.user.id, {
+        privateMode: false,
+        userId: expect.any(String),
+      });
     });
   });
 
@@ -44,7 +47,12 @@ describe(ViewService.name, () => {
 
       const result = await sut.getAssetsByOriginalPath(authStub.admin, path);
       expect(result).toEqual(mockAssetReponseDto);
-      await expect(mocks.view.getAssetsByOriginalPath(authStub.admin.user.id, path)).resolves.toEqual(mockAssets);
+      await expect(
+        mocks.view.getAssetsByOriginalPath(authStub.admin.user.id, path, {
+          privateMode: false,
+          userId: authStub.admin.user.id,
+        }),
+      ).resolves.toEqual(mockAssets);
     });
   });
 });

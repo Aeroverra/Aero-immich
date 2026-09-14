@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/constants/enums.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_album.repository.dart';
 
 import '../repository_context.dart';
@@ -41,6 +42,130 @@ void main() {
       final updated = await sut.get(album.id);
       expect(updated?.thumbnailAssetId, thumbnail.id);
       expect(updated?.assetCount, 1);
+    });
+  });
+
+  group('private mode', () {
+    test('a private album is hidden from every album query while off and listed with full counts when on', () async {
+      final user = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: user.id, isPrivate: true);
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: public.id);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: private.id);
+
+      expect(await sut.getAll(), isEmpty);
+      expect(await sut.get(album.id), isNull);
+      expect(await sut.watchAlbum(album.id).first, isNull);
+      expect(await sut.getAlbumsContainingAsset(public.id), isEmpty);
+      expect(await sut.getCount(), 0);
+
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+      final listed = await sut.getAll(privateFilter: on);
+      expect(listed.single.id, album.id);
+      expect(listed.single.isPrivate, isTrue);
+      expect(listed.single.assetCount, 2);
+      expect((await sut.get(album.id, privateFilter: on))?.assetCount, 2);
+      expect((await sut.watchAlbum(album.id, privateFilter: on).first)?.id, album.id);
+      expect((await sut.getAlbumsContainingAsset(public.id, privateFilter: on)).single.assetCount, 2);
+      expect(await sut.getCount(privateFilter: on), 1);
+    });
+
+    test('a public album stays listed while off, without its private assets in the count', () async {
+      final user = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: user.id);
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: public.id);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: private.id);
+
+      final off = await sut.getAll();
+      expect(off.single.assetCount, 1);
+      expect((await sut.get(album.id))?.assetCount, 1);
+      expect((await sut.getAlbumsContainingAsset(public.id)).single.assetCount, 1);
+      expect(await sut.getCount(), 1);
+
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+      expect((await sut.getAll(privateFilter: on)).single.assetCount, 2);
+      expect((await sut.get(album.id, privateFilter: on))?.assetCount, 2);
+    });
+
+    test('a partner private album is hidden while off and fully counted once the viewer mode is on', () async {
+      final user = await ctx.newUser();
+      final partner = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: partner.id, isPrivate: true);
+      final private = await ctx.newRemoteAsset(ownerId: partner.id, isPrivate: true);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: private.id);
+
+      expect(await sut.get(album.id), isNull);
+      expect(
+        (await sut.get(album.id, privateFilter: PrivateModeFilter(enabled: true, userId: user.id)))?.assetCount,
+        1,
+      );
+    });
+
+    test('the all filter shows a private album whatever the session state, for the linked album backup', () async {
+      final user = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: user.id, isPrivate: true);
+
+      expect((await sut.get(album.id, privateFilter: PrivateModeFilter.all))?.id, album.id);
+      expect((await sut.getAll(privateFilter: PrivateModeFilter.all)).single.id, album.id);
+    });
+
+    test(
+      'getAlbumsContainingAssets lists each album holding any of the assets once, private ones only when on',
+      () async {
+        final user = await ctx.newUser();
+        final trip = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Trip');
+        final family = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Family');
+        final secrets = await ctx.newRemoteAlbum(ownerId: user.id, name: 'Secrets', isPrivate: true);
+        await ctx.newRemoteAlbum(ownerId: user.id, name: 'Unrelated');
+        final first = await ctx.newRemoteAsset(ownerId: user.id);
+        final second = await ctx.newRemoteAsset(ownerId: user.id);
+        await ctx.newRemoteAlbumAsset(albumId: trip.id, assetId: first.id);
+        await ctx.newRemoteAlbumAsset(albumId: trip.id, assetId: second.id);
+        await ctx.newRemoteAlbumAsset(albumId: family.id, assetId: second.id);
+        await ctx.newRemoteAlbumAsset(albumId: secrets.id, assetId: first.id);
+
+        final off = await sut.getAlbumsContainingAssets([first.id, second.id]);
+        expect(off.map((album) => album.name), unorderedEquals(['Trip', 'Family']));
+
+        final on = await sut.getAlbumsContainingAssets([
+          first.id,
+          second.id,
+        ], privateFilter: PrivateModeFilter(enabled: true, userId: user.id));
+        expect(on.map((album) => album.name), unorderedEquals(['Trip', 'Family', 'Secrets']));
+        expect(await sut.getAlbumsContainingAssets(const []), isEmpty);
+      },
+    );
+
+    test('getPrivateAssetIds returns the private subset of the given ids', () async {
+      final user = await ctx.newUser();
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      final otherPrivate = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+
+      expect(await sut.getPrivateAssetIds([public.id, private.id]), [private.id]);
+      expect(await sut.getPrivateAssetIds([public.id]), isEmpty);
+      expect(await sut.getPrivateAssetIds(const []), isEmpty);
+      expect(await sut.getPrivateAssetIds([otherPrivate.id, private.id]), containsAll([otherPrivate.id, private.id]));
+    });
+
+    test('watchDateRange ignores private assets while off', () async {
+      final user = await ctx.newUser();
+      final album = await ctx.newRemoteAlbum(ownerId: user.id);
+      final public = await ctx.newRemoteAsset(ownerId: user.id, createdAt: DateTime.utc(2024, 5, 5));
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true, createdAt: DateTime.utc(2020, 1, 1));
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: public.id);
+      await ctx.newRemoteAlbumAsset(albumId: album.id, assetId: private.id);
+
+      final off = await sut.watchDateRange(album.id).first;
+      expect(off.$1, public.createdAt);
+
+      final on = await sut
+          .watchDateRange(album.id, privateFilter: PrivateModeFilter(enabled: true, userId: user.id))
+          .first;
+      expect(on.$1, private.createdAt);
     });
   });
 

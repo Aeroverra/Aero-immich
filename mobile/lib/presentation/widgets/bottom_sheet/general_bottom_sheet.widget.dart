@@ -12,6 +12,7 @@ import 'package:immich_mobile/presentation/actions/edit_datetime.action.dart';
 import 'package:immich_mobile/presentation/actions/edit_location.action.dart';
 import 'package:immich_mobile/presentation/actions/favorite.action.dart';
 import 'package:immich_mobile/presentation/actions/lock.action.dart';
+import 'package:immich_mobile/presentation/actions/private.action.dart';
 import 'package:immich_mobile/presentation/actions/share.action.dart';
 import 'package:immich_mobile/presentation/actions/share_link.action.dart';
 import 'package:immich_mobile/presentation/actions/stack.action.dart';
@@ -20,6 +21,8 @@ import 'package:immich_mobile/presentation/actions/upload.action.dart';
 import 'package:immich_mobile/presentation/widgets/album/album_selector.widget.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_sheet.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
+import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class GeneralBottomSheet extends ConsumerStatefulWidget {
@@ -47,9 +50,14 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
   @override
   Widget build(BuildContext context) {
     Future<void> addToAlbum(RemoteAlbum album) async {
-      final result = await ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album);
+      final result = await addWithPrivateShareConfirmation(
+        context,
+        warning: privateAddWarning(context, album, ref.read(multiSelectProvider).selectedAssets),
+        add: ({required confirmPrivate}) =>
+            ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album, confirmPrivate: confirmPrivate),
+      );
 
-      if (!context.mounted) {
+      if (result == null || !context.mounted) {
         return;
       }
 
@@ -87,6 +95,8 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
         .new(action: EditDateTimeAction(source: .timeline)),
         .new(action: EditLocationAction(source: .timeline)),
         .new(action: LockAction(source: .timeline)),
+        .new(action: MarkPrivateAction(source: .timeline)),
+        .new(action: UnmarkPrivateAction(source: .timeline)),
         .new(action: StackAction(source: .timeline)),
         .new(action: CleanupLocalAction(source: .timeline)),
         .new(action: UploadAction(source: .timeline)),

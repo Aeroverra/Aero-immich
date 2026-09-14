@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { DateTime } from 'luxon';
 import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
@@ -43,6 +44,12 @@ const setup = (db?: Kysely<DB>) => {
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
+
+const newPersonWithFace = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string, assetId: string) => {
+  const { person } = await ctx.newPerson({ ownerId, name: 'Someone' });
+  const { assetFace } = await ctx.newAssetFace({ assetId, personGroupId: person.personGroupId });
+  return { person, assetFace };
+};
 
 describe(PersonService.name, () => {
   describe('delete', () => {
@@ -1009,6 +1016,85 @@ describe(PersonService.name, () => {
           }),
         ]),
       );
+    });
+  });
+
+  describe('private mode', () => {
+    it('should hide people whose faces are only on private assets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { person: visible } = await newPersonWithFace(ctx, user.id, plain.id);
+      const { person: secret } = await newPersonWithFace(ctx, user.id, hidden.id);
+
+      const off = await sut.getAll(factory.auth({ user }), { withHidden: false, page: 1, size: 10 });
+      expect(off.total).toBe(1);
+      expect(off.people.map(({ id }) => id)).toEqual([visible.personGroupId]);
+
+      const on = await sut.getAll(factory.auth({ user, session: { privateMode: true } }), {
+        withHidden: false,
+        page: 1,
+        size: 10,
+      });
+      expect(on.total).toBe(2);
+      expect(on.people.map(({ id }) => id).sort()).toEqual([visible.personGroupId, secret.personGroupId].sort());
+    });
+
+    it('should only count visible assets in the person statistics', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { person } = await newPersonWithFace(ctx, user.id, plain.id);
+      await ctx.newAssetFace({ assetId: hidden.id, personGroupId: person.personGroupId });
+
+      await expect(sut.getStatistics(factory.auth({ user }), person.personGroupId)).resolves.toEqual({ assets: 1 });
+      await expect(
+        sut.getStatistics(factory.auth({ user, session: { privateMode: true } }), person.personGroupId),
+      ).resolves.toEqual({ assets: 2 });
+    });
+
+    it('should treat a private feature photo as a missing thumbnail outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { person } = await ctx.newPerson({
+        ownerId: user.id,
+        name: 'Someone',
+        thumbnailPath: '/data/thumbs/person.jpeg',
+      });
+      const { assetFace } = await ctx.newAssetFace({ assetId: hidden.id, personGroupId: person.personGroupId });
+      await ctx
+        .get(PersonRepository)
+        .update({ ownerId: user.id, personGroupId: person.personGroupId, faceAssetId: assetFace.id });
+
+      await expect(sut.getThumbnail(factory.auth({ user }), person.personGroupId)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      await expect(
+        sut.getThumbnail(factory.auth({ user, session: { privateMode: true } }), person.personGroupId),
+      ).resolves.toMatchObject({ path: '/data/thumbs/person.jpeg' });
+    });
+
+    it('should prefer a non-private face when choosing a new feature photo', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      await ctx.newAssetFace({ assetId: hidden.id, personGroupId: person.personGroupId });
+      const { assetFace: plainFace } = await ctx.newAssetFace({
+        assetId: plain.id,
+        personGroupId: person.personGroupId,
+      });
+
+      await sut.createNewFeaturePhoto([{ ownerId: user.id, personGroupId: person.personGroupId }]);
+
+      await expect(
+        ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
+      ).resolves.toMatchObject({ faceAssetId: plainFace.id });
     });
   });
 });
