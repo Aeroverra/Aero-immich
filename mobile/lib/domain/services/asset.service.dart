@@ -2,6 +2,7 @@ import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
@@ -72,8 +73,8 @@ class AssetService {
     return _remoteRepository.getExif(id);
   }
 
-  Future<List<(String, String)>> getPlaces(String userId) {
-    return _remoteRepository.getPlaces(userId);
+  Future<List<(String, String)>> getPlaces(String userId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _remoteRepository.getPlaces(userId, privateFilter: privateFilter);
   }
 
   Future<(int local, int remote)> getAssetCounts() async {
@@ -121,6 +122,7 @@ class AssetService {
     Option<AssetVisibility> visibility = const .none(),
     Option<LatLng> location = const .none(),
     Option<String> dateTime = const .none(),
+    Option<bool> isPrivate = const .none(),
   }) async {
     if (remoteIds.isEmpty) {
       return;
@@ -135,12 +137,14 @@ class AssetService {
       visibility: visibility,
       location: location,
       dateTimeOriginal: dateTime,
+      isPrivate: isPrivate,
     );
     await _remoteRepository.updateAssets(
       remoteIds,
       isFavorite: isFavorite,
       visibility: visibility,
       createdAt: parsedDateTime,
+      isPrivate: isPrivate,
     );
     await _exifRepository.updateExif(
       remoteIds,
@@ -157,6 +161,14 @@ class AssetService {
 
     await _apiRepository.delete(remoteIds, false);
     await _remoteRepository.trash(remoteIds);
+  }
+
+  Future<bool> hasPrivateAssets(List<String> remoteIds) {
+    return _remoteRepository.hasPrivateAssets(remoteIds);
+  }
+
+  Future<bool> isAlbumPrivate(String albumId) {
+    return _remoteRepository.isAlbumPrivate(albumId);
   }
 
   Future<void> delete(List<String> remoteIds) async {

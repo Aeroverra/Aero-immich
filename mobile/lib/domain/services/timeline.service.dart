@@ -6,6 +6,7 @@ import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
@@ -36,13 +37,19 @@ enum TimelineOrigin {
   albumActivities,
   folder,
   recentlyAdded,
+  privateFolder,
 }
 
 class TimelineFactory {
   final TimelineRepository _timelineRepository;
   final SettingsRepository _settingsRepository;
+  final PrivateModeFilter privateFilter;
 
-  const TimelineFactory({required this._timelineRepository, required this._settingsRepository});
+  const TimelineFactory({
+    required this._timelineRepository,
+    required this._settingsRepository,
+    this.privateFilter = PrivateModeFilter.off,
+  });
 
   GroupAssetsBy get groupBy {
     final group = _settingsRepository.appConfig.timeline.groupAssetsBy;
@@ -50,32 +57,44 @@ class TimelineFactory {
     return group == GroupAssetsBy.auto ? GroupAssetsBy.day : group;
   }
 
-  TimelineService main(List<String> timelineUsers) => TimelineService(_timelineRepository.main(timelineUsers, groupBy));
+  TimelineService main(List<String> timelineUsers) =>
+      TimelineService(_timelineRepository.main(timelineUsers, groupBy, privateFilter: privateFilter));
 
   TimelineService localAlbum({required String albumId}) =>
       TimelineService(_timelineRepository.localAlbum(albumId, groupBy));
 
   TimelineService remoteAlbum({required String albumId}) =>
-      TimelineService(_timelineRepository.remoteAlbum(albumId, groupBy));
+      TimelineService(_timelineRepository.remoteAlbum(albumId, groupBy, privateFilter: privateFilter));
 
-  TimelineService remoteAssets(String userId) => TimelineService(_timelineRepository.remote(userId, groupBy));
+  TimelineService remoteAssets(String userId) =>
+      TimelineService(_timelineRepository.remote(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService recentlyAdded(String userId) => TimelineService(_timelineRepository.recentlyAdded(userId, groupBy));
+  TimelineService recentlyAdded(String userId) =>
+      TimelineService(_timelineRepository.recentlyAdded(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService favorite(String userId) => TimelineService(_timelineRepository.favorite(userId, groupBy));
+  TimelineService favorite(String userId) =>
+      TimelineService(_timelineRepository.favorite(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService trash(String userId) => TimelineService(_timelineRepository.trash(userId, groupBy));
+  TimelineService trash(String userId) =>
+      TimelineService(_timelineRepository.trash(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService archive(String userId) => TimelineService(_timelineRepository.archived(userId, groupBy));
+  TimelineService archive(String userId) =>
+      TimelineService(_timelineRepository.archived(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService lockedFolder(String userId) => TimelineService(_timelineRepository.locked(userId, groupBy));
+  TimelineService lockedFolder(String userId) =>
+      TimelineService(_timelineRepository.locked(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService video(String userId) => TimelineService(_timelineRepository.video(userId, groupBy));
+  TimelineService privateFolder(String userId) =>
+      TimelineService(_timelineRepository.privateFolder(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService place(String place) => TimelineService(_timelineRepository.place(place, groupBy));
+  TimelineService video(String userId) =>
+      TimelineService(_timelineRepository.video(userId, groupBy, privateFilter: privateFilter));
+
+  TimelineService place(String place) =>
+      TimelineService(_timelineRepository.place(place, groupBy, privateFilter: privateFilter));
 
   TimelineService person(String userId, String personId) =>
-      TimelineService(_timelineRepository.person(userId, personId, groupBy));
+      TimelineService(_timelineRepository.person(userId, personId, groupBy, privateFilter: privateFilter));
 
   TimelineService fromAssets(List<BaseAsset> assets, TimelineOrigin type) =>
       TimelineService(_timelineRepository.fromAssets(assets, type));
@@ -91,7 +110,9 @@ class TimelineFactory {
     List<String> userIds,
     TimelineMapOptions Function() currentOptions,
     Stream<TimelineMapOptions> optionsStream,
-  ) => TimelineService(_timelineRepository.geographicMap(userIds, currentOptions, optionsStream, groupBy));
+  ) => TimelineService(
+    _timelineRepository.geographicMap(userIds, currentOptions, optionsStream, groupBy, privateFilter: privateFilter),
+  );
 }
 
 class TimelineService {

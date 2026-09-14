@@ -14,6 +14,7 @@ class RemoteAsset extends BaseAsset {
   final String? livePhotoVideoId;
   final DateTime? uploadedAt;
   final DateTime? deletedAt;
+  final bool isPrivate;
 
   const RemoteAsset({
     required this.id,
@@ -35,6 +36,7 @@ class RemoteAsset extends BaseAsset {
     this.stackId,
     required super.isEdited,
     this.deletedAt,
+    this.isPrivate = false,
   }) : localAssetId = localId;
 
   @override
@@ -97,6 +99,7 @@ class RemoteAsset extends BaseAsset {
     stackId: ${stackId ?? "<NA>"},
     checksum: $checksum,
     livePhotoVideoId: ${livePhotoVideoId ?? "<NA>"},
+    isPrivate: $isPrivate,
  }''';
   }
 
@@ -117,7 +120,8 @@ class RemoteAsset extends BaseAsset {
         stackId == other.stackId &&
         livePhotoVideoId == other.livePhotoVideoId &&
         uploadedAt == other.uploadedAt &&
-        deletedAt == other.deletedAt;
+        deletedAt == other.deletedAt &&
+        isPrivate == other.isPrivate;
   }
 
   @override
@@ -131,7 +135,8 @@ class RemoteAsset extends BaseAsset {
       stackId.hashCode ^
       livePhotoVideoId.hashCode ^
       uploadedAt.hashCode ^
-      deletedAt.hashCode;
+      deletedAt.hashCode ^
+      isPrivate.hashCode;
 
   RemoteAsset copyWith({
     String? id,
@@ -153,6 +158,7 @@ class RemoteAsset extends BaseAsset {
     String? stackId,
     bool? isEdited,
     DateTime? deletedAt,
+    bool? isPrivate,
   }) {
     return RemoteAsset(
       id: id ?? this.id,
@@ -174,6 +180,7 @@ class RemoteAsset extends BaseAsset {
       stackId: stackId ?? this.stackId,
       isEdited: isEdited ?? this.isEdited,
       deletedAt: deletedAt ?? this.deletedAt,
+      isPrivate: isPrivate ?? this.isPrivate,
     );
   }
 }
@@ -201,6 +208,7 @@ class RemoteAssetExif extends RemoteAsset {
     super.livePhotoVideoId,
     super.stackId,
     super.isEdited = false,
+    super.isPrivate = false,
     this.exifInfo = const ExifInfo(),
   });
 
@@ -239,6 +247,7 @@ class RemoteAssetExif extends RemoteAsset {
     String? livePhotoVideoId,
     String? stackId,
     bool? isEdited,
+    bool? isPrivate,
     ExifInfo? exifInfo,
   }) {
     return RemoteAssetExif(
@@ -261,6 +270,7 @@ class RemoteAssetExif extends RemoteAsset {
       livePhotoVideoId: livePhotoVideoId ?? this.livePhotoVideoId,
       stackId: stackId ?? this.stackId,
       isEdited: isEdited ?? this.isEdited,
+      isPrivate: isPrivate ?? this.isPrivate,
       exifInfo: exifInfo ?? this.exifInfo, // Use the new parameter
     );
   }
