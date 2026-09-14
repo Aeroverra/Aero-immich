@@ -7,6 +7,7 @@ import {
   getBaseUrl,
   getDownloadInfo,
   getStack,
+  StackSource,
   untagAssets,
   updateAsset,
   updateAssets,
@@ -283,6 +284,14 @@ export const getOwnedAssetsWithWarning = (assets: TimelineAsset[], user: UserRes
   }
   return ids;
 };
+
+/** Whether stacks created automatically are shown grouped; follows the user preference and defaults to grouped */
+export const isGroupingAutoStacks = () =>
+  !authManager.authenticated || (authManager.preferences.stacks?.groupAuto ?? true);
+
+/** Manual stacks are always shown as stacks, automatic stacks only while the user groups them */
+export const isStackGrouped = (stack: { source?: StackSource }) =>
+  stack.source !== StackSource.Auto || isGroupingAutoStacks();
 
 export type StackResponse = {
   stack?: StackResponseDto;
