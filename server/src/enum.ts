@@ -241,6 +241,9 @@ export enum Permission {
   PluginUpdate = 'plugin.update',
   PluginDelete = 'plugin.delete',
 
+  // not an endpoint permission: lets an API key act as if private mode were unlocked, never implied by `all`
+  PrivateModeAccess = 'privateMode.access',
+
   ServerAbout = 'server.about',
   ServerApkLinks = 'server.apkLinks',
   ServerStorage = 'server.storage',
