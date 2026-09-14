@@ -91,6 +91,10 @@ describe(JobService.name, () => {
         jobs: [JobName.AutoStack],
       },
       {
+        item: { name: JobName.AssetDetectFaces, data: { id: 'asset-1', source: 'upload' } },
+        jobs: [],
+      },
+      {
         item: { name: JobName.FacialRecognition, data: { id: 'asset-1' } },
         jobs: [],
       },
@@ -106,6 +110,21 @@ describe(JobService.name, () => {
 
       expect(mocks.job.queue).toHaveBeenCalledWith({
         name: JobName.AssetDetectFaceAttributes,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+    });
+
+    it('should analyze video frames after face detection of an upload when enabled', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoFrameAnalysis: { enabled: true } } });
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.FaceDetection, {
+        name: JobName.AssetDetectFaces,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetAnalyzeVideoFrames,
         data: { id: 'asset-1', source: 'upload' },
       });
     });

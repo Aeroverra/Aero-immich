@@ -470,6 +470,69 @@ export class BaseHWConfig extends BaseConfig {
   }
 }
 
+const getColorMetadataOverrides = (videoStream: VideoStreamInfo): string[] => {
+  const metadataOverrides = [];
+  if (videoStream.colorPrimaries === ColorPrimaries.Reserved) {
+    metadataOverrides.push('colour_primaries=1');
+  }
+
+  if (videoStream.colorMatrix === ColorMatrix.Reserved) {
+    metadataOverrides.push('matrix_coefficients=1');
+  }
+
+  if (videoStream.colorTransfer === ColorTransfer.Reserved) {
+    metadataOverrides.push('transfer_characteristics=1');
+  }
+
+  if (metadataOverrides.length === 0) {
+    return [];
+  }
+
+  // workaround for https://fftrac-bg.ffmpeg.org/ticket/11020
+  return [`-bsf:${videoStream.index}`, `${videoStream.codecName}_metadata=${metadataOverrides.join(':')}`];
+};
+
+/**
+ * Extracts the single frame at a given position of a video as a JPEG, scaled and tone-mapped
+ * the same way as the video preview, so face boxes found in it line up with the preview size.
+ */
+export class VideoFrameConfig extends BaseConfig {
+  static create(config: ConfigFFmpegDto): VideoFrameConfig {
+    return new VideoFrameConfig(config);
+  }
+
+  getFrameCommand(timestampMs: number, videoStream: VideoStreamInfo) {
+    return {
+      inputOptions: [
+        '-ss',
+        (timestampMs / 1000).toFixed(3),
+        '-sws_flags',
+        'accurate_rnd+full_chroma_int',
+        ...getColorMetadataOverrides(videoStream),
+      ],
+      outputOptions: [
+        '-map',
+        `0:${videoStream.index}`,
+        '-frames:v',
+        '1',
+        '-an',
+        '-vf',
+        this.getFilterOptions(videoStream).join(','),
+        '-f',
+        'image2pipe',
+        '-c:v',
+        'mjpeg',
+        '-q:v',
+        '2',
+      ],
+    };
+  }
+
+  getScaling(videoStream: VideoStreamInfo) {
+    return super.getScaling(videoStream) + ':flags=lanczos+accurate_rnd+full_chroma_int:out_range=pc';
+  }
+}
+
 export class ThumbnailConfig extends BaseConfig {
   static create(config: ConfigFFmpegDto): VideoCodecSWConfig {
     return new ThumbnailConfig(config);
@@ -482,25 +545,7 @@ export class ThumbnailConfig extends BaseConfig {
         ? ['-sws_flags', 'accurate_rnd+full_chroma_int']
         : ['-skip_frame', 'nointra', '-sws_flags', 'accurate_rnd+full_chroma_int'];
 
-    const metadataOverrides = [];
-    if (videoStream.colorPrimaries === ColorPrimaries.Reserved) {
-      metadataOverrides.push('colour_primaries=1');
-    }
-
-    if (videoStream.colorMatrix === ColorMatrix.Reserved) {
-      metadataOverrides.push('matrix_coefficients=1');
-    }
-
-    if (videoStream.colorTransfer === ColorTransfer.Reserved) {
-      metadataOverrides.push('transfer_characteristics=1');
-    }
-
-    if (metadataOverrides.length > 0) {
-      // workaround for https://fftrac-bg.ffmpeg.org/ticket/11020
-      options.push(`-bsf:${videoStream.index}`, `${videoStream.codecName}_metadata=${metadataOverrides.join(':')}`);
-    }
-
-    return options;
+    return [...options, ...getColorMetadataOverrides(videoStream)];
   }
 
   getBaseOutputOptions() {
