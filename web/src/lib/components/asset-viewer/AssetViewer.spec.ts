@@ -1,4 +1,4 @@
-import { getStack, StackSource, updateAsset } from '@immich/sdk';
+import { AssetTypeEnum, getStack, StackSource, updateAsset } from '@immich/sdk';
 import { fireEvent, waitFor } from '@testing-library/svelte';
 import { getAnimateMock } from '$lib/__mocks__/animate.mock';
 import { getResizeObserverMock } from '$lib/__mocks__/resize-observer.mock';
@@ -88,8 +88,9 @@ describe('AssetViewer', () => {
       authManager.setUser(user);
       authManager.setPreferences(preferencesFactory.build({ stacks: { groupAuto } }));
 
-      const asset = assetFactory.build({ ownerId: user.id });
-      const other = assetFactory.build({ ownerId: user.id });
+      // images only: the video player does not render in the test DOM
+      const asset = assetFactory.build({ ownerId: user.id, type: AssetTypeEnum.Image });
+      const other = assetFactory.build({ ownerId: user.id, type: AssetTypeEnum.Image });
       asset.stack = { id: 'stack-id', primaryAssetId: asset.id, assetCount: 2, source };
       vi.mocked(getStack).mockResolvedValue({
         id: 'stack-id',
