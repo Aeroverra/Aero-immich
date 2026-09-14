@@ -66,6 +66,8 @@ class SyncApiRepository {
           serverVersion.supports(.assetFacesV2) ? SyncRequestType.assetFacesV2 : SyncRequestType.assetFacesV1,
           if (serverVersion.supports(.assetOcr)) SyncRequestType.assetOcrV1,
         ],
+        // this build understands private assets; without the flag the server withholds them
+        includePrivate: const Optional.present(true),
       ).toJson(),
     );
 
