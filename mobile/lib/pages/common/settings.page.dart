@@ -16,6 +16,7 @@ import 'package:immich_mobile/widgets/settings/notification_setting.dart';
 import 'package:immich_mobile/widgets/settings/preference_settings/preference_setting.dart';
 import 'package:immich_mobile/widgets/settings/previously_deleted_settings/previously_deleted_settings.dart';
 import 'package:immich_mobile/widgets/settings/settings_card.dart';
+import 'package:immich_mobile/widgets/settings/stack_actions_settings/stack_actions_settings.dart';
 
 enum SettingSection {
   advanced(Icons.build_outlined),
@@ -27,6 +28,7 @@ enum SettingSection {
   notifications(Icons.notifications_none_rounded),
   preferences(Icons.interests_outlined),
   previouslyDeleted(Icons.restore_from_trash_outlined),
+  stackActions(Icons.burst_mode_outlined),
   timeline(Icons.auto_awesome_mosaic_outlined),
   beta(Icons.sync_outlined);
 
@@ -42,6 +44,7 @@ enum SettingSection {
     SettingSection.notifications => t.notifications,
     SettingSection.preferences => t.preferences_settings_title,
     SettingSection.previouslyDeleted => t.previously_deleted_files,
+    SettingSection.stackActions => t.stack_actions,
     SettingSection.timeline => t.asset_list_settings_title,
     SettingSection.beta => t.sync_status,
   };
@@ -56,6 +59,7 @@ enum SettingSection {
     SettingSection.notifications => t.setting_notifications_subtitle,
     SettingSection.preferences => t.preferences_settings_subtitle,
     SettingSection.previouslyDeleted => t.previously_deleted_files_description,
+    SettingSection.stackActions => t.stack_actions_description,
     SettingSection.timeline => t.asset_list_settings_subtitle,
     SettingSection.beta => t.sync_status_subtitle,
   };
@@ -70,6 +74,7 @@ enum SettingSection {
     SettingSection.notifications => const NotificationSetting(),
     SettingSection.preferences => const PreferenceSetting(),
     SettingSection.previouslyDeleted => const PreviouslyDeletedSettings(),
+    SettingSection.stackActions => const StackActionsSettings(),
     SettingSection.timeline => const AssetListSettings(),
     SettingSection.beta => const SyncStatusAndActions(),
   };
