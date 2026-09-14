@@ -25,6 +25,12 @@ While the mode is off, a private album still shows up but without its private as
 
 The idle timeout is configured under **Account Settings** as *Private mode timeout* and defaults to 30 minutes. Resetting your PIN code turns private mode off on every session.
 
+## API keys
+
+An API key has no session, so it cannot unlock private mode with a PIN code. By default an API key therefore never sees private assets or private albums, even with the `all` permission.
+
+To let a key work with private assets, grant it the `privateMode.access` permission (**Account Settings > API Keys**, option *Private mode access*). A key with this permission behaves like a session with private mode on: it can read, change, mark and unmark private assets and private albums. It still needs the regular permissions for each action, for example `asset.read` or `asset.update`. `privateMode.access` is never included in `all` or in *Select all*, so it has to be granted on its own.
+
 ## Relation to the locked folder
 
 Private mode and the locked folder are independent. An asset can be both locked and private. Unlocking the locked folder does not turn private mode on, and turning private mode on does not unlock the locked folder.

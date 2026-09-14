@@ -100,7 +100,7 @@ const checkSharedLinkAccess = async (
 
 const toAssetAccessOptions = (auth: AuthDto): AssetAccessOptions => ({
   hasElevatedPermission: !!auth.session?.hasElevatedPermission,
-  privateMode: !!auth.session?.privateMode,
+  privateMode: isPrivateMode(auth),
 });
 
 const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRequest): Promise<Set<string>> => {
@@ -399,14 +399,19 @@ export const requireElevatedPermission = (auth: AuthDto) => {
 };
 
 export const requirePrivateMode = (auth: AuthDto) => {
-  if (!auth.session?.privateMode) {
+  if (!isPrivateMode(auth)) {
     throw new UnauthorizedException('Private mode is required');
   }
 };
 
-export const isPrivateMode = (auth: AuthDto) => !!auth.session?.privateMode;
+/**
+ * Private mode is unlocked per session with the PIN code. An API key has no session, so it only gets the same
+ * access when it was explicitly granted `privateMode.access`; `all` does not include it.
+ */
+export const isPrivateMode = (auth: AuthDto) =>
+  !!auth.session?.privateMode || !!auth.apiKey?.permissions.includes(Permission.PrivateModeAccess);
 
 export const toPrivateScope = (auth: AuthDto): PrivateScope => ({
-  privateMode: !!auth.session?.privateMode,
+  privateMode: isPrivateMode(auth),
   userId: auth.user.id,
 });

@@ -25118,6 +25118,7 @@
           "plugin.read",
           "plugin.update",
           "plugin.delete",
+          "privateMode.access",
           "server.about",
           "server.apkLinks",
           "server.storage",
