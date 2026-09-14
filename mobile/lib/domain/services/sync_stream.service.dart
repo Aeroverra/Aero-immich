@@ -303,12 +303,18 @@ class SyncStreamService {
         return _syncStreamRepository.deleteMemoryAssetsV1(data.cast());
       case SyncEntityType.stackV1:
         return _syncStreamRepository.updateStacksV1(data.cast());
+      case SyncEntityType.stackV2:
+        return _syncStreamRepository.updateStacksV2(data.cast());
       case SyncEntityType.stackDeleteV1:
         return _syncStreamRepository.deleteStacksV1(data.cast());
       case SyncEntityType.partnerStackV1:
         return _syncStreamRepository.updateStacksV1(data.cast(), debugLabel: 'partner');
+      case SyncEntityType.partnerStackV2:
+        return _syncStreamRepository.updateStacksV2(data.cast(), debugLabel: 'partner');
       case SyncEntityType.partnerStackBackfillV1:
         return _syncStreamRepository.updateStacksV1(data.cast(), debugLabel: 'partner backfill');
+      case SyncEntityType.partnerStackBackfillV2:
+        return _syncStreamRepository.updateStacksV2(data.cast(), debugLabel: 'partner backfill');
       case SyncEntityType.partnerStackDeleteV1:
         return _syncStreamRepository.deleteStacksV1(data.cast(), debugLabel: 'partner');
       case SyncEntityType.userMetadataV1:
