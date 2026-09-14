@@ -3,6 +3,7 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import AssetDeleteConfirmModal from '$lib/modals/AssetDeleteConfirmModal.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { showDeleteModal } from '$lib/stores/preferences.store';
   import { type OnDelete, type OnUndoDelete, deleteAssets } from '$lib/utils/actions';
   import { IconButton, modalManager } from '@immich/ui';
@@ -24,16 +25,20 @@
 
   const onAction = async () => {
     const assets = assetMultiSelectManager.ownedAssets;
+    const assetIds = await resolveStackSelection(assets);
+    if (!assetIds) {
+      return;
+    }
 
     if (force && $showDeleteModal) {
-      const confirmed = await modalManager.show(AssetDeleteConfirmModal, { size: assets.length });
+      const confirmed = await modalManager.show(AssetDeleteConfirmModal, { size: assetIds.length });
       if (!confirmed) {
         return;
       }
     }
 
     loading = true;
-    await deleteAssets(force, onAssetDelete, assets, onUndoDelete);
+    await deleteAssets(force, onAssetDelete, assets, onUndoDelete, assetIds.slice(assets.length));
     assetMultiSelectManager.clear();
     loading = false;
   };
