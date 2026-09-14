@@ -876,6 +876,7 @@ export enum QueueName {
   Workflow = 'workflow',
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
+  VideoFrameAnalysis = 'videoFrameAnalysis',
 }
 
 export const QueueNameSchema = z.enum(QueueName).describe('Queue name').meta({ id: 'QueueName' });
@@ -969,6 +970,10 @@ export enum JobName {
   TagCleanup = 'TagCleanup',
 
   VersionCheck = 'VersionCheck',
+
+  // Video frame analysis
+  AssetAnalyzeVideoFramesQueueAll = 'AssetAnalyzeVideoFramesQueueAll',
+  AssetAnalyzeVideoFrames = 'AssetAnalyzeVideoFrames',
 
   // OCR
   OcrQueueAll = 'OcrQueueAll',

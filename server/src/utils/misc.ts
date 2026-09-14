@@ -106,6 +106,12 @@ export const isDuplicateDetectionEnabled = (machineLearning: SystemConfig['machi
   isSmartSearchEnabled(machineLearning) && machineLearning.duplicateDetection.enabled;
 export const isAutoStackEnabled = (machineLearning: SystemConfig['machineLearning']) =>
   isSmartSearchEnabled(machineLearning) && machineLearning.autoStack.enabled;
+export const isVideoFrameFaceDetectionEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isFacialRecognitionEnabled(machineLearning) && machineLearning.videoFrameAnalysis.detectFaces;
+export const isVideoFrameAnalysisEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isMachineLearningEnabled(machineLearning) &&
+  machineLearning.videoFrameAnalysis.enabled &&
+  (isSmartSearchEnabled(machineLearning) || isVideoFrameFaceDetectionEnabled(machineLearning));
 export const isFaceImportEnabled = (metadata: SystemConfig['metadata']) => metadata.faces.import;
 
 export const isConnectionAborted = (error: Error | any) => error.code === 'ECONNABORTED';
