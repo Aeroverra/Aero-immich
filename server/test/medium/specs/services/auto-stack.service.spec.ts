@@ -345,7 +345,7 @@ describe(AutoStackService.name, () => {
       await newFaceWithAttributes(ctx, blink.id, {
         eyeBlinkLeft: 0.9,
         eyeBlinkRight: 0.8,
-        smile: 0.9,
+        smile: 0.5,
         yaw: 0,
         sharpness: 300,
       });
@@ -387,6 +387,31 @@ describe(AutoStackService.name, () => {
       await expect(sut.handleAutoStack({ id: front.id })).resolves.toBe(JobStatus.Success);
 
       await expect(getStackOf(ctx, front.id)).resolves.toBeUndefined();
+    });
+
+    it('should split when the expression changes', async () => {
+      const { sut, ctx } = setup();
+      const user = await newUserWithAutoStacks(ctx);
+      const neutral = await newPhoto(ctx, user.id, 0);
+      const smiling = await newPhoto(ctx, user.id, 1);
+      await newFaceWithAttributes(ctx, neutral.id, {
+        eyeBlinkLeft: 0.05,
+        eyeBlinkRight: 0.05,
+        smile: 0,
+        yaw: 0,
+        sharpness: 90,
+      });
+      await newFaceWithAttributes(ctx, smiling.id, {
+        eyeBlinkLeft: 0.05,
+        eyeBlinkRight: 0.05,
+        smile: 0.76,
+        yaw: 0,
+        sharpness: 90,
+      });
+
+      await expect(sut.handleAutoStack({ id: neutral.id })).resolves.toBe(JobStatus.Success);
+
+      await expect(getStackOf(ctx, neutral.id)).resolves.toBeUndefined();
     });
 
     it('should wait while a new upload in the burst has no face attributes yet', async () => {

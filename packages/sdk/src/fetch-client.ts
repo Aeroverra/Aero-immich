@@ -213,6 +213,8 @@ export type AdminConfigAutoStackDto = {
     maxFaceSizeChange: number;
     /** Maximum time between two consecutive photos of an automatic stack, in seconds */
     maxGapSeconds: number;
+    /** Maximum change in the smile score (0-1) of the largest face between two photos */
+    maxSmileChange: number;
     /** Maximum time between the first and the last photo of an automatic stack, in seconds */
     maxSpanSeconds: number;
     /** Maximum change in head yaw of the largest face between two photos, in degrees */
