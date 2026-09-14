@@ -41,7 +41,7 @@
 </script>
 
 {#if items.length > 0}
-  <section class="px-4 pt-4 text-sm" data-testid="detail-panel-metadata">
+  <section class="px-6 pt-4 text-sm" data-testid="detail-panel-metadata">
     {#if googlePhotosUrl}
       <Link href={googlePhotosUrl} target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 py-2">
         <Icon icon={mdiOpenInNew} size="18" />
