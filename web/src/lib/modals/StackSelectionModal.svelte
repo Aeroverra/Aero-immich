@@ -34,12 +34,12 @@
   </ModalBody>
 
   <ModalFooter>
-    <div class="flex w-full flex-col gap-2 sm:flex-row">
-      <Button shape="round" color="secondary" fullWidth onclick={() => onClose({ includeStacked: false, remember })}>
-        {$t('stack_actions_mode_primary')}
-      </Button>
+    <div class="flex w-full flex-col gap-2">
       <Button shape="round" fullWidth onclick={() => onClose({ includeStacked: true, remember })}>
         {$t('stack_actions_mode_stack')}
+      </Button>
+      <Button shape="round" color="secondary" fullWidth onclick={() => onClose({ includeStacked: false, remember })}>
+        {$t('stack_actions_mode_primary')}
       </Button>
     </div>
   </ModalFooter>
