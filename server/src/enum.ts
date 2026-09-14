@@ -79,6 +79,20 @@ export enum AssetOrder {
 
 export const AssetOrderSchema = z.enum(AssetOrder).describe('Asset sort order').meta({ id: 'AssetOrder' });
 
+export enum DeletedReimportMode {
+  /** store the upload and move it to the trash right away */
+  Trash = 'trash',
+  /** reject the upload as a duplicate without storing it */
+  Skip = 'skip',
+  /** store the upload and add it to the "Previously deleted" album */
+  Album = 'album',
+}
+
+export const DeletedReimportModeSchema = z
+  .enum(DeletedReimportMode)
+  .describe('How an upload of a previously deleted file is handled')
+  .meta({ id: 'DeletedReimportMode' });
+
 export enum AssetOrderBy {
   TakenAt = 'takenAt',
   CreatedAt = 'createdAt',
@@ -177,6 +191,9 @@ export enum Permission {
   AdminConfigUpdate = 'adminConfig.update',
 
   UserConfigRead = 'userConfig.read',
+
+  DeletedChecksumRead = 'deletedChecksum.read',
+  DeletedChecksumDelete = 'deletedChecksum.delete',
 
   DuplicateRead = 'duplicate.read',
   DuplicateDelete = 'duplicate.delete',
@@ -378,6 +395,8 @@ export const UserMetadataKeySchema = z
 
 export enum AssetMetadataKey {
   MobileApp = 'mobile-app',
+  /** why an upload was trashed or added to an album right away, see DeletedReimportMode */
+  DeletedReimport = 'deleted-reimport',
 }
 
 export enum UserAvatarColor {
@@ -890,6 +909,7 @@ export enum JobName {
   NotifyUserSignup = 'NotifyUserSignup',
   NotifyAlbumInvite = 'NotifyAlbumInvite',
   NotifyAlbumUpdate = 'NotifyAlbumUpdate',
+  NotifyDeletedReimport = 'NotifyDeletedReimport',
 
   UserDelete = 'UserDelete',
   UserDeleteCheck = 'UserDeleteCheck',
