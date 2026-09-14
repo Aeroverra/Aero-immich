@@ -173,6 +173,8 @@
     "machine_learning_auto_stack_max_face_size_change_description": "Largest relative change in size of the largest face between two photos",
     "machine_learning_auto_stack_max_gap": "Maximum time between photos",
     "machine_learning_auto_stack_max_gap_description": "Largest time in seconds between two consecutive photos of a stack",
+    "machine_learning_auto_stack_max_smile_change": "Maximum expression change",
+    "machine_learning_auto_stack_max_smile_change_description": "Largest change in the smile score (0 to 1) of the largest face between two photos. Closed eyes never split a stack.",
     "machine_learning_auto_stack_max_span": "Maximum series length",
     "machine_learning_auto_stack_max_span_description": "Largest time in seconds between the first and the last photo of a stack",
     "machine_learning_auto_stack_max_yaw_change": "Maximum head turn",

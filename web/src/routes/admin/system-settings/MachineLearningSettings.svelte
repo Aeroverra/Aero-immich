@@ -279,6 +279,19 @@
             isEdited={configToEdit.machineLearning.autoStack.maxYawChange !==
               config.machineLearning.autoStack.maxYawChange}
           />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_smile_change')}
+            description={$t('admin.machine_learning_auto_stack_max_smile_change_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxSmileChange}
+            step="0.05"
+            min={0}
+            max={1}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxSmileChange !==
+              config.machineLearning.autoStack.maxSmileChange}
+          />
         </div>
       </SettingAccordion>
 

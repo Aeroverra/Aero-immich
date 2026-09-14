@@ -24,6 +24,7 @@ const options: AutoStackOptions = {
   maxFaceShift: 0.1,
   maxFaceSizeChange: 0.25,
   maxYawChange: 15,
+  maxSmileChange: 0.4,
 };
 
 const start = new Date('2024-10-30T12:00:00.000Z').getTime();
@@ -167,6 +168,24 @@ describe('auto stack', () => {
       expect(groupIds(burst)).toEqual([ids(burst.slice(0, 10)), ids(burst.slice(10))]);
     });
 
+    it('should keep a burst of 100 photos in one stack and start a new one after', () => {
+      const dimensions = 1152;
+      const vector = (seed: number) =>
+        parseEmbedding(Array.from({ length: dimensions }, (_, index) => 1 + 0.001 * Math.sin(seed + index)));
+      const burst = Array.from({ length: 103 }, (_, index) =>
+        asset({ seconds: index * 0.25, embedding: vector(index), faces: [face({ sharpness: index })] }),
+      );
+      const started = performance.now();
+      const groups = groupAutoStackAssets(burst, { ...options, maxAssets: 100 });
+      expect(performance.now() - started).toBeLessThan(2000);
+      expect(groups.map(({ assetIds }) => [...assetIds].sort())).toEqual([
+        ids(burst.slice(0, 100)),
+        ids(burst.slice(100)),
+      ]);
+      // the sharpest face of the first 100 is the cover
+      expect(groups[0].assetIds[0]).toBe(burst[99].id);
+    });
+
     it('should not mix cameras', () => {
       const pixel = [asset({ seconds: 0 }), asset({ seconds: 2 })];
       const iphone = [
@@ -294,6 +313,45 @@ describe('auto stack', () => {
         const a = asset({ seconds: 0, faces: [face({ yaw: -30, detected: false })] });
         const b = asset({ seconds: 1, faces: [face({ yaw: 30 })] });
         expect(getAutoStackPairSplitReason(a, b, options)).toBeNull();
+      });
+
+      it('should split when the expression changes', () => {
+        const a = asset({ seconds: 0, faces: [face({ smile: 0 })] });
+        const b = asset({ seconds: 1, faces: [face({ smile: 0.76 })] });
+        expect(getAutoStackPairSplitReason(a, b, options)).toBe(AutoStackSplitReason.ExpressionChanged);
+        expect(groupIds([a, b])).toEqual([]);
+      });
+
+      it('should keep a small change of expression', () => {
+        const a = asset({ seconds: 0, faces: [face({ smile: 0.6 })] });
+        const b = asset({ seconds: 1, faces: [face({ smile: 0.31 })] });
+        expect(getAutoStackPairSplitReason(a, b, options)).toBeNull();
+      });
+
+      it('should keep a blink in the stack', () => {
+        const open = asset({ seconds: 0, faces: [face({ eyeBlinkLeft: 0.02, eyeBlinkRight: 0.03, smile: 0.2 })] });
+        const blink = asset({ seconds: 1, faces: [face({ eyeBlinkLeft: 0.95, eyeBlinkRight: 0.97, smile: 0.25 })] });
+        const open2 = asset({ seconds: 2, faces: [face({ eyeBlinkLeft: 0.05, eyeBlinkRight: 0.04, smile: 0.22 })] });
+        expect(getAutoStackPairSplitReason(open, blink, options)).toBeNull();
+        const groups = groupAutoStackAssets([open, blink, open2], options);
+        expect(groups).toHaveLength(1);
+        expect(groups[0].assetIds).toHaveLength(3);
+        expect(groups[0].assetIds[0]).not.toBe(blink.id);
+      });
+
+      it('should ignore the smile of faces without landmarks', () => {
+        const a = asset({ seconds: 0, faces: [face({ smile: 0, detected: false })] });
+        const b = asset({ seconds: 1, faces: [face({ smile: 0.9 })] });
+        expect(getAutoStackPairSplitReason(a, b, options)).toBeNull();
+      });
+
+      it('should split a selfie session whose expression changes frame by frame', () => {
+        // consecutive frames 1-3 s apart that look alike, but the smile goes 0.00 -> 0.76 -> 0.60 -> 0.31 -> 0.11;
+        // every member is compared with every other one, so 0.31 cannot join the stack that holds 0.76
+        const frames = [0, 0.76, 0.6, 0.31, 0.11].map((smile, index) =>
+          asset({ seconds: [0, 1, 3, 5, 6][index], faces: [face({ smile })] }),
+        );
+        expect(groupIds(frames)).toEqual([ids([frames[1], frames[2]]), ids([frames[3], frames[4]])]);
       });
 
       it('should split a selfie session into poses', () => {

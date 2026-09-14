@@ -263,6 +263,12 @@ const AdminConfigSchemaWithVisibility = z
             .max(180)
             .describe('Maximum change in head yaw of the largest face between two photos, in degrees')
             .meta({ format: 'double' }),
+          maxSmileChange: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe('Maximum change in the smile score (0-1) of the largest face between two photos')
+            .meta({ format: 'double' }),
         }).meta({ id: 'AdminConfigAutoStackDto' }),
         facialRecognition: AdminConfigMachineLearningModelSchema.extend({
           minScore: z
@@ -679,11 +685,12 @@ export const defaults = Object.freeze<SystemConfig>({
       enabled: true,
       maxGapSeconds: 5,
       maxSpanSeconds: 30,
-      maxAssets: 10,
+      maxAssets: 100,
       maxDistance: 0.06,
       maxFaceShift: 0.1,
       maxFaceSizeChange: 0.25,
       maxYawChange: 15,
+      maxSmileChange: 0.4,
     },
     facialRecognition: {
       enabled: true,

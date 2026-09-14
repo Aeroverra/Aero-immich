@@ -24,6 +24,8 @@ export type AutoStackOptions = {
   maxFaceSizeChange: number;
   /** Largest difference in head yaw of the biggest face, in degrees */
   maxYawChange: number;
+  /** Largest difference in the smile score (0-1) of the biggest face; a change of expression is a different shot */
+  maxSmileChange: number;
 };
 
 export type AutoStackFace = {
@@ -104,6 +106,7 @@ export enum AutoStackSplitReason {
   FaceMoved = 'face-moved',
   FaceSizeChanged = 'face-size-changed',
   HeadTurned = 'head-turned',
+  ExpressionChanged = 'expression-changed',
 }
 
 const SCREENSHOT_PATTERN = /^screenshot/i;
@@ -270,6 +273,17 @@ export const getAutoStackPairSplitReason = (
       Math.abs(faceA.face.yaw - faceB.face.yaw) > options.maxYawChange
     ) {
       return AutoStackSplitReason.HeadTurned;
+    }
+
+    // blinks never split: a frame with closed eyes stays in the stack so the top pick can pass over it
+    if (
+      hasLandmarks(faceA.face) &&
+      hasLandmarks(faceB.face) &&
+      typeof faceA.face.smile === 'number' &&
+      typeof faceB.face.smile === 'number' &&
+      Math.abs(faceA.face.smile - faceB.face.smile) > options.maxSmileChange
+    ) {
+      return AutoStackSplitReason.ExpressionChanged;
     }
   }
 
