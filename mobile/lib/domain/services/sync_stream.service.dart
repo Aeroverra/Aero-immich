@@ -56,6 +56,17 @@ class SyncStreamService {
 
   bool get isCancelled => _cancellation?.isCompleted ?? false;
 
+  /// Whether the server reports the stackSource feature; stock servers do not know StacksV2
+  Future<bool> _supportsStackSource() async {
+    try {
+      final features = await _api.serverInfoApi.getServerFeatures();
+      return features?.stackSource.orElse(null) ?? false;
+    } catch (error, stack) {
+      _logger.warning("Cannot read the server features, syncing stacks without their source", error, stack);
+      return false;
+    }
+  }
+
   Future<bool> sync() async {
     _logger.info("Remote sync request for user");
     final serverVersion = await _api.serverInfoApi.getServerVersion();
@@ -65,6 +76,7 @@ class SyncStreamService {
     }
 
     final serverSemVer = SemVer(major: serverVersion.major, minor: serverVersion.minor, patch: serverVersion.patch_);
+    final supportsStackSource = await _supportsStackSource();
 
     final value = Store.get(StoreKey.syncMigrationStatus, "[]");
     final migrations = (jsonDecode(value) as List).cast<String>();
@@ -81,6 +93,7 @@ class SyncStreamService {
     await _syncApiRepository.streamChanges(
       _handleEvents,
       serverVersion: serverSemVer,
+      supportsStackSource: supportsStackSource,
       onReset: () => shouldReset = true,
       abortSignal: _cancellation?.future,
     );
@@ -89,6 +102,7 @@ class SyncStreamService {
       await _syncApiRepository.streamChanges(
         _handleEvents,
         serverVersion: serverSemVer,
+        supportsStackSource: supportsStackSource,
         abortSignal: _cancellation?.future,
       );
     }

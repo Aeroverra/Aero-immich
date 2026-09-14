@@ -27,6 +27,7 @@ class SyncApiRepository {
   Future<void> streamChanges(
     Future<void> Function(List<SyncEvent>, Function() abort, Function() reset) onData, {
     required SemVer serverVersion,
+    bool supportsStackSource = false,
     Function()? onReset,
     int batchSize = kSyncEventBatchSize,
     http.Client? httpClient,
@@ -59,8 +60,8 @@ class SyncApiRepository {
           SyncRequestType.albumToAssetsV1,
           SyncRequestType.memoriesV1,
           SyncRequestType.memoryToAssetsV1,
-          serverVersion.supports(.stacksV2) ? SyncRequestType.stacksV2 : SyncRequestType.stacksV1,
-          serverVersion.supports(.stacksV2) ? SyncRequestType.partnerStacksV2 : SyncRequestType.partnerStacksV1,
+          supportsStackSource ? SyncRequestType.stacksV2 : SyncRequestType.stacksV1,
+          supportsStackSource ? SyncRequestType.partnerStacksV2 : SyncRequestType.partnerStacksV1,
           SyncRequestType.userMetadataV1,
           SyncRequestType.peopleV1,
           serverVersion.supports(.assetFacesV2) ? SyncRequestType.assetFacesV2 : SyncRequestType.assetFacesV1,
