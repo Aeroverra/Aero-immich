@@ -23,6 +23,18 @@ enum DeletedReimportMode {
   album,
 }
 
+/// Whether an action on a selection with collapsed stacks includes the assets stacked below the visible ones
+enum StackActionMode {
+  /// ask on every action
+  ask,
+
+  /// act on the visible primary asset of each stack only
+  primary,
+
+  /// act on every asset of each stack
+  stack,
+}
+
 @freezed
 abstract class Onboarding with _$Onboarding {
   const Onboarding._();
@@ -45,6 +57,7 @@ abstract class Preferences with _$Preferences {
     @Default(false) bool ratingsEnabled,
     @Default(true) bool sharedLinksEnabled,
     @Default(false) bool tagsEnabled,
+    @Default(StackActionMode.ask) StackActionMode stackActionMode,
     @Default(AvatarColor.primary) AvatarColor userAvatarColor,
     @Default(true) bool showSupportBadge,
     @Default(3) int minimumFaces,
@@ -59,6 +72,10 @@ abstract class Preferences with _$Preferences {
       ratingsEnabled: (map["ratings"] as Map<String, Object?>?)?["enabled"] as bool? ?? false,
       sharedLinksEnabled: (map["sharedLinks"] as Map<String, Object?>?)?["enabled"] as bool? ?? true,
       tagsEnabled: (map["tags"] as Map<String, Object?>?)?["enabled"] as bool? ?? false,
+      stackActionMode: StackActionMode.values.firstWhere(
+        (e) => e.name == (map["stackActions"] as Map<String, Object?>?)?["mode"] as String?,
+        orElse: () => StackActionMode.ask,
+      ),
       userAvatarColor: AvatarColor.values.firstWhere(
         (e) => e.value == (map["avatar"] as Map<String, Object?>?)?["color"] as String?,
         orElse: () => AvatarColor.primary,
