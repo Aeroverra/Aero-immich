@@ -30,6 +30,10 @@ const SharedLinkCreateSchema = z
     allowUpload: z.boolean().optional().describe('Allow uploads'),
     allowDownload: z.boolean().default(true).optional().describe('Allow downloads'),
     showMetadata: z.boolean().default(true).optional().describe('Show metadata'),
+    confirmPrivate: z
+      .boolean()
+      .optional()
+      .describe('Required to be true when the link would expose private assets, acknowledging they will be shared'),
   })
   .superRefine(({ type, albumId, assetIds }, ctx) => {
     switch (type) {

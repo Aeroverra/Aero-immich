@@ -4,6 +4,7 @@
   import Sidebar from '$lib/components/sidebar/Sidebar.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { Route } from '$lib/route';
   import { recentAlbumsDropdown } from '$lib/stores/preferences.store';
   import { NavbarGroup, NavbarItem } from '@immich/ui';
@@ -24,6 +25,8 @@
     mdiImageMultipleOutline,
     mdiLink,
     mdiLock,
+    mdiLockOpenVariant,
+    mdiLockOpenVariantOutline,
     mdiLockOutline,
     mdiMagnify,
     mdiMap,
@@ -112,6 +115,15 @@
   />
 
   <NavbarItem title={$t('locked_folder')} href={Route.locked()} icon={mdiLockOutline} activeIcon={mdiLock} />
+
+  {#if authManager.preferences.privateMode.sidebarWeb && privateModeManager.enabled}
+    <NavbarItem
+      title={$t('private_photos')}
+      href={Route.private()}
+      icon={mdiLockOpenVariantOutline}
+      activeIcon={mdiLockOpenVariant}
+    />
+  {/if}
 
   {#if featureFlagsManager.value.trash}
     <NavbarItem title={$t('trash')} href={Route.trash()} icon={mdiTrashCanOutline} activeIcon={mdiTrashCan} />

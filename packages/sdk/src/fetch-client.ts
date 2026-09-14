@@ -689,6 +689,14 @@ export type PeopleResponse = {
     /** Whether people appear in web sidebar */
     sidebarWeb: boolean;
 };
+export type PrivateModeResponse = {
+    /** Whether private assets are included in generated memories */
+    includeInMemories: boolean;
+    /** Whether the private page appears in the web sidebar */
+    sidebarWeb: boolean;
+    /** Minutes of inactivity before private mode turns off */
+    timeoutMinutes: number;
+};
 export type PurchaseResponse = {
     /** Date until which to hide buy button */
     hideBuyButtonUntil: string;
@@ -723,6 +731,7 @@ export type UserPreferencesResponseDto = {
     folders: FoldersResponse;
     memories: MemoriesResponse;
     people: PeopleResponse;
+    privateMode: PrivateModeResponse;
     purchase: PurchaseResponse;
     ratings: RatingsResponse;
     recentlyAdded: RecentlyAddedResponse;
@@ -775,6 +784,14 @@ export type PeopleUpdate = {
     /** Whether people appear in web sidebar */
     sidebarWeb?: boolean;
 };
+export type PrivateModeUpdate = {
+    /** Whether private assets are included in generated memories */
+    includeInMemories?: boolean;
+    /** Whether the private page appears in the web sidebar */
+    sidebarWeb?: boolean;
+    /** Minutes of inactivity before private mode turns off */
+    timeoutMinutes?: number;
+};
 export type PurchaseUpdate = {
     /** Date until which to hide buy button */
     hideBuyButtonUntil?: string;
@@ -810,6 +827,7 @@ export type UserPreferencesUpdateDto = {
     folders?: FoldersUpdate;
     memories?: MemoriesUpdate;
     people?: PeopleUpdate;
+    privateMode?: PrivateModeUpdate;
     purchase?: PurchaseUpdate;
     ratings?: RatingsUpdate;
     recentlyAdded?: RecentlyAddedUpdate;
@@ -876,6 +894,8 @@ export type AlbumResponseDto = {
     id: string;
     /** Activity feed enabled */
     isActivityEnabled: boolean;
+    /** Album contains at least one private asset */
+    isPrivate: boolean;
     /** Last modified asset timestamp */
     lastModifiedAssetTimestamp?: string;
     order?: AssetOrder;
@@ -898,6 +918,8 @@ export type CreateAlbumDto = {
     albumUsers?: AlbumUserCreateDto[];
     /** Initial asset IDs */
     assetIds?: string[];
+    /** Required to be true when the album is created with other users and contains private assets, acknowledging they will be shared */
+    confirmPrivate?: boolean;
     /** Album description */
     description?: string | null;
 };
@@ -906,6 +928,8 @@ export type AlbumsAddAssetsDto = {
     albumIds: string[];
     /** Asset IDs */
     assetIds: string[];
+    /** Required to be true when private assets are added to a shared album, acknowledging they will be shared */
+    confirmPrivate?: boolean;
 };
 export type AlbumsAddAssetsResponseDto = {
     error?: BulkIdErrorReason;
@@ -943,6 +967,12 @@ export type BulkIdResponseDto = {
     /** Whether operation succeeded */
     success: boolean;
 };
+export type AlbumAddAssetsDto = {
+    /** Required to be true when private assets are added to a shared album, acknowledging they will be shared */
+    confirmPrivate?: boolean;
+    /** IDs to process */
+    ids: string[];
+};
 export type MapMarkerResponseDto = {
     /** City name */
     city: string | null;
@@ -969,6 +999,8 @@ export type AlbumUserAddDto = {
 export type AddUsersDto = {
     /** Album users to add */
     albumUsers: AlbumUserAddDto[];
+    /** Required to be true when the album contains private assets, acknowledging they will be shared */
+    confirmPrivate?: boolean;
 };
 export type ApiKeyResponseDto = {
     /** Creation date */
@@ -1079,6 +1111,8 @@ export type AssetBulkUpdateDto = {
     ids: string[];
     /** Mark as favorite */
     isFavorite?: boolean;
+    /** Mark as private (requires private mode) */
+    isPrivate?: boolean;
     /** Latitude coordinate */
     latitude?: number;
     /** Longitude coordinate */
@@ -1286,6 +1320,8 @@ export type AssetResponseDto = {
     isFavorite: boolean;
     /** Is offline */
     isOffline: boolean;
+    /** Is private */
+    isPrivate: boolean;
     /** Is trashed */
     isTrashed: boolean;
     /** Library ID */
@@ -1324,6 +1360,8 @@ export type UpdateAssetDto = {
     description?: string;
     /** Mark as favorite */
     isFavorite?: boolean;
+    /** Mark as private (requires private mode) */
+    isPrivate?: boolean;
     /** Latitude coordinate */
     latitude?: number;
     /** Live photo video ID */
@@ -1494,6 +1532,10 @@ export type AuthStatusResponseDto = {
     pinCode: boolean;
     /** PIN expiration date */
     pinExpiresAt?: string;
+    /** Is private mode enabled for this session */
+    privateMode: boolean;
+    /** Private mode expiration date */
+    privateModeExpiresAt?: string;
 };
 export type ValidateAccessTokenResponseDto = {
     /** Authentication status */
@@ -2260,6 +2302,7 @@ export type SearchFilterBranch = {
     isFavorite?: BoolFilter;
     isMotion?: BoolFilter;
     isOffline?: BoolFilter;
+    isPrivate?: BoolFilter;
     lensModel?: StringFilterNullable;
     libraryId?: IdFilterNullable;
     make?: StringFilterNullable;
@@ -2294,6 +2337,7 @@ export type SearchFilter = {
     isFavorite?: BoolFilter;
     isMotion?: BoolFilter;
     isOffline?: BoolFilter;
+    isPrivate?: BoolFilter;
     lensModel?: StringFilterNullable;
     libraryId?: IdFilterNullable;
     make?: StringFilterNullable;
@@ -2348,6 +2392,8 @@ export type MetadataSearchDto = {
     isNotInAlbum?: boolean;
     /** Filter by offline status */
     isOffline?: boolean;
+    /** Filter by private status (requires private mode) */
+    isPrivate?: boolean;
     /** Filter by lens model */
     lensModel?: string | null;
     /** Library ID to filter by */
@@ -2473,6 +2519,8 @@ export type RandomSearchDto = {
     isNotInAlbum?: boolean;
     /** Filter by offline status */
     isOffline?: boolean;
+    /** Filter by private status (requires private mode) */
+    isPrivate?: boolean;
     /** Filter by lens model */
     lensModel?: string | null;
     /** Library ID to filter by */
@@ -2538,6 +2586,8 @@ export type SmartSearchDto = {
     isNotInAlbum?: boolean;
     /** Filter by offline status */
     isOffline?: boolean;
+    /** Filter by private status (requires private mode) */
+    isPrivate?: boolean;
     /** Search language code */
     language?: string;
     /** Filter by lens model */
@@ -2609,6 +2659,8 @@ export type StatisticsSearchDto = {
     isNotInAlbum?: boolean;
     /** Filter by offline status */
     isOffline?: boolean;
+    /** Filter by private status (requires private mode) */
+    isPrivate?: boolean;
     /** Filter by lens model */
     lensModel?: string | null;
     /** Library ID to filter by */
@@ -2921,6 +2973,8 @@ export type SharedLinkCreateDto = {
     allowUpload?: boolean;
     /** Asset IDs (for individual assets) */
     assetIds?: string[];
+    /** Required to be true when the link would expose private assets, acknowledging they will be shared */
+    confirmPrivate?: boolean;
     /** Link description */
     description?: string | null;
     /** Expiration date */
@@ -3071,6 +3125,8 @@ export type TimeBucketAssetResponseDto = {
     isFavorite: boolean[];
     /** Array indicating whether each asset is an image (false for videos) */
     isImage: boolean[];
+    /** Array indicating whether each asset is private */
+    isPrivate: boolean[];
     /** Array indicating whether each asset is in the trash */
     isTrashed: boolean[];
     /** Array of latitude coordinates extracted from EXIF GPS data */
@@ -3300,6 +3356,8 @@ export type SyncAlbumV2 = {
     id: string;
     /** Is activity enabled */
     isActivityEnabled: boolean;
+    /** Album contains at least one private asset */
+    isPrivate: boolean;
     /** Album name */
     name: string;
     order: AssetOrder;
@@ -3548,6 +3606,8 @@ export type SyncAssetV2 = {
     isEdited: boolean;
     /** Is favorite */
     isFavorite: boolean;
+    /** Is private */
+    isPrivate: boolean;
     /** Library ID */
     libraryId: string | null;
     /** Live photo video ID */
@@ -4215,9 +4275,10 @@ export function getUserSessionsAdmin({ id }: {
 /**
  * Retrieve user statistics
  */
-export function getUserStatisticsAdmin({ id, isFavorite, isTrashed, visibility }: {
+export function getUserStatisticsAdmin({ id, isFavorite, isPrivate, isTrashed, visibility }: {
     id: string;
     isFavorite?: boolean;
+    isPrivate?: boolean;
     isTrashed?: boolean;
     visibility?: AssetVisibility;
 }, opts?: Oazapfts.RequestOpts) {
@@ -4226,6 +4287,7 @@ export function getUserStatisticsAdmin({ id, isFavorite, isTrashed, visibility }
         data: AssetStatsResponseDto;
     }>(`/admin/users/${encodeURIComponent(id)}/statistics${QS.query(QS.explode({
         isFavorite,
+        isPrivate,
         isTrashed,
         visibility
     }))}`, {
@@ -4360,9 +4422,9 @@ export function removeAssetFromAlbum({ id, bulkIdsDto }: {
 /**
  * Add assets to an album
  */
-export function addAssetsToAlbum({ id, bulkIdsDto }: {
+export function addAssetsToAlbum({ id, albumAddAssetsDto }: {
     id: string;
-    bulkIdsDto: BulkIdsDto;
+    albumAddAssetsDto: AlbumAddAssetsDto;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
         status: 200;
@@ -4370,7 +4432,7 @@ export function addAssetsToAlbum({ id, bulkIdsDto }: {
     }>(`/albums/${encodeURIComponent(id)}/assets`, oazapfts.json({
         ...opts,
         method: "PUT",
-        body: bulkIdsDto
+        body: albumAddAssetsDto
     })));
 }
 /**
@@ -4704,8 +4766,9 @@ export function updateBulkAssetMetadata({ assetMetadataBulkUpsertDto }: {
 /**
  * Get asset statistics
  */
-export function getAssetStatistics({ isFavorite, isTrashed, visibility }: {
+export function getAssetStatistics({ isFavorite, isPrivate, isTrashed, visibility }: {
     isFavorite?: boolean;
+    isPrivate?: boolean;
     isTrashed?: boolean;
     visibility?: AssetVisibility;
 }, opts?: Oazapfts.RequestOpts) {
@@ -4714,6 +4777,7 @@ export function getAssetStatistics({ isFavorite, isTrashed, visibility }: {
         data: AssetStatsResponseDto;
     }>(`/assets/statistics${QS.query(QS.explode({
         isFavorite,
+        isPrivate,
         isTrashed,
         visibility
     }))}`, {
@@ -5107,6 +5171,27 @@ export function lockAuthSession(opts?: Oazapfts.RequestOpts) {
         ...opts,
         method: "POST"
     }));
+}
+/**
+ * Disable private mode
+ */
+export function disablePrivateMode(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText("/auth/session/private-mode", {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Enable private mode
+ */
+export function enablePrivateMode({ sessionUnlockDto }: {
+    sessionUnlockDto: SessionUnlockDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText("/auth/session/private-mode", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: sessionUnlockDto
+    })));
 }
 /**
  * Unlock auth session
@@ -6335,7 +6420,7 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
@@ -6346,6 +6431,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     isMotion?: boolean;
     isNotInAlbum?: boolean;
     isOffline?: boolean;
+    isPrivate?: boolean;
     lensModel?: string | null;
     libraryId?: string | null;
     make?: string | null;
@@ -6382,6 +6468,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         isMotion,
         isNotInAlbum,
         isOffline,
+        isPrivate,
         lensModel,
         libraryId,
         make,
@@ -7269,10 +7356,11 @@ export function tagAssets({ id, bulkIdsDto }: {
 /**
  * Get time bucket
  */
-export function getTimeBucket({ albumId, bbox, isFavorite, isTrashed, key, order, orderBy, personId, slug, tagId, timeBucket, userId, visibility, withCoordinates, withPartners, withStacked }: {
+export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, timeBucket, userId, visibility, withCoordinates, withPartners, withStacked }: {
     albumId?: string;
     bbox?: string;
     isFavorite?: boolean;
+    isPrivate?: boolean;
     isTrashed?: boolean;
     key?: string;
     order?: AssetOrder;
@@ -7294,6 +7382,7 @@ export function getTimeBucket({ albumId, bbox, isFavorite, isTrashed, key, order
         albumId,
         bbox,
         isFavorite,
+        isPrivate,
         isTrashed,
         key,
         order,
@@ -7314,10 +7403,11 @@ export function getTimeBucket({ albumId, bbox, isFavorite, isTrashed, key, order
 /**
  * Get time buckets
  */
-export function getTimeBuckets({ albumId, bbox, isFavorite, isTrashed, key, order, orderBy, personId, slug, tagId, userId, visibility, withCoordinates, withPartners, withStacked }: {
+export function getTimeBuckets({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, userId, visibility, withCoordinates, withPartners, withStacked }: {
     albumId?: string;
     bbox?: string;
     isFavorite?: boolean;
+    isPrivate?: boolean;
     isTrashed?: boolean;
     key?: string;
     order?: AssetOrder;
@@ -7338,6 +7428,7 @@ export function getTimeBuckets({ albumId, bbox, isFavorite, isTrashed, key, orde
         albumId,
         bbox,
         isFavorite,
+        isPrivate,
         isTrashed,
         key,
         order,
@@ -8007,6 +8098,7 @@ export enum Permission {
     PluginRead = "plugin.read",
     PluginUpdate = "plugin.update",
     PluginDelete = "plugin.delete",
+    PrivateModeAccess = "privateMode.access",
     ServerAbout = "server.about",
     ServerApkLinks = "server.apkLinks",
     ServerStorage = "server.storage",
