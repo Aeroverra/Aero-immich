@@ -11,14 +11,41 @@ select
   "asset"."fileCreatedAt",
   "asset_exif"."make",
   "asset_exif"."model",
-  "asset_job_status"."autoStackedAt"
+  "asset_job_status"."autoStackedAt",
+  "asset_quality"."updatedAt" as "qualityUpdatedAt"
 from
   "asset"
   left join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
   left join "asset_job_status" on "asset_job_status"."assetId" = "asset"."id"
   left join "stack" on "stack"."id" = "asset"."stackId"
+  left join "asset_quality" on "asset_quality"."assetId" = "asset"."id"
 where
   "asset"."id" = $1::uuid
+
+-- AutoStackRepository.getTimeline
+select
+  "asset"."id",
+  "asset"."fileCreatedAt",
+  smart_search.embedding <=> lag(smart_search.embedding) over (
+    order by
+      asset."fileCreatedAt",
+      asset.id
+  ) as "distance"
+from
+  "asset"
+  inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+  left join "smart_search" on "smart_search"."assetId" = "asset"."id"
+where
+  "asset"."ownerId" = $1::uuid
+  and "asset"."fileCreatedAt" >= $2
+  and "asset"."fileCreatedAt" <= $3
+  and "asset"."deletedAt" is null
+  and "asset"."visibility" in ('timeline', 'archive')
+  and "asset_exif"."make" = $4
+  and "asset_exif"."model" = $5
+order by
+  "asset"."fileCreatedAt" asc,
+  "asset"."id" asc
 
 -- AutoStackRepository.getCandidates
 select
@@ -100,14 +127,12 @@ from
   left join "asset_quality" on "asset_quality"."assetId" = "asset"."id"
 where
   "asset"."ownerId" = $1::uuid
-  and "asset"."fileCreatedAt" >= $2
-  and "asset"."fileCreatedAt" <= $3
+  and "asset"."id" = any ($2::uuid[])
   and "asset"."deletedAt" is null
   and "asset"."visibility" in ('timeline', 'archive')
-  and "asset_exif"."make" = $4
-  and "asset_exif"."model" = $5
 order by
-  "asset"."fileCreatedAt" asc
+  "asset"."fileCreatedAt" asc,
+  "asset"."id" asc
 
 -- AutoStackRepository.getStacks
 select
