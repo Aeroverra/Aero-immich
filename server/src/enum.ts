@@ -1055,7 +1055,9 @@ export enum SyncRequestType {
   PartnerAssetsV2 = 'PartnerAssetsV2',
   PartnerAssetExifsV1 = 'PartnerAssetExifsV1',
   PartnerStacksV1 = 'PartnerStacksV1',
+  PartnerStacksV2 = 'PartnerStacksV2',
   StacksV1 = 'StacksV1',
+  StacksV2 = 'StacksV2',
   UsersV1 = 'UsersV1',
   PeopleV1 = 'PeopleV1',
   /** @deprecated */
@@ -1100,8 +1102,10 @@ export enum SyncEntityType {
   PartnerAssetExifV1 = 'PartnerAssetExifV1',
   PartnerAssetExifBackfillV1 = 'PartnerAssetExifBackfillV1',
   PartnerStackBackfillV1 = 'PartnerStackBackfillV1',
+  PartnerStackBackfillV2 = 'PartnerStackBackfillV2',
   PartnerStackDeleteV1 = 'PartnerStackDeleteV1',
   PartnerStackV1 = 'PartnerStackV1',
+  PartnerStackV2 = 'PartnerStackV2',
 
   AlbumV1 = 'AlbumV1',
   AlbumV2 = 'AlbumV2',
@@ -1135,6 +1139,7 @@ export enum SyncEntityType {
   MemoryToAssetDeleteV1 = 'MemoryToAssetDeleteV1',
 
   StackV1 = 'StackV1',
+  StackV2 = 'StackV2',
   StackDeleteV1 = 'StackDeleteV1',
 
   PersonV1 = 'PersonV1',
@@ -1206,6 +1211,26 @@ export const AssetVisibilitySchema = z
   .enum(AssetVisibility)
   .describe('Asset visibility')
   .meta({ id: 'AssetVisibility' });
+
+export enum StackSource {
+  /** created by a user (or a client such as an importer) through the API */
+  Manual = 'manual',
+  /** created by the server from similar photos taken close together */
+  Auto = 'auto',
+}
+
+export const StackSourceSchema = z.enum(StackSource).describe('How the stack was created').meta({ id: 'StackSource' });
+
+export enum StackUserEditAction {
+  /** the stack was deleted */
+  Delete = 'delete',
+  /** assets were taken out of the stack */
+  RemoveAssets = 'removeAssets',
+  /** a different primary asset was chosen */
+  UpdatePrimary = 'updatePrimary',
+  /** the stack was absorbed into another stack */
+  Merge = 'merge',
+}
 
 export enum ReleaseChannel {
   Stable = 'stable',
