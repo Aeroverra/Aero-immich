@@ -19193,6 +19193,9 @@
           "videoConversion": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
+          "videoFrameAnalysis": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
           "workflow": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           }
@@ -19213,6 +19216,7 @@
           "smartSearch",
           "thumbnailGeneration",
           "videoConversion",
+          "videoFrameAnalysis",
           "workflow"
         ],
         "type": "object"
@@ -19349,6 +19353,9 @@
             },
             "minItems": 1,
             "type": "array"
+          },
+          "videoFrameAnalysis": {
+            "$ref": "#/components/schemas/AdminConfigVideoFrameAnalysisDto"
           }
         },
         "required": [
@@ -19360,7 +19367,8 @@
           "faceAttributes",
           "facialRecognition",
           "ocr",
-          "urls"
+          "urls",
+          "videoFrameAnalysis"
         ],
         "type": "object"
       },
@@ -19838,6 +19846,51 @@
         },
         "required": [
           "deleteDelay"
+        ],
+        "type": "object"
+      },
+      "AdminConfigVideoFrameAnalysisDto": {
+        "properties": {
+          "createPeople": {
+            "description": "Whether faces found only in video frames may create new people",
+            "type": "boolean"
+          },
+          "detectFaces": {
+            "description": "Whether to detect faces in the sampled frames",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "frameDensity": {
+            "description": "Frames sampled per video, multiplied by the square root of the duration in seconds",
+            "format": "double",
+            "maximum": 10,
+            "minimum": 0.1,
+            "type": "number"
+          },
+          "maxFrames": {
+            "description": "Maximum number of frames sampled per video",
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "minFrameInterval": {
+            "description": "Minimum number of seconds between two sampled frames",
+            "format": "double",
+            "maximum": 600,
+            "minimum": 0.5,
+            "type": "number"
+          }
+        },
+        "required": [
+          "createPeople",
+          "detectFaces",
+          "enabled",
+          "frameDensity",
+          "maxFrames",
+          "minFrameInterval"
         ],
         "type": "object"
       },
@@ -20724,6 +20777,13 @@
             "description": "Bounding box Y2 coordinate",
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "frameTimestamp": {
+            "description": "Position in milliseconds of the video frame the face was detected in, if it was not the thumbnail",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
             "type": "integer"
           },
           "id": {
@@ -23056,6 +23116,8 @@
           "StorageTemplateMigrationSingle",
           "TagCleanup",
           "VersionCheck",
+          "AssetAnalyzeVideoFramesQueueAll",
+          "AssetAnalyzeVideoFrames",
           "OcrQueueAll",
           "Ocr",
           "WorkflowAssetTrigger",
@@ -26156,7 +26218,8 @@
           "faceAttributes",
           "workflow",
           "integrityCheck",
-          "editor"
+          "editor",
+          "videoFrameAnalysis"
         ],
         "type": "string"
       },
@@ -26332,6 +26395,9 @@
           "videoConversion": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "videoFrameAnalysis": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "workflow": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           }
@@ -26357,6 +26423,7 @@
           "storageTemplateMigration",
           "thumbnailGeneration",
           "videoConversion",
+          "videoFrameAnalysis",
           "workflow"
         ],
         "type": "object"
@@ -27912,6 +27979,10 @@
           "trash": {
             "description": "Whether trash feature is enabled",
             "type": "boolean"
+          },
+          "videoFrameAnalysis": {
+            "description": "Whether enhanced video analysis of sampled frames is enabled",
+            "type": "boolean"
           }
         },
         "required": [
@@ -27931,7 +28002,8 @@
           "search",
           "sidecar",
           "smartSearch",
-          "trash"
+          "trash",
+          "videoFrameAnalysis"
         ],
         "type": "object"
       },
@@ -33298,6 +33370,9 @@
           },
           "ocr": {
             "$ref": "#/components/schemas/UserConfigOcrDto"
+          },
+          "videoFrameAnalysis": {
+            "$ref": "#/components/schemas/UserConfigVideoFrameAnalysisDto"
           }
         },
         "required": [
@@ -33307,7 +33382,8 @@
           "enabled",
           "faceAttributes",
           "facialRecognition",
-          "ocr"
+          "ocr",
+          "videoFrameAnalysis"
         ],
         "type": "object"
       },
@@ -33457,6 +33533,18 @@
         },
         "required": [
           "deleteDelay"
+        ],
+        "type": "object"
+      },
+      "UserConfigVideoFrameAnalysisDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
         ],
         "type": "object"
       },
