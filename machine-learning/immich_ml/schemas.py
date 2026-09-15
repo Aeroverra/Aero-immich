@@ -27,12 +27,16 @@ class BoundingBox(TypedDict):
 
 class ModelTask(StrEnum):
     FACIAL_RECOGNITION = "facial-recognition"
+    FACE_ATTRIBUTES = "face-attributes"
+    IMAGE_QUALITY = "image-quality"
     SEARCH = "clip"
     OCR = "ocr"
 
 
 class ModelType(StrEnum):
     DETECTION = "detection"
+    LANDMARKS = "landmarks"
+    QUALITY = "quality"
     RECOGNITION = "recognition"
     TEXTUAL = "textual"
     VISUAL = "visual"
@@ -47,7 +51,9 @@ class ModelFormat(StrEnum):
 class ModelSource(StrEnum):
     INSIGHTFACE = "insightface"
     MCLIP = "mclip"
+    MEDIAPIPE = "mediapipe"
     OPENCLIP = "openclip"
+    OPENCV = "opencv"
     PADDLE = "paddle"
 
 
@@ -101,6 +107,35 @@ class DetectedFace(TypedDict):
 
 
 FacialRecognitionOutput = list[DetectedFace]
+
+
+class FaceAttributesBox(TypedDict):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    imageWidth: int
+    imageHeight: int
+
+
+class FaceAttributes(TypedDict):
+    detected: bool
+    eyeBlinkLeft: float | None
+    eyeBlinkRight: float | None
+    smile: float | None
+    yaw: float | None
+    pitch: float | None
+    roll: float | None
+    sharpness: float | None
+
+
+FaceAttributesOutput = list[FaceAttributes]
+
+
+class ImageQualityOutput(TypedDict):
+    sharpness: float
+    exposureClipped: float
+    brightness: float
 
 
 class PipelineEntry(TypedDict):
