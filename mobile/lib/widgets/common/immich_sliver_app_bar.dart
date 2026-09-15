@@ -31,6 +31,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
   final bool snap;
   final Widget? title;
   final double? expandedHeight;
+  final Widget? leading;
 
   const ImmichSliverAppBar({
     super.key,
@@ -41,6 +42,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
     this.snap = true,
     this.title,
     this.expandedHeight,
+    this.leading,
   });
 
   @override
@@ -65,6 +67,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
           expandedHeight: expandedHeight,
           shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(bottom: Radius.circular(5))),
           automaticallyImplyLeading: false,
+          leading: leading,
           centerTitle: false,
           title: title ?? const _ImmichLogoWithText(),
           actions: [
