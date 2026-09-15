@@ -8,7 +8,7 @@ import { DB } from 'src/schema';
 import { StackAutoExclusionTable } from 'src/schema/tables/stack-auto-exclusion.table';
 import { anyUuid, asUuid } from 'src/utils/database';
 
-export type AutoStackCandidateSearch = {
+export type AutoStackTimelineSearch = {
   ownerId: string;
   make: string;
   model: string;
@@ -64,6 +64,7 @@ export class AutoStackRepository {
       .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
       .leftJoin('asset_job_status', 'asset_job_status.assetId', 'asset.id')
       .leftJoin('stack', 'stack.id', 'asset.stackId')
+      .leftJoin('asset_quality', 'asset_quality.assetId', 'asset.id')
       .select([
         'asset.id',
         'asset.ownerId',
@@ -75,20 +76,51 @@ export class AutoStackRepository {
         'asset_exif.make',
         'asset_exif.model',
         'asset_job_status.autoStackedAt',
+        'asset_quality.updatedAt as qualityUpdatedAt',
       ])
       .where('asset.id', '=', asUuid(id))
       .executeTakeFirst();
   }
 
   /**
-   * Every visible asset of one owner and camera captured in a time window, with what the grouping needs. Images
-   * without an embedding or face detection are returned too, so the job can tell that a neighbour is still being
-   * processed.
+   * The visible assets of one owner and camera captured in a time window, in capture order, with the smart search
+   * distance to the previous asset. Only ids and times leave the database, so a long series of photos can be cut
+   * into sessions without loading every embedding.
    */
   @GenerateSql({
     params: [{ ownerId: DummyValue.UUID, make: 'Google', model: 'Pixel', from: DummyValue.DATE, to: DummyValue.DATE }],
   })
-  getCandidates({ ownerId, make, model, from, to }: AutoStackCandidateSearch) {
+  getTimeline({ ownerId, make, model, from, to }: AutoStackTimelineSearch) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .leftJoin('smart_search', 'smart_search.assetId', 'asset.id')
+      .select(['asset.id', 'asset.fileCreatedAt'])
+      .select(
+        sql<
+          number | null
+        >`smart_search.embedding <=> lag(smart_search.embedding) over (order by asset."fileCreatedAt", asset.id)`.as(
+          'distance',
+        ),
+      )
+      .where('asset.ownerId', '=', asUuid(ownerId))
+      .where('asset.fileCreatedAt', '>=', from)
+      .where('asset.fileCreatedAt', '<=', to)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.visibility', 'in', [sql.lit(AssetVisibility.Timeline), sql.lit(AssetVisibility.Archive)])
+      .where('asset_exif.make', '=', make)
+      .where('asset_exif.model', '=', model)
+      .orderBy('asset.fileCreatedAt', 'asc')
+      .orderBy('asset.id', 'asc')
+      .execute();
+  }
+
+  /**
+   * The given visible assets of one owner, with what the grouping needs. Images without an embedding or face
+   * detection are returned too, so the job can tell that a neighbour is still being processed.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  getCandidates(ownerId: string, ids: string[]) {
     return this.db
       .selectFrom('asset')
       .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
@@ -142,13 +174,11 @@ export class AutoStackRepository {
         ).as('faces'),
       )
       .where('asset.ownerId', '=', asUuid(ownerId))
-      .where('asset.fileCreatedAt', '>=', from)
-      .where('asset.fileCreatedAt', '<=', to)
+      .where('asset.id', '=', anyUuid(ids))
       .where('asset.deletedAt', 'is', null)
       .where('asset.visibility', 'in', [sql.lit(AssetVisibility.Timeline), sql.lit(AssetVisibility.Archive)])
-      .where('asset_exif.make', '=', make)
-      .where('asset_exif.model', '=', model)
       .orderBy('asset.fileCreatedAt', 'asc')
+      .orderBy('asset.id', 'asc')
       .execute();
   }
 
@@ -208,7 +238,7 @@ export class AutoStackRepository {
   }
 
   @GenerateSql({ params: [[DummyValue.UUID], DummyValue.DATE] })
-  async setAutoStackedAt(assetIds: string[], autoStackedAt: Date) {
+  async setAutoStackedAt(assetIds: string[], autoStackedAt: Date | null) {
     if (assetIds.length === 0) {
       return;
     }

@@ -171,10 +171,93 @@ describe(AutoStackService.name, () => {
         .where('assetId', 'in', [a.id, b.id, c.id, otherScene.id, later.id])
         .execute();
       const evaluated = statuses.filter(({ autoStackedAt }) => autoStackedAt).map(({ assetId }) => assetId);
-      expect(evaluated.sort()).toEqual([a.id, b.id, c.id, otherScene.id].sort());
+      // the other scene always starts a new stack, it is evaluated by its own job
+      expect(evaluated.sort()).toEqual([a.id, b.id, c.id].sort());
 
       // a neighbour evaluated with the burst is skipped
       await expect(sut.handleAutoStack({ id: c.id })).resolves.toBe(JobStatus.Skipped);
+      await expect(sut.handleAutoStack({ id: otherScene.id })).resolves.toBe(JobStatus.Success);
+      await expect(getStackOf(ctx, a.id)).resolves.toEqual(stack);
+    });
+
+    it('should cut a long series where the scene changes and evaluate each part on its own', async () => {
+      const { sut, ctx } = setup();
+      const user = await newUserWithAutoStacks(ctx);
+      // a photo every 3 seconds for 5 minutes, a new scene every 10 photos
+      const photos = [];
+      for (let index = 0; index < 100; index++) {
+        photos.push(await newPhoto(ctx, user.id, index * 3, { vector: embedding(Math.floor(index / 10) * 2) }));
+      }
+
+      const timeline = await ctx.get(AutoStackRepository).getTimeline({
+        ownerId: user.id,
+        make: 'Google',
+        model: 'Pixel 9 Pro XL',
+        from: new Date(start),
+        to: new Date(start + 300_000),
+      });
+      expect(timeline.map(({ id }) => id)).toEqual(photos.map(({ id }) => id));
+      expect(timeline[0].distance).toBeNull();
+      expect(timeline[1].distance).toBeCloseTo(0);
+      expect(timeline[10].distance).toBeCloseTo(1);
+
+      await expect(sut.handleAutoStack({ id: photos[45].id })).resolves.toBe(JobStatus.Success);
+
+      const statuses = await ctx.database
+        .selectFrom('asset_job_status')
+        .select('assetId')
+        .where('autoStackedAt', 'is not', null)
+        .where(
+          'assetId',
+          'in',
+          photos.map(({ id }) => id),
+        )
+        .execute();
+      expect(statuses.map(({ assetId }) => assetId).sort()).toEqual(
+        photos
+          .slice(40, 50)
+          .map(({ id }) => id)
+          .sort(),
+      );
+      const stack = await getStackOf(ctx, photos[45].id);
+      expect(await getStackMembers(ctx, stack!.id)).toEqual(
+        photos
+          .slice(40, 50)
+          .map(({ id }) => id)
+          .sort(),
+      );
+    });
+
+    it('should evaluate a stack again only when face attributes were stored after the last evaluation', async () => {
+      const { sut, ctx } = setup();
+      const user = await newUserWithAutoStacks(ctx);
+      const a = await newPhoto(ctx, user.id, 0);
+      const b = await newPhoto(ctx, user.id, 1);
+      await newQuality(ctx, a.id, 100);
+      await newQuality(ctx, b.id, 100);
+      await ctx.database
+        .updateTable('asset_quality')
+        .set({ updatedAt: new Date(Date.now() - 60_000) })
+        .where('assetId', 'in', [a.id, b.id])
+        .execute();
+
+      await expect(sut.handleAutoStack({ id: a.id })).resolves.toBe(JobStatus.Success);
+      const stack = await getStackOf(ctx, a.id);
+      expect(stack).toBeDefined();
+
+      // the attributes of both photos were stored before the evaluation: the refreshes queued for them do nothing
+      await expect(sut.handleAutoStack({ id: a.id, refresh: true })).resolves.toBe(JobStatus.Skipped);
+      await expect(sut.handleAutoStack({ id: b.id, refresh: true })).resolves.toBe(JobStatus.Skipped);
+
+      // new attributes make the other photo the better cover
+      await ctx.database
+        .updateTable('asset_quality')
+        .set({ sharpness: 900, updatedAt: new Date(Date.now() + 1000) })
+        .where('assetId', '=', stack!.primaryAssetId === a.id ? b.id : a.id)
+        .execute();
+      const refreshed = stack!.primaryAssetId === a.id ? b : a;
+      await expect(sut.handleAutoStack({ id: refreshed.id, refresh: true })).resolves.toBe(JobStatus.Success);
+      await expect(getStackOf(ctx, a.id)).resolves.toEqual({ ...stack, primaryAssetId: refreshed.id });
     });
 
     it('should do nothing for a user who did not turn automatic stacks on', async () => {
