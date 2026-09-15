@@ -75,4 +75,26 @@ describe('FeatureSettings component', () => {
       'true',
     );
   });
+
+  it('saves the automatic stacks grouping preference', async () => {
+    const preferences = preferencesFactory.build({ stacks: { groupAuto: true } });
+    authManager.setPreferences(preferences);
+    sdkMock.updateMyPreferences.mockResolvedValue({ ...preferences, stacks: { groupAuto: false } });
+    const user = userEvent.setup();
+
+    render(FeatureSettings);
+
+    const toggle = screen.getByRole('switch', { name: 'Group automatic stacks' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await user.click(toggle);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(sdkMock.updateMyPreferences).toHaveBeenCalledWith({
+        userPreferencesUpdateDto: expect.objectContaining({ stacks: { groupAuto: false } }),
+      }),
+    );
+    expect(authManager.preferences.stacks.groupAuto).toBe(false);
+  });
 });
