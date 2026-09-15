@@ -92,7 +92,7 @@ describe(JobService.name, () => {
       },
       {
         item: { name: JobName.AssetDetectFaces, data: { id: 'asset-1', source: 'upload' } },
-        jobs: [],
+        jobs: [JobName.AssetDetectFaceAttributes],
       },
       {
         item: { name: JobName.FacialRecognition, data: { id: 'asset-1' } },
@@ -165,7 +165,9 @@ describe(JobService.name, () => {
         data: { id: 'asset-1', source: 'upload' },
       });
 
-      expect(mocks.job.queue).not.toHaveBeenCalledWith(expect.objectContaining({ name: JobName.AssetAnalyzeVideoFrames }));
+      expect(mocks.job.queue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: JobName.AssetAnalyzeVideoFrames }),
+      );
     });
 
     for (const { item, jobs, stub } of tests) {
