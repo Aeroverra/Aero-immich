@@ -167,6 +167,10 @@ class TimelineService {
 
   Future<List<BaseAsset>> loadAssets(int index, int count) => _mutex.run(() => _loadAssets(index, count));
 
+  /// Reads a range straight from the source for a one-off lookup, leaving the buffer used for rendering untouched.
+  /// Unlike [loadAssets] this does not depend on the bucket listener having counted the assets yet
+  Future<List<BaseAsset>> fetchAssets(int index, int count) => _assetSource(index, count);
+
   Future<List<BaseAsset>> _loadAssets(int index, int count) async {
     if (hasRange(index, count)) {
       return getAssets(index, count);
@@ -192,7 +196,11 @@ class TimelineService {
     _buffer = await _assetSource(start, len);
     _bufferOffset = start;
 
-    return getAssets(index, count);
+    // A row can ask before the bucket listener has counted the assets of a freshly created service, or with an index
+    // from the segments of the service it replaced. Hand back what the source returned instead of throwing, the
+    // segments catch up on the next frame
+    final from = math.min(index - start, _buffer.length);
+    return _buffer.sublist(from, math.min(from + count, _buffer.length));
   }
 
   bool hasRange(int index, int count) =>
