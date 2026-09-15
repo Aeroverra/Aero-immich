@@ -99,6 +99,37 @@ describe(VideoFrameAnalysisService.name, () => {
       expect(mocks.media.extractVideoFrame).not.toHaveBeenCalled();
     });
 
+    it('should read the stream details from the file when the database has none', async () => {
+      mocks.assetJob.getForVideoFrameAnalysis.mockResolvedValue(makeAsset({ videoStream: null, duration: null }));
+      mocks.media.probe.mockResolvedValue({
+        ...videoInfoStub.videoStreamH264,
+        format: { ...videoInfoStub.videoStreamH264.format, duration: 3.5 },
+      });
+      mocks.machineLearning.analyzeImage.mockResolvedValue({ imageWidth: 1, imageHeight: 1, clip: '[1]', faces: [] });
+
+      await expect(sut.handleAnalyzeVideoFrames({ id: 'asset-id' })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.media.probe).toHaveBeenCalledWith('/original/video.mp4');
+      expect(mocks.media.extractVideoFrame).toHaveBeenCalledTimes(1);
+      expect(mocks.media.extractVideoFrame).toHaveBeenCalledWith(
+        '/original/video.mp4',
+        expect.objectContaining({ inputOptions: expect.arrayContaining(['-ss', '1.750']) }),
+      );
+    });
+
+    it('should mark a video whose stream details cannot be read as analyzed', async () => {
+      mocks.assetJob.getForVideoFrameAnalysis.mockResolvedValue(makeAsset({ videoStream: null }));
+      mocks.media.probe.mockRejectedValue(new Error('invalid data'));
+
+      await expect(sut.handleAnalyzeVideoFrames({ id: 'asset-id' })).resolves.toBe(JobStatus.Failed);
+
+      expect(mocks.media.extractVideoFrame).not.toHaveBeenCalled();
+      expect(mocks.asset.upsertJobStatus).toHaveBeenCalledWith({
+        assetId: 'asset-id',
+        videoFramesAnalyzedAt: expect.any(Date),
+      });
+    });
+
     it('should mark a video with an unknown duration as analyzed', async () => {
       mocks.assetJob.getForVideoFrameAnalysis.mockResolvedValue(makeAsset({ duration: null }));
 
