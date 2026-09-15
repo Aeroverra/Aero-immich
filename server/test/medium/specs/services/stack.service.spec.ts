@@ -1,4 +1,5 @@
 import { Kysely } from 'kysely';
+import { StackSource, StackUserEditAction } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { EventRepository } from 'src/repositories/event.repository';
@@ -122,6 +123,112 @@ describe(StackService.name, () => {
 
       const full = await sut.get(factory.auth({ user, session: { privateMode: true } }), stack.id);
       expect(full.assets).toHaveLength(2);
+    });
+  });
+
+  describe('source', () => {
+    it('should create manual stacks through the API and keep the source of automatic stacks', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: asset1 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset2 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset3 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset4 } = await ctx.newAsset({ ownerId: user.id });
+      for (const asset of [asset1, asset2, asset3, asset4]) {
+        await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      }
+
+      await expect(sut.create(auth, { assetIds: [asset1.id, asset2.id] })).resolves.toMatchObject({
+        source: StackSource.Manual,
+      });
+      const { stack: auto } = await ctx.newStack({ ownerId: user.id, source: StackSource.Auto }, [
+        asset3.id,
+        asset4.id,
+      ]);
+
+      await expect(sut.get(auth, auto.id)).resolves.toMatchObject({ id: auto.id, source: StackSource.Auto });
+    });
+
+    it('should report the members of a deleted automatic stack, trashed ones included', async () => {
+      const { sut, ctx } = setup();
+      const emit = ctx.getMock(EventRepository).emit;
+      emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: asset1 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset2 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: trashed } = await ctx.newAsset({ ownerId: user.id, deletedAt: new Date() });
+      const { stack } = await ctx.newStack({ ownerId: user.id, source: StackSource.Auto }, [
+        asset1.id,
+        asset2.id,
+        trashed.id,
+      ]);
+
+      await sut.delete(factory.auth({ user }), stack.id);
+
+      expect(emit).toHaveBeenCalledWith('StackUserEdit', {
+        userId: user.id,
+        stackId: stack.id,
+        source: StackSource.Auto,
+        action: StackUserEditAction.Delete,
+        assetIds: expect.arrayContaining([asset1.id, asset2.id, trashed.id]),
+      });
+    });
+
+    it('should report an asset taken out of an automatic stack', async () => {
+      const { sut, ctx } = setup();
+      const emit = ctx.getMock(EventRepository).emit;
+      emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: asset1 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset2 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset3 } = await ctx.newAsset({ ownerId: user.id });
+      const { stack } = await ctx.newStack({ ownerId: user.id, source: StackSource.Auto }, [
+        asset1.id,
+        asset2.id,
+        asset3.id,
+      ]);
+
+      await sut.removeAsset(factory.auth({ user }), { id: stack.id, assetId: asset3.id });
+
+      expect(emit).toHaveBeenCalledWith('StackUserEdit', {
+        userId: user.id,
+        stackId: stack.id,
+        source: StackSource.Auto,
+        action: StackUserEditAction.RemoveAssets,
+        assetIds: [asset3.id],
+      });
+    });
+
+    it('should report an automatic stack merged into a new manual stack', async () => {
+      const { sut, ctx } = setup();
+      const emit = ctx.getMock(EventRepository).emit;
+      emit.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: asset1 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: asset2 } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: other } = await ctx.newAsset({ ownerId: user.id });
+      for (const asset of [asset1, asset2, other]) {
+        await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      }
+      const { stack: auto } = await ctx.newStack({ ownerId: user.id, source: StackSource.Auto }, [
+        asset1.id,
+        asset2.id,
+      ]);
+
+      const created = await sut.create(factory.auth({ user }), { assetIds: [other.id, asset1.id] });
+
+      expect(created.source).toBe(StackSource.Manual);
+      expect(created.assets.map(({ id }) => id).sort()).toEqual([asset1.id, asset2.id, other.id].sort());
+      expect(emit).toHaveBeenCalledWith('StackUserEdit', {
+        userId: user.id,
+        stackId: auto.id,
+        source: StackSource.Auto,
+        action: StackUserEditAction.Merge,
+        assetIds: expect.arrayContaining([asset1.id, asset2.id]),
+        targetStackId: created.id,
+      });
     });
   });
 });
