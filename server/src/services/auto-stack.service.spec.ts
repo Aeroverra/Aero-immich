@@ -8,7 +8,8 @@ import {
   StackUserEditAction,
   UserMetadataKey,
 } from 'src/enum';
-import { AutoStackService } from 'src/services/auto-stack.service';
+import { AutoStackService, MAX_SESSION_ASSETS } from 'src/services/auto-stack.service';
+import { getCosineDistance, parseEmbedding } from 'src/utils/auto-stack';
 import { makeStream, newTestService, ServiceMocks } from 'test/utils';
 import { beforeEach, describe, expect, it, vitest } from 'vitest';
 
@@ -65,12 +66,32 @@ const jobAsset = (id: string, seconds: number) => ({
   fileCreatedAt: new Date(burstStart + seconds * 1000),
   make: 'Google',
   model: 'Pixel 9 Pro XL',
-  autoStackedAt: null,
+  autoStackedAt: null as Date | null,
+  qualityUpdatedAt: null as Date | null,
 });
 
 describe(AutoStackService.name, () => {
   let sut: AutoStackService;
   let mocks: ServiceMocks;
+
+  /** the repository answers from these assets: the timeline in capture order with the distance to the previous one */
+  const mockSession = (candidates: Candidate[]) => {
+    mocks.autoStack.getTimeline.mockImplementation(({ from, to }) => {
+      const inWindow = candidates
+        .filter(({ fileCreatedAt }) => fileCreatedAt >= from && fileCreatedAt <= to)
+        .toSorted((a, b) => a.fileCreatedAt.getTime() - b.fileCreatedAt.getTime());
+      return Promise.resolve(
+        inWindow.map(({ id, fileCreatedAt, embedding }, index) => {
+          const current = parseEmbedding(embedding);
+          const previous = index > 0 ? parseEmbedding(inWindow[index - 1].embedding) : null;
+          return { id, fileCreatedAt, distance: current && previous ? getCosineDistance(current, previous) : null };
+        }),
+      );
+    });
+    mocks.autoStack.getCandidates.mockImplementation((_, ids) =>
+      Promise.resolve(candidates.filter(({ id }) => ids.includes(id))),
+    );
+  };
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(AutoStackService));
@@ -177,7 +198,7 @@ describe(AutoStackService.name, () => {
 
     it('should create a stack with the top pick first and mark the neighbourhood as evaluated', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('asset-2', 1, { isFavorite: true }),
         candidate('asset-3', 2),
@@ -187,9 +208,11 @@ describe(AutoStackService.name, () => {
 
       await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
 
-      expect(mocks.autoStack.getCandidates).toHaveBeenCalledWith(
+      expect(mocks.autoStack.getTimeline).toHaveBeenCalledWith(
         expect.objectContaining({ ownerId, make: 'Google', model: 'Pixel 9 Pro XL' }),
       );
+      // a photo that looks different always starts a new stack, so it is left to its own session
+      expect(mocks.autoStack.getCandidates).toHaveBeenCalledWith(ownerId, ['asset-1', 'asset-2', 'asset-3']);
       expect(mocks.stack.create).toHaveBeenCalledTimes(1);
       expect(mocks.stack.create).toHaveBeenCalledWith(
         { ownerId, source: StackSource.Auto },
@@ -197,9 +220,8 @@ describe(AutoStackService.name, () => {
         { privateMode: true, userId: ownerId },
       );
       expect(mocks.stack.deleteAll).not.toHaveBeenCalled();
-      // the photo 57 seconds later is in another neighbourhood
       expect(mocks.autoStack.setAutoStackedAt).toHaveBeenCalledWith(
-        ['asset-1', 'asset-2', 'asset-3', 'other-scene'],
+        ['asset-1', 'asset-2', 'asset-3'],
         expect.any(Date),
       );
       expect(mocks.websocket.clientSend).toHaveBeenCalledWith('on_asset_stack_update', ownerId);
@@ -208,17 +230,12 @@ describe(AutoStackService.name, () => {
     it('should widen the window while photos keep following each other', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
       const series = Array.from({ length: 30 }, (_, index) => candidate(`asset-${index + 1}`, index * 4));
-      mocks.autoStack.getCandidates.mockImplementation(({ from, to }) =>
-        Promise.resolve(
-          series.filter(
-            ({ fileCreatedAt }) => fileCreatedAt.getTime() >= from.getTime() && fileCreatedAt.getTime() <= to.getTime(),
-          ),
-        ),
-      );
+      mockSession(series);
 
       await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
 
-      expect(mocks.autoStack.getCandidates.mock.calls.length).toBeGreaterThan(1);
+      expect(mocks.autoStack.getTimeline.mock.calls.length).toBeGreaterThan(1);
+      expect(mocks.autoStack.getCandidates).toHaveBeenCalledTimes(1);
       expect(mocks.autoStack.setAutoStackedAt).toHaveBeenCalledWith(
         series.map(({ id }) => id),
         expect.any(Date),
@@ -227,9 +244,73 @@ describe(AutoStackService.name, () => {
       expect(mocks.stack.create).toHaveBeenCalledTimes(4);
     });
 
+    it('should not widen the window past a photo that looks different', async () => {
+      // 4 seconds apart, a different scene every 5 photos, for 2 minutes
+      const series = Array.from({ length: 30 }, (_, index) =>
+        candidate(`asset-${index}`, index * 4, { embedding: Math.floor(index / 5) % 2 === 0 ? '[1,0,0]' : '[0,1,0]' }),
+      );
+      mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-12', 48));
+      mockSession(series);
+
+      await expect(sut.handleAutoStack({ id: 'asset-12' })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.autoStack.getTimeline).toHaveBeenCalledTimes(1);
+      expect(mocks.autoStack.getCandidates).toHaveBeenCalledWith(ownerId, [
+        'asset-10',
+        'asset-11',
+        'asset-12',
+        'asset-13',
+        'asset-14',
+      ]);
+      expect(mocks.autoStack.setAutoStackedAt).toHaveBeenCalledWith(
+        ['asset-10', 'asset-11', 'asset-12', 'asset-13', 'asset-14'],
+        expect.any(Date),
+      );
+    });
+
+    it('should group a long series of similar photos in parts', async () => {
+      const series = Array.from({ length: MAX_SESSION_ASSETS + 100 }, (_, index) =>
+        candidate(`asset-${index}`, index * 0.1),
+      );
+      mocks.autoStack.getForAutoStackJob.mockResolvedValue(
+        jobAsset(`asset-${MAX_SESSION_ASSETS + 50}`, (MAX_SESSION_ASSETS + 50) * 0.1),
+      );
+      mockSession(series);
+
+      await expect(sut.handleAutoStack({ id: `asset-${MAX_SESSION_ASSETS + 50}` })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.autoStack.getCandidates).toHaveBeenCalledWith(
+        ownerId,
+        series.slice(MAX_SESSION_ASSETS).map(({ id }) => id),
+      );
+    });
+
+    it('should evaluate the members of a replaced stack outside the session again', async () => {
+      mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
+      mockSession([
+        candidate('asset-1', 0, { stackId: 'auto-stack' }),
+        candidate('asset-2', 1, { stackId: 'auto-stack' }),
+        candidate('other-scene', 2, { stackId: 'auto-stack', embedding: '[0,1,0]' }),
+      ]);
+      mocks.autoStack.getStacks.mockResolvedValue([
+        {
+          id: 'auto-stack',
+          primaryAssetId: 'asset-1',
+          assets: [{ id: 'asset-1' }, { id: 'asset-2' }, { id: 'other-scene' }],
+        },
+      ]);
+
+      await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.stack.deleteAll).toHaveBeenCalledWith(['auto-stack']);
+      expect(mocks.stack.create).toHaveBeenCalledWith(expect.anything(), ['asset-1', 'asset-2'], expect.anything());
+      expect(mocks.autoStack.setAutoStackedAt).toHaveBeenCalledWith(['other-scene'], null);
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([{ name: JobName.AutoStack, data: { id: 'other-scene' } }]);
+    });
+
     it('should wait for a recent neighbour that is still being processed', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('asset-2', 1, { embedding: null, createdAt: new Date('2026-09-14T11:59:00.000Z') }),
       ]);
@@ -242,7 +323,7 @@ describe(AutoStackService.name, () => {
 
     it('should wait for the faces of a recent neighbour', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('asset-2', 1, { facesRecognizedAt: null, createdAt: new Date('2026-09-14T11:59:00.000Z') }),
       ]);
@@ -252,7 +333,7 @@ describe(AutoStackService.name, () => {
 
     it('should wait for the face attributes of a recent neighbour', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('asset-2', 1, { hasQuality: false, createdAt: new Date('2026-09-14T11:59:00.000Z') }),
       ]);
@@ -265,7 +346,7 @@ describe(AutoStackService.name, () => {
         machineLearning: { ...enabledConfig.machineLearning, faceAttributes: { enabled: false } },
       });
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { hasQuality: false, createdAt: new Date('2026-09-14T11:59:00.000Z') }),
         candidate('asset-2', 1, { hasQuality: false, createdAt: new Date('2026-09-14T11:59:00.000Z') }),
       ]);
@@ -277,7 +358,7 @@ describe(AutoStackService.name, () => {
 
     it('should stack old photos whose face attributes are missing', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { hasQuality: false, sharpness: null, exposureClipped: null }),
         candidate('asset-2', 1, { hasQuality: false, sharpness: null, exposureClipped: null }),
       ]);
@@ -305,7 +386,7 @@ describe(AutoStackService.name, () => {
         boundingBoxY2: 600,
       };
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('blink', 0, { sharpness: 300, faces: [{ ...face, eyeBlinkLeft: 0.9, sharpness: 200 }] }),
         candidate('open', 1, { sharpness: 100, faces: [face] }),
         candidate('blurry', 2, { sharpness: 20, faces: [{ ...face, sharpness: 10 }] }),
@@ -324,10 +405,11 @@ describe(AutoStackService.name, () => {
     it('should evaluate an asset of an automatic stack again when its attributes were refreshed', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue({
         ...jobAsset('asset-1', 0),
-        autoStackedAt: new Date(),
+        autoStackedAt: new Date('2026-09-14T11:00:00.000Z'),
+        qualityUpdatedAt: new Date('2026-09-14T11:30:00.000Z'),
         stackSource: StackSource.Auto,
       });
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { stackId: 'auto-stack', sharpness: 10 }),
         candidate('asset-2', 1, { stackId: 'auto-stack', sharpness: 500 }),
       ]);
@@ -338,6 +420,21 @@ describe(AutoStackService.name, () => {
       await expect(sut.handleAutoStack({ id: 'asset-1', refresh: true })).resolves.toBe(JobStatus.Success);
 
       expect(mocks.autoStack.updatePrimaryAsset).toHaveBeenCalledWith('auto-stack', 'asset-2');
+    });
+
+    it('should not refresh an asset that was evaluated after its attributes were stored', async () => {
+      // a neighbour in the same session ran first
+      mocks.autoStack.getForAutoStackJob.mockResolvedValue({
+        ...jobAsset('asset-1', 0),
+        autoStackedAt: new Date('2026-09-14T11:30:01.000Z'),
+        qualityUpdatedAt: new Date('2026-09-14T11:30:00.000Z'),
+        stackSource: StackSource.Auto,
+      });
+
+      await expect(sut.handleAutoStack({ id: 'asset-1', refresh: true })).resolves.toBe(JobStatus.Skipped);
+
+      expect(mocks.autoStack.getTimeline).not.toHaveBeenCalled();
+      expect(mocks.autoStack.getCandidates).not.toHaveBeenCalled();
     });
 
     it('should not refresh an evaluated asset outside automatic stacks', async () => {
@@ -357,7 +454,7 @@ describe(AutoStackService.name, () => {
         machineLearning: { ...enabledConfig.machineLearning, facialRecognition: { enabled: false } },
       });
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { facesRecognizedAt: null }),
         candidate('asset-2', 1, { facesRecognizedAt: null }),
       ]);
@@ -369,7 +466,7 @@ describe(AutoStackService.name, () => {
 
     it('should not wait for an old neighbour that never got an embedding', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('asset-2', 1),
         candidate('broken', 2, { embedding: null }),
@@ -387,7 +484,7 @@ describe(AutoStackService.name, () => {
 
     it('should leave locked assets and their stacks alone', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('manual-1', 1, { isInUserStack: true, stackId: 'manual-stack' }),
         candidate('manual-2', 2, { isInUserStack: true, stackId: 'manual-stack' }),
@@ -406,7 +503,7 @@ describe(AutoStackService.name, () => {
     it('should never touch a version stack or add its members to an automatic stack', async () => {
       // the repository reports every stack whose source is not auto (manual, version) as a user stack
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0),
         candidate('boosted', 1, { isInUserStack: true, stackId: 'version-stack' }),
         candidate('original', 2, { isInUserStack: true, stackId: 'version-stack' }),
@@ -425,11 +522,7 @@ describe(AutoStackService.name, () => {
 
     it('should ignore a photo the user took out of a stack and stack its neighbours', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
-        candidate('asset-1', 0),
-        candidate('removed', 1, { isExcluded: true }),
-        candidate('asset-2', 2),
-      ]);
+      mockSession([candidate('asset-1', 0), candidate('removed', 1, { isExcluded: true }), candidate('asset-2', 2)]);
 
       await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
 
@@ -442,7 +535,7 @@ describe(AutoStackService.name, () => {
 
     it('should keep an automatic stack that still matches', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { stackId: 'auto-stack' }),
         candidate('asset-2', 1, { stackId: 'auto-stack' }),
       ]);
@@ -461,7 +554,7 @@ describe(AutoStackService.name, () => {
 
     it('should move the cover of an automatic stack to the new top pick', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { stackId: 'auto-stack' }),
         candidate('asset-2', 1, { stackId: 'auto-stack', isFavorite: true }),
       ]);
@@ -477,7 +570,7 @@ describe(AutoStackService.name, () => {
 
     it('should replace an automatic stack when a late upload joins the burst', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('late', 1));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { stackId: 'auto-stack' }),
         candidate('late', 1),
         candidate('asset-2', 2, { stackId: 'auto-stack' }),
@@ -498,11 +591,7 @@ describe(AutoStackService.name, () => {
 
     it('should make every member private when one of them is', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
-        candidate('asset-1', 0),
-        candidate('asset-2', 1, { isPrivate: true }),
-        candidate('asset-3', 2),
-      ]);
+      mockSession([candidate('asset-1', 0), candidate('asset-2', 1, { isPrivate: true }), candidate('asset-3', 2)]);
 
       await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
 
@@ -515,7 +604,7 @@ describe(AutoStackService.name, () => {
 
     it('should not touch the private flag of a public stack', async () => {
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([candidate('asset-1', 0), candidate('asset-2', 1)]);
+      mockSession([candidate('asset-1', 0), candidate('asset-2', 1)]);
 
       await expect(sut.handleAutoStack({ id: 'asset-1' })).resolves.toBe(JobStatus.Success);
 
@@ -540,7 +629,7 @@ describe(AutoStackService.name, () => {
         boundingBoxY2: 600,
       };
       mocks.autoStack.getForAutoStackJob.mockResolvedValue(jobAsset('asset-1', 0));
-      mocks.autoStack.getCandidates.mockResolvedValue([
+      mockSession([
         candidate('asset-1', 0, { faces: [face] }),
         candidate('asset-2', 1, { faces: [face] }),
         candidate('asset-3', 2, {
