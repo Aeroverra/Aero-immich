@@ -47,6 +47,7 @@ class Timeline extends ConsumerWidget {
     this.readOnly = false,
     this.persistentBottomBar = false,
     this.loadingWidget,
+    this.initialScrollDate,
   });
 
   final Widget? topSliverWidget;
@@ -62,6 +63,13 @@ class Timeline extends ConsumerWidget {
   final bool readOnly;
   final bool persistentBottomBar;
   final Widget? loadingWidget;
+
+  /// Opens the timeline at the segment holding this date instead of at the top.
+  ///
+  /// The jump is deferred until the first non-empty segment list arrives, so a
+  /// freshly pushed timeline lands on the date even though its buckets load
+  /// asynchronously. It happens once; later scrolling is left to the user.
+  final DateTime? initialScrollDate;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -95,6 +103,7 @@ class Timeline extends ConsumerWidget {
             snapToMonth: snapToMonth,
             maxWidth: constraints.maxWidth,
             loadingWidget: loadingWidget,
+            initialScrollDate: initialScrollDate,
           ),
         );
       },
@@ -125,6 +134,7 @@ class _SliverTimeline extends ConsumerStatefulWidget {
     this.snapToMonth = true,
     this.maxWidth,
     this.loadingWidget,
+    this.initialScrollDate,
   });
 
   final Widget? topSliverWidget;
@@ -137,6 +147,7 @@ class _SliverTimeline extends ConsumerStatefulWidget {
   final bool snapToMonth;
   final double? maxWidth;
   final Widget? loadingWidget;
+  final DateTime? initialScrollDate;
 
   @override
   ConsumerState createState() => _SliverTimelineState();
@@ -156,6 +167,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   double _scaleFactor = 3.0;
   double _baseScaleFactor = 3.0;
   int? _restoreAssetIndex;
+  DateTime? _pendingScrollDate;
 
   @override
   void initState() {
@@ -173,6 +185,11 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     // The service is swapped when its inputs change (private mode toggled, partners changed). The segments
     // are regenerated from scratch, so remember where the user was and restore it once the list reattaches
     ref.listenManual(timelineServiceProvider, (_, _) => _rememberAssetPosition());
+
+    _pendingScrollDate = widget.initialScrollDate;
+    if (_pendingScrollDate != null) {
+      ref.listenManual(timelineSegmentProvider, _onSegmentsForPendingScroll, fireImmediately: true);
+    }
   }
 
   void _rememberAssetPosition() {
@@ -180,6 +197,29 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     if (segments != null && _scrollController.hasClients) {
       _restoreAssetIndex = _getCurrentAssetIndex(segments);
     }
+  }
+
+  void _onSegmentsForPendingScroll(AsyncValue<List<Segment>>? _, AsyncValue<List<Segment>> next) {
+    final date = _pendingScrollDate;
+    if (date == null) {
+      return;
+    }
+
+    // A refreshing stream still serves the previous segments through valueOrNull; those belong to the
+    // service being swapped out, so wait for the new ones. An empty list is what the main timeline
+    // yields before its users resolve, so it is not a verdict on the date either.
+    final segments = next.isLoading ? null : next.valueOrNull;
+    if (segments == null || segments.isEmpty) {
+      return;
+    }
+
+    _pendingScrollDate = null;
+    // The scroll view is created in the same rebuild these segments trigger, so wait a frame for it to attach
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _scrollToDate(date, animate: false);
+      }
+    });
   }
 
   @override
@@ -291,7 +331,11 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     );
   }
 
-  void _scrollToDate(DateTime date) {
+  void _scrollToDate(DateTime date, {bool animate = true}) {
+    if (!_scrollController.hasClients) {
+      return;
+    }
+
     final timelineState = ref.read(timelineStateProvider.notifier);
     final asyncSegments = ref.read(timelineSegmentProvider);
     asyncSegments.whenData((segments) {
@@ -319,14 +363,16 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
       if (fallbackSegment != null) {
         // Scroll to the segment with a small offset to show the header
         final targetOffset = fallbackSegment.startOffset - 50;
+        final clampedOffset = targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+        if (!animate) {
+          _scrollController.jumpTo(clampedOffset);
+          return;
+        }
+
         timelineState.setScrubbing(true);
         unawaited(
           _scrollController
-              .animateTo(
-                targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
-                duration: const Duration(milliseconds: 500),
-                curve: Curves.easeInOut,
-              )
+              .animateTo(clampedOffset, duration: const Duration(milliseconds: 500), curve: Curves.easeInOut)
               .whenComplete(() => timelineState.setScrubbing(false)),
         );
       } else {
