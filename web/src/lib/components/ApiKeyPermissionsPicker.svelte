@@ -1,5 +1,6 @@
 <script lang="ts">
   import ApiKeyGrid from '$lib/components/user-settings-page/UserApiKeyGrid.svelte';
+  import { isAllStandardPermissions, standardPermissions } from '$lib/utils/api-key-permissions';
   import { Permission } from '@immich/sdk';
   import { Checkbox, IconButton, Input, Label } from '@immich/ui';
   import { mdiClose } from '@mdi/js';
@@ -11,6 +12,7 @@
 
   let { selectedPermissions = $bindable([]) }: Props = $props();
 
+  // privateMode.access is listed like every other permission, only "select all" leaves it out
   const permissions: Record<string, Permission[]> = {};
   for (const permission of Object.values(Permission)) {
     if (permission === Permission.All) {
@@ -25,7 +27,7 @@
   }
 
   let searchValue = $state('');
-  let allItemsSelected = $derived(selectedPermissions.length === Object.keys(Permission).length - 1);
+  let allItemsSelected = $derived(isAllStandardPermissions(selectedPermissions));
 
   const matchFilter = (search: string) => {
     search = search.toLowerCase();
@@ -34,10 +36,10 @@
       title.toLowerCase().includes(search) || items.some((item) => item.toLowerCase().includes(search));
   };
 
+  // select all never touches privateMode.access, it is granted on its own
   const onCheckedAllChange = (checked: boolean) => {
-    selectedPermissions = checked
-      ? Object.values(Permission).filter((permission) => permission !== Permission.All)
-      : [];
+    const keep = selectedPermissions.includes(Permission.PrivateModeAccess) ? [Permission.PrivateModeAccess] : [];
+    selectedPermissions = checked ? [...standardPermissions, ...keep] : keep;
   };
 
   const filteredResults = $derived(Object.entries(permissions).filter(matchFilter(searchValue)));
@@ -73,6 +75,13 @@
     {/snippet}
   </Input>
   {#each filteredResults as [title, subItems] (title)}
-    <ApiKeyGrid {title} {subItems} selectedItems={selectedPermissions} {handleSelectItems} {handleDeselectItems} />
+    <ApiKeyGrid
+      {title}
+      {subItems}
+      description={title === 'privateMode' ? $t('api_key_private_mode_access_description') : undefined}
+      selectedItems={selectedPermissions}
+      {handleSelectItems}
+      {handleDeselectItems}
+    />
   {/each}
 </div>
