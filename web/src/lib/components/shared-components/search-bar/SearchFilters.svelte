@@ -23,8 +23,10 @@
   import SearchTagsSection from './SearchTagsSection.svelte';
   import SearchTextSection from './SearchTextSection.svelte';
   import SearchDisplaySection from './SearchDisplaySection.svelte';
+  import SearchPrivateSection from './SearchPrivateSection.svelte';
   import SearchRatingsSection from './SearchRatingsSection.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
+  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import {
     getPeople,
     getSearchDatePreset,
@@ -134,7 +136,8 @@
     searchManager.filter.display.isArchive ||
       searchManager.filter.display.isFavorite ||
       searchManager.filter.display.isNotInAlbum ||
-      searchManager.filter.rating,
+      searchManager.filter.rating ||
+      searchManager.filter.isPrivate !== undefined,
   );
 
   const clear = () => {
@@ -246,6 +249,9 @@
               <SearchRatingsSection />
             {/if}
             <SearchDisplaySection />
+            {#if privateModeManager.enabled}
+              <SearchPrivateSection />
+            {/if}
           </div>
         </div>
       </div>
