@@ -1,0 +1,20 @@
+# Feature branches merged into the `main` integration branch, in stacking order.
+# Format: <branch> [<parent branch>]
+#   - a branch with no parent is rebased directly onto upstream-main
+#   - a branch with a parent is stacked on it and is rebased onto the parent's
+#     freshly rebased tip (git rebase --onto <new parent> <old parent> <branch>)
+# Lines starting with # and blank lines are ignored.
+feat/aero-migrations
+feat/private-mode feat/aero-migrations
+feat/private-mode-sync-compat feat/private-mode
+fix/event-manager-listener-drop
+feat/search-back-navigation feat/private-mode
+feat/untagged-filters feat/search-back-navigation
+feat/deleted-hash feat/private-mode-sync-compat
+feat/asset-metadata-panel
+feat/stack-view-toggle feat/deleted-hash
+feat/face-attributes feat/stack-view-toggle
+feat/auto-stacks feat/face-attributes
+feat/stack-selection-actions feat/auto-stacks
+feat/video-frame-search feat/stack-selection-actions
+fix/ml-request-memory
