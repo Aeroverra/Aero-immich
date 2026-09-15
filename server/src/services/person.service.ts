@@ -42,6 +42,7 @@ import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import { BaseService } from 'src/services/base.service';
 import type { JobItem, JobOf } from 'src/types';
+import { isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getDimensions } from 'src/utils/asset.util';
 import { ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
@@ -70,11 +71,12 @@ export class PersonService extends BaseService {
       }
       closestFaceAssetId = person.faceAssetId;
     }
-    const { items, hasNextPage } = await this.personRepository.getAllForUser(pagination, auth.user.id, {
+    const scope = toPrivateScope(auth);
+    const { items, hasNextPage } = await this.personRepository.getAllForUser(pagination, auth.user.id, scope, {
       withHidden,
       closestFaceAssetId,
     });
-    const { total, hidden } = await this.personRepository.getNumberOfPeople(auth.user.id);
+    const { total, hidden } = await this.personRepository.getNumberOfPeople(auth.user.id, scope);
 
     return {
       people: items.map((person) => mapPerson(person)),
@@ -166,13 +168,21 @@ export class PersonService extends BaseService {
 
   async getStatistics(auth: AuthDto, personGroupId: string): Promise<PersonStatisticsResponseDto> {
     await this.requireAccess({ auth, permission: Permission.PersonRead, ids: [personGroupId] });
-    return this.personRepository.getStatistics(personGroupId, auth.user.id);
+    return this.personRepository.getStatistics(personGroupId, auth.user.id, toPrivateScope(auth));
   }
 
   async getThumbnail(auth: AuthDto, personGroupId: string): Promise<ImmichFileResponse> {
     await this.requireAccess({ auth, permission: Permission.PersonRead, ids: [personGroupId] });
     const person = await this.personRepository.getByGroupId({ ownerId: auth.user.id, personGroupId });
     if (!person || !person.thumbnailPath) {
+      throw new NotFoundException();
+    }
+
+    // a feature photo cut from a private asset behaves like a missing thumbnail outside private mode
+    if (
+      !isPrivateMode(auth) &&
+      (await this.personRepository.isCoverAssetPrivate({ ownerId: auth.user.id, personGroupId }))
+    ) {
       throw new NotFoundException();
     }
 

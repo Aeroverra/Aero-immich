@@ -2,8 +2,10 @@ import 'package:drift/drift.dart';
 import 'package:immich_mobile/data/db/main/dao/person.drift.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/people/person.drift.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/person.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 
 @DriftAccessor()
 class PeopleRepository extends DatabaseAccessor<Drift> with $PeopleRepositoryMixin {
@@ -36,7 +38,7 @@ class PeopleRepository extends DatabaseAccessor<Drift> with $PeopleRepositoryMix
     return query.map((row) => row.toDto()).get();
   }
 
-  Stream<List<Person>> watch({int minFaces = 3}) {
+  Stream<List<Person>> watch({int minFaces = 3, PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final people = _db.personEntity;
     final faces = _db.assetFaceEntity;
     final assets = _db.remoteAssetEntity;
@@ -50,6 +52,7 @@ class PeopleRepository extends DatabaseAccessor<Drift> with $PeopleRepositoryMix
             people.isHidden.equals(false) &
                 assets.deletedAt.isNull() &
                 assets.visibility.equalsValue(AssetVisibility.timeline) &
+                assets.privateFilter(privateFilter) &
                 faces.isVisible.equals(true) &
                 faces.deletedAt.isNull(),
           )
