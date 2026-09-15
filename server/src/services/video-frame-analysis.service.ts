@@ -5,7 +5,7 @@ import { AssetType, AssetVisibility, DatabaseLock, JobName, JobStatus, QueueName
 import { AssetFaceTable } from 'src/schema/tables/asset-face.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { BaseService } from 'src/services/base.service';
-import { JobItem, JobOf } from 'src/types';
+import { JobItem, JobOf, VideoStreamInfo } from 'src/types';
 import { VideoFrameConfig } from 'src/utils/media';
 import {
   batched,
@@ -70,13 +70,28 @@ export class VideoFrameAnalysisService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    if (!asset.videoStream) {
+    let videoStream: VideoStreamInfo | null = asset.videoStream;
+    let duration = asset.duration;
+    if (!videoStream || !duration) {
+      // videos imported before stream details were stored in the database only have them in the file
+      try {
+        const probed = await this.mediaRepository.probe(asset.originalPath);
+        videoStream ??= probed.videoStreams[0] ?? null;
+        duration ||= probed.format.duration ? Math.round(probed.format.duration * 1000) : null;
+      } catch (error) {
+        this.logger.warn(`Could not probe asset ${id} for video frame analysis: ${error}`);
+      }
+    }
+
+    if (!videoStream) {
       this.logger.warn(`Video frame analysis failed for asset ${id}: missing video metadata`);
+      // marked as analyzed anyway so an unreadable file is not queued again by every "missing" run
+      await this.assetRepository.upsertJobStatus({ assetId: id, videoFramesAnalyzedAt: new Date() });
       return JobStatus.Failed;
     }
 
     const { frameDensity, minFrameInterval, maxFrames } = machineLearning.videoFrameAnalysis;
-    const timestamps = getVideoFrameTimestamps(asset.duration, { frameDensity, minFrameInterval, maxFrames });
+    const timestamps = getVideoFrameTimestamps(duration, { frameDensity, minFrameInterval, maxFrames });
     if (timestamps.length === 0) {
       this.logger.debug(`Skipping video frame analysis for asset ${id}: unknown duration`);
       await this.assetRepository.upsertJobStatus({ assetId: id, videoFramesAnalyzedAt: new Date() });
@@ -98,7 +113,7 @@ export class VideoFrameAnalysisService extends BaseService {
       try {
         frame = await this.mediaRepository.extractVideoFrame(
           asset.originalPath,
-          frameConfig.getFrameCommand(frameTimestamp, asset.videoStream),
+          frameConfig.getFrameCommand(frameTimestamp, videoStream),
         );
       } catch (error) {
         this.logger.warn(`Could not extract the frame at ${frameTimestamp}ms of asset ${id}: ${error}`);
