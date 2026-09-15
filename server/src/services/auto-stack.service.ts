@@ -29,7 +29,20 @@ const PENDING_NEIGHBOUR_MS = 24 * 60 * 60 * 1000;
 /** how often the time window around an asset is widened while photos keep following each other closely */
 const MAX_WINDOW_EXPANSIONS = 8;
 
+/** most assets grouped in one job; a longer series of similar photos is grouped in parts of this size */
+export const MAX_SESSION_ASSETS = 500;
+
 type Candidate = Awaited<ReturnType<BaseService['autoStackRepository']['getCandidates']>>[number];
+type TimelineItem = Awaited<ReturnType<BaseService['autoStackRepository']['getTimeline']>>[number];
+type JobAsset = NonNullable<Awaited<ReturnType<BaseService['autoStackRepository']['getForAutoStackJob']>>>;
+
+/**
+ * An asset of an automatic stack whose face attributes were stored after it was last evaluated. Its neighbours
+ * refresh the same session, so after a backfill only the first of them evaluates it again.
+ */
+const isRefreshNeeded = ({ stackSource, autoStackedAt, qualityUpdatedAt }: JobAsset) =>
+  stackSource === StackSource.Auto &&
+  (!autoStackedAt || !qualityUpdatedAt || new Date(qualityUpdatedAt).getTime() > new Date(autoStackedAt).getTime());
 
 @Injectable()
 export class AutoStackService extends BaseService {
@@ -65,8 +78,8 @@ export class AutoStackService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    if (asset.autoStackedAt && !(refresh && asset.stackSource === StackSource.Auto)) {
-      // evaluated together with a neighbour already
+    if (asset.autoStackedAt && !(refresh && isRefreshNeeded(asset))) {
+      // evaluated together with a neighbour already, after its face attributes were stored
       return JobStatus.Skipped;
     }
 
@@ -86,6 +99,8 @@ export class AutoStackService extends BaseService {
       return JobStatus.Skipped;
     }
 
+    // taken before anything is read, so attributes stored while the job runs refresh the session again
+    const evaluatedAt = new Date();
     const options = machineLearning.autoStack;
     const session = await this.getSession(
       { id: asset.id, ownerId: asset.ownerId, make: asset.make!, model: asset.model!, capturedAt: asset.fileCreatedAt },
@@ -153,6 +168,19 @@ export class AutoStackService extends BaseService {
 
     if (plan.delete.length > 0) {
       await this.stackRepository.deleteAll(plan.delete);
+
+      // members of a replaced stack outside this session are grouped again by their own session
+      const sessionIds = new Set(session.map(({ id }) => id));
+      const outside = existing
+        .filter((stack) => plan.delete.includes(stack.id))
+        .flatMap((stack) => stack.assetIds)
+        .filter((assetId) => !sessionIds.has(assetId));
+      if (outside.length > 0) {
+        await this.autoStackRepository.setAutoStackedAt(outside, null);
+        await this.jobRepository.queueAll(
+          outside.map((assetId) => ({ name: JobName.AutoStack, data: { id: assetId } })),
+        );
+      }
     }
 
     for (const { id: stackId, primaryAssetId } of plan.update) {
@@ -178,7 +206,7 @@ export class AutoStackService extends BaseService {
 
     await this.autoStackRepository.setAutoStackedAt(
       session.filter((candidate) => isReady(candidate)).map((candidate) => candidate.id),
-      new Date(),
+      evaluatedAt,
     );
 
     const changes = plan.create.length + plan.delete.length + plan.update.length;
@@ -193,8 +221,10 @@ export class AutoStackService extends BaseService {
   }
 
   /**
-   * The assets of the same owner and camera around an asset whose capture times follow each other within the
-   * maximum gap. The window is widened while the run touches its edges, so a long series is evaluated as a whole.
+   * The assets of the same owner and camera around an asset that can end up in the same stacks. A photo taken more
+   * than the maximum gap after the previous one, or that looks different from it, always starts a new stack, so the
+   * series is cut there and every asset between two cuts gets the same session, whichever of them runs the job.
+   * The window is widened while no cut is found; a longer series without cuts is grouped in parts.
    */
   private async getSession(
     asset: { id: string; ownerId: string; make: string; model: string; capturedAt: Date },
@@ -203,14 +233,17 @@ export class AutoStackService extends BaseService {
     const gap = options.maxGapSeconds * 1000;
     const step = Math.max(options.maxSpanSeconds * 1000, gap) + gap;
     const time = new Date(asset.capturedAt).getTime();
-    const getTime = (candidate: Candidate) => new Date(candidate.fileCreatedAt).getTime();
+    const getTime = (item: TimelineItem) => new Date(item.fileCreatedAt).getTime();
 
     let from = time - step;
     let to = time + step;
-    let session: Candidate[] | undefined;
+    let timeline: TimelineItem[] = [];
+    let index = -1;
+    let first = 0;
+    let last = 0;
 
     for (let expansion = 0; expansion <= MAX_WINDOW_EXPANSIONS; expansion++) {
-      const candidates = await this.autoStackRepository.getCandidates({
+      timeline = await this.autoStackRepository.getTimeline({
         ownerId: asset.ownerId,
         make: asset.make,
         model: asset.model,
@@ -218,24 +251,27 @@ export class AutoStackService extends BaseService {
         to: new Date(to),
       });
 
-      const index = candidates.findIndex(({ id }) => id === asset.id);
+      index = timeline.findIndex(({ id }) => id === asset.id);
       if (index === -1) {
         return;
       }
 
-      let first = index;
-      while (first > 0 && getTime(candidates[first]) - getTime(candidates[first - 1]) <= gap) {
+      // a missing distance (no embedding yet) is not a cut, so a neighbour that is still processed is waited for
+      const isCut = (i: number) =>
+        getTime(timeline[i]) - getTime(timeline[i - 1]) > gap || (timeline[i].distance ?? 0) > options.maxDistance;
+
+      first = index;
+      while (first > 0 && !isCut(first)) {
         first--;
       }
 
-      let last = index;
-      while (last < candidates.length - 1 && getTime(candidates[last + 1]) - getTime(candidates[last]) <= gap) {
+      last = index;
+      while (last < timeline.length - 1 && !isCut(last + 1)) {
         last++;
       }
 
-      session = candidates.slice(first, last + 1);
-      const widenStart = getTime(candidates[first]) - from <= gap;
-      const widenEnd = to - getTime(candidates[last]) <= gap;
+      const widenStart = first === 0 && getTime(timeline[0]) - from <= gap;
+      const widenEnd = last === timeline.length - 1 && to - getTime(timeline[last]) <= gap;
       if (!widenStart && !widenEnd) {
         break;
       }
@@ -249,7 +285,13 @@ export class AutoStackService extends BaseService {
       }
     }
 
-    return session;
+    if (last - first + 1 > MAX_SESSION_ASSETS) {
+      first += Math.floor((index - first) / MAX_SESSION_ASSETS) * MAX_SESSION_ASSETS;
+      last = Math.min(last, first + MAX_SESSION_ASSETS - 1);
+    }
+
+    const ids = timeline.slice(first, last + 1).map(({ id }) => id);
+    return this.autoStackRepository.getCandidates(asset.ownerId, ids);
   }
 
   /** remember what the user changed by hand so the job never undoes it */
