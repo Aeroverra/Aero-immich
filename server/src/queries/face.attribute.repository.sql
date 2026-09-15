@@ -32,6 +32,7 @@ select
         where
           "asset_face"."assetId" = "asset"."id"
           and "asset_face"."deletedAt" is null
+          and "asset_face"."frameTimestamp" is null
         order by
           "asset_face"."id"
       ) as agg
@@ -75,6 +76,7 @@ where
       where
         "asset_face"."assetId" = "asset"."id"
         and "asset_face"."deletedAt" is null
+        and "asset_face"."frameTimestamp" is null
         and "asset_face_attribute"."faceId" is null
     )
   )
