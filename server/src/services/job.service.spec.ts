@@ -1,6 +1,7 @@
 import { AssetType, ImmichWorker, JobName, JobStatus, QueueName } from 'src/enum';
 import { JobService } from 'src/services/job.service';
 import { JobItem } from 'src/types';
+import { AUTO_STACK_UPLOAD_DELAY } from 'src/utils/auto-stack';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { newUuid } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
@@ -78,14 +79,61 @@ describe(JobService.name, () => {
         jobs: [],
       },
       {
+        item: { name: JobName.SmartSearch, data: { id: 'asset-1', source: 'upload' } },
+        jobs: [JobName.AssetDetectDuplicates, JobName.AutoStack],
+      },
+      {
         item: { name: JobName.AssetDetectFaces, data: { id: 'asset-1' } },
         jobs: [JobName.AssetDetectFaceAttributes],
+      },
+      {
+        item: { name: JobName.AssetDetectFaceAttributes, data: { id: 'asset-1' } },
+        jobs: [JobName.AutoStack],
       },
       {
         item: { name: JobName.FacialRecognition, data: { id: 'asset-1' } },
         jobs: [],
       },
     ];
+
+    it('should pass the upload source from face detection to face attributes', async () => {
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.FaceDetection, {
+        name: JobName.AssetDetectFaces,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetDetectFaceAttributes,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+    });
+
+    it('should wait for the rest of a burst after the face attributes of an upload', async () => {
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.FaceAttributes, {
+        name: JobName.AssetDetectFaceAttributes,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AutoStack,
+        data: { id: 'asset-1', delay: AUTO_STACK_UPLOAD_DELAY },
+      });
+    });
+
+    it('should refresh the automatic stack of an asset whose face attributes were computed again', async () => {
+      mocks.job.run.mockResolvedValue(JobStatus.Skipped);
+
+      await sut.onJobRun(QueueName.FaceAttributes, {
+        name: JobName.AssetDetectFaceAttributes,
+        data: { id: 'asset-1' },
+      });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.AutoStack, data: { id: 'asset-1', refresh: true } });
+    });
 
     for (const { item, jobs, stub } of tests) {
       it(`should queue ${jobs.length} jobs when a ${item.name} job finishes successfully`, async () => {
