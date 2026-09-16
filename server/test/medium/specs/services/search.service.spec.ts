@@ -1,3 +1,4 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { SearchSuggestionType } from 'src/dtos/search.dto';
 import { AlbumUserRole, AssetOrder, AssetVisibility, SearchOrderField } from 'src/enum';
@@ -32,6 +33,16 @@ const setup = (db?: Kysely<DB>) => {
     mock: [LoggingRepository],
   });
 };
+
+const newPrivatePair = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string) => {
+  const { asset: publicAsset } = await ctx.newAsset({ ownerId });
+  await ctx.newExif({ assetId: publicAsset.id, fileSizeInByte: 100, make: 'Canon', city: 'Oslo' });
+  const { asset: privateAsset } = await ctx.newAsset({ ownerId, isPrivate: true });
+  await ctx.newExif({ assetId: privateAsset.id, fileSizeInByte: 200, make: 'Leica', city: 'Bergen' });
+  return { publicAsset, privateAsset };
+};
+
+const ids = (items: { id: string }[]) => items.map(({ id }) => id).toSorted();
 
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
@@ -438,7 +449,7 @@ describe(SearchService.name, () => {
       }
 
       const options = { filter: {}, embedding: unitVector(0) };
-      const scope = { userIds: [user.id], lockedOwnerId: user.id };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
       const firstPage = await searchRepository.searchSmartV3({ take: 2 }, options, scope);
       expect(firstPage.items.length).toBe(2);
       expect(firstPage.items[0].id).toBe(assetIds[0]);
@@ -447,6 +458,198 @@ describe(SearchService.name, () => {
       const secondPage = await searchRepository.searchSmartV3({ take: 2, skip: 2 }, options, scope);
       expect(secondPage.items.length).toBe(1);
       expect(secondPage.hasNextPage).toBe(false);
+    });
+  });
+
+  describe('private mode', () => {
+    it('should filter the legacy metadata search by the private flag while the mode is on', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.newExif({ assetId: plain.id, make: 'Canon' });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      const onlyPrivate = await sut.searchMetadata(auth, { isPrivate: true, size: 10 });
+      expect(onlyPrivate.assets.items.map(({ id }) => id)).toEqual([hidden.id]);
+
+      const noPrivate = await sut.searchMetadata(auth, { isPrivate: false, size: 10 });
+      expect(noPrivate.assets.items.map(({ id }) => id)).toEqual([plain.id]);
+
+      const random = await sut.searchRandom(auth, { isPrivate: true, size: 10 });
+      expect(random.map(({ id }) => id)).toEqual([hidden.id]);
+    });
+
+    it('should hide private assets from the legacy search endpoints outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset } = await newPrivatePair(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      const metadata = await sut.searchMetadata(auth, { size: 250 });
+      expect(ids(metadata.assets.items)).toEqual([publicAsset.id]);
+      await expect(sut.searchStatistics(auth, {})).resolves.toEqual({ total: 1 });
+      expect(ids(await sut.searchRandom(auth, { size: 250 }))).toEqual([publicAsset.id]);
+      expect(ids(await sut.searchLargeAssets(auth, { size: 250 }))).toEqual([publicAsset.id]);
+    });
+
+    it('should return private assets from the legacy search endpoints in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newPrivatePair(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: true } });
+      const expected = [publicAsset.id, privateAsset.id].toSorted();
+
+      const metadata = await sut.searchMetadata(auth, { size: 250 });
+      expect(ids(metadata.assets.items)).toEqual(expected);
+      await expect(sut.searchStatistics(auth, {})).resolves.toEqual({ total: 2 });
+      expect(ids(await sut.searchRandom(auth, { size: 250 }))).toEqual(expected);
+      expect(ids(await sut.searchLargeAssets(auth, { size: 250 }))).toEqual(expected);
+    });
+
+    it('should hide private assets from the new search shape outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset } = await newPrivatePair(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      const metadata = await sut.searchMetadata(auth, { size: 250, filter: {} });
+      expect(ids(metadata.assets.items)).toEqual([publicAsset.id]);
+      await expect(sut.searchStatistics(auth, { filter: {} })).resolves.toEqual({ total: 1 });
+      expect(ids(await sut.searchRandom(auth, { size: 250, filter: {} }))).toEqual([publicAsset.id]);
+    });
+
+    it('should return private assets from the new search shape in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newPrivatePair(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      const metadata = await sut.searchMetadata(auth, { size: 250, filter: {} });
+      expect(ids(metadata.assets.items)).toEqual([publicAsset.id, privateAsset.id].toSorted());
+      await expect(sut.searchStatistics(auth, { filter: { isPrivate: { eq: true } } })).resolves.toEqual({ total: 1 });
+      expect(ids(await sut.searchRandom(auth, { size: 250, filter: { isPrivate: { eq: true } } }))).toEqual([
+        privateAsset.id,
+      ]);
+    });
+
+    it('should reject a filter asking for private assets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      await expect(sut.searchMetadata(auth, { size: 250, filter: { isPrivate: { eq: true } } })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it("should never return a partner's private asset", async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: user.id });
+      const { publicAsset } = await newPrivatePair(ctx, partner.id);
+
+      for (const privateMode of [false, true]) {
+        const auth = factory.auth({ user, session: { privateMode } });
+        const legacy = await sut.searchMetadata(auth, { size: 250 });
+        expect(ids(legacy.assets.items)).toEqual([publicAsset.id]);
+        const v3 = await sut.searchMetadata(auth, { size: 250, filter: {} });
+        expect(ids(v3.assets.items)).toEqual([publicAsset.id]);
+        await expect(sut.searchStatistics(auth, { filter: {} })).resolves.toEqual({ total: 1 });
+      }
+    });
+
+    it('should scope smart search by the private owner', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      const { asset: publicAsset } = await ctx.newAsset({ ownerId: user.id });
+      await searchRepository.upsert(publicAsset.id, unitVector(0));
+      const { asset: privateAsset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await searchRepository.upsert(privateAsset.id, unitVector(1));
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const hidden = await searchRepository.searchSmartV3({ take: 10 }, options, {
+        userIds: [user.id],
+        lockedOwnerId: user.id,
+        privateOwnerId: null,
+      });
+      expect(ids(hidden.items)).toEqual([publicAsset.id]);
+
+      const shown = await searchRepository.searchSmartV3({ take: 10 }, options, {
+        userIds: [user.id],
+        lockedOwnerId: user.id,
+        privateOwnerId: user.id,
+      });
+      expect(ids(shown.items)).toEqual([publicAsset.id, privateAsset.id].toSorted());
+
+      const legacyHidden = await searchRepository.searchSmart(
+        { page: 1, size: 10 },
+        { ...options, userIds: [user.id], privateScope: { privateMode: false, userId: user.id } },
+      );
+      expect(ids(legacyHidden.items)).toEqual([publicAsset.id]);
+    });
+
+    it('should hide private assets from the explore cities outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      for (let i = 0; i < 5; i++) {
+        const { asset: publicAsset } = await ctx.newAsset({ ownerId: user.id });
+        await ctx.newExif({ assetId: publicAsset.id, city: 'Oslo' });
+        const { asset: privateAsset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+        await ctx.newExif({ assetId: privateAsset.id, city: 'Bergen' });
+      }
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      const [cities] = await sut.getExploreData(auth);
+      expect(cities.items.map(({ value }) => value)).toEqual(['Oslo']);
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      const [privateCities] = await sut.getExploreData(privateAuth);
+      expect(privateCities.items.map(({ value }) => value).toSorted()).toEqual(['Bergen', 'Oslo']);
+    });
+
+    it('should hide private assets from the recently added explore data outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newPrivatePair(ctx, user.id);
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      const [, recents] = await sut.getExploreData(auth);
+      expect(ids(recents.items.map(({ data }) => data))).toEqual([publicAsset.id]);
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      const [, privateRecents] = await sut.getExploreData(privateAuth);
+      expect(ids(privateRecents.items.map(({ data }) => data))).toEqual([publicAsset.id, privateAsset.id].toSorted());
+    });
+
+    it('should hide private assets from the assets by city outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newPrivatePair(ctx, user.id);
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      expect(ids(await sut.getAssetsByCity(auth))).toEqual([publicAsset.id]);
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      expect(ids(await sut.getAssetsByCity(privateAuth))).toEqual([publicAsset.id, privateAsset.id].toSorted());
+    });
+
+    it('should hide private assets from the search suggestions outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await newPrivatePair(ctx, user.id);
+      const dto = { type: SearchSuggestionType.CAMERA_MAKE, includeNull: false };
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getSearchSuggestions(auth, dto)).resolves.toEqual(['Canon']);
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      const suggestions = await sut.getSearchSuggestions(privateAuth, dto);
+      expect(suggestions).toHaveLength(2);
+      expect(suggestions).toEqual(expect.arrayContaining(['Canon', 'Leica']));
     });
   });
 });

@@ -234,6 +234,17 @@ where
 order by
   "shared_link"."createdAt" desc
 
+-- SharedLinkRepository.hasPrivateAssets
+select
+  "asset"."id"
+from
+  "asset"
+where
+  "asset"."id" in ($1)
+  and "asset"."isPrivate" = $2
+limit
+  $3
+
 -- SharedLinkRepository.getByKey
 select
   "shared_link"."id",

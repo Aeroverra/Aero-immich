@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/current_album.provider.da
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_mobile/widgets/common/user_circle_avatar.dart';
 
@@ -81,7 +82,9 @@ class AlbumOptionsPage extends HookConsumerWidget {
           return;
         }
 
-        await ref.read(remoteAlbumProvider.notifier).addUsers(album.id, newUsers);
+        if (!await addUsersWithPrivateConfirmation(context, ref, album, newUsers)) {
+          return;
+        }
         ref.invalidate(remoteAlbumSharedUsersProvider(album.id));
         if (!context.mounted) {
           return;

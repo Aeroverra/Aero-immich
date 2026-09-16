@@ -21,6 +21,7 @@ class FoldersStore {
   constructor() {
     eventManager.on({
       AuthLogout: () => this.clearCache(),
+      PrivateModeChange: () => this.bustAssetCache(),
     });
   }
 
