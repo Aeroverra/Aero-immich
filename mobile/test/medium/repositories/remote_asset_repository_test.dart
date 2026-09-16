@@ -1,4 +1,6 @@
+import 'package:drift/drift.dart' hide isNull;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_asset.repository.dart';
 
 import '../repository_context.dart';
@@ -62,6 +64,51 @@ void main() {
 
       expect(result.length, 1);
       expect(result[0].id, remote.id);
+    });
+  });
+
+  group('getStackAssets', () {
+    late String userId;
+    late String manualStackId;
+    late String autoStackId;
+    late Set<String> manualIds;
+    late Set<String> autoIds;
+
+    setUp(() async {
+      final user = await ctx.newUser();
+      userId = user.id;
+
+      final manualPrimary = await ctx.newRemoteAsset(ownerId: userId);
+      manualStackId = (await ctx.newStack(ownerId: userId, primaryAssetId: manualPrimary.id)).id;
+      final manualMember = await ctx.newRemoteAsset(ownerId: userId, stackId: manualStackId);
+      await ctx.db.update(ctx.db.remoteAssetEntity).replace(manualPrimary.copyWith(stackId: Value(manualStackId)));
+      manualIds = {manualPrimary.id, manualMember.id};
+
+      final autoPrimary = await ctx.newRemoteAsset(ownerId: userId);
+      autoStackId = (await ctx.newStack(ownerId: userId, primaryAssetId: autoPrimary.id, source: StackSource.auto)).id;
+      final autoMember = await ctx.newRemoteAsset(ownerId: userId, stackId: autoStackId);
+      await ctx.db.update(ctx.db.remoteAssetEntity).replace(autoPrimary.copyWith(stackId: Value(autoStackId)));
+      autoIds = {autoPrimary.id, autoMember.id};
+    });
+
+    test('returns the assets of manual and automatic stacks', () async {
+      final result = await sut.getStackAssets([manualStackId, autoStackId]);
+
+      expect(result.map((asset) => asset.id).toSet(), {...manualIds, ...autoIds});
+    });
+
+    test('leaves out automatic stacks when they are shown as separate assets', () async {
+      final result = await sut.getStackAssets([manualStackId, autoStackId], includeAutoStacks: false);
+
+      expect(result.map((asset) => asset.id).toSet(), manualIds);
+    });
+
+    test('keeps assets of stacks that are not synced yet', () async {
+      final orphan = await ctx.newRemoteAsset(ownerId: userId, stackId: 'unknown-stack');
+
+      final result = await sut.getStackAssets(['unknown-stack'], includeAutoStacks: false);
+
+      expect(result.map((asset) => asset.id), [orphan.id]);
     });
   });
 }
