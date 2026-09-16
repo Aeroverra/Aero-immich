@@ -16,6 +16,31 @@ class UserMetadataRepository extends DatabaseAccessor<Drift> {
       return userMetadata.toDto();
     }).get();
   }
+
+  /// The preferences synced from the server, re-emitted whenever a sync or [setGroupAutoStacks] changes them
+  Stream<Preferences?> watchPreferences(String userId) {
+    final query = _db.userMetadataEntity.select()
+      ..where((e) => e.userId.equals(userId) & e.key.equalsValue(UserMetadataKey.preferences));
+
+    return query.watchSingleOrNull().map((row) => row == null ? null : Preferences.fromMap(row.value));
+  }
+
+  /// Applies a stacks.groupAuto change the server accepted, so the timeline follows before the next sync
+  Future<void> setGroupAutoStacks(String userId, bool groupAuto) async {
+    await _db.transaction(() async {
+      final query = _db.userMetadataEntity.select()
+        ..where((e) => e.userId.equals(userId) & e.key.equalsValue(UserMetadataKey.preferences));
+      final current = await query.getSingleOrNull();
+      final value = <String, Object?>{...?current?.value};
+      value['stacks'] = <String, Object?>{...?(value['stacks'] as Map<String, Object?>?), 'groupAuto': groupAuto};
+
+      await _db
+          .into(_db.userMetadataEntity)
+          .insertOnConflictUpdate(
+            UserMetadataEntityCompanion.insert(userId: userId, key: UserMetadataKey.preferences, value: value),
+          );
+    });
+  }
 }
 
 extension UserMetadataDataExtension on UserMetadataEntityData {
