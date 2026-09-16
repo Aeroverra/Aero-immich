@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Duration } from 'luxon';
-import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { MachineLearningConfig } from 'src/dtos/config.dto';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -209,7 +208,7 @@ export class MachineLearningRepository {
   }
 
   private async predict<T>(payload: ModelPayload, config: MachineLearningRequest): Promise<T> {
-    const { body, contentType } = await this.getRequestBody(payload, config);
+    const formData = await this.getFormData(payload, config);
 
     for (const url of [
       // try healthy servers first
@@ -217,11 +216,7 @@ export class MachineLearningRepository {
       ...this.config.urls.filter((url) => !this.isHealthy(url)),
     ]) {
       try {
-        const response = await fetch(new URL('predict', url), {
-          method: 'POST',
-          body,
-          headers: { 'Content-Type': contentType },
-        });
+        const response = await fetch(new URL('predict', url), { method: 'POST', body: formData });
         if (response.ok) {
           this.setHealthy(url, true);
           return response.json();
@@ -321,41 +316,21 @@ export class MachineLearningRepository {
     return response[ModelTask.OCR];
   }
 
-  /**
-   * The request as multipart form data, encoded by hand: a Blob in a FormData body is read through `Blob.stream()`,
-   * which keeps the data of every blob it read in memory until the process exits (Node 24 and 26), so every image
-   * sent to machine learning was retained.
-   */
-  private async getRequestBody(payload: ModelPayload, config: MachineLearningRequest) {
-    const boundary = `immich-${randomUUID()}`;
-    const parts: Buffer[] = [];
-    const addPart = (name: string, value: string | Buffer, filename?: string) => {
-      const headers = [`--${boundary}`, `Content-Disposition: form-data; name="${name}"`];
-      if (filename) {
-        headers[1] += `; filename="${filename}"`;
-        headers.push('Content-Type: application/octet-stream');
-      }
-      parts.push(
-        Buffer.from(`${headers.join('\r\n')}\r\n\r\n`),
-        typeof value === 'string' ? Buffer.from(value) : value,
-        Buffer.from('\r\n'),
-      );
-    };
-
-    addPart('entries', JSON.stringify(config));
+  private async getFormData(payload: ModelPayload, config: MachineLearningRequest): Promise<FormData> {
+    const formData = new FormData();
+    formData.append('entries', JSON.stringify(config));
 
     if ('imagePath' in payload) {
-      addPart('image', await readFile(payload.imagePath), 'blob');
+      const fileBuffer = await readFile(payload.imagePath);
+      formData.append('image', new Blob([new Uint8Array(fileBuffer)]));
     } else if ('image' in payload) {
-      addPart('image', payload.image, 'blob');
+      formData.append('image', new Blob([new Uint8Array(payload.image)]));
     } else if ('text' in payload) {
-      addPart('text', payload.text);
+      formData.append('text', payload.text);
     } else {
       throw new Error('Invalid input');
     }
 
-    parts.push(Buffer.from(`--${boundary}--\r\n`));
-
-    return { body: Buffer.concat(parts), contentType: `multipart/form-data; boundary=${boundary}` };
+    return formData;
   }
 }
