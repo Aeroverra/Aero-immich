@@ -9,11 +9,12 @@ name: Aero release
 #              new for this fork.
 #   integrate  fast-forward `upstream-main` to the tag, rebase every branch in
 #              .github/aero-branches.txt onto it, rebuild `main` = tag + fork
-#              glue + merges, run the server and web checks and the private
-#              mode API e2e suite against the e2e docker stack. On any
-#              conflict or failure: open/update the issue "Upstream <tag>:
-#              integration failed" and push nothing. On success: push
-#              upstream-main, the rebased branches (--force-with-lease) and main.
+#              glue + merges, run the server and web checks, the mobile codegen
+#              and Dart analysis, and the private mode API e2e suite against the
+#              e2e docker stack. On any conflict or failure: open/update the
+#              issue "Upstream <tag>: integration failed" and push nothing. On
+#              success: push upstream-main, the rebased branches
+#              (--force-with-lease) and main.
 #   candidate  build the server image from `main` and push only the
 #              `<tag>-aero-rc` and `<tag>-aero-rc-<sha>` tags.
 #   revert-validation
@@ -284,6 +285,57 @@ jobs:
           run_check web-install mise run //web:install
           run_check web-check-typescript mise run //web:check-typescript
 
+      # Flutter and the mobile toolchain, the way upstream's static_analysis.yml
+      # and build-mobile.yml set them up (use-mise with the mobile config root).
+      - name: Setup Mise for mobile
+        uses: immich-app/devtools/actions/use-mise@06a9ef925332c91be647d6256642b86b398592c8 # use-mise-action-v3.2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          working_directory: ./mobile
+
+      # Nothing else analyses the mobile app in this fork: upstream's
+      # static_analysis.yml is disabled here on purpose (its pre-job and token
+      # steps need upstream's PUSH_O_MATIC app secrets, so it failed on every
+      # push), and so are build-mobile.yml and test.yml. Two feature branches
+      # can then each add an argument to the same widget, merge into main with
+      # no conflict and leave a main that does not compile for mobile: on
+      # 2026-09-17 main carried two appBar arguments in
+      # mobile/lib/presentation/pages/dev/main_timeline.page.dart, and a second
+      # branch pair left a generated DTO field missing in a mobile test. Both
+      # are plain analyzer errors, so codegen plus `dart analyze` of the rebuilt
+      # main catches this class of silent merge before anything is pushed.
+      # Only the dart half of `mise //mobile:analyze` runs: dcm is a licensed
+      # third party tool and adds nothing for broken merges. The APK itself is
+      # not built here (it is built by hand when the app is shipped), so this
+      # adds codegen plus one analyzer pass to the job, not a full mobile build.
+      - name: Mobile checks (codegen and Dart analysis of the rebuilt main)
+        id: mobile
+        run: |
+          set -uo pipefail
+          cd mobile
+          run_check() {
+            local name=$1; shift
+            echo "::group::$name: $*"
+            if "$@" 2>&1 | tee "$AERO_LOGS/$name.log"; then
+              echo "::endgroup::"
+              echo "- \`$name\`: ok" >> "$AERO_LOGS/summary.txt"
+            else
+              echo "::endgroup::"
+              echo "- \`$name\`: FAILED" >> "$AERO_LOGS/summary.txt"
+              echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+              echo "::error::$name failed ($*)"
+              return 1
+            fi
+          }
+          # the ui package is analysed together with the app and resolves its
+          # own dependencies, like upstream's static_analysis.yml does
+          ui_install() ( cd packages/ui && mise exec -- flutter pub get --enforce-lockfile )
+          set -e
+          run_check mobile-install mise run //mobile:install:ci
+          run_check mobile-ui-install ui_install
+          run_check mobile-codegen mise run //mobile:codegen
+          run_check mobile-analyze mise run //mobile:analyze:dart
+
       # Mirrors upstream's test.yml "End-to-End Tests (Server & CLI)" job: build
       # the server image from the rebuilt main, start e2e/docker-compose.yml,
       # run the API specs against it with VITEST_DISABLE_DOCKER_SETUP. Only the
@@ -383,7 +435,7 @@ jobs:
         if: ${{ failure() && !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FAILED_CHECK: ${{ steps.checks.outputs.failed_check || steps.e2e.outputs.failed_check }}
+          FAILED_CHECK: ${{ steps.checks.outputs.failed_check || steps.mobile.outputs.failed_check || steps.e2e.outputs.failed_check }}
           INTEGRATE_OUTCOME: ${{ steps.integrate.outcome }}
         run: |
           set -euo pipefail

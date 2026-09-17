@@ -4,12 +4,17 @@
 #   - a branch with a parent is stacked on it and is rebased onto the parent's
 #     freshly rebased tip (git rebase --onto <new parent> <old parent> <branch>)
 # Lines starting with # and blank lines are ignored.
+#
+# Two branches that change the same construct in different ways must be stacked,
+# even when git merges them without a conflict: independent branches adding an
+# argument to the same widget or call merge silently and break only the rebuilt
+# main. That is why feat/search-back-navigation is stacked on feat/custom-views
+# instead of on feat/private-mode: both it and the stack chain put something in
+# the main timeline app bar.
 feat/aero-migrations
 feat/private-mode feat/aero-migrations
 feat/private-mode-sync-compat feat/private-mode
 fix/event-manager-listener-drop
-feat/search-back-navigation feat/private-mode
-feat/untagged-filters feat/search-back-navigation
 feat/deleted-hash feat/private-mode-sync-compat
 feat/asset-metadata-panel
 feat/stack-view-toggle feat/deleted-hash
@@ -18,5 +23,7 @@ feat/auto-stacks feat/face-attributes
 feat/stack-selection-actions feat/auto-stacks
 feat/video-frame-search feat/stack-selection-actions
 feat/custom-views feat/video-frame-search
+feat/search-back-navigation feat/custom-views
+feat/untagged-filters feat/search-back-navigation
 fix/node-blob-leak
 fix/tag-sidecar-race

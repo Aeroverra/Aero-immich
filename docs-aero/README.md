@@ -35,9 +35,10 @@ The branches currently listed, in stacking order:
 | `feat/private-mode` | `feat/aero-migrations` | private mode (server, web, mobile), migration `1789200000000-PrivateMode` |
 | `feat/private-mode-sync-compat` | `feat/private-mode` | official-client sync compatibility for private assets, migration `1789250000000-PrivateModeSyncCompat` |
 | `fix/event-manager-listener-drop` | upstream tag | web event manager fix (also carried inside `feat/private-mode`) |
-| `feat/search-back-navigation` | `feat/private-mode` | mobile: open the timeline at a date, keep search results when viewing an asset; stacked because it edits the same timeline widget private mode touches |
-| `feat/untagged-filters` | `feat/search-back-navigation` | "No tags" search filter (web, mobile), not-in-album/untagged server tests; stacked because it edits the same search filter files private mode does and its required `hasNoTags` field is passed by the search page tests of private mode and search-back |
 | `feat/deleted-hash` | `feat/private-mode-sync-compat` | previously deleted files: remembered checksums, `deletedReimport` preference, migration `1789339001650-AssetDeletedChecksum`; stacked because it shares the user-preferences files with private mode and the sync/open-api files with the compat layer |
+| the stacking, face and view branches | each on the one before | `feat/stack-view-toggle`, `feat/face-attributes`, `feat/auto-stacks`, `feat/stack-selection-actions`, `feat/video-frame-search`, `feat/custom-views`: one chain on top of `feat/deleted-hash`, because they all touch the timeline, the sync stream and the machine-learning jobs |
+| `feat/search-back-navigation` | `feat/custom-views` | mobile: open the timeline at a date, keep search results when viewing an asset; stacked on top of the chain because it puts a back button in the same main timeline app bar the chain fills with buttons (it used to be stacked on `feat/private-mode`, and the two app bars merged into a `main` that did not compile) |
+| `feat/untagged-filters` | `feat/search-back-navigation` | "No tags" search filter (web, mobile), not-in-album/untagged server tests; stacked because it edits the same search filter files private mode does and its required `hasNoTags` field is passed by the search page tests of private mode and search-back |
 | `main` | Disposable integration branch and the repository default: upstream tag + a merge of every branch listed in `.github/aero-branches.txt`, in order, plus one "fork glue" commit (this folder, the workflows, the scripts, the branch list). Rebuilt from scratch by automation. The Docker image is built from it. | the release workflow (and the initial setup) |
 
 Do not develop on `main`. Anything you commit there other than the glue paths (`.github/workflows/aero-release.yml`, `.github/workflows/aero-dry-run.yml`, `.github/workflows/aero-revert-validation.yml`, `.github/scripts/`, `.github/aero-branches.txt`, `docs-aero/`, `scripts/aero/`) is thrown away on the next integration. A change to the glue itself (this file, the workflows, the scripts) needs no release: it is committed to `main` directly and applies to the next run.
@@ -46,19 +47,22 @@ Never use GitHub's "Sync fork" button on this repository. It would merge upstrea
 
 ### Stacked branches
 
-`.github/aero-branches.txt` lists one branch per line, in stacking order, with an optional parent:
+`.github/aero-branches.txt` lists one branch per line, in stacking order, with an optional parent (an excerpt of the current file):
 
 ```
 feat/aero-migrations
 feat/private-mode feat/aero-migrations
 feat/private-mode-sync-compat feat/private-mode
 fix/event-manager-listener-drop
-feat/search-back-navigation feat/private-mode
-feat/untagged-filters feat/search-back-navigation
 feat/deleted-hash feat/private-mode-sync-compat
+feat/stack-view-toggle feat/deleted-hash
+feat/custom-views feat/video-frame-search
+feat/search-back-navigation feat/custom-views
 ```
 
 A branch without a parent is rebased straight onto the upstream tag. A branch with a parent is rebased onto the parent's freshly rebased tip (`git rebase --onto <new parent> <old parent> <branch>`), so a stack survives the rebase as long as the child was already rebased onto the parent's current tip. If the parent gained commits the child does not have yet, rebase the child onto the parent locally first, otherwise the integration stops at the conflict.
+
+Stack a branch on another one whenever both change the **same construct**, not only when git reports a conflict. Git merges two branches that each add a named argument to the same widget, or an entry to the same list, without complaining, because the added lines sit a few lines apart: every branch builds on its own, and only the rebuilt `main` fails to compile. That happened on 2026-09-17, when `feat/search-back-navigation` and the stack chain each passed their own `appBar` to the main timeline (`duplicate_named_argument`), which is why that branch now sits on top of the chain and the page passes a single app bar that every feature extends. The mobile Dart analysis in `integrate` (below) is the safety net for the next one.
 
 ## Adding a feature branch
 
@@ -106,7 +110,7 @@ Dispatching with `tag` skips both checks and forces that tag.
 2. rebases every listed branch in order onto the tag, stacked ones onto their rebased parent,
 3. recreates `main` = tag + `git merge --no-ff` of each branch in order, then re-applies the glue paths from the previous `main` tip as one commit `chore(aero): fork glue (workflows, scripts, branch list, docs)`.
 
-Then it runs the checks on the rebuilt `main` with upstream's own toolchain (mise): server `install`, `plugins`, `check` (tsc), `test --run` (unit tests), then sdk build and web `check-typescript`. Last comes the e2e smoke (`e2e-private-mode`), mirroring upstream's "End-to-End Tests (Server & CLI)" job: the cli and e2e packages are installed, `e2e/docker-compose.yml` is brought up with `--build` (server image built from the rebuilt `main`, plus postgres, valkey and the e2e auth server) and `e2e/src/specs/server/api/private-mode.e2e-spec.ts` runs against it with `VITEST_DISABLE_DOCKER_SETUP=true`. Only the fork's own suite runs here (upstream's full API+CLI suite would roughly double the job); the `AERO_E2E_SPECS` variable in the step widens it. The stack's logs are attached to the run as `aero-e2e-private-mode-logs`.
+Then it runs the checks on the rebuilt `main` with upstream's own toolchain (mise): server `install`, `plugins`, `check` (tsc), `test --run` (unit tests), then sdk build and web `check-typescript`, then the mobile app: `//mobile:install:ci`, the ui package's own `flutter pub get --enforce-lockfile`, `//mobile:codegen` (dart sdk from the OpenAPI spec, build_runner, drift migrations and schema, pigeon, translations) and `//mobile:analyze:dart` (`dart analyze --fatal-infos` over `lib` and `test`). That mobile pass exists because upstream's `static_analysis.yml`, `build-mobile.yml` and `test.yml` are disabled in this fork (they need upstream's `PUSH_O_MATIC` app secrets and runners, and failed on every push), so nothing else compiles the app: without it two branches can each add an argument to the same widget, merge cleanly and leave a `main` that does not build for mobile. Only the dart half of `//mobile:analyze` runs; `dcm` is a licensed third party tool and adds nothing here. The APK is still built by hand when the app is shipped. Last comes the e2e smoke (`e2e-private-mode`), mirroring upstream's "End-to-End Tests (Server & CLI)" job: the cli and e2e packages are installed, `e2e/docker-compose.yml` is brought up with `--build` (server image built from the rebuilt `main`, plus postgres, valkey and the e2e auth server) and `e2e/src/specs/server/api/private-mode.e2e-spec.ts` runs against it with `VITEST_DISABLE_DOCKER_SETUP=true`. Only the fork's own suite runs here (upstream's full API+CLI suite would roughly double the job); the `AERO_E2E_SPECS` variable in the step widens it. The stack's logs are attached to the run as `aero-e2e-private-mode-logs`.
 
 - **Any conflict or failing check**: the job opens or updates the issue `Upstream <tag>: integration failed` with the branch, the conflicting files (or the failing check with the last 80 log lines) and the exact local commands to fix it, and fails. Nothing is pushed; `upstream-main`, the branches and `main` are untouched.
 - **Success**: `aero-integrate.sh push` pushes `upstream-main` (fast-forward to the tag), each rebased branch (`--force-with-lease` against the tip it started from) and `main` (`--force-with-lease`, only when its tree changed), and closes an earlier "integration failed" issue for that tag.
