@@ -4,6 +4,7 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/appears_in_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/asset_owner_details.widget.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/custom_fields_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/date_time_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/description.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/drag_handle.widget.dart';
@@ -49,6 +50,7 @@ class AssetDetails extends ConsumerWidget {
             PeopleDetails(asset: asset),
             LocationDetails(asset: asset, exifInfo: exifInfo),
             TechnicalDetails(asset: asset, exifInfo: exifInfo),
+            CustomFieldsDetails(asset: asset),
             RatingDetails(exifInfo: exifInfo),
             AppearsInDetails(asset: asset),
             SizedBox(height: context.padding.bottom + 48),
