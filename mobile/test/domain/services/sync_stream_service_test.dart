@@ -706,6 +706,7 @@ void main() {
       smartSearch: false,
       customViews: Optional.present(customViews),
       trash: true,
+      videoFrameAnalysis: false,
     );
 
     CustomViewResponseDto view({required bool isDefault}) => CustomViewResponseDto(
