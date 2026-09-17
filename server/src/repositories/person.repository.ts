@@ -17,6 +17,7 @@ import {
   PrivateScope,
   removeUndefinedKeys,
   withFilePath,
+  withVideoStream,
   withPrivateScope,
 } from 'src/utils/database';
 import { paginationHelper, PaginationOptions } from 'src/utils/pagination';
@@ -355,7 +356,7 @@ export class PersonRepository {
   getFaceForFacialRecognitionJob(id: string) {
     return this.db
       .selectFrom('asset_face')
-      .select(['asset_face.id', 'asset_face.personGroupId', 'asset_face.sourceType'])
+      .select(['asset_face.id', 'asset_face.personGroupId', 'asset_face.sourceType', 'asset_face.frameTimestamp'])
       .select((eb) =>
         jsonObjectFrom(
           eb
@@ -378,6 +379,7 @@ export class PersonRepository {
       .innerJoin('asset_face', 'asset_face.id', 'person.faceAssetId')
       .innerJoin('asset', 'asset_face.assetId', 'asset.id')
       .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .leftJoin('asset_video', 'asset_video.assetId', 'asset.id')
       .select([
         'person.ownerId',
         'asset_face.boundingBoxX1 as x1',
@@ -389,8 +391,10 @@ export class PersonRepository {
         'asset.type',
         'asset.originalPath',
         'asset_exif.orientation as exifOrientation',
+        'asset_face.frameTimestamp',
       ])
       .select((eb) => withFilePath(eb, AssetFileType.Preview).as('previewPath'))
+      .select((eb) => withVideoStream(eb).as('videoStream'))
       .where('person.ownerId', '=', ownerId)
       .where('person.personGroupId', '=', personGroupId)
       .where('asset_face.deletedAt', 'is', null)
