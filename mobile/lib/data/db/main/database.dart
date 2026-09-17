@@ -171,7 +171,7 @@ class Drift extends $Drift {
   }
 
   @override
-  int get schemaVersion => 34;
+  int get schemaVersion => 35;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -385,6 +385,9 @@ class Drift extends $Drift {
                 await m.create(v34.viewEntity);
                 await m.create(v34.viewTagEntity);
                 await m.create(v34.idxViewTagTagId);
+              },
+              from34To35: (m, v35) async {
+                await m.create(v35.idxRemoteAssetLivePhotoVideoId);
               },
             ),
           ),

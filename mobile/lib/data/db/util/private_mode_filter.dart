@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/remote/album.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
 
@@ -16,40 +17,53 @@ extension RemoteAssetPrivateModeFilter on $RemoteAssetEntityTable {
   }
 
   /// Whether the asset passes [view]: included (everything, untagged, or an include tag or descendant) and not
-  /// excluded (an exclude tag or descendant), plus the private asset handling. Mirrors the server predicate.
+  /// excluded (an exclude tag or descendant), plus the private asset handling. Mirrors the server predicate: the
+  /// hidden motion part of a live photo also carries the tags of its still, so it follows the still in and out of
+  /// views (an album holding a hidden still and its untagged motion part must not count as visible).
   Expression<bool> viewFilter(ViewFilter view) {
     final db = attachedDatabase as Drift;
 
-    Expression<bool> hasTag(Set<String> tagIds) => existsQuery(
+    Expression<bool> hasTag(Set<String> tagIds, Expression<String> assetId) => existsQuery(
       db.tagAssetEntity.selectOnly()
         ..addColumns([db.tagAssetEntity.tagId])
-        ..where(db.tagAssetEntity.assetId.equalsExp(id) & db.tagAssetEntity.tagId.isIn(tagIds)),
+        ..where(db.tagAssetEntity.assetId.equalsExp(assetId) & db.tagAssetEntity.tagId.isIn(tagIds)),
     );
+
+    // any tag of the view owner counts, hidden ones included
+    Expression<bool> hasOwnerTag(Expression<String> assetId) => existsQuery(
+      db.tagAssetEntity.selectOnly().join([
+          innerJoin(db.tagEntity, db.tagEntity.id.equalsExp(db.tagAssetEntity.tagId), useColumns: false),
+        ])
+        ..addColumns([db.tagAssetEntity.tagId])
+        ..where(db.tagAssetEntity.assetId.equalsExp(assetId) & db.tagEntity.ownerId.equals(view.ownerId)),
+    );
+
+    Expression<bool> withLivePhotoStill(Expression<bool> Function(Expression<String> assetId) match) {
+      final still = db.alias(db.remoteAssetEntity, 'live_photo_still');
+      return match(id) |
+          (visibility.equalsValue(AssetVisibility.hidden) &
+              existsQuery(
+                still.selectOnly()
+                  ..addColumns([still.id])
+                  ..where(still.livePhotoVideoId.equalsExp(id) & match(still.id)),
+              ));
+    }
 
     final included = <Expression<bool>>[];
     if (view.includeAll) {
       included.add(const Constant(true));
     } else {
       if (view.includeUntagged) {
-        // any tag of the view owner counts, hidden ones included
-        included.add(
-          notExistsQuery(
-            db.tagAssetEntity.selectOnly().join([
-                innerJoin(db.tagEntity, db.tagEntity.id.equalsExp(db.tagAssetEntity.tagId), useColumns: false),
-              ])
-              ..addColumns([db.tagAssetEntity.tagId])
-              ..where(db.tagAssetEntity.assetId.equalsExp(id) & db.tagEntity.ownerId.equals(view.ownerId)),
-          ),
-        );
+        included.add(withLivePhotoStill(hasOwnerTag).not());
       }
       if (view.includeTagIds.isNotEmpty) {
-        included.add(hasTag(view.includeTagIds));
+        included.add(withLivePhotoStill((assetId) => hasTag(view.includeTagIds, assetId)));
       }
     }
 
     var predicate = included.isEmpty ? const Constant(false) : Expression.or(included);
     if (view.excludeTagIds.isNotEmpty) {
-      predicate = predicate & hasTag(view.excludeTagIds).not();
+      predicate = predicate & withLivePhotoStill((assetId) => hasTag(view.excludeTagIds, assetId)).not();
     }
     return switch (view.privateAssets) {
       ViewPrivateAssets.hide => predicate & isPrivate.equals(false),
