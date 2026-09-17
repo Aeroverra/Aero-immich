@@ -12,6 +12,7 @@
   import DeleteAssets from '$lib/components/timeline/actions/DeleteAssetsAction.svelte';
   import DownloadAction from '$lib/components/timeline/actions/DownloadAction.svelte';
   import FavoriteAction from '$lib/components/timeline/actions/FavoriteAction.svelte';
+  import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
@@ -163,6 +164,16 @@
 
   const handleHideAssets = (ids: string[]) => handlePromiseError(memoryManager.hideAssets(ids));
 
+  const handleSetPrivate = (ids: string[], isPrivate: boolean) => {
+    for (const memory of memoryManager.memories) {
+      for (const asset of memory.assets) {
+        if (ids.includes(asset.id)) {
+          asset.isPrivate = isPrivate;
+        }
+      }
+    }
+  };
+
   const handleGalleryScrollsIntoView = () => {
     galleryInView = true;
     handlePromiseError(handleAction('galleryInView', 'pause'));
@@ -281,6 +292,7 @@
 
       <FavoriteAction removeFavorite={assetMultiSelectManager.isAllFavorite} />
 
+      <SetPrivateAction onSetPrivate={handleSetPrivate} onRemove={handleHideAssets} />
       <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
         <DownloadAction menuItem />
         <ChangeDate menuItem />

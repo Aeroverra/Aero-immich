@@ -12,6 +12,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
+import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/extensions/asyncvalue_extensions.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
@@ -22,6 +23,7 @@ import 'package:immich_mobile/presentation/widgets/timeline/scrubber.widget.dart
 import 'package:immich_mobile/presentation/widgets/timeline/segment.model.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.state.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline_drag_region.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/timeline_scroll_anchor.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
@@ -155,13 +157,20 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
   int _perRow = 4;
   double _scaleFactor = 3.0;
   double _baseScaleFactor = 3.0;
-  int? _restoreAssetIndex;
+
+  // Keeps the user on the same photos while the segments are rebuilt, see [TimelineScrollAnchor]
+  final GlobalKey _segmentedListKey = GlobalKey();
+  TimelineScrollAnchor? _pendingAnchor;
+  // The segments last shown; read from here because the segment provider may already be rebuilding when a capture runs
+  List<Segment>? _displayedSegments;
+  bool _isRestoringAnchor = false;
+  int _anchorGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _scrollController = ScrollController(onAttach: _restoreAssetPosition);
+    _scrollController = ScrollController(onAttach: (_) => unawaited(_restoreAnchor(_displayedSegments)));
     _eventSubscription = EventStream.shared.listen(_onEvent);
 
     final currentTilesPerRow = ref.read(appConfigProvider.select((config) => config.timeline.tilesPerRow));
@@ -170,6 +179,91 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     _baseScaleFactor = _scaleFactor;
 
     ref.listenManual(multiSelectProvider.select((s) => s.isEnabled), _onMultiSelectionToggled);
+    // The service is swapped when its inputs change (private mode toggled, partners changed, filters changed). The
+    // segments are regenerated from scratch, so remember what the user was looking at in the outgoing service and
+    // bring it back once the new segments arrive
+    ref.listenManual(timelineServiceProvider, (previous, _) => _captureAnchor(previous));
+    ref.listenManual(timelineSegmentProvider, (_, next) {
+      if (next.hasValue && !next.isLoading) {
+        unawaited(_restoreAnchor(next.requireValue));
+      }
+    });
+  }
+
+  /// Distance from the start of the scroll view to the first segment (app bar, top sliver widget)
+  double get _segmentsLeadingExtent {
+    final renderObject = _segmentedListKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderSliver) {
+      return 0;
+    }
+    try {
+      return renderObject.constraints.precedingScrollExtent;
+    } on StateError {
+      // not laid out yet
+      return 0;
+    }
+  }
+
+  void _captureAnchor([TimelineService? service]) {
+    final segments = _displayedSegments;
+    if (segments == null || !_scrollController.hasClients) {
+      return;
+    }
+    final TimelineService assetSource = service ?? ref.read(timelineServiceProvider);
+    _pendingAnchor = TimelineScrollAnchor.capture(
+      segments: segments,
+      scrollOffset: _scrollController.offset - _segmentsLeadingExtent,
+      columnCount: ref.read(timelineArgsProvider).columnCount,
+      assetAt: assetSource.getAssetSafe,
+    );
+  }
+
+  Future<void> _restoreAnchor(List<Segment>? segments) async {
+    final anchor = _pendingAnchor;
+    // the anchor waits for segments built after it was captured
+    if (anchor == null || segments == null || identical(segments, anchor.segments)) {
+      return;
+    }
+    _pendingAnchor = null;
+    final generation = ++_anchorGeneration;
+    // hidden until it is back in place, otherwise the new list flashes at the old pixel offset first
+    _isRestoringAnchor = true;
+
+    double? offset;
+    try {
+      final service = ref.read(timelineServiceProvider);
+      offset = await anchor.resolve(
+        segments: segments,
+        columnCount: ref.read(timelineArgsProvider).columnCount,
+        loadAssets: service.fetchAssets,
+      );
+    } catch (_) {
+      offset = null;
+    }
+
+    void jump([int attempt = 0]) {
+      if (!mounted || generation != _anchorGeneration) {
+        return;
+      }
+      if (!_scrollController.hasClients && attempt < 10) {
+        // the list attaches once the new segments are built
+        WidgetsBinding.instance.addPostFrameCallback((_) => jump(attempt + 1));
+        WidgetsBinding.instance.ensureVisualUpdate();
+        return;
+      }
+      if (offset != null && _scrollController.hasClients) {
+        final position = _scrollController.position;
+        _scrollController.jumpTo((_segmentsLeadingExtent + offset).clamp(0.0, position.maxScrollExtent));
+      }
+      setState(() => _isRestoringAnchor = false);
+    }
+
+    if (!mounted || generation != _anchorGeneration) {
+      return;
+    }
+    // one frame after layout, so the new extents are known
+    WidgetsBinding.instance.addPostFrameCallback((_) => jump());
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
@@ -177,10 +271,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     super.didUpdateWidget(oldWidget);
     if (widget.maxWidth != oldWidget.maxWidth) {
       // The updated args already regenerate the segments, only remember the scroll position to restore it afterwards
-      final segments = ref.read(timelineSegmentProvider).valueOrNull;
-      if (segments != null && _scrollController.hasClients) {
-        _restoreAssetIndex = _getCurrentAssetIndex(segments);
-      }
+      _captureAnchor();
     }
   }
 
@@ -216,50 +307,8 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
     }
   }
 
-  void _restoreAssetPosition(_) {
-    if (_restoreAssetIndex == null) {
-      return;
-    }
-
-    final asyncSegments = ref.read(timelineSegmentProvider);
-    asyncSegments.whenData((segments) {
-      final targetSegment = segments.lastWhereOrNull((segment) => segment.firstAssetIndex <= _restoreAssetIndex!);
-      if (targetSegment != null) {
-        final assetIndexInSegment = _restoreAssetIndex! - targetSegment.firstAssetIndex;
-        final newColumnCount = ref.read(timelineArgsProvider).columnCount;
-        final rowIndexInSegment = (assetIndexInSegment / newColumnCount).floor();
-        final targetRowIndex = targetSegment.firstIndex + 1 + rowIndexInSegment;
-        final targetOffset = targetSegment.indexToLayoutOffset(targetRowIndex);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            _scrollController.jumpTo(targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent));
-          }
-        });
-      }
-    });
-    _restoreAssetIndex = null;
-  }
-
   void _onMultiSelectionToggled(_, bool isEnabled) {
     EventStream.shared.emit(MultiSelectToggleEvent(isEnabled));
-  }
-
-  int? _getCurrentAssetIndex(List<Segment> segments) {
-    final currentOffset = _scrollController.offset.clamp(0.0, _scrollController.position.maxScrollExtent);
-    final segment = segments.findByOffset(currentOffset) ?? segments.lastOrNull;
-    int? targetAssetIndex;
-    if (segment != null) {
-      final rowIndex = segment.getMinChildIndexForScrollOffset(currentOffset);
-      if (rowIndex > segment.firstIndex) {
-        final rowIndexInSegment = rowIndex - (segment.firstIndex + 1);
-        final assetsPerRow = ref.read(timelineArgsProvider).columnCount;
-        final assetIndexInSegment = rowIndexInSegment * assetsPerRow;
-        targetAssetIndex = segment.firstAssetIndex + assetIndexInSegment;
-      } else {
-        targetAssetIndex = segment.firstAssetIndex;
-      }
-    }
-    return targetAssetIndex;
   }
 
   @override
@@ -432,6 +481,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
             body: asyncSegments.widgetWhen(
               onLoading: widget.loadingWidget != null ? () => widget.loadingWidget! : null,
               onData: (segments) {
+                _displayedSegments = segments;
                 final childCount = (segments.lastOrNull?.lastIndex ?? -1) + 1;
                 final double appBarExpandedHeight = widget.appBar != null && widget.appBar is MesmerizingSliverAppBar
                     ? 200
@@ -451,6 +501,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                     if (isSelectionMode) const SelectionSliverAppBar() else if (widget.appBar != null) widget.appBar!,
                     if (widget.topSliverWidget != null) widget.topSliverWidget!,
                     _SliverSegmentedList(
+                      key: _segmentedListKey,
                       segments: segments,
                       delegate: SliverChildBuilderDelegate(
                         (ctx, index) {
@@ -501,11 +552,10 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                           final newPerRow = 7 - newScaleFactor.toInt();
 
                           if (newPerRow != _perRow) {
-                            final targetAssetIndex = _getCurrentAssetIndex(segments);
+                            _captureAnchor();
                             setState(() {
                               _scaleFactor = newScaleFactor;
                               _perRow = newPerRow;
-                              _restoreAssetIndex = targetAssetIndex;
                             });
 
                             unawaited(ref.read(settingsProvider).write(.timelineTilesPerRow, _perRow));
@@ -526,7 +576,8 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        timeline,
+                        // always wrapped, so toggling the opacity never remounts the scroll view
+                        Opacity(opacity: _isRestoringAnchor ? 0 : 1, child: timeline),
                         if (isBottomWidgetVisible)
                           Positioned(
                             top: MediaQuery.paddingOf(context).top,
@@ -553,7 +604,7 @@ class _SliverTimelineState extends ConsumerState<_SliverTimeline> with WidgetsBi
 class _SliverSegmentedList extends SliverMultiBoxAdaptorWidget {
   final List<Segment> _segments;
 
-  const _SliverSegmentedList({required this._segments, required super.delegate});
+  const _SliverSegmentedList({super.key, required this._segments, required super.delegate});
 
   @override
   _RenderSliverTimelineBoxAdaptor createRenderObject(BuildContext context) =>

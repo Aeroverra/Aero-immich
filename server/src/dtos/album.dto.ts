@@ -2,7 +2,7 @@ import { ShallowDehydrateObject } from 'kysely';
 import { createZodDto } from 'nestjs-zod';
 import { AlbumUser, AuthSharedLink } from 'src/database';
 import { HistoryBuilder } from 'src/decorators';
-import { BulkIdErrorReasonSchema } from 'src/dtos/asset-ids.response.dto';
+import { BulkIdErrorReasonSchema, BulkIdsSchema } from 'src/dtos/asset-ids.response.dto';
 import { MapAsset } from 'src/dtos/asset-response.dto';
 import { UserResponseSchema, mapUser } from 'src/dtos/user.dto';
 import { AlbumUserRole, AlbumUserRoleSchema, AssetOrder, AssetOrderSchema } from 'src/enum';
@@ -21,6 +21,10 @@ const AlbumUserAddSchema = z
 const AddUsersSchema = z
   .object({
     albumUsers: z.array(AlbumUserAddSchema).min(1).describe('Album users to add'),
+    confirmPrivate: z
+      .boolean()
+      .optional()
+      .describe('Required to be true when the album contains private assets, acknowledging they will be shared'),
   })
   .meta({ id: 'AddUsersDto' });
 
@@ -52,13 +56,32 @@ const CreateAlbumSchema = z
       }),
     albumUsers: z.array(AlbumUserCreateSchema).optional().describe('Album users'),
     assetIds: z.array(z.uuidv4()).optional().describe('Initial asset IDs'),
+    confirmPrivate: z
+      .boolean()
+      .optional()
+      .describe(
+        'Required to be true when the album is created with other users and contains private assets, acknowledging they will be shared',
+      ),
   })
   .meta({ id: 'CreateAlbumDto' });
+
+const AlbumAddAssetsSchema = BulkIdsSchema.extend({
+  confirmPrivate: z
+    .boolean()
+    .optional()
+    .describe('Required to be true when private assets are added to a shared album, acknowledging they will be shared'),
+}).meta({ id: 'AlbumAddAssetsDto' });
 
 const AlbumsAddAssetsSchema = z
   .object({
     albumIds: z.array(z.uuidv4()).describe('Album IDs'),
     assetIds: z.array(z.uuidv4()).describe('Asset IDs'),
+    confirmPrivate: z
+      .boolean()
+      .optional()
+      .describe(
+        'Required to be true when private assets are added to a shared album, acknowledging they will be shared',
+      ),
   })
   .meta({ id: 'AlbumsAddAssetsDto' });
 
@@ -187,6 +210,7 @@ export const AlbumResponseSchema = z
     isActivityEnabled: z.boolean().describe('Activity feed enabled'),
     order: AssetOrderSchema.optional(),
     contributorCounts: z.array(ContributorCountResponseSchema).optional(),
+    isPrivate: z.boolean().describe('Album contains at least one private asset'),
   })
   .meta({ id: 'AlbumResponseDto' });
 
@@ -206,6 +230,7 @@ export class AlbumUserParamDto extends createZodDto(AlbumUserParamSchema) {}
 export class AddUsersDto extends createZodDto(AddUsersSchema) {}
 export class AlbumUserCreateDto extends createZodDto(AlbumUserCreateSchema) {}
 export class CreateAlbumDto extends createZodDto(CreateAlbumSchema) {}
+export class AlbumAddAssetsDto extends createZodDto(AlbumAddAssetsSchema) {}
 export class AlbumsAddAssetsDto extends createZodDto(AlbumsAddAssetsSchema) {}
 export class AlbumsAddAssetsResponseDto extends createZodDto(AlbumsAddAssetsResponseSchema) {}
 export class UpdateAlbumDto extends createZodDto(UpdateAlbumSchema) {}
@@ -227,6 +252,7 @@ export type MapAlbumDto = {
   id: string;
   isActivityEnabled: boolean;
   order: AssetOrder;
+  isPrivate: boolean;
 };
 
 export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto => {
@@ -270,5 +296,6 @@ export const mapAlbum = (entity: MaybeDehydrated<MapAlbumDto>): AlbumResponseDto
     assetCount: entity.assets?.length || 0,
     isActivityEnabled: entity.isActivityEnabled,
     order: entity.order,
+    isPrivate: entity.isPrivate,
   };
 };
