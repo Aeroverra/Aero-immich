@@ -258,6 +258,38 @@ void main() {
       expect(await albums.get('hidden-album', privateFilter: hideTravel), isNull);
       expect(await albums.getCount(privateFilter: hideTravel), 2);
     });
+
+    test('untagged motion parts of hidden live photos do not make an album visible', () async {
+      // the live case: an album of tagged stills plus their hidden motion parts, which only the stills carry tags for
+      for (final index in [1, 2]) {
+        await ctx.newRemoteAsset(id: 'motion-$index', ownerId: me, type: .video, visibility: .hidden);
+        await ctx.newRemoteAsset(id: 'still-$index', ownerId: me, livePhotoVideoId: 'motion-$index');
+      }
+      await views.addTagAssets(['Travel'], ['still-1', 'still-2']);
+      final trip = await ctx.newRemoteAlbum(id: 'trip', ownerId: me, thumbnailAssetId: 'still-1');
+      for (final assetId in ['still-1', 'motion-1', 'still-2', 'motion-2']) {
+        await ctx.newRemoteAlbumAsset(albumId: trip.id, assetId: assetId);
+      }
+      // a visible live photo keeps its motion part
+      await ctx.newRemoteAsset(id: 'motion-3', ownerId: me, type: .video, visibility: .hidden);
+      await ctx.newRemoteAsset(id: 'still-3', ownerId: me, livePhotoVideoId: 'motion-3');
+      final other = await ctx.newRemoteAlbum(id: 'other', ownerId: me);
+      await ctx.newRemoteAlbumAsset(albumId: other.id, assetId: 'still-3');
+      await ctx.newRemoteAlbumAsset(albumId: other.id, assetId: 'motion-3');
+
+      final filtered = await albums.getAll(privateFilter: hideTravel);
+      expect(filtered.map((album) => album.id), isNot(contains('trip')));
+      expect(await albums.get('trip', privateFilter: hideTravel), isNull);
+      final tripAssets = await timeline.remoteAlbum('trip', .day, privateFilter: hideTravel).assetSource(0, 10);
+      expect(tripAssets, isEmpty);
+
+      final otherAlbum = await albums.get('other', privateFilter: hideTravel);
+      expect(otherAlbum!.assetCount, 2);
+
+      // without a view the album and its motion parts show as before
+      final unfiltered = await albums.get('trip', privateFilter: PrivateModeFilter(enabled: false, userId: me));
+      expect(unfiltered!.assetCount, 4);
+    });
   });
 
   group('repository', () {
