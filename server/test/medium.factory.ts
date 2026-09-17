@@ -403,7 +403,8 @@ export class SyncTestContext extends MediumTestContext<typeof SyncService> {
     const acks: Record<string, string> = {};
     const syncAcks: string[] = [];
     for (const { type, ack } of response) {
-      if (type === SyncEntityType.SyncAckV1) {
+      // a checkpoint event can carry the ack of another stream (see write in the sync service)
+      if (type === SyncEntityType.SyncAckV1 || !ack.startsWith(`${type}|`)) {
         syncAcks.push(ack);
         continue;
       }
