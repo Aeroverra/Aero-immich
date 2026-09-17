@@ -349,6 +349,24 @@ describe(UserService.name, () => {
     });
   });
 
+  describe('getMyDeletedChecksumStatistics', () => {
+    it('should count the remembered checksums of the user', async () => {
+      mocks.assetDeletedChecksum.getCount.mockResolvedValue(3);
+
+      await expect(sut.getMyDeletedChecksumStatistics(authStub.user1)).resolves.toEqual({ count: 3 });
+
+      expect(mocks.assetDeletedChecksum.getCount).toHaveBeenCalledWith(authStub.user1.user.id);
+    });
+  });
+
+  describe('deleteMyDeletedChecksums', () => {
+    it('should forget every remembered checksum of the user', async () => {
+      await sut.deleteMyDeletedChecksums(authStub.user1);
+
+      expect(mocks.assetDeletedChecksum.deleteAll).toHaveBeenCalledWith(authStub.user1.user.id);
+    });
+  });
+
   describe('handleUserSyncUsage', () => {
     it('should sync usage', async () => {
       await sut.handleUserSyncUsage();

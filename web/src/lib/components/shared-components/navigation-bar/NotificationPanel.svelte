@@ -57,6 +57,21 @@
         break;
       }
 
+      case NotificationType.Custom: {
+        if (typeof notification.data !== 'string') {
+          return;
+        }
+
+        const { deletedReimport } = JSON.parse(notification.data);
+        if (deletedReimport?.albumId) {
+          await goto(Route.viewAlbum({ id: deletedReimport.albumId }));
+        } else if (deletedReimport?.trash) {
+          await goto(Route.trash());
+        }
+
+        break;
+      }
+
       default: {
         break;
       }

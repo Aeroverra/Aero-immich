@@ -1,5 +1,5 @@
 import { AdminConfigDto, defaults, SystemConfig } from 'src/dtos/config.dto';
-import { AssetFileType, JobName, JobStatus, UserMetadataKey } from 'src/enum';
+import { AssetFileType, DeletedReimportMode, JobName, JobStatus, NotificationType, UserMetadataKey } from 'src/enum';
 import { NotificationService } from 'src/services/notification.service';
 import { AlbumFactory } from 'test/factories/album.factory';
 import { AssetFileFactory } from 'test/factories/asset-file.factory';
@@ -594,6 +594,70 @@ describe(NotificationService.name, () => {
 
       await expect(sut.handleSendEmail({ html: '', subject: '', text: '', to: '' })).resolves.toBe(JobStatus.Success);
       expect(mocks.email.sendEmail).toHaveBeenCalledWith(expect.objectContaining({ replyTo: 'demo@immich.app' }));
+    });
+  });
+
+  describe('onAssetDeletedReimport', () => {
+    it('should restart the delayed notification job of the user', async () => {
+      await sut.onAssetDeletedReimport({ userId: '42' });
+
+      expect(mocks.job.removeJob).toHaveBeenCalledWith(JobName.NotifyDeletedReimport, '42');
+      expect(mocks.job.queue).toHaveBeenCalledExactlyOnceWith({
+        name: JobName.NotifyDeletedReimport,
+        data: { userId: '42', delay: 300_000 },
+      });
+    });
+  });
+
+  describe('handleDeletedReimport', () => {
+    it('should skip when nothing is pending', async () => {
+      mocks.assetDeletedChecksum.getPendingNotification.mockResolvedValue([]);
+
+      await expect(sut.handleDeletedReimport({ userId: '42' })).resolves.toBe(JobStatus.Skipped);
+
+      expect(mocks.notification.create).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markNotified).not.toHaveBeenCalled();
+    });
+
+    it('should skip when the user is gone', async () => {
+      mocks.assetDeletedChecksum.getPendingNotification.mockResolvedValue([
+        { reimportMode: DeletedReimportMode.Trash, count: 3 },
+      ]);
+      mocks.user.get.mockResolvedValue(undefined);
+
+      await expect(sut.handleDeletedReimport({ userId: '42' })).resolves.toBe(JobStatus.Skipped);
+
+      expect(mocks.notification.create).not.toHaveBeenCalled();
+    });
+
+    it('should create one notification summarising every pending re-upload', async () => {
+      const user = UserFactory.from()
+        .metadata({
+          key: UserMetadataKey.Preferences,
+          value: { deletedReimport: { mode: DeletedReimportMode.Album, albumId: 'album-id' } },
+        })
+        .build();
+      mocks.assetDeletedChecksum.getPendingNotification.mockResolvedValue([
+        { reimportMode: DeletedReimportMode.Trash, count: 142 },
+        { reimportMode: DeletedReimportMode.Skip, count: 1 },
+        { reimportMode: DeletedReimportMode.Album, count: 2 },
+      ]);
+      mocks.user.get.mockResolvedValue(user);
+      mocks.notification.create.mockResolvedValue(notificationStub.albumEvent);
+
+      await expect(sut.handleDeletedReimport({ userId: user.id })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.notification.create).toHaveBeenCalledExactlyOnceWith({
+        userId: user.id,
+        type: NotificationType.Custom,
+        level: 'info',
+        title: 'Previously deleted files',
+        description:
+          '142 previously deleted files were moved to the trash, 1 previously deleted file was not uploaded, 2 previously deleted files were added to the "Previously deleted" album',
+        data: JSON.stringify({ deletedReimport: { trash: 142, skip: 1, album: 2, albumId: 'album-id' } }),
+      });
+      expect(mocks.websocket.clientSend).toHaveBeenCalledWith('on_notification', user.id, expect.anything());
+      expect(mocks.assetDeletedChecksum.markNotified).toHaveBeenCalledWith(user.id);
     });
   });
 });

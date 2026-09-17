@@ -965,4 +965,39 @@ describe(AssetService.name, () => {
       expect(mocks.assetEdit.replaceAll).not.toHaveBeenCalled();
     });
   });
+
+  describe('handleAssetDeletion of a previously uploaded file', () => {
+    it('should remember the checksum of an uploaded asset', async () => {
+      const asset = AssetFactory.from().build();
+      mocks.assetJob.getForAssetDeletion.mockResolvedValue(getForAssetDeletion(asset));
+
+      await sut.handleAssetDeletion({ id: asset.id, deleteOnDisk: true });
+
+      expect(mocks.assetDeletedChecksum.upsert).toHaveBeenCalledWith({
+        ownerId: asset.ownerId,
+        checksum: asset.checksum,
+        assetId: asset.id,
+        originalFileName: asset.originalFileName,
+      });
+      expect(mocks.asset.remove).toHaveBeenCalled();
+    });
+
+    it('should not remember an external library asset', async () => {
+      const asset = AssetFactory.from({ libraryId: newUuid() }).build();
+      mocks.assetJob.getForAssetDeletion.mockResolvedValue(getForAssetDeletion(asset));
+
+      await sut.handleAssetDeletion({ id: asset.id, deleteOnDisk: false });
+
+      expect(mocks.assetDeletedChecksum.upsert).not.toHaveBeenCalled();
+    });
+
+    it('should not remember the motion part of a live photo', async () => {
+      const asset = AssetFactory.from({ visibility: AssetVisibility.Hidden }).build();
+      mocks.assetJob.getForAssetDeletion.mockResolvedValue(getForAssetDeletion(asset));
+
+      await sut.handleAssetDeletion({ id: asset.id, deleteOnDisk: true });
+
+      expect(mocks.assetDeletedChecksum.upsert).not.toHaveBeenCalled();
+    });
+  });
 });
