@@ -37,7 +37,8 @@ select distinct
   "album"."isActivityEnabled",
   "album"."order",
   "album"."isPrivate",
-  "album"."updateId"
+  "album"."updateId",
+  false as "isViewHidden"
 from
   "album" as "album"
   left join "album_user" as "album_users" on "album"."id" = "album_users"."albumId"
@@ -56,6 +57,419 @@ from
   "album_user"
 where
   "albumId" = $1
+
+-- SyncRepository.albumViewState.getNextCheckpoint
+select
+  immich_uuid_v7 (now() - interval '5 minutes') as "updateId"
+
+-- SyncRepository.albumViewState.getCheckpoint
+select
+  "updateId"
+from
+  "album_view_state_checkpoint"
+where
+  "userId" = $1
+
+-- SyncRepository.albumViewState.getChanged
+select
+  "album"."id" as "albumId",
+  "album"."albumThumbnailAssetId",
+  "album_view_state"."albumId" as "stateAlbumId",
+  "album_view_state"."isHidden" as "stateIsHidden",
+  "album_view_state"."thumbnailAssetId" as "stateThumbnailAssetId",
+  exists (
+    select
+      "asset"."id"
+    from
+      "album_asset"
+      inner join "asset" on "asset"."id" = "album_asset"."assetId"
+    where
+      "album_asset"."albumId" = "album"."id"
+      and "asset"."deletedAt" is null
+      and "asset"."visibility" in ('archive', 'timeline')
+      and "asset"."isPrivate" = $1
+  ) as "hasAssets",
+  exists (
+    select
+      "asset"."id"
+    from
+      "album_asset"
+      inner join "asset" on "asset"."id" = "album_asset"."assetId"
+    where
+      "album_asset"."albumId" = "album"."id"
+      and "asset"."deletedAt" is null
+      and "asset"."visibility" in ('archive', 'timeline')
+      and "asset"."isPrivate" = $2
+      and (
+        (
+          (
+            not exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "asset"."id"
+                and "tag"."userId" = $3
+            )
+            and (
+              "asset"."visibility" != 'hidden'
+              or not exists (
+                select
+                from
+                  "asset" as "live_photo_still"
+                where
+                  "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                  and exists (
+                    select
+                    from
+                      "tag_asset"
+                      inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                    where
+                      "tag_asset"."assetId" = "live_photo_still"."id"
+                      and "tag"."userId" = $4
+                  )
+              )
+            )
+          )
+          or (
+            exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "asset"."id"
+                and "tag_closure"."id_ancestor" = any ($5::uuid[])
+            )
+            or (
+              "asset"."visibility" = 'hidden'
+              and exists (
+                select
+                from
+                  "asset" as "live_photo_still"
+                where
+                  "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                  and exists (
+                    select
+                    from
+                      "tag_asset"
+                      inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                    where
+                      "tag_asset"."assetId" = "live_photo_still"."id"
+                      and "tag_closure"."id_ancestor" = any ($6::uuid[])
+                  )
+              )
+            )
+          )
+        )
+        and (
+          not exists (
+            select
+            from
+              "tag_asset"
+              inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+            where
+              "tag_asset"."assetId" = "asset"."id"
+              and "tag_closure"."id_ancestor" = any ($7::uuid[])
+          )
+          and (
+            "asset"."visibility" != 'hidden'
+            or not exists (
+              select
+              from
+                "asset" as "live_photo_still"
+              where
+                "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                and exists (
+                  select
+                  from
+                    "tag_asset"
+                    inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                  where
+                    "tag_asset"."assetId" = "live_photo_still"."id"
+                    and "tag_closure"."id_ancestor" = any ($8::uuid[])
+                )
+            )
+          )
+        )
+        and "asset"."isPrivate" = $9
+      )
+  ) as "hasVisibleAssets",
+  case
+    when "album"."albumThumbnailAssetId" is null then null
+    when exists (
+      select
+        "asset"."id"
+      from
+        "album_asset"
+        inner join "asset" on "asset"."id" = "album_asset"."assetId"
+      where
+        "album_asset"."albumId" = "album"."id"
+        and "asset"."deletedAt" is null
+        and "asset"."visibility" in ('archive', 'timeline')
+        and "asset"."isPrivate" = $10
+        and "asset"."id" = "album"."albumThumbnailAssetId"
+        and (
+          (
+            (
+              not exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "asset"."id"
+                  and "tag"."userId" = $11
+              )
+              and (
+                "asset"."visibility" != 'hidden'
+                or not exists (
+                  select
+                  from
+                    "asset" as "live_photo_still"
+                  where
+                    "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                    and exists (
+                      select
+                      from
+                        "tag_asset"
+                        inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                      where
+                        "tag_asset"."assetId" = "live_photo_still"."id"
+                        and "tag"."userId" = $12
+                    )
+                )
+              )
+            )
+            or (
+              exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "asset"."id"
+                  and "tag_closure"."id_ancestor" = any ($13::uuid[])
+              )
+              or (
+                "asset"."visibility" = 'hidden'
+                and exists (
+                  select
+                  from
+                    "asset" as "live_photo_still"
+                  where
+                    "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                    and exists (
+                      select
+                      from
+                        "tag_asset"
+                        inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                      where
+                        "tag_asset"."assetId" = "live_photo_still"."id"
+                        and "tag_closure"."id_ancestor" = any ($14::uuid[])
+                    )
+                )
+              )
+            )
+          )
+          and (
+            not exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "asset"."id"
+                and "tag_closure"."id_ancestor" = any ($15::uuid[])
+            )
+            and (
+              "asset"."visibility" != 'hidden'
+              or not exists (
+                select
+                from
+                  "asset" as "live_photo_still"
+                where
+                  "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                  and exists (
+                    select
+                    from
+                      "tag_asset"
+                      inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                    where
+                      "tag_asset"."assetId" = "live_photo_still"."id"
+                      and "tag_closure"."id_ancestor" = any ($16::uuid[])
+                  )
+              )
+            )
+          )
+          and "asset"."isPrivate" = $17
+        )
+    ) then "album"."albumThumbnailAssetId"
+    else (
+      select
+        "asset"."id"
+      from
+        "album_asset"
+        inner join "asset" on "asset"."id" = "album_asset"."assetId"
+      where
+        "album_asset"."albumId" = "album"."id"
+        and "asset"."deletedAt" is null
+        and "asset"."visibility" in ('archive', 'timeline')
+        and "asset"."isPrivate" = $18
+        and (
+          (
+            (
+              not exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "asset"."id"
+                  and "tag"."userId" = $19
+              )
+              and (
+                "asset"."visibility" != 'hidden'
+                or not exists (
+                  select
+                  from
+                    "asset" as "live_photo_still"
+                  where
+                    "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                    and exists (
+                      select
+                      from
+                        "tag_asset"
+                        inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                      where
+                        "tag_asset"."assetId" = "live_photo_still"."id"
+                        and "tag"."userId" = $20
+                    )
+                )
+              )
+            )
+            or (
+              exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "asset"."id"
+                  and "tag_closure"."id_ancestor" = any ($21::uuid[])
+              )
+              or (
+                "asset"."visibility" = 'hidden'
+                and exists (
+                  select
+                  from
+                    "asset" as "live_photo_still"
+                  where
+                    "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                    and exists (
+                      select
+                      from
+                        "tag_asset"
+                        inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                      where
+                        "tag_asset"."assetId" = "live_photo_still"."id"
+                        and "tag_closure"."id_ancestor" = any ($22::uuid[])
+                    )
+                )
+              )
+            )
+          )
+          and (
+            not exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "asset"."id"
+                and "tag_closure"."id_ancestor" = any ($23::uuid[])
+            )
+            and (
+              "asset"."visibility" != 'hidden'
+              or not exists (
+                select
+                from
+                  "asset" as "live_photo_still"
+                where
+                  "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                  and exists (
+                    select
+                    from
+                      "tag_asset"
+                      inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                    where
+                      "tag_asset"."assetId" = "live_photo_still"."id"
+                      and "tag_closure"."id_ancestor" = any ($24::uuid[])
+                  )
+              )
+            )
+          )
+          and "asset"."isPrivate" = $25
+        )
+      order by
+        "asset"."fileCreatedAt" desc
+      limit
+        $26
+    )
+  end as "visibleThumbnailAssetId"
+from
+  "album"
+  inner join "album_user" on "album_user"."albumId" = "album"."id"
+  and "album_user"."userId" = $27
+  left join "album_view_state" on "album_view_state"."albumId" = "album"."id"
+  and "album_view_state"."userId" = $28
+where
+  (
+    "album"."updateId" > $29
+    or "album_user"."updateId" > $30
+    or "album"."id" in (
+      select
+        "album_asset"."albumId"
+      from
+        "album_asset"
+      where
+        "album_asset"."updateId" > $31
+    )
+    or "album"."id" in (
+      select
+        "album_asset_audit"."albumId"
+      from
+        "album_asset_audit"
+      where
+        "album_asset_audit"."id" > $32
+    )
+    or "album"."id" in (
+      select
+        "album_asset"."albumId"
+      from
+        "asset"
+        inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
+      where
+        "asset"."updateId" > $33
+    )
+  )
+
+-- SyncRepository.albumViewState.getAll
+select
+  "album"."id" as "albumId",
+  "album"."albumThumbnailAssetId",
+  "album_view_state"."albumId" as "stateAlbumId",
+  "album_view_state"."isHidden" as "stateIsHidden",
+  "album_view_state"."thumbnailAssetId" as "stateThumbnailAssetId",
+  true as "hasAssets",
+  true as "hasVisibleAssets",
+  "album"."albumThumbnailAssetId" as "visibleThumbnailAssetId"
+from
+  "album_view_state"
+  inner join "album" on "album"."id" = "album_view_state"."albumId"
+where
+  "album_view_state"."userId" = $1
 
 -- SyncRepository.albumAsset.getBackfill
 select
@@ -132,7 +546,8 @@ select
   end as "isFavorite",
   "asset"."updateId",
   "album"."isPrivate" as "isAlbumPrivate",
-  false as "isViewHidden"
+  false as "isViewHidden",
+  false as "isAlbumViewHidden"
 from
   "asset" as "asset"
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
@@ -174,7 +589,8 @@ select
     else $2
   end as "isFavorite",
   "album"."isPrivate" as "isAlbumPrivate",
-  false as "isViewHidden"
+  false as "isViewHidden",
+  false as "isAlbumViewHidden"
 from
   "album_asset" as "album_asset"
   inner join "asset" on "asset"."id" = "album_asset"."assetId"
@@ -270,7 +686,8 @@ select
   "asset_exif"."rating",
   "asset_exif"."fps",
   "asset_exif"."updateId",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isAlbumViewHidden"
 from
   "asset_exif" as "asset_exif"
   inner join "album_asset" on "album_asset"."assetId" = "asset_exif"."assetId"
@@ -320,7 +737,8 @@ select
   "asset_exif"."profileDescription",
   "asset_exif"."rating",
   "asset_exif"."fps",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isAlbumViewHidden"
 from
   "album_asset" as "album_asset"
   inner join "asset_exif" on "asset_exif"."assetId" = "album_asset"."assetId"
@@ -391,7 +809,8 @@ select
   "album_asset"."albumId" as "albumId",
   "album_asset"."updateId",
   "album"."isPrivate" as "isAlbumPrivate",
-  false as "isViewHidden"
+  false as "isViewHidden",
+  false as "isAlbumViewHidden"
 from
   "album_asset" as "album_asset"
   inner join "album" on "album"."id" = "album_asset"."albumId"
@@ -454,7 +873,8 @@ select
   "album_user"."userId" as "userId",
   "album_user"."role",
   "album_user"."updateId",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isAlbumViewHidden"
 from
   "album_user" as "album_user"
   inner join "album" on "album"."id" = "album_user"."albumId"
