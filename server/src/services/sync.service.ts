@@ -20,7 +20,7 @@ import { BaseService } from 'src/services/base.service';
 import { SyncAck } from 'src/types';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
 import { ClientDisconnectedError, waitForDrain } from 'src/utils/response';
-import { fromAck, serialize, SerializeOptions, toAck } from 'src/utils/sync';
+import { fromAck, mapJsonLine, serialize, SerializeOptions, toAck } from 'src/utils/sync';
 
 type CheckpointMap = Partial<Record<SyncEntityType, SyncAck>>;
 type AssetLike = Omit<SyncAssetV2, 'checksum' | 'thumbhash'> & {
@@ -44,18 +44,93 @@ const isEntityBackfillComplete = (createId: string, checkpoint: SyncAck | undefi
 const getStartId = (createId: string, checkpoint: SyncAck | undefined): string | undefined =>
   createId === checkpoint?.updateId ? checkpoint?.extraId : undefined;
 
-export const send = async <T extends keyof SyncItem, D extends SyncItem[T]>(
+/** the type and ack of the event written last to a response, and whether it was the ack of withheld rows */
+type LastWrite = { type: SyncEntityType; ackType: SyncEntityType; ack: string; withheld: boolean };
+const lastWrites = new WeakMap<Writable, LastWrite>();
+
+const write = async <T extends keyof SyncItem, D extends SyncItem[T]>(
   response: Writable,
   item: SerializeOptions<T, D>,
+  { withheld = false }: { withheld?: boolean } = {},
 ) => {
   if (response.destroyed || response.writableEnded) {
     throw new ClientDisconnectedError();
   }
 
+  // The mobile apps handle every run of consecutive events of one type as one batch and acknowledge only its last
+  // ack. Two checkpoint events in a row for different streams (a withheld run ending one stream, a skipped row or a
+  // backfill marker starting the next) would lose the first ack, and the rows behind it would be scanned and sent
+  // again on every sync. SyncAckV1 and SyncCompleteV1 are both no-ops for the apps and carry any ack, so the second
+  // one is written with the other type to start its own batch. Only done next to the acks of withheld rows, so the
+  // stream of a client that receives everything stays exactly as upstream writes it.
+  const ackType = item.ackType ?? item.type;
+  const last = lastWrites.get(response);
+  let type: SyncEntityType = item.type;
+  let lines = '';
+  if (last && (withheld || last.withheld) && last.ackType !== ackType && last.type === type) {
+    if (type === SyncEntityType.SyncAckV1) {
+      type = SyncEntityType.SyncCompleteV1;
+    } else if (type === SyncEntityType.SyncCompleteV1) {
+      lines += mapJsonLine({ type: SyncEntityType.SyncAckV1, data: {}, ack: last.ack });
+    }
+  }
+
+  const ack = toAck({ type: ackType, updateId: item.ids[0], extraId: item.ids[1] });
+  lines += type === item.type ? serialize(item) : mapJsonLine({ type, data: item.data, ack });
+  lastWrites.set(response, { type, ackType, ack, withheld });
+
   // indicates back pressure, so we wait for 'drain' event
-  if (!response.write(serialize(item))) {
+  if (!response.write(lines)) {
     await waitForDrain(response);
   }
+};
+
+/** the checkpoint move of the withheld rows written last, not sent yet (see deferWithheldAck) */
+type PendingAck = { ackType: SyncEntityType; updateId: string; count: number };
+const pendingAcks = new WeakMap<Writable, PendingAck>();
+
+/** a long run of withheld rows still moves the checkpoint now and then, so an interrupted sync keeps its progress */
+export const WITHHELD_ACK_INTERVAL = 1000;
+
+const flushWithheldAck = async (response: Writable) => {
+  const pending = pendingAcks.get(response);
+  if (!pending) {
+    return;
+  }
+  pendingAcks.delete(response);
+  await write(
+    response,
+    { type: SyncEntityType.SyncAckV1, data: {}, ackType: pending.ackType, ids: [pending.updateId] },
+    { withheld: true },
+  );
+};
+
+/**
+ * Moves the checkpoint of `ackType` past a withheld row. Consecutive withheld rows share one SyncAckV1: the mobile
+ * apps process (and acknowledge over HTTP) every run of events of the same type as one batch, so a delete followed by
+ * an ack per row turned a view change over tens of thousands of assets into one database transaction and one ack
+ * request per event, and the official app needed hours to drop them.
+ */
+const deferWithheldAck = async (response: Writable, ackType: SyncEntityType, updateId: string) => {
+  const pending = pendingAcks.get(response);
+  if (pending && pending.ackType !== ackType) {
+    await flushWithheldAck(response);
+  }
+
+  const count = pending?.ackType === ackType ? pending.count + 1 : 1;
+  pendingAcks.set(response, { ackType, updateId, count });
+  if (count >= WITHHELD_ACK_INTERVAL) {
+    await flushWithheldAck(response);
+  }
+};
+
+export const send = async <T extends keyof SyncItem, D extends SyncItem[T]>(
+  response: Writable,
+  item: SerializeOptions<T, D>,
+) => {
+  // anything else written ends a run of withheld rows; their ack goes first so checkpoints never move backwards
+  await flushWithheldAck(response);
+  await write(response, item);
 };
 
 const sendEntityBackfillCompleteAck = async (response: Writable, ackType: SyncEntityType, id: string) => {
@@ -374,7 +449,7 @@ export class SyncService extends BaseService {
    * on the next sync. Nothing is deleted: the client never held the row, or drops it through a cascade.
    */
   private skipPrivate(response: Writable, upsertType: SyncEntityType, updateId: string) {
-    return send(response, { type: SyncEntityType.SyncAckV1, data: {}, ackType: upsertType, ids: [updateId] });
+    return deferWithheldAck(response, upsertType, updateId);
   }
 
   /**
@@ -387,7 +462,8 @@ export class SyncService extends BaseService {
     upsertType: SyncEntityType,
     updateId: string,
   ) {
-    await send(response, { type: deletion.type, ids: [updateId], data: deletion.data });
+    // written without ending the run, so the deletes of consecutive withheld rows reach the client as one batch
+    await write(response, { type: deletion.type, ids: [updateId], data: deletion.data });
     await this.skipPrivate(response, upsertType, updateId);
   }
 
