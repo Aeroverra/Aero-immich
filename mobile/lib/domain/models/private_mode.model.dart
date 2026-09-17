@@ -1,14 +1,20 @@
+import 'package:immich_mobile/domain/models/custom_view.model.dart';
+
 /// Describes how private assets are filtered in local queries.
 ///
 /// The sync stream always delivers private assets, so every query that lists
 /// assets applies this filter: private assets are hidden unless the session's
 /// private mode is [enabled] and the asset belongs to [userId]. Partner private
 /// assets are never shown.
+///
+/// The sync stream also delivers the assets the applied custom [view] hides, so the
+/// same queries keep only the assets that pass it. Without a view every asset passes.
 class PrivateModeFilter {
   final bool enabled;
   final String? userId;
+  final ViewFilter? view;
 
-  const PrivateModeFilter({required this.enabled, this.userId});
+  const PrivateModeFilter({required this.enabled, this.userId, this.view});
 
   static const off = PrivateModeFilter(enabled: false);
 
@@ -18,14 +24,18 @@ class PrivateModeFilter {
 
   bool get showsOwnPrivate => enabled && userId != null;
 
-  @override
-  bool operator ==(Object other) => other is PrivateModeFilter && other.enabled == enabled && other.userId == userId;
+  /// The view to evaluate, null when there is none or it lets every asset through
+  ViewFilter? get restrictingView => view == null || view!.isUnrestricted ? null : view;
 
   @override
-  int get hashCode => enabled.hashCode ^ userId.hashCode;
+  bool operator ==(Object other) =>
+      other is PrivateModeFilter && other.enabled == enabled && other.userId == userId && other.view == view;
 
   @override
-  String toString() => 'PrivateModeFilter(enabled: $enabled, userId: $userId)';
+  int get hashCode => Object.hash(enabled, userId, view);
+
+  @override
+  String toString() => 'PrivateModeFilter(enabled: $enabled, userId: $userId, view: $view)';
 }
 
 /// Server-side private mode state of the current session
