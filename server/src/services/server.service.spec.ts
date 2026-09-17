@@ -153,6 +153,7 @@ describe(ServerService.name, () => {
         realtimeTranscoding: false,
         stackSource: true,
         videoFrameAnalysis: false,
+        views: true,
       });
       expect(mocks.systemMetadata.get).toHaveBeenCalled();
     });

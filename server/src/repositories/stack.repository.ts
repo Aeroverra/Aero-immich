@@ -6,7 +6,7 @@ import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { DB } from 'src/schema';
 import { StackTable } from 'src/schema/tables/stack.table';
-import { asUuid, PrivateScope, withDefaultVisibility, withPrivateScope } from 'src/utils/database';
+import { asUuid, isTagHidden, PrivateScope, withDefaultVisibility, withPrivateScope } from 'src/utils/database';
 
 export interface StackSearch {
   ownerId: string;
@@ -32,7 +32,8 @@ const withAssets = (eb: ExpressionBuilder<DB, 'stack'>, scope: PrivateScope, wit
           jsonArrayFrom(
             eb
               .selectFrom('tag')
-              .select(columns.tag)
+              .select(['tag.id', 'tag.value', 'tag.createdAt', 'tag.updatedAt', 'tag.color', 'tag.parentId'])
+              .select((eb) => isTagHidden(eb, 'tag.id').$castTo<boolean>().as('isHidden'))
               .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
               .whereRef('tag_asset.assetId', '=', 'asset.id'),
           ).as('tags'),

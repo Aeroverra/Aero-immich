@@ -109,6 +109,7 @@ describe('/server', () => {
         realtimeTranscoding: false,
         stackSource: true,
         videoFrameAnalysis: false,
+        views: true,
         search: true,
         sidecar: true,
         trash: true,
