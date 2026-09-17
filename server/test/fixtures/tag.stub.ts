@@ -9,6 +9,7 @@ const parent = Object.freeze<Tag>({
   value: 'Parent',
   color: null,
   parentId: null,
+  isHidden: false,
 });
 
 const child = Object.freeze<Tag>({
@@ -18,6 +19,7 @@ const child = Object.freeze<Tag>({
   value: 'Parent/Child',
   color: null,
   parentId: parent.id,
+  isHidden: false,
 });
 
 const tag = {
@@ -27,6 +29,7 @@ const tag = {
   value: 'Tag1',
   color: null,
   parentId: null,
+  isHidden: false,
 };
 
 const color = {
@@ -36,6 +39,7 @@ const color = {
   value: 'Tag1',
   color: '#000000',
   parentId: null,
+  isHidden: false,
 };
 
 const upsert = {
@@ -59,6 +63,7 @@ export const tagResponseStub = {
     updatedAt: '2021-01-01T00:00:00.000Z',
     name: 'Tag1',
     value: 'Tag1',
+    isHidden: false,
   }),
   color1: Object.freeze<TagResponseDto>({
     id: 'tag-1',
@@ -67,5 +72,6 @@ export const tagResponseStub = {
     color: '#000000',
     name: 'Tag1',
     value: 'Tag1',
+    isHidden: false,
   }),
 };

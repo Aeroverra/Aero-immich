@@ -8,6 +8,7 @@ import 'package:immich_mobile/extensions/platform_extensions.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/gallery_permission.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
@@ -83,6 +84,7 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
 
       await _ref.read(serverInfoProvider.notifier).getServerVersion();
       await _ref.read(privateModeProvider.notifier).refresh();
+      await _ref.read(activeViewProvider.notifier).refresh();
     }
 
     if (!_shouldContinueOperation()) {
@@ -217,8 +219,9 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
 
       _ref.read(websocketProvider.notifier).disconnect();
 
-      // Private mode never survives the app leaving the foreground
+      // Private mode never survives the app leaving the foreground, and neither does a switched view
       unawaited(_ref.read(privateModeProvider.notifier).disable());
+      _ref.read(activeViewProvider.notifier).resetToDefault();
     }
 
     return LogService.I.flush().catchError((_) {});

@@ -646,6 +646,49 @@ where
   "person"."ownerId" = $1
   and "person"."personGroupId" = $2
 
+-- PersonRepository.isCoverAssetInView
+select
+  "asset"."id"
+from
+  "person"
+  inner join "asset_face" on "asset_face"."id" = "person"."faceAssetId"
+  inner join "asset" on "asset"."id" = "asset_face"."assetId"
+where
+  "person"."ownerId" = $1
+  and "person"."personGroupId" = $2
+  and (
+    (
+      not exists (
+        select
+        from
+          "tag_asset"
+          inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+        where
+          "tag_asset"."assetId" = "asset"."id"
+          and "tag"."userId" = $3
+      )
+      or exists (
+        select
+        from
+          "tag_asset"
+          inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+        where
+          "tag_asset"."assetId" = "asset"."id"
+          and "tag_closure"."id_ancestor" = any ($4::uuid[])
+      )
+    )
+    and not exists (
+      select
+      from
+        "tag_asset"
+        inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+      where
+        "tag_asset"."assetId" = "asset"."id"
+        and "tag_closure"."id_ancestor" = any ($5::uuid[])
+    )
+    and "asset"."isPrivate" = $6
+  )
+
 -- PersonRepository.getLatestFaceDate
 select
   max("asset_job_status"."facesRecognizedAt")::text as "latestDate"

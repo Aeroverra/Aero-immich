@@ -28,6 +28,7 @@ class SyncApiRepository {
     Future<void> Function(List<SyncEvent>, Function() abort, Function() reset) onData, {
     required SemVer serverVersion,
     bool supportsStackSource = false,
+    bool supportsCustomViews = false,
     Function()? onReset,
     int batchSize = kSyncEventBatchSize,
     http.Client? httpClient,
@@ -66,9 +67,17 @@ class SyncApiRepository {
           SyncRequestType.peopleV1,
           serverVersion.supports(.assetFacesV2) ? SyncRequestType.assetFacesV2 : SyncRequestType.assetFacesV1,
           if (serverVersion.supports(.assetOcr)) SyncRequestType.assetOcrV1,
+          if (supportsCustomViews) ...[
+            SyncRequestType.tagsV1,
+            SyncRequestType.tagAssetsV1,
+            SyncRequestType.viewsV1,
+            SyncRequestType.viewTagsV1,
+          ],
         ],
         // this build understands private assets; without the flag the server withholds them
         includePrivate: const Optional.present(true),
+        // this build applies custom views locally; without the flag the server only sends the default view
+        includeViews: supportsCustomViews ? const Optional.present(true) : const Optional.absent(),
       ).toJson(),
     );
 
@@ -194,6 +203,14 @@ const _kResponseMap = <SyncEntityType, Function(Object)>{
   SyncEntityType.partnerStackBackfillV1: SyncStackV1.fromJson,
   SyncEntityType.partnerStackBackfillV2: SyncStackV2.fromJson,
   SyncEntityType.partnerStackDeleteV1: SyncStackDeleteV1.fromJson,
+  SyncEntityType.tagV1: SyncTagV1.fromJson,
+  SyncEntityType.tagDeleteV1: SyncTagDeleteV1.fromJson,
+  SyncEntityType.tagAssetV1: SyncTagAssetV1.fromJson,
+  SyncEntityType.tagAssetDeleteV1: SyncTagAssetDeleteV1.fromJson,
+  SyncEntityType.viewV1: SyncViewV1.fromJson,
+  SyncEntityType.viewDeleteV1: SyncViewDeleteV1.fromJson,
+  SyncEntityType.viewTagV1: SyncViewTagV1.fromJson,
+  SyncEntityType.viewTagDeleteV1: SyncViewTagDeleteV1.fromJson,
   SyncEntityType.userMetadataV1: SyncUserMetadataV1.fromJson,
   SyncEntityType.userMetadataDeleteV1: SyncUserMetadataDeleteV1.fromJson,
   SyncEntityType.personV1: SyncPersonV1.fromJson,

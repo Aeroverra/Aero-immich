@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/presentation/widgets/feature_message/feature_message_dialog.widget.dart';
 import 'package:immich_mobile/presentation/widgets/memory/memory_lane.widget.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/group_auto_stacks_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/feature_message.provider.dart';
@@ -48,7 +49,12 @@ class _MainTimelinePageState extends ConsumerState<MainTimelinePage> {
   Widget build(BuildContext context) {
     final hasMemories = ref.watch(memoryLaneProvider.select((state) => state.value?.isNotEmpty ?? false));
     return Timeline(
-      appBar: const ImmichSliverAppBar(floating: true, pinned: false, snap: false, actions: [GroupAutoStacksButton()]),
+      appBar: const ImmichSliverAppBar(
+        floating: true,
+        pinned: false,
+        snap: false,
+        actions: [CustomViewSwitcherButton(), GroupAutoStacksButton()],
+      ),
       topSliverWidget: const SliverToBoxAdapter(child: MemoryLane()),
       topSliverWidgetHeight: hasMemories ? 200 : 0,
       showStorageIndicator: true,

@@ -68,9 +68,10 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
         .mergedBucket(
           userIds: userIds,
           groupBy: groupBy.index,
-          privateMode: privateFilter.showsOwnPrivate,
-          currentUserId: privateFilter.userId ?? '',
           groupAutoStacks: groupAutoStacks,
+          viewActive: privateFilter.restrictingView != null,
+          member_filter: (_, _, member) => member.privateFilter(privateFilter),
+          asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )
         .map((row) {
           final date = row.bucketDate.truncateDate(groupBy);
@@ -90,9 +91,10 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
         .mergedAsset(
           userIds: userIds,
           limit: (_) => Limit(count, offset),
-          privateMode: privateFilter.showsOwnPrivate,
-          currentUserId: privateFilter.userId ?? '',
           groupAutoStacks: groupAutoStacks,
+          viewActive: privateFilter.restrictingView != null,
+          member_filter: (_, _, member) => member.privateFilter(privateFilter),
+          asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )
         .map(
           (row) => row.remoteId != null && row.ownerId != null
@@ -423,6 +425,28 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     origin: TimelineOrigin.recentlyAdded,
     groupBy: groupBy,
     sortBy: SortAssetsBy.uploaded,
+    privateFilter: privateFilter,
+  );
+
+  /// The user's assets carrying any of [tagIds] (pass a tag with its descendants to include child tags), in the
+  /// timeline or the archive
+  TimelineQuery tagged(
+    String userId,
+    Set<String> tagIds,
+    GroupAssetsBy groupBy, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => _remoteQueryBuilder(
+    filter: (row) =>
+        row.deletedAt.isNull() &
+        row.ownerId.equals(userId) &
+        (row.visibility.equalsValue(AssetVisibility.timeline) | row.visibility.equalsValue(AssetVisibility.archive)) &
+        existsQuery(
+          _db.tagAssetEntity.selectOnly()
+            ..addColumns([_db.tagAssetEntity.tagId])
+            ..where(_db.tagAssetEntity.assetId.equalsExp(row.id) & _db.tagAssetEntity.tagId.isIn(tagIds)),
+        ),
+    groupBy: groupBy,
+    origin: TimelineOrigin.tag,
     privateFilter: privateFilter,
   );
 
