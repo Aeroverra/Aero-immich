@@ -130,6 +130,7 @@ export const setupBaseMockApiRoutes = async (context: BrowserContext, adminUserI
         oauth: false,
         oauthAutoLaunch: false,
         ocr: false,
+        faceAttributes: false,
         passwordLogin: true,
         configFile: false,
         email: false,

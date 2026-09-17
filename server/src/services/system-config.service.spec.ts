@@ -42,6 +42,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     [QueueName.VideoConversion]: { concurrency: 1 },
     [QueueName.Notification]: { concurrency: 5 },
     [QueueName.Ocr]: { concurrency: 1 },
+    [QueueName.FaceAttributes]: { concurrency: 2 },
     [QueueName.Workflow]: { concurrency: 5 },
     [QueueName.IntegrityCheck]: { concurrency: 1 },
     [QueueName.Editor]: { concurrency: 2 },
@@ -128,6 +129,10 @@ const updatedConfig = Object.freeze<SystemConfig>({
       minScore: 0.7,
       maxDistance: 0.5,
       minFaces: 3,
+    },
+    faceAttributes: {
+      enabled: true,
+      modelName: 'face_landmarker',
     },
     ocr: {
       enabled: true,
