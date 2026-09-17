@@ -3,10 +3,13 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/tag.model.dart';
 import 'package:immich_mobile/domain/services/tag.service.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 
 class TagNotifier extends AsyncNotifier<Set<Tag>> {
   @override
   Future<Set<Tag>> build() async {
+    // the server leaves hidden tags out while private mode is locked
+    ref.watch(privateModeProvider);
     return ref.watch(tagServiceProvider).getAllTags();
   }
 

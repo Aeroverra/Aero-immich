@@ -15,6 +15,7 @@ import {
 import { JobName, JobStatus, Permission, QueueName } from 'src/enum';
 import { TagAssetTable } from 'src/schema/tables/tag-asset.table';
 import { BaseService } from 'src/services/base.service';
+import { isPrivateMode } from 'src/utils/access';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
 import { updateLockedColumns } from 'src/utils/database';
 import { findOrFail } from 'src/utils/misc';
@@ -23,7 +24,7 @@ import { upsertTags } from 'src/utils/tag';
 @Injectable()
 export class TagService extends BaseService {
   async getAll(auth: AuthDto) {
-    const tags = await this.tagRepository.getAll(auth.user.id);
+    const tags = await this.tagRepository.getAll(auth.user.id, { withHidden: isPrivateMode(auth) });
     return tags.map((tag) => mapTag(tag));
   }
 
@@ -50,8 +51,8 @@ export class TagService extends BaseService {
       throw new BadRequestException(`A tag with that name already exists`);
     }
 
-    const { color } = dto;
-    const tag = await this.tagRepository.create({ userId, value, color, parentId: parent?.id });
+    const { color, isHidden } = dto;
+    const tag = await this.tagRepository.create({ userId, value, color, parentId: parent?.id, isHidden });
 
     return mapTag(tag);
   }
@@ -59,7 +60,7 @@ export class TagService extends BaseService {
   async update(auth: AuthDto, id: string, dto: TagUpdateDto): Promise<TagResponseDto> {
     await this.requireAccess({ auth, permission: Permission.TagUpdate, ids: [id] });
 
-    const { name, color } = dto;
+    const { name, color, isHidden } = dto;
     const existing = await this.findOrFail(id);
 
     let value;
@@ -71,7 +72,7 @@ export class TagService extends BaseService {
       value = existing.value;
     }
 
-    const tag = await this.tagRepository.update(id, { value, color });
+    const tag = await this.tagRepository.update(id, { value, color, isHidden });
     return mapTag(tag);
   }
 

@@ -3,6 +3,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/server_capability.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
@@ -27,7 +29,49 @@ enum SyncMigrationTask {
   v20260128_ResetAssetV1, // Asset v2.5.0 has width and height information that were edited assets.
   v20260597_ResetAssetV1AssetV2, // Assets didn't include the uploadedAt column.
   v20260701_ResetAlbumsV1, // Album user migration dropped the owner. Sync fresh albums from the server to re-populate them.
+  // Fork: the first sync that asks for every asset (includeViews) after syncing without it. The server withheld the
+  // assets its default view hides from this session, and their checkpoints already moved past them.
+  aero_customViews_ResetWithheldAssets,
 }
+
+/// The upsert streams whose rows the server withholds from clients that sync without includeViews
+@visibleForTesting
+const kCustomViewWithheldTypes = [
+  SyncEntityType.assetV1,
+  SyncEntityType.assetV2,
+  SyncEntityType.partnerAssetV1,
+  SyncEntityType.partnerAssetV2,
+  SyncEntityType.partnerAssetBackfillV1,
+  SyncEntityType.partnerAssetBackfillV2,
+  SyncEntityType.assetExifV1,
+  SyncEntityType.partnerAssetExifV1,
+  SyncEntityType.partnerAssetExifBackfillV1,
+  SyncEntityType.albumAssetCreateV1,
+  SyncEntityType.albumAssetCreateV2,
+  SyncEntityType.albumAssetUpdateV1,
+  SyncEntityType.albumAssetUpdateV2,
+  SyncEntityType.albumAssetBackfillV1,
+  SyncEntityType.albumAssetBackfillV2,
+  SyncEntityType.albumAssetExifCreateV1,
+  SyncEntityType.albumAssetExifUpdateV1,
+  SyncEntityType.albumAssetExifBackfillV1,
+  SyncEntityType.albumToAssetV1,
+  SyncEntityType.albumToAssetBackfillV1,
+  SyncEntityType.memoryV1,
+  SyncEntityType.memoryToAssetV1,
+  SyncEntityType.stackV1,
+  SyncEntityType.stackV2,
+  SyncEntityType.partnerStackV1,
+  SyncEntityType.partnerStackV2,
+  SyncEntityType.partnerStackBackfillV1,
+  SyncEntityType.partnerStackBackfillV2,
+  SyncEntityType.personV1,
+  SyncEntityType.assetFaceV1,
+  SyncEntityType.assetFaceV2,
+  SyncEntityType.assetOcrV1,
+  SyncEntityType.assetMetadataV1,
+  SyncEntityType.assetEditV1,
+];
 
 class SyncStreamService {
   final Logger _logger = Logger('SyncStreamService');
@@ -56,15 +100,26 @@ class SyncStreamService {
 
   bool get isCancelled => _cancellation?.isCompleted ?? false;
 
-  /// Whether the server reports the stackSource feature; stock servers do not know StacksV2
-  Future<bool> _supportsStackSource() async {
+  /// The fork features the server reports: stackSource (stock servers do not know StacksV2) and customViews (stock
+  /// servers do not know the tag and view streams)
+  Future<({bool stackSource, bool customViews})> _serverFeatures() async {
     try {
       final features = await _api.serverInfoApi.getServerFeatures();
-      return features?.stackSource.orElse(null) ?? false;
+      return (
+        stackSource: features?.stackSource.orElse(null) ?? false,
+        customViews: features?.customViews.orElse(null) ?? false,
+      );
     } catch (error, stack) {
-      _logger.warning("Cannot read the server features, syncing stacks without their source", error, stack);
-      return false;
+      _logger.warning("Cannot read the server features, syncing without the fork streams", error, stack);
+      return (stackSource: false, customViews: false);
     }
+  }
+
+  /// Whether the user has a default view, so an earlier sync without includeViews may have missed assets. Throws when
+  /// the views cannot be read.
+  Future<bool> _hasDefaultView() async {
+    final views = await _api.customViewsApi.getCustomViews();
+    return views?.any((view) => view.isDefault) ?? false;
   }
 
   Future<bool> sync() async {
@@ -76,12 +131,14 @@ class SyncStreamService {
     }
 
     final serverSemVer = SemVer(major: serverVersion.major, minor: serverVersion.minor, patch: serverVersion.patch_);
-    final supportsStackSource = await _supportsStackSource();
+    final features = await _serverFeatures();
+    final supportsStackSource = features.stackSource;
+    final supportsCustomViews = features.customViews;
 
     final value = Store.get(StoreKey.syncMigrationStatus, "[]");
     final migrations = (jsonDecode(value) as List).cast<String>();
     int previousLength = migrations.length;
-    await _runPreSyncTasks(migrations, serverSemVer);
+    await _runPreSyncTasks(migrations, serverSemVer, supportsCustomViews: supportsCustomViews);
 
     if (migrations.length != previousLength) {
       _logger.info("Updated pre-sync migration status: $migrations");
@@ -94,6 +151,7 @@ class SyncStreamService {
       _handleEvents,
       serverVersion: serverSemVer,
       supportsStackSource: supportsStackSource,
+      supportsCustomViews: supportsCustomViews,
       onReset: () => shouldReset = true,
       abortSignal: _cancellation?.future,
     );
@@ -103,6 +161,7 @@ class SyncStreamService {
         _handleEvents,
         serverVersion: serverSemVer,
         supportsStackSource: supportsStackSource,
+        supportsCustomViews: supportsCustomViews,
         abortSignal: _cancellation?.future,
       );
     }
@@ -118,7 +177,20 @@ class SyncStreamService {
     return true;
   }
 
-  Future<void> _runPreSyncTasks(List<String> migrations, SemVer semVer) async {
+  Future<void> _runPreSyncTasks(List<String> migrations, SemVer semVer, {bool supportsCustomViews = false}) async {
+    if (supportsCustomViews && !migrations.contains(SyncMigrationTask.aero_customViews_ResetWithheldAssets.name)) {
+      try {
+        if (await _hasDefaultView()) {
+          _logger.info("Running pre-sync task: aero_customViews_ResetWithheldAssets");
+          await _syncApiRepository.deleteSyncAck(kCustomViewWithheldTypes);
+        }
+        migrations.add(SyncMigrationTask.aero_customViews_ResetWithheldAssets.name);
+      } catch (error, stack) {
+        // retried on the next sync
+        _logger.warning("Cannot check for a default view before the first custom views sync", error, stack);
+      }
+    }
+
     if (!migrations.contains(SyncMigrationTask.v20260701_ResetAlbumsV1.name)) {
       _logger.info("Running pre-sync task: v20260701_ResetAlbumsV1");
       await _syncApiRepository.deleteSyncAck([SyncEntityType.albumV1]);
@@ -349,6 +421,22 @@ class SyncStreamService {
         return _syncStreamRepository.updateAssetOcrV1(data.cast());
       case SyncEntityType.assetOcrDeleteV1:
         return _syncStreamRepository.deleteAssetOcrV1(data.cast());
+      case SyncEntityType.tagV1:
+        return _syncStreamRepository.updateTagsV1(data.cast());
+      case SyncEntityType.tagDeleteV1:
+        return _syncStreamRepository.deleteTagsV1(data.cast());
+      case SyncEntityType.tagAssetV1:
+        return _syncStreamRepository.updateTagAssetsV1(data.cast());
+      case SyncEntityType.tagAssetDeleteV1:
+        return _syncStreamRepository.deleteTagAssetsV1(data.cast());
+      case SyncEntityType.viewV1:
+        return _syncStreamRepository.updateViewsV1(data.cast());
+      case SyncEntityType.viewDeleteV1:
+        return _syncStreamRepository.deleteViewsV1(data.cast());
+      case SyncEntityType.viewTagV1:
+        return _syncStreamRepository.updateViewTagsV1(data.cast());
+      case SyncEntityType.viewTagDeleteV1:
+        return _syncStreamRepository.deleteViewTagsV1(data.cast());
     }
   }
 
