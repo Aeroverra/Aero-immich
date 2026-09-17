@@ -1,9 +1,26 @@
 import { Kysely } from 'kysely';
-import { SyncEntityType, SyncRequestType, ViewAccess, ViewPrivateAssets, ViewTagMode } from 'src/enum';
+import { AuthDto } from 'src/dtos/auth.dto';
+import {
+  AssetType,
+  AssetVisibility,
+  SyncEntityType,
+  SyncRequestType,
+  ViewAccess,
+  ViewPrivateAssets,
+  ViewTagMode,
+} from 'src/enum';
+import { AccessRepository } from 'src/repositories/access.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { CustomViewRepository } from 'src/repositories/custom-view.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
+import { SessionRepository } from 'src/repositories/session.repository';
 import { TagRepository } from 'src/repositories/tag.repository';
+import { UserRepository } from 'src/repositories/user.repository';
 import { DB } from 'src/schema';
-import { SyncTestContext } from 'test/medium.factory';
+import { CustomViewService } from 'src/services/custom-view.service';
+import { WITHHELD_ACK_INTERVAL } from 'src/services/sync.service';
+import { newMediumService, SyncTestContext } from 'test/medium.factory';
+import { factory } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
 
 let defaultDatabase: Kysely<DB>;
@@ -36,6 +53,57 @@ const assetIds = (response: Array<{ type: string; data: unknown }>, type: SyncEn
     .filter((item) => item.type === type)
     .map((item) => (item.data as { id?: string; assetId?: string }).id ?? (item.data as { assetId: string }).assetId)
     .toSorted();
+
+type SyncResponse = Array<{ type: string; ack: string; data: unknown }>;
+
+/**
+ * How the mobile apps consume a response: every run of consecutive events of one type is one batch, handled in one
+ * database transaction and acknowledged with its last ack in one request.
+ */
+const toClientBatches = (response: SyncResponse) => {
+  const batches: Array<{ type: string; count: number; ack: string }> = [];
+  for (const { type, ack } of response) {
+    const last = batches.at(-1);
+    if (last?.type === type) {
+      last.count++;
+      last.ack = ack;
+    } else {
+      batches.push({ type, count: 1, ack });
+    }
+  }
+  return batches;
+};
+
+const clientAck = async (ctx: SyncTestContext, auth: AuthDto, response: SyncResponse) => {
+  for (const { ack } of toClientBatches(response)) {
+    await ctx.sut.setAcks(auth, { acks: [ack] });
+  }
+};
+
+/** the views endpoints for the user of a sync test, with private mode unlocked as editing views requires */
+const newViewService = (userId: string) => {
+  const { sut } = newMediumService(CustomViewService, {
+    database: defaultDatabase,
+    real: [AccessRepository, CryptoRepository, CustomViewRepository, SessionRepository, TagRepository, UserRepository],
+    mock: [LoggingRepository],
+  });
+  const viewAuth = factory.auth({ user: { id: userId }, session: { privateMode: true } });
+  return { views: sut, viewAuth };
+};
+
+/** a sync user with an Unreviewed tag and untagged assets that have exif */
+const newTaggedLibrary = async (count: number) => {
+  const { auth, user, ctx } = await setup();
+  const { views, viewAuth } = newViewService(user.id);
+  const unreviewed = await ctx.get(TagRepository).create({ userId: user.id, value: 'Unreviewed' });
+  const assets = [];
+  for (let i = 0; i < count; i++) {
+    const { asset } = await ctx.newAsset({ ownerId: user.id });
+    await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+    assets.push(asset);
+  }
+  return { auth, user, ctx, views, viewAuth, unreviewed, assets };
+};
 
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
@@ -268,5 +336,219 @@ describe(SyncRequestType.ViewsV1, () => {
       expect.objectContaining({ type: SyncEntityType.ViewDeleteV1, data: { viewId } }),
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
+  });
+  describe('default view changes for a client without the views flag', () => {
+    const types = [SyncRequestType.AssetsV2, SyncRequestType.AssetExifsV1];
+
+    it('should delete assets tagged before the default view rule was saved, in one batch', async () => {
+      const { auth, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(5);
+      const assetIdList = assets.map(({ id }) => id).toSorted();
+
+      // the live order: the assets are tagged, the official app syncs them while they are still visible...
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: assetIdList });
+      await clientAck(ctx, auth, await ctx.syncStream(auth, types));
+      await ctx.assertSyncIsComplete(auth, types);
+
+      // ...and only then the default view starts excluding the tag
+      const view = await views.create(viewAuth, { name: 'Default', isDefault: true, includeAll: true });
+      await ctx.assertSyncIsComplete(auth, types);
+      await views.update(viewAuth, view.id, { excludeTagIds: [unreviewed.id] });
+
+      const response = await ctx.syncStream(auth, types);
+      expect(assetIds(response, SyncEntityType.AssetDeleteV1)).toEqual(assetIdList);
+      expect(assetIds(response, SyncEntityType.AssetV2)).toEqual([]);
+      // one delete batch and one ack, instead of a delete and an ack (two batches, two requests) per asset
+      expect(toClientBatches(response).map(({ type, count }) => [type, count])).toEqual([
+        [SyncEntityType.AssetDeleteV1, 5],
+        [SyncEntityType.SyncAckV1, 1],
+        [SyncEntityType.SyncCompleteV1, 1],
+      ]);
+      await clientAck(ctx, auth, response);
+      await ctx.assertSyncIsComplete(auth, types);
+
+      // removing the rule brings them back, exif included
+      await views.update(viewAuth, view.id, { excludeTagIds: [] });
+      const returning = await ctx.syncStream(auth, types);
+      expect(assetIds(returning, SyncEntityType.AssetV2)).toEqual(assetIdList);
+      expect(assetIds(returning, SyncEntityType.AssetExifV1)).toEqual(assetIdList);
+      expect(assetIds(returning, SyncEntityType.AssetDeleteV1)).toEqual([]);
+      await clientAck(ctx, auth, returning);
+      await ctx.assertSyncIsComplete(auth, types);
+    });
+
+    it('should delete assets tagged after the default view rule was saved', async () => {
+      const { auth, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(3);
+      const assetIdList = assets.map(({ id }) => id).toSorted();
+      await clientAck(ctx, auth, await ctx.syncStream(auth, types));
+      await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+      await ctx.assertSyncIsComplete(auth, types);
+
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: assetIdList });
+      const response = await ctx.syncStream(auth, types);
+      expect(assetIds(response, SyncEntityType.AssetDeleteV1)).toEqual(assetIdList);
+      await clientAck(ctx, auth, response);
+      await ctx.assertSyncIsComplete(auth, types);
+    });
+
+    it('should re-send assets when the default view is unset or deleted, and delete them when it is set', async () => {
+      const { auth, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(2);
+      const assetIdList = assets.map(({ id }) => id).toSorted();
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: assetIdList });
+      const view = await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+      await clientAck(ctx, auth, await ctx.syncStream(auth, types));
+      await ctx.assertSyncIsComplete(auth, types);
+
+      await views.update(viewAuth, view.id, { isDefault: false });
+      const unset = await ctx.syncStream(auth, types);
+      expect(assetIds(unset, SyncEntityType.AssetV2)).toEqual(assetIdList);
+      await clientAck(ctx, auth, unset);
+
+      await views.update(viewAuth, view.id, { isDefault: true });
+      const set = await ctx.syncStream(auth, types);
+      expect(assetIds(set, SyncEntityType.AssetDeleteV1)).toEqual(assetIdList);
+      await clientAck(ctx, auth, set);
+
+      await views.delete(viewAuth, view.id);
+      const deleted = await ctx.syncStream(auth, types);
+      expect(assetIds(deleted, SyncEntityType.AssetV2)).toEqual(assetIdList);
+      await clientAck(ctx, auth, deleted);
+      await ctx.assertSyncIsComplete(auth, types);
+    });
+
+    it('should still move the checkpoint during a long run of withheld assets', async () => {
+      const { auth, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(WITHHELD_ACK_INTERVAL + 2);
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: assets.map(({ id }) => id) });
+      await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+
+      const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(toClientBatches(response).map(({ type, count }) => [type, count])).toEqual([
+        [SyncEntityType.AssetDeleteV1, WITHHELD_ACK_INTERVAL],
+        [SyncEntityType.SyncAckV1, 1],
+        [SyncEntityType.AssetDeleteV1, 2],
+        [SyncEntityType.SyncAckV1, 1],
+        [SyncEntityType.SyncCompleteV1, 1],
+      ]);
+      await clientAck(ctx, auth, response);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+    });
+
+    it('should keep checkpoints moving forward when withheld and visible assets alternate', async () => {
+      const { auth, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(4);
+      await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: [assets[0].id, assets[2].id] });
+      // touching them one by one interleaves hidden and visible assets in the stream
+      for (const asset of assets) {
+        await ctx.database.updateTable('asset').set({ updatedAt: new Date() }).where('id', '=', asset.id).execute();
+        // update ids are only ordered across milliseconds
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+
+      const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(response.map(({ type }) => type)).toEqual([
+        SyncEntityType.AssetDeleteV1,
+        SyncEntityType.SyncAckV1,
+        SyncEntityType.AssetV2,
+        SyncEntityType.AssetDeleteV1,
+        SyncEntityType.SyncAckV1,
+        SyncEntityType.AssetV2,
+        SyncEntityType.SyncCompleteV1,
+      ]);
+      await clientAck(ctx, auth, response);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+    });
+
+    it('should not lose the ack of a withheld run when the next stream starts with a skipped row', async () => {
+      const { auth, user, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(3);
+      const assetIdList = assets.map(({ id }) => id);
+      const { person } = await ctx.newPerson({ ownerId: user.id });
+      for (const assetId of assetIdList) {
+        await ctx.newAssetFace({ assetId, personGroupId: person.personGroupId });
+      }
+      await ctx.newAlbum({ ownerId: user.id }, assetIdList);
+      const allTypes = [
+        SyncRequestType.AssetsV2,
+        SyncRequestType.AlbumsV2,
+        SyncRequestType.AlbumAssetsV2,
+        SyncRequestType.AlbumToAssetsV1,
+        SyncRequestType.AssetExifsV1,
+        SyncRequestType.PeopleV1,
+        SyncRequestType.AssetFacesV2,
+      ];
+      await clientAck(ctx, auth, await ctx.syncStream(auth, allTypes));
+      await ctx.assertSyncIsComplete(auth, allTypes);
+
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: assetIdList });
+      await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+
+      const response = await ctx.syncStream(auth, allTypes);
+      const batches = toClientBatches(response);
+      // checkpoint events of different streams never share a batch, where only the last ack would be kept
+      for (const [index, batch] of batches.entries()) {
+        if (index > 0) {
+          expect(batch.type).not.toEqual(batches[index - 1].type);
+        }
+      }
+      await clientAck(ctx, auth, response);
+      await ctx.assertSyncIsComplete(auth, allTypes);
+    });
+
+    it('should withhold the motion part of a live photo together with its still', async () => {
+      const { auth, user, ctx, views, viewAuth, unreviewed } = await newTaggedLibrary(0);
+      const { asset: motion } = await ctx.newAsset({
+        ownerId: user.id,
+        type: AssetType.Video,
+        visibility: AssetVisibility.Hidden,
+      });
+      const { asset: still } = await ctx.newAsset({ ownerId: user.id, livePhotoVideoId: motion.id });
+      const { asset: otherMotion } = await ctx.newAsset({
+        ownerId: user.id,
+        type: AssetType.Video,
+        visibility: AssetVisibility.Hidden,
+      });
+      await ctx.newAsset({ ownerId: user.id, livePhotoVideoId: otherMotion.id });
+      await views.create(viewAuth, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [unreviewed.id],
+      });
+      await clientAck(ctx, auth, await ctx.syncStream(auth, [SyncRequestType.AssetsV2]));
+
+      // tagging only the still takes its untagged motion part along
+      await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: [still.id] });
+      const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(assetIds(response, SyncEntityType.AssetDeleteV1)).toEqual([still.id, motion.id].toSorted());
+      expect(assetIds(response, SyncEntityType.AssetV2)).toEqual([]);
+      await clientAck(ctx, auth, response);
+
+      await ctx.get(TagRepository).removeAssetIds(unreviewed.id, [still.id]);
+      const returning = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+      expect(assetIds(returning, SyncEntityType.AssetV2)).toEqual([still.id, motion.id].toSorted());
+    });
   });
 });
