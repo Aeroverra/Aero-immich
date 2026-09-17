@@ -7,7 +7,7 @@
   import { handleError } from '$lib/utils/handle-error';
   import { ViewAccess, type CustomViewResponseDto } from '@immich/sdk';
   import { modalManager } from '@immich/ui';
-  import { mdiCheck, mdiFilterVariant, mdiLockOutline, mdiShieldLockOutline } from '@mdi/js';
+  import { mdiCheck, mdiEyeOutline, mdiFilterVariant, mdiLockOutline, mdiShieldLockOutline } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
 
@@ -24,6 +24,7 @@
     if (view.access === ViewAccess.Private) {
       return mdiShieldLockOutline;
     }
+    return mdiEyeOutline;
   };
 
   const handleSwitch = async (view: CustomViewResponseDto | null) => {
@@ -64,11 +65,12 @@
       align="bottom-right"
       direction="left"
       hideContent
+      buttonClass="max-sm:size-8"
     >
       <MenuOption
         text={viewManager.defaultView?.name ?? $t('custom_view_all_photos')}
         subtitle={$t('custom_view_default')}
-        icon={isFiltered ? undefined : mdiCheck}
+        icon={isFiltered ? mdiEyeOutline : mdiCheck}
         onClick={() => handleSwitch(viewManager.defaultView ?? null)}
       />
       {#each viewManager.otherViews as view (view.id)}
