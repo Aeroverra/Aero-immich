@@ -1,4 +1,5 @@
 import { Selectable } from 'kysely';
+import { StackSource } from 'src/enum';
 import { StackTable } from 'src/schema/tables/stack.table';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { build } from 'test/factories/builder.factory';
@@ -24,6 +25,7 @@ export class StackFactory {
       id: newUuid(),
       ownerId: newUuid(),
       primaryAssetId: newUuid(),
+      source: StackSource.Manual,
       updatedAt: newDate(),
       updateId: newUuidV7(),
       ...dto,
