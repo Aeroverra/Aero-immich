@@ -25,6 +25,7 @@ import {
   isFacialRecognitionEnabled,
   isOcrEnabled,
   isSmartSearchEnabled,
+  isVideoFrameAnalysisEnabled,
 } from 'src/utils/misc';
 
 @Injectable()
@@ -110,6 +111,7 @@ export class ServerService extends BaseService {
       email: notifications.smtp.enabled,
       realtimeTranscoding: ffmpeg.realtime.enabled,
       stackSource: true,
+      videoFrameAnalysis: isVideoFrameAnalysisEnabled(machineLearning),
     };
   }
 
