@@ -1,16 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { ExpressionBuilder, Kysely, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
-import { columns } from 'src/database';
+import { columns, ViewFilter } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { DB } from 'src/schema';
 import { SyncAck } from 'src/types';
+import { isViewUnrestricted, viewAssetPredicate } from 'src/utils/database';
 
 export type SyncBackfillOptions = {
   nowId: string;
   afterUpdateId?: string;
   beforeUpdateId: string;
   includePrivate?: boolean;
+  /** the default view a client without the views flag is limited to; null or undefined sends everything */
+  view?: ViewFilter | null;
 };
 
 const dummyBackfillOptions = {
@@ -36,6 +39,8 @@ export type SyncQueryOptions = {
   userId: string;
   ack?: SyncAck;
   includePrivate?: boolean;
+  /** the default view a client without the views flag is limited to; null or undefined sends everything */
+  view?: ViewFilter | null;
 };
 
 const dummyQueryOptions = {
@@ -69,8 +74,12 @@ export class SyncRepository {
   person: PersonSync;
   personGroup: PersonGroupSync;
   stack: StackSync;
+  tag: TagSync;
+  tagAsset: TagAssetSync;
   user: UserSync;
   userMetadata: UserMetadataSync;
+  view: ViewSync;
+  viewTag: ViewTagSync;
 
   constructor(@InjectKysely() private db: Kysely<DB>) {
     this.album = new AlbumSync(this.db);
@@ -94,8 +103,12 @@ export class SyncRepository {
     this.person = new PersonSync(this.db);
     this.personGroup = new PersonGroupSync(this.db);
     this.stack = new StackSync(this.db);
+    this.tag = new TagSync(this.db);
+    this.tagAsset = new TagAssetSync(this.db);
     this.user = new UserSync(this.db);
     this.userMetadata = new UserMetadataSync(this.db);
+    this.view = new ViewSync(this.db);
+    this.viewTag = new ViewTagSync(this.db);
   }
 }
 
@@ -106,6 +119,31 @@ const privateAssetPredicate = (assetIdRef: string) => (eb: ExpressionBuilder<DB,
 /** rows whose album is not private; a client that did not opt in was told the album was deleted */
 const privateAlbumPredicate = (albumIdRef: string) => (eb: ExpressionBuilder<DB, any>) =>
   eb(eb.ref(albumIdRef), 'in', eb.selectFrom('album').select('album.id').where('album.isPrivate', '=', false));
+
+type ViewOptions = { view?: ViewFilter | null };
+
+/** whether the asset referenced by `assetIdRef` passes the default view the client is limited to */
+const viewAssetExists = (eb: ExpressionBuilder<DB, any>, view: ViewFilter, assetIdRef: string) =>
+  eb.exists(
+    eb
+      .selectFrom('asset as view_asset')
+      .whereRef('view_asset.id', '=', eb.ref(assetIdRef))
+      .where((eb) =>
+        viewAssetPredicate(eb, view, { assetIdRef: 'view_asset.id', isPrivateRef: 'view_asset.isPrivate' }),
+      ),
+  );
+
+/** rows of assets that pass the default view; used where the stream leaves rows out instead of withholding them */
+const viewAssetFilter =
+  ({ view }: ViewOptions, assetIdRef: string) =>
+  (eb: ExpressionBuilder<DB, any>) =>
+    isViewUnrestricted(view) ? eb.lit(true) : viewAssetExists(eb, view!, assetIdRef);
+
+/** true when the client is limited to the default view and the view hides the asset of the row */
+const isViewHidden = (eb: ExpressionBuilder<DB, any>, { view }: ViewOptions, assetIdRef: string) =>
+  isViewUnrestricted(view)
+    ? eb.lit(false).$castTo<boolean>()
+    : eb.not(viewAssetExists(eb, view!, assetIdRef)).$castTo<boolean>();
 
 /** a memory is private as a whole while it holds any private asset */
 const isMemoryPrivate = (eb: ExpressionBuilder<DB, any>, memoryIdRef: string) =>
@@ -121,7 +159,7 @@ const isMemoryPrivate = (eb: ExpressionBuilder<DB, any>, memoryIdRef: string) =>
     .$castTo<boolean>();
 
 /** the visible faces of a person on assets of the given privacy, mirroring the people list */
-const visiblePersonFaces = (eb: ExpressionBuilder<DB, 'person'>, isPrivate: boolean) =>
+const visiblePersonFaces = (eb: ExpressionBuilder<DB, 'person'>, isPrivate?: boolean) =>
   eb
     .selectFrom('asset_face')
     .innerJoin('asset', 'asset.id', 'asset_face.assetId')
@@ -131,7 +169,7 @@ const visiblePersonFaces = (eb: ExpressionBuilder<DB, 'person'>, isPrivate: bool
     .where('asset_face.deletedAt', 'is', null)
     .where('asset_face.isVisible', '=', true)
     .where('asset.deletedAt', 'is', null)
-    .where('asset.isPrivate', '=', isPrivate);
+    .$if(isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', isPrivate!));
 
 export class BaseSync {
   constructor(protected db: Kysely<DB>) {}
@@ -252,6 +290,7 @@ class AlbumAssetSync extends BaseSync {
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
       .stream();
   }
 
@@ -273,6 +312,7 @@ class AlbumAssetSync extends BaseSync {
       )
       .select('asset.updateId')
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
@@ -297,6 +337,7 @@ class AlbumAssetSync extends BaseSync {
           .as('isFavorite'),
       )
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -313,6 +354,7 @@ class AlbumAssetExifSync extends BaseSync {
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'album_asset.assetId')))
       .stream();
   }
 
@@ -329,6 +371,7 @@ class AlbumAssetExifSync extends BaseSync {
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('asset_exif.assetId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'asset_exif.assetId')))
       .stream();
   }
 
@@ -344,6 +387,7 @@ class AlbumAssetExifSync extends BaseSync {
       .leftJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'album_asset.assetId')))
       .stream();
   }
 }
@@ -355,6 +399,7 @@ class AlbumToAssetSync extends BaseSync {
       .select(['album_asset.assetId as assetId', 'album_asset.albumId as albumId', 'album_asset.updateId'])
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'album_asset.assetId')))
       .stream();
   }
 
@@ -384,6 +429,7 @@ class AlbumToAssetSync extends BaseSync {
       .select(['album_asset.assetId as assetId', 'album_asset.albumId as albumId', 'album_asset.updateId'])
       .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isViewHidden(eb, options, 'album_asset.assetId').as('isViewHidden'))
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -460,6 +506,7 @@ class AssetSync extends BaseSync {
     return this.upsertQuery('asset', options)
       .select(columns.syncAsset)
       .select('asset.updateId')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('ownerId', '=', options.userId)
       .stream();
   }
@@ -513,6 +560,18 @@ class PersonSync extends BaseSync {
             .$castTo<boolean>()
             .as('isPrivate'),
         )
+        // and hidden for a client limited to the default view when none of its visible faces passes the view
+        .select((eb) =>
+          (isViewUnrestricted(options.view)
+            ? eb.lit(false).$castTo<boolean>()
+            : eb
+                .and([
+                  eb.exists(visiblePersonFaces(eb)),
+                  eb.not(eb.exists(visiblePersonFaces(eb).where((eb) => viewAssetPredicate(eb, options.view!)))),
+                ])
+                .$castTo<boolean>()
+          ).as('isViewHidden'),
+        )
         .where('ownerId', '=', options.userId)
         .stream()
     );
@@ -559,6 +618,7 @@ class AssetFaceSync extends BaseSync {
       ])
       .innerJoin('asset', 'asset.id', 'asset_face.assetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('asset.ownerId', '=', options.userId)
       .stream();
   }
@@ -575,7 +635,8 @@ class AssetExifSync extends BaseSync {
           .selectFrom('asset')
           .select('id')
           .where('ownerId', '=', options.userId)
-          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false)),
+          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false))
+          .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!))),
       )
       .stream();
   }
@@ -601,6 +662,7 @@ class AssetEditSync extends BaseSync {
       .select([...columns.syncAssetEdit, 'asset_edit.updateId'])
       .innerJoin('asset', 'asset.id', 'asset_edit.assetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('asset.ownerId', '=', options.userId)
       .stream();
   }
@@ -662,6 +724,7 @@ class MemoryToAssetSync extends BaseSync {
       .select(['memoriesId as memoryId', 'assetId as assetId'])
       .select('updateId')
       .select((eb) => isMemoryPrivate(eb, 'memory_asset.memoriesId').as('isMemoryPrivate'))
+      .select((eb) => isViewHidden(eb, options, 'memory_asset.assetId').as('isViewHidden'))
       .where('memoriesId', 'in', (eb) => eb.selectFrom('memory').select('id').where('ownerId', '=', options.userId))
       .stream();
   }
@@ -712,6 +775,7 @@ class PartnerAssetsSync extends BaseSync {
       .select('asset.updateId')
       .where('ownerId', '=', partnerId)
       .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
       .stream();
   }
 
@@ -731,6 +795,7 @@ class PartnerAssetsSync extends BaseSync {
       .select(columns.syncPartnerAsset)
       .select(sql.val(false).as('isFavorite'))
       .select('asset.updateId')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('ownerId', 'in', (eb) =>
         eb.selectFrom('partner').select(['sharedById']).where('sharedWithId', '=', options.userId),
       )
@@ -747,6 +812,7 @@ class PartnerAssetExifsSync extends BaseSync {
       .innerJoin('asset', 'asset.id', 'asset_exif.assetId')
       .where('asset.ownerId', '=', partnerId)
       .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
       .stream();
   }
 
@@ -762,7 +828,8 @@ class PartnerAssetExifsSync extends BaseSync {
           .where('ownerId', 'in', (eb) =>
             eb.selectFrom('partner').select(['sharedById']).where('sharedWithId', '=', options.userId),
           )
-          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false)),
+          .$if(!options.includePrivate, (qb) => qb.where('isPrivate', '=', false))
+          .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!))),
       )
       .stream();
   }
@@ -788,6 +855,7 @@ class StackSync extends BaseSync {
       .select('stack.updateId')
       .innerJoin('asset', 'asset.id', 'stack.primaryAssetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('stack.ownerId', '=', options.userId)
       .stream();
   }
@@ -811,6 +879,7 @@ class PartnerStackSync extends BaseSync {
       .select('updateId')
       .where('ownerId', '=', partnerId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('stack.primaryAssetId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'stack.primaryAssetId')))
       .stream();
   }
 
@@ -821,6 +890,7 @@ class PartnerStackSync extends BaseSync {
       .select('stack.updateId')
       .innerJoin('asset', 'asset.id', 'stack.primaryAssetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('stack.ownerId', 'in', (eb) =>
         eb.selectFrom('partner').select(['sharedById']).where('sharedWithId', '=', options.userId),
       )
@@ -886,6 +956,7 @@ class AssetMetadataSync extends BaseSync {
       .select(['assetId', 'key', 'value', 'asset_metadata.updateId'])
       .innerJoin('asset', 'asset.id', 'asset_metadata.assetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('asset.ownerId', '=', userId)
       .stream();
   }
@@ -911,7 +982,122 @@ class AssetOcrSync extends BaseSync {
       .select(columns.syncAssetOcr)
       .innerJoin('asset', 'asset.id', 'asset_ocr.assetId')
       .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
       .where('asset.ownerId', '=', userId)
+      .stream();
+  }
+}
+
+class TagSync extends BaseSync {
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getDeletes(options: SyncQueryOptions) {
+    return this.auditQuery('tag_audit', options).select(['id', 'tagId']).where('userId', '=', options.userId).stream();
+  }
+
+  cleanupAuditTable(daysAgo: number) {
+    return this.auditCleanup('tag_audit', daysAgo);
+  }
+
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getUpserts(options: SyncQueryOptions) {
+    // hidden tags are sent too: the fork app hides their names locally while private mode is locked
+    return this.upsertQuery('tag', options)
+      .select([
+        'tag.id',
+        'tag.userId as ownerId',
+        'tag.value',
+        'tag.parentId',
+        'tag.color',
+        'tag.isHidden',
+        'tag.createdAt',
+        'tag.updatedAt',
+        'tag.updateId',
+      ])
+      .where('tag.userId', '=', options.userId)
+      .stream();
+  }
+}
+
+class TagAssetSync extends BaseSync {
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getDeletes(options: SyncQueryOptions) {
+    return this.auditQuery('tag_asset_audit', options)
+      .select(['id', 'tagId', 'assetId'])
+      .where('userId', '=', options.userId)
+      .stream();
+  }
+
+  cleanupAuditTable(daysAgo: number) {
+    return this.auditCleanup('tag_asset_audit', daysAgo);
+  }
+
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getUpserts(options: SyncQueryOptions) {
+    return this.upsertQuery('tag_asset', options)
+      .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+      .innerJoin('asset', 'asset.id', 'tag_asset.assetId')
+      .select(['tag_asset.tagId', 'tag_asset.assetId', 'tag_asset.updateId'])
+      .select('asset.isPrivate as isAssetPrivate')
+      .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
+      .where('tag.userId', '=', options.userId)
+      .stream();
+  }
+}
+
+class ViewSync extends BaseSync {
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getDeletes(options: SyncQueryOptions) {
+    return this.auditQuery('view_audit', options)
+      .select(['id', 'viewId'])
+      .where('userId', '=', options.userId)
+      .stream();
+  }
+
+  cleanupAuditTable(daysAgo: number) {
+    return this.auditCleanup('view_audit', daysAgo);
+  }
+
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getUpserts(options: SyncQueryOptions) {
+    return this.upsertQuery('view', options)
+      .select([
+        'view.id',
+        'view.ownerId',
+        'view.name',
+        'view.order',
+        'view.isDefault',
+        'view.access',
+        'view.includeAll',
+        'view.includeUntagged',
+        'view.privateAssets',
+        'view.createdAt',
+        'view.updatedAt',
+        'view.updateId',
+      ])
+      .where('view.ownerId', '=', options.userId)
+      .stream();
+  }
+}
+
+class ViewTagSync extends BaseSync {
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getDeletes(options: SyncQueryOptions) {
+    return this.auditQuery('view_tag_audit', options)
+      .select(['id', 'viewId', 'tagId'])
+      .where('userId', '=', options.userId)
+      .stream();
+  }
+
+  cleanupAuditTable(daysAgo: number) {
+    return this.auditCleanup('view_tag_audit', daysAgo);
+  }
+
+  @GenerateSql({ params: [dummyQueryOptions], stream: true })
+  getUpserts(options: SyncQueryOptions) {
+    return this.upsertQuery('view_tag', options)
+      .innerJoin('view', 'view.id', 'view_tag.viewId')
+      .select(['view_tag.viewId', 'view_tag.tagId', 'view_tag.mode', 'view_tag.updateId'])
+      .where('view.ownerId', '=', options.userId)
       .stream();
   }
 }
