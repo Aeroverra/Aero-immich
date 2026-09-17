@@ -166,6 +166,7 @@ export type AdminConfigJobSettingsDto = {
 export type AdminConfigJobDto = {
     backgroundTask: AdminConfigJobSettingsDto;
     editor: AdminConfigJobSettingsDto;
+    faceAttributes: AdminConfigJobSettingsDto;
     faceDetection: AdminConfigJobSettingsDto;
     integrityCheck: AdminConfigJobSettingsDto;
     library: AdminConfigJobSettingsDto;
@@ -217,6 +218,12 @@ export type AdminConfigDuplicateDetectionDto = {
     /** Maximum distance threshold for duplicate detection */
     maxDistance: number;
 };
+export type AdminConfigFaceAttributesDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Name of the model to use */
+    modelName: string;
+};
 export type AdminConfigFacialRecognitionDto = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -247,6 +254,7 @@ export type AdminConfigMachineLearningDto = {
     duplicateDetection: AdminConfigDuplicateDetectionDto;
     /** Enabled */
     enabled: boolean;
+    faceAttributes: AdminConfigFaceAttributesDto;
     facialRecognition: AdminConfigFacialRecognitionDto;
     ocr: AdminConfigOcrDto;
     /** ML service URLs */
@@ -1608,6 +1616,10 @@ export type UserConfigDuplicateDetectionDto = {
     /** Whether the task is enabled */
     enabled: boolean;
 };
+export type UserConfigFaceAttributesDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigFacialRecognitionDto = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -1623,6 +1635,7 @@ export type UserConfigMachineLearningDto = {
     duplicateDetection: UserConfigDuplicateDetectionDto;
     /** Enabled */
     enabled: boolean;
+    faceAttributes: UserConfigFaceAttributesDto;
     facialRecognition: UserConfigFacialRecognitionDto;
     ocr: UserConfigOcrDto;
 };
@@ -1807,6 +1820,7 @@ export type QueuesResponseLegacyDto = {
     backupDatabase: QueueResponseLegacyDto;
     duplicateDetection: QueueResponseLegacyDto;
     editor: QueueResponseLegacyDto;
+    faceAttributes: QueueResponseLegacyDto;
     faceDetection: QueueResponseLegacyDto;
     facialRecognition: QueueResponseLegacyDto;
     integrityCheck: QueueResponseLegacyDto;
@@ -2808,6 +2822,8 @@ export type ServerFeaturesDto = {
     duplicateDetection: boolean;
     /** Whether email notifications are enabled */
     email: boolean;
+    /** Whether face attributes and image quality analysis is enabled */
+    faceAttributes: boolean;
     /** Whether facial recognition is enabled */
     facialRecognition: boolean;
     /** Whether face import is enabled */
@@ -8344,6 +8360,7 @@ export enum QueueName {
     Notifications = "notifications",
     BackupDatabase = "backupDatabase",
     Ocr = "ocr",
+    FaceAttributes = "faceAttributes",
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
     Editor = "editor"
@@ -8388,6 +8405,8 @@ export enum JobName {
     AssetDeleteCheck = "AssetDeleteCheck",
     AssetDetectFacesQueueAll = "AssetDetectFacesQueueAll",
     AssetDetectFaces = "AssetDetectFaces",
+    AssetDetectFaceAttributesQueueAll = "AssetDetectFaceAttributesQueueAll",
+    AssetDetectFaceAttributes = "AssetDetectFaceAttributes",
     AssetDetectDuplicatesQueueAll = "AssetDetectDuplicatesQueueAll",
     AssetDetectDuplicates = "AssetDetectDuplicates",
     AssetEditThumbnailGeneration = "AssetEditThumbnailGeneration",
