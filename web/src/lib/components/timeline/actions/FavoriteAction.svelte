@@ -1,6 +1,7 @@
 <script lang="ts">
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import type { OnFavorite } from '$lib/utils/actions';
   import { handleError } from '$lib/utils/handle-error';
   import { updateAssets } from '@immich/sdk';
@@ -23,13 +24,15 @@
 
   const handleFavorite = async () => {
     const isFavorite = !removeFavorite;
+    const assets = assetMultiSelectManager.ownedAssets.filter((asset) => asset.isFavorite !== isFavorite);
+    const ids = await resolveStackSelection(assets);
+    if (!ids) {
+      return;
+    }
+
     loading = true;
 
     try {
-      const assets = assetMultiSelectManager.ownedAssets.filter((asset) => asset.isFavorite !== isFavorite);
-
-      const ids = assets.map(({ id }) => id);
-
       if (ids.length > 0) {
         await updateAssets({ assetBulkUpdateDto: { ids, isFavorite } });
       }

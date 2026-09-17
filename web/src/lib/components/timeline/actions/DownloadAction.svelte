@@ -5,6 +5,7 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { handleDownloadAsset } from '$lib/services/asset.service';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { downloadArchive } from '$lib/utils/asset-utils';
   import { getAssetInfo } from '@immich/sdk';
   import { IconButton } from '@immich/ui';
@@ -19,16 +20,20 @@
   let { filename = 'immich', menuItem = false }: Props = $props();
 
   const handleDownloadFiles = async () => {
-    const assets = assetMultiSelectManager.assets;
-    if (assets.length === 1) {
+    const assetIds = await resolveStackSelection(assetMultiSelectManager.assets);
+    if (!assetIds) {
+      return;
+    }
+
+    if (assetIds.length === 1) {
       assetMultiSelectManager.clear();
-      let asset = await getAssetInfo({ ...authManager.params, id: assets[0].id });
+      let asset = await getAssetInfo({ ...authManager.params, id: assetIds[0] });
       await handleDownloadAsset(asset, { edited: true });
       return;
     }
 
     assetMultiSelectManager.clear();
-    await downloadArchive(filename, { assetIds: assets.map((asset) => asset.id) });
+    await downloadArchive(filename, { assetIds });
   };
 </script>
 
