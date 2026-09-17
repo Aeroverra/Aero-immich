@@ -17706,6 +17706,389 @@
         "x-immich-state": "Stable"
       }
     },
+    "/views": {
+      "get": {
+        "description": "Retrieve the views of the current user. Views with private access are only listed while private mode is unlocked.",
+        "operationId": "getCustomViews",
+        "parameters": [
+          {
+            "name": "tagId",
+            "required": false,
+            "in": "query",
+            "description": "Only views with a rule on this tag or on one of its descendants (the views a tag deletion affects)",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CustomViewResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve views",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "view.read",
+        "x-immich-state": "Beta"
+      },
+      "post": {
+        "description": "Create a view from tag rules. Requires private mode, because views can name hidden tags.",
+        "operationId": "createCustomView",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomViewCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomViewResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Create a view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "view.create",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/views/active": {
+      "get": {
+        "description": "Retrieve the view that applies to the current session: the view it switched to, or the default view. API keys ignore views.",
+        "operationId": "getActiveCustomView",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomViewActiveResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve the active view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-state": "Beta"
+      },
+      "put": {
+        "description": "Switch the current session to a view, or back to the default view with null. Views with locked access require the PIN code on every switch, views with private access require private mode. A switched view falls back to the default view when private mode locks or its timeout passes.",
+        "operationId": "setActiveCustomView",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomViewActiveUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomViewActiveResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Switch the active view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-state": "Beta"
+      }
+    },
+    "/views/{id}": {
+      "delete": {
+        "description": "Delete a view. Sessions on it return to the default view. Requires private mode.",
+        "operationId": "deleteCustomView",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Delete a view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "view.delete",
+        "x-immich-state": "Beta"
+      },
+      "get": {
+        "description": "Retrieve a specific view by its ID.",
+        "operationId": "getCustomView",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomViewResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "view.read",
+        "x-immich-state": "Beta"
+      },
+      "put": {
+        "description": "Update a view. Requires private mode.",
+        "operationId": "updateCustomView",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomViewUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomViewResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update a view",
+        "tags": [
+          "Custom views"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "view.update",
+        "x-immich-state": "Beta"
+      }
+    },
     "/workflows": {
       "get": {
         "description": "Retrieve a list of workflows available to the authenticated user.",
@@ -18242,6 +18625,10 @@
     {
       "name": "Cluster groups",
       "description": "A cluster group is a set of users whose faces are clustered together, so that a person can be shared between them."
+    },
+    {
+      "name": "Custom views",
+      "description": "A custom view is a saved filter over your tags that the whole library can be switched to, such as a default view that hides unreviewed photos."
     },
     {
       "name": "Config (user)",
@@ -19988,6 +20375,12 @@
           "hasSharedLink": {
             "description": "Has shared link",
             "type": "boolean"
+          },
+          "hiddenByViewCount": {
+            "description": "Number of assets the active view hides in this album; only sent while private mode is unlocked and a view hides some of them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
           },
           "id": {
             "description": "Album ID",
@@ -22185,6 +22578,241 @@
           "x",
           "y"
         ],
+        "type": "object"
+      },
+      "CustomViewActiveResponseDto": {
+        "properties": {
+          "expiresAt": {
+            "description": "When a switched view falls back to the default view unless the session stays active",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "view": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CustomViewResponseDto"
+              }
+            ],
+            "description": "The view that applies to this session (the switched view or the default one); null when nothing is filtered",
+            "nullable": true
+          },
+          "viewId": {
+            "description": "The view this session switched to; null when the default view applies",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "expiresAt",
+          "view",
+          "viewId"
+        ],
+        "type": "object"
+      },
+      "CustomViewActiveUpdateDto": {
+        "properties": {
+          "pinCode": {
+            "description": "PIN code, required on every switch to a view with locked access",
+            "example": "123456",
+            "pattern": "^\\d{6}$",
+            "type": "string"
+          },
+          "viewId": {
+            "description": "View to switch to; null returns to the default view",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewId"
+        ],
+        "type": "object"
+      },
+      "CustomViewCreateDto": {
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ViewAccess"
+          },
+          "excludeTagIds": {
+            "description": "Exclude assets with any of these tags or their descendants; exclude wins over include",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "includeAll": {
+            "description": "Include every asset",
+            "type": "boolean"
+          },
+          "includeTagIds": {
+            "description": "Include assets with any of these tags or their descendants",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "includeUntagged": {
+            "description": "Include assets without any of your tags",
+            "type": "boolean"
+          },
+          "isDefault": {
+            "description": "Make this the default view, which applies whenever no other view is active (at most one per user)",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "View name",
+            "minLength": 1,
+            "type": "string"
+          },
+          "order": {
+            "description": "Position in the view list",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "privateAssets": {
+            "$ref": "#/components/schemas/ViewPrivateAssets"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "CustomViewResponseDto": {
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ViewAccess"
+          },
+          "createdAt": {
+            "description": "Creation date",
+            "format": "date-time",
+            "type": "string"
+          },
+          "excludeTagIds": {
+            "description": "Exclude assets with any of these tags or their descendants",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "View ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "includeAll": {
+            "description": "Include every asset",
+            "type": "boolean"
+          },
+          "includeTagIds": {
+            "description": "Include assets with any of these tags or their descendants",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "includeUntagged": {
+            "description": "Include assets without any of the owner tags",
+            "type": "boolean"
+          },
+          "isDefault": {
+            "description": "Whether this is the default view",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "View name",
+            "type": "string"
+          },
+          "order": {
+            "description": "Position in the view list",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "privateAssets": {
+            "$ref": "#/components/schemas/ViewPrivateAssets"
+          },
+          "updatedAt": {
+            "description": "Last update date",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access",
+          "createdAt",
+          "excludeTagIds",
+          "id",
+          "includeAll",
+          "includeTagIds",
+          "includeUntagged",
+          "isDefault",
+          "name",
+          "order",
+          "privateAssets",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "CustomViewUpdateDto": {
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ViewAccess"
+          },
+          "excludeTagIds": {
+            "description": "Exclude assets with any of these tags or their descendants; exclude wins over include",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "includeAll": {
+            "description": "Include every asset",
+            "type": "boolean"
+          },
+          "includeTagIds": {
+            "description": "Include assets with any of these tags or their descendants",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "includeUntagged": {
+            "description": "Include assets without any of your tags",
+            "type": "boolean"
+          },
+          "isDefault": {
+            "description": "Make this the default view, which applies whenever no other view is active (at most one per user)",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "View name",
+            "minLength": 1,
+            "type": "string"
+          },
+          "order": {
+            "description": "Position in the view list",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "privateAssets": {
+            "$ref": "#/components/schemas/ViewPrivateAssets"
+          }
+        },
         "type": "object"
       },
       "DatabaseBackupDeleteDto": {
@@ -25514,6 +26142,10 @@
           "userProfileImage.read",
           "userProfileImage.update",
           "userProfileImage.delete",
+          "view.create",
+          "view.read",
+          "view.update",
+          "view.delete",
           "queue.read",
           "queue.update",
           "queueJob.create",
@@ -27982,6 +28614,10 @@
           },
           "videoFrameAnalysis": {
             "description": "Whether enhanced video analysis of sampled frames is enabled",
+            "type": "boolean"
+          },
+          "views": {
+            "description": "Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it.",
             "type": "boolean"
           }
         },
@@ -31565,6 +32201,14 @@
           "AssetFaceDeleteV1",
           "UserMetadataV1",
           "UserMetadataDeleteV1",
+          "TagV1",
+          "TagDeleteV1",
+          "TagAssetV1",
+          "TagAssetDeleteV1",
+          "ViewV1",
+          "ViewDeleteV1",
+          "ViewTagV1",
+          "ViewTagDeleteV1",
           "SyncAckV1",
           "SyncResetV1",
           "SyncCompleteV1"
@@ -31888,7 +32532,11 @@
           "PeopleV1",
           "AssetFacesV1",
           "AssetFacesV2",
-          "UserMetadataV1"
+          "UserMetadataV1",
+          "TagsV1",
+          "TagAssetsV1",
+          "ViewsV1",
+          "ViewTagsV1"
         ],
         "type": "string"
       },
@@ -32008,6 +32656,10 @@
             "description": "Include assets marked private. Without it, private assets are left out of the stream and a delete is emitted when an asset becomes private.",
             "type": "boolean"
           },
+          "includeViews": {
+            "description": "Include every asset regardless of views; the client filters with the views it syncs. Without it, only assets that pass the user default view are sent, and a delete is emitted when an asset leaves the default view.",
+            "type": "boolean"
+          },
           "reset": {
             "description": "Reset sync state",
             "type": "boolean"
@@ -32022,6 +32674,123 @@
         },
         "required": [
           "types"
+        ],
+        "type": "object"
+      },
+      "SyncTagAssetDeleteV1": {
+        "properties": {
+          "assetId": {
+            "description": "Asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "tagId": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "tagId"
+        ],
+        "type": "object"
+      },
+      "SyncTagAssetV1": {
+        "properties": {
+          "assetId": {
+            "description": "Asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "tagId": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "tagId"
+        ],
+        "type": "object"
+      },
+      "SyncTagDeleteV1": {
+        "properties": {
+          "tagId": {
+            "description": "Tag ID; its child tags, asset links and view rules are deleted with it",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tagId"
+        ],
+        "type": "object"
+      },
+      "SyncTagV1": {
+        "properties": {
+          "color": {
+            "description": "Tag color (hex)",
+            "nullable": true,
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Created at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "id": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "isHidden": {
+            "description": "Hidden unless private mode is unlocked; children of a hidden tag are hidden too",
+            "type": "boolean"
+          },
+          "ownerId": {
+            "description": "Owner ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "parentId": {
+            "description": "Parent tag ID",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Updated at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "value": {
+            "description": "Tag value (full path)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "color",
+          "createdAt",
+          "id",
+          "isHidden",
+          "ownerId",
+          "parentId",
+          "updatedAt",
+          "value"
         ],
         "type": "object"
       },
@@ -32132,6 +32901,138 @@
           "id",
           "name",
           "profileChangedAt"
+        ],
+        "type": "object"
+      },
+      "SyncViewDeleteV1": {
+        "properties": {
+          "viewId": {
+            "description": "View ID; its tag rules are deleted with it",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "viewId"
+        ],
+        "type": "object"
+      },
+      "SyncViewTagDeleteV1": {
+        "properties": {
+          "tagId": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "viewId": {
+            "description": "View ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tagId",
+          "viewId"
+        ],
+        "type": "object"
+      },
+      "SyncViewTagV1": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ViewTagMode"
+          },
+          "tagId": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "viewId": {
+            "description": "View ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "tagId",
+          "viewId"
+        ],
+        "type": "object"
+      },
+      "SyncViewV1": {
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/ViewAccess"
+          },
+          "createdAt": {
+            "description": "Created at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "id": {
+            "description": "View ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "includeAll": {
+            "description": "Include every asset",
+            "type": "boolean"
+          },
+          "includeUntagged": {
+            "description": "Include assets without any of the owner tags",
+            "type": "boolean"
+          },
+          "isDefault": {
+            "description": "Whether this is the default view",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "View name",
+            "type": "string"
+          },
+          "order": {
+            "description": "Position in the view list",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "ownerId": {
+            "description": "Owner ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "privateAssets": {
+            "$ref": "#/components/schemas/ViewPrivateAssets"
+          },
+          "updatedAt": {
+            "description": "Updated at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access",
+          "createdAt",
+          "id",
+          "includeAll",
+          "includeUntagged",
+          "isDefault",
+          "name",
+          "order",
+          "ownerId",
+          "privateAssets",
+          "updatedAt"
         ],
         "type": "object"
       },
@@ -32255,6 +33156,10 @@
             "pattern": "^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$",
             "type": "string"
           },
+          "isHidden": {
+            "description": "Hide the tag and its children everywhere unless private mode is unlocked",
+            "type": "boolean"
+          },
           "name": {
             "description": "Tag name",
             "pattern": "^[^/]*$",
@@ -32290,6 +33195,10 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
+          "isHidden": {
+            "description": "Whether the tag is hidden unless private mode is unlocked (children of a hidden tag are hidden too)",
+            "type": "boolean"
+          },
           "name": {
             "description": "Tag name",
             "type": "string"
@@ -32311,6 +33220,7 @@
         "required": [
           "createdAt",
           "id",
+          "isHidden",
           "name",
           "updatedAt",
           "value"
@@ -32324,6 +33234,10 @@
             "nullable": true,
             "pattern": "^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$",
             "type": "string"
+          },
+          "isHidden": {
+            "description": "Hide the tag and its children everywhere unless private mode is unlocked",
+            "type": "boolean"
           },
           "name": {
             "description": "Tag name",
@@ -33897,6 +34811,32 @@
           "mp4",
           "ogg",
           "webm"
+        ],
+        "type": "string"
+      },
+      "ViewAccess": {
+        "description": "Who can switch to the view",
+        "enum": [
+          "open",
+          "locked",
+          "private"
+        ],
+        "type": "string"
+      },
+      "ViewPrivateAssets": {
+        "description": "How the view treats private assets",
+        "enum": [
+          "hide",
+          "unlocked",
+          "only"
+        ],
+        "type": "string"
+      },
+      "ViewTagMode": {
+        "description": "Whether assets with the tag are included in or excluded from the view",
+        "enum": [
+          "include",
+          "exclude"
         ],
         "type": "string"
       },
