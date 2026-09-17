@@ -1221,49 +1221,15 @@ class AlbumViewStateSync {
       .executeTakeFirst();
   }
 
-  /** the albums of the user that changed after `afterUpdateId` (all of them without it), with their state */
-  @GenerateSql({ params: [DummyValue.UUID, dummyViewFilter, DummyValue.UUID] })
-  getChanged(userId: string, view: ViewFilter, afterUpdateId?: string): Promise<AlbumViewStateRow[]> {
-    return this.db
+  /** the albums of the user that changed after `afterUpdateId`, all of them without it */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async getChangedAlbumIds(userId: string, afterUpdateId?: string) {
+    const rows = await this.db
       .selectFrom('album')
       .innerJoin('album_user', (join) =>
         join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', userId),
       )
-      .leftJoin('album_view_state', (join) =>
-        join.onRef('album_view_state.albumId', '=', 'album.id').on('album_view_state.userId', '=', userId),
-      )
-      .select([
-        'album.id as albumId',
-        'album.albumThumbnailAssetId',
-        'album_view_state.albumId as stateAlbumId',
-        'album_view_state.isHidden as stateIsHidden',
-        'album_view_state.thumbnailAssetId as stateThumbnailAssetId',
-      ])
-      .select((eb) => eb.exists(albumViewAssets(eb)).as('hasAssets'))
-      .select((eb) => eb.exists(albumViewAssets(eb).where((eb) => viewAssetPredicate(eb, view))).as('hasVisibleAssets'))
-      .select((eb) =>
-        eb
-          .case()
-          .when('album.albumThumbnailAssetId', 'is', null)
-          .then(eb.lit(null))
-          .when(
-            eb.exists(
-              albumViewAssets(eb)
-                .whereRef('asset.id', '=', 'album.albumThumbnailAssetId')
-                .where((eb) => viewAssetPredicate(eb, view)),
-            ),
-          )
-          .then(eb.ref('album.albumThumbnailAssetId'))
-          // the same replacement cover the album endpoints pick
-          .else(
-            albumViewAssets(eb)
-              .where((eb) => viewAssetPredicate(eb, view))
-              .orderBy('asset.fileCreatedAt', 'desc')
-              .limit(1),
-          )
-          .end()
-          .as('visibleThumbnailAssetId'),
-      )
+      .select('album.id')
       .$if(!!afterUpdateId, (qb) =>
         qb.where((eb) =>
           eb.or([
@@ -1297,8 +1263,63 @@ class AlbumViewStateSync {
           ]),
         ),
       )
-      .$castTo<AlbumViewStateRow>()
       .execute();
+    return rows.map(({ id }) => id);
+  }
+
+  /** the state of the albums under the view, next to the stored state */
+  @GenerateSql({ params: [DummyValue.UUID, dummyViewFilter, [DummyValue.UUID]] })
+  getStates(userId: string, view: ViewFilter, albumIds: string[]): Promise<AlbumViewStateRow[]> {
+    if (albumIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db.transaction().execute(async (tx) => {
+      // many cheap correlated subqueries add up to a planner cost where JIT compilation takes longer than the query
+      await sql`set local jit = off`.execute(tx);
+      return tx
+        .selectFrom('album')
+        .leftJoin('album_view_state', (join) =>
+          join.onRef('album_view_state.albumId', '=', 'album.id').on('album_view_state.userId', '=', userId),
+        )
+        .select([
+          'album.id as albumId',
+          'album.albumThumbnailAssetId',
+          'album_view_state.albumId as stateAlbumId',
+          'album_view_state.isHidden as stateIsHidden',
+          'album_view_state.thumbnailAssetId as stateThumbnailAssetId',
+        ])
+        .select((eb) => eb.exists(albumViewAssets(eb)).as('hasAssets'))
+        .select((eb) =>
+          eb.exists(albumViewAssets(eb).where((eb) => viewAssetPredicate(eb, view))).as('hasVisibleAssets'),
+        )
+        .select((eb) =>
+          eb
+            .case()
+            .when('album.albumThumbnailAssetId', 'is', null)
+            .then(eb.lit(null))
+            .when(
+              eb.exists(
+                albumViewAssets(eb)
+                  .whereRef('asset.id', '=', 'album.albumThumbnailAssetId')
+                  .where((eb) => viewAssetPredicate(eb, view)),
+              ),
+            )
+            .then(eb.ref('album.albumThumbnailAssetId'))
+            // the same replacement cover the album endpoints pick
+            .else(
+              albumViewAssets(eb)
+                .where((eb) => viewAssetPredicate(eb, view))
+                .orderBy('asset.fileCreatedAt', 'desc')
+                .limit(1),
+            )
+            .end()
+            .as('visibleThumbnailAssetId'),
+        )
+        .where('album.id', '=', anyUuid(albumIds))
+        .$castTo<AlbumViewStateRow>()
+        .execute();
+    });
   }
 
   /** every state row of the user, for when no default view restricts the user anymore */

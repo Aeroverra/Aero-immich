@@ -435,7 +435,8 @@ export class SyncService extends BaseService {
 
     const { updateId: next } = await repository.getNextCheckpoint();
     const checkpoint = await repository.getCheckpoint(userId);
-    const rows = await repository.getChanged(userId, view, checkpoint?.updateId);
+    const albumIds = await repository.getChangedAlbumIds(userId, checkpoint?.updateId);
+    const rows = await repository.getStates(userId, view, albumIds);
     const changes = toAlbumViewStateChanges(rows);
     await repository.update(userId, changes, next);
     if (changes.touched.length > 0) {
