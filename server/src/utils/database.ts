@@ -243,6 +243,18 @@ export const isTagHidden = (eb: ExpressionBuilder<DB, any>, tagIdRef: string) =>
       .where('hidden_tag.isHidden', '=', true),
   );
 
+/** tag columns for asset responses, where isHidden is the effective flag (a child of a hidden tag is hidden too) */
+export const withEffectiveTagColumns = (eb: ExpressionBuilder<DB, 'tag'>) =>
+  [
+    'tag.id',
+    'tag.value',
+    'tag.createdAt',
+    'tag.updatedAt',
+    'tag.color',
+    'tag.parentId',
+    isTagHidden(eb, 'tag.id').$castTo<boolean>().as('isHidden'),
+  ] as const;
+
 /**
  * Mixed-owner feeds (timeline with partners, search, map, memories, people, stats):
  * private assets are visible only to their owner and only while private mode is on.
@@ -530,9 +542,7 @@ export function withTags(eb: ExpressionBuilder<DB, 'asset'>) {
   return jsonArrayFrom(
     eb
       .selectFrom('tag')
-      .select(['tag.id', 'tag.value', 'tag.createdAt', 'tag.updatedAt', 'tag.color', 'tag.parentId'])
-      // effective flag: a tag under a hidden parent is hidden too
-      .select((eb) => isTagHidden(eb, 'tag.id').$castTo<boolean>().as('isHidden'))
+      .select(withEffectiveTagColumns)
       .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
       .whereRef('asset.id', '=', 'tag_asset.assetId'),
   ).as('tags');
