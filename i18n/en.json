@@ -1311,6 +1311,7 @@
   "iso": "ISO",
   "items_count": "{count, plural, one {# item} other {# items}}",
   "jobs": "Jobs",
+  "jump_to_time": "Jump to {time}",
   "keep": "Keep",
   "keep_albums": "Keep albums",
   "keep_albums_count": "Keeping {count} {count, plural, one {album} other {albums}}",

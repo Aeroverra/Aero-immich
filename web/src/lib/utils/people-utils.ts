@@ -1,4 +1,5 @@
 import { AssetTypeEnum, type AssetFaceResponseDto } from '@immich/sdk';
+import { Duration } from 'luxon';
 import type { Faces } from '$lib/managers/asset-viewer-manager.svelte';
 import { getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
 import { mapNormalizedRectToContent, type Rect, type Size } from '$lib/utils/container-utils';
@@ -176,4 +177,16 @@ export const zoomImageToBase64 = async (
   });
 
   return cropFace(face, faceImage, image.naturalWidth, image.naturalHeight);
+};
+
+/** a position in a video, for example where a face was found: 2:17 or 1:02:17 */
+export const formatVideoPosition = (positionMs: number) =>
+  Duration.fromMillis(Math.max(0, positionMs)).toFormat(positionMs < 3_600_000 ? 'm:ss' : 'h:mm:ss');
+
+/** the distinct positions of the faces that were found in video frames, in order */
+export const getFramePositions = (faces: Pick<AssetFaceResponseDto, 'frameTimestamp'>[]) => {
+  const positions = new Set(
+    faces.flatMap(({ frameTimestamp }) => (typeof frameTimestamp === 'number' ? [frameTimestamp] : [])),
+  );
+  return [...positions].sort((a, b) => a - b);
 };

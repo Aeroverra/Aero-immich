@@ -1,7 +1,14 @@
 import { AssetTypeEnum, SourceType, type AssetFaceResponseDto } from '@immich/sdk';
 import type { Faces } from '$lib/managers/asset-viewer-manager.svelte';
 import type { Size } from '$lib/utils/container-utils';
-import { getBoundingBox, loadVideoFrame, VIDEO_FRAME_TIMEOUT_MS, zoomImageToBase64 } from '$lib/utils/people-utils';
+import {
+  formatVideoPosition,
+  getBoundingBox,
+  getFramePositions,
+  loadVideoFrame,
+  VIDEO_FRAME_TIMEOUT_MS,
+  zoomImageToBase64,
+} from '$lib/utils/people-utils';
 
 const makeFace = (overrides: Partial<Faces> = {}): Faces => ({
   id: 'face-1',
@@ -238,5 +245,29 @@ describe('video frame face crops', () => {
 
       expect(videos).toHaveLength(0);
     });
+  });
+});
+
+describe('video frame positions', () => {
+  it.each([
+    { ms: 0, expected: '0:00' },
+    { ms: 9400, expected: '0:09' },
+    { ms: 137_000, expected: '2:17' },
+    { ms: 3_599_999, expected: '59:59' },
+    { ms: 3_737_000, expected: '1:02:17' },
+  ])('should format $ms ms as $expected', ({ ms, expected }) => {
+    expect(formatVideoPosition(ms)).toBe(expected);
+  });
+
+  it('should list the distinct frame positions in order and skip thumbnail faces', () => {
+    expect(
+      getFramePositions([
+        { frameTimestamp: 90_000 },
+        { frameTimestamp: null },
+        { frameTimestamp: 5000 },
+        { frameTimestamp: undefined },
+        { frameTimestamp: 90_000 },
+      ]),
+    ).toEqual([5000, 90_000]);
   });
 });
