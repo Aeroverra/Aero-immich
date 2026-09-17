@@ -50,7 +50,7 @@
   };
 </script>
 
-{#if featureFlagsManager.value.views && viewManager.views.length > 0}
+{#if featureFlagsManager.value.customViews && viewManager.views.length > 0}
   <div class="flex items-center" data-testid="view-switcher">
     <span
       class="hidden max-w-40 truncate text-sm font-medium lg:inline {isFiltered ? 'text-primary' : ''}"

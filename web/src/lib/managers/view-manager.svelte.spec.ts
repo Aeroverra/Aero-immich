@@ -13,7 +13,7 @@ vi.mock('$app/navigation', () => ({
 }));
 
 vi.mock(import('$lib/managers/feature-flags-manager.svelte'), () => ({
-  featureFlagsManager: { init: vi.fn(), value: { views: true } } as never,
+  featureFlagsManager: { init: vi.fn(), value: { customViews: true } } as never,
 }));
 
 const newView = (overrides: Partial<CustomViewResponseDto> = {}): CustomViewResponseDto => ({
@@ -35,7 +35,7 @@ const newView = (overrides: Partial<CustomViewResponseDto> = {}): CustomViewResp
 describe('ViewManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    featureFlagsManager.value.views = true;
+    featureFlagsManager.value.customViews = true;
     authManager.setUser(userAdminFactory.build());
     authManager.setPreferences(preferencesFactory.build());
     viewManager.reset();
@@ -43,7 +43,7 @@ describe('ViewManager', () => {
   });
 
   it('does nothing on a server without views', async () => {
-    featureFlagsManager.value.views = undefined;
+    featureFlagsManager.value.customViews = undefined;
 
     await viewManager.load();
 
