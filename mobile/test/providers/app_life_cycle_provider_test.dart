@@ -13,6 +13,7 @@ import 'package:immich_mobile/providers/app_life_cycle.provider.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/gallery_permission.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
@@ -94,6 +95,21 @@ class TestPrivateModeNotifier extends PrivateModeNotifier {
   }
 }
 
+class TestActiveViewNotifier extends ActiveViewNotifier {
+  TestActiveViewNotifier(super.ref);
+
+  int resetCount = 0;
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  void resetToDefault() {
+    resetCount++;
+    state = null;
+  }
+}
+
 class TestDriftBackupNotifier extends BackupNotifier {
   TestDriftBackupNotifier() : super(MockForegroundUploadService(), MockBackgroundUploadService(), UploadSpeedManager());
 }
@@ -165,6 +181,7 @@ void main() {
         }),
         backupProvider.overrideWith((_) => TestDriftBackupNotifier()),
         privateModeProvider.overrideWith(TestPrivateModeNotifier.new),
+        activeViewProvider.overrideWith(TestActiveViewNotifier.new),
         backgroundWorkerLockServiceProvider.overrideWithValue(lockService),
         backgroundSyncProvider.overrideWithValue(backgroundSync),
         appConfigProvider.overrideWithValue(defaultConfig),
@@ -242,6 +259,16 @@ void main() {
 
     expect(notifier.disableCount, 1);
     expect(notifier.state, isFalse);
+  });
+
+  test('pause returns to the default view', () async {
+    final notifier = container.read(activeViewProvider.notifier) as TestActiveViewNotifier;
+    notifier.state = 'view-1';
+
+    await lifeCycle.handleAppPause();
+
+    expect(notifier.resetCount, 1);
+    expect(notifier.state, isNull);
   });
 
   test('resume re-queries the memory lane', () async {
