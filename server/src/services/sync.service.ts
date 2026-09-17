@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/com
 import { Insertable } from 'kysely';
 import { DateTime, Duration } from 'luxon';
 import { Writable } from 'node:stream';
+import { setTimeout } from 'node:timers/promises';
 import { ViewFilter } from 'src/database';
 import { OnJob } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
@@ -317,8 +318,12 @@ export class SyncService extends BaseService {
     // a client without the views flag only receives the assets that pass the default view
     const view = dto.includeViews ? null : ((await this.customViewRepository.getDefault(auth.user.id)) ?? null);
     if (!dto.includeViews && dto.types.some((type) => ALBUM_SYNC_TYPES.has(type))) {
-      // before nowId, so albums touched here are sent in this run
-      await this.refreshAlbumViewState(auth.user.id, view);
+      const touched = await this.refreshAlbumViewState(auth.user.id, view);
+      if (touched) {
+        // nowId leaves out the current millisecond, so the rows touched just now are only part of this run once the
+        // clock moved past it
+        await setTimeout(2);
+      }
     }
 
     const { nowId } = await this.syncCheckpointRepository.getNow();
@@ -422,15 +427,17 @@ export class SyncService extends BaseService {
    * all hides is withheld, and a cover it hides is replaced. Only albums that changed since the last run are evaluated,
    * and only albums whose state really changes are sent again, so the album list of the official app does not reorder.
    */
-  private async refreshAlbumViewState(userId: string, view: ViewFilter | null) {
+  private async refreshAlbumViewState(userId: string, view: ViewFilter | null): Promise<boolean> {
     const repository = this.syncRepository.albumViewState;
     if (isViewUnrestricted(view)) {
       const rows = await repository.getAll(userId);
       const checkpoint = await repository.getCheckpoint(userId);
-      if (rows.length > 0 || checkpoint) {
-        await repository.update(userId, toAlbumViewStateChanges(rows), null);
+      if (rows.length === 0 && !checkpoint) {
+        return false;
       }
-      return;
+      const changes = toAlbumViewStateChanges(rows);
+      await repository.update(userId, changes, null);
+      return changes.touched.length > 0;
     }
 
     const { updateId: next } = await repository.getNextCheckpoint();
@@ -439,11 +446,14 @@ export class SyncService extends BaseService {
     const rows = await repository.getStates(userId, view, albumIds);
     const changes = toAlbumViewStateChanges(rows);
     await repository.update(userId, changes, next);
-    if (changes.touched.length > 0) {
-      this.logger.debug(
-        `Album view state of ${userId}: ${rows.length} album(s) evaluated, ${changes.touched.length} sent again`,
-      );
+    if (changes.touched.length === 0) {
+      return false;
     }
+
+    this.logger.debug(
+      `Album view state of ${userId}: ${rows.length} album(s) evaluated, ${changes.touched.length} sent again`,
+    );
+    return true;
   }
 
   private needsFullSync(checkpointMap: CheckpointMap) {
