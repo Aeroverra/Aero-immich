@@ -228,9 +228,11 @@ export class MetadataService extends BaseService {
 
   @OnJob({ name: JobName.AssetExtractMetadata, queue: QueueName.MetadataExtraction })
   async handleMetadataExtraction(data: JobOf<JobName.AssetExtractMetadata>) {
-    const [{ metadata, reverseGeocoding }, asset] = await Promise.all([
+    const [{ metadata, reverseGeocoding }, asset, updateId] = await Promise.all([
       this.getConfig({ withCache: true }),
       this.assetJobRepository.getForMetadataExtraction(data.id),
+      // read before the file, so an edit that is written to the sidecar in the meantime is not overwritten
+      this.assetJobRepository.getExifUpdateIdForMetadataExtraction(data.id),
     ]);
 
     if (!asset) {
@@ -381,6 +383,7 @@ export class MetadataService extends BaseService {
           video: videoData,
           keyframes: keyframeData,
           lockedPropertiesBehavior: 'skip',
+          updateId,
         });
         await this.applyTagList(asset);
       },
@@ -520,7 +523,16 @@ export class MetadataService extends BaseService {
       await this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Sidecar, path: sidecarPath });
     }
 
-    await this.assetRepository.unlockProperties(asset.id, lockedProperties);
+    const unlocked = await this.assetRepository.unlockProperties(asset.id, lockedProperties, asset.exifInfo.updateId);
+    if (!unlocked) {
+      // the asset changed while the file was written. A newer write may already have finished and unlocked the
+      // properties, so they are locked again until the file is written with the current values.
+      await this.assetRepository.upsertExif({
+        exif: { assetId: asset.id, lockedProperties },
+        lockedPropertiesBehavior: 'append',
+      });
+      await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id } });
+    }
 
     return JobStatus.Success;
   }
@@ -655,6 +667,7 @@ export class MetadataService extends BaseService {
     await this.tagRepository.replaceAssetTags(
       id,
       results.map((tag) => tag.id),
+      asset?.tags ?? null,
     );
   }
 

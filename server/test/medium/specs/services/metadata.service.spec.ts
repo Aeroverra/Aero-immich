@@ -1,12 +1,16 @@
 import { Kysely } from 'kysely';
+import { randomUUID } from 'node:crypto';
 import { Stats } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { JobName } from 'src/enum';
+import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { EventRepository } from 'src/repositories/event.repository';
+import { JobRepository } from 'src/repositories/job.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { MetadataRepository } from 'src/repositories/metadata.repository';
 import { StorageRepository } from 'src/repositories/storage.repository';
@@ -14,7 +18,10 @@ import { SystemMetadataRepository } from 'src/repositories/system-metadata.repos
 import { TagRepository } from 'src/repositories/tag.repository';
 import { DB } from 'src/schema';
 import { MetadataService } from 'src/services/metadata.service';
+import { TagService } from 'src/services/tag.service';
+import { upsertTags } from 'src/utils/tag';
 import { newMediumService } from 'test/medium.factory';
+import { factory } from 'test/small.factory';
 import { getKyselyDB, newRandomImage } from 'test/utils';
 
 type TimeZoneTest = {
@@ -41,7 +48,7 @@ const setup = (db?: Kysely<DB>) => {
       SystemMetadataRepository,
       TagRepository,
     ],
-    mock: [EventRepository, StorageRepository, LoggingRepository],
+    mock: [EventRepository, JobRepository, StorageRepository, LoggingRepository],
   });
 
   ctx.getMock(StorageRepository).stat.mockResolvedValue({
@@ -61,6 +68,56 @@ const createTestFile = async (exifData: Record<string, any>) => {
   await writeFile(filePath, data);
   await ctx.get(MetadataRepository).writeTags(filePath, exifData);
   return { filePath };
+};
+
+/** A metadata service and a tag service on the same database, with assets that have real files */
+const setupTagging = async () => {
+  const { sut, ctx } = setup();
+  ctx.getMock(EventRepository).emit.mockResolvedValue();
+  const { sut: tagService, ctx: tagCtx } = newMediumService(TagService, {
+    database: ctx.database,
+    real: [AccessRepository, AssetRepository, TagRepository],
+    mock: [EventRepository, LoggingRepository],
+  });
+  tagCtx.getMock(EventRepository).emit.mockResolvedValue();
+  ctx.getMock(JobRepository).queue.mockResolvedValue();
+
+  const { user } = await ctx.newUser();
+  const auth = factory.auth({ user });
+  const [tagA, tagB] = await upsertTags(ctx.get(TagRepository), { userId: user.id, tags: ['tag-a', 'tag-b'] });
+
+  const newTaggableAsset = async () => {
+    const originalPath = join(tmpdir(), `${randomUUID()}.png`);
+    await writeFile(originalPath, newRandomImage());
+    const { asset } = await ctx.newAsset({ originalPath, ownerId: user.id });
+    await ctx.newExif({ assetId: asset.id, description: '' });
+    return asset;
+  };
+
+  const getTags = async (assetId: string) => {
+    const rows = await ctx.database
+      .selectFrom('tag_asset')
+      .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+      .select('tag.value')
+      .where('tag_asset.assetId', '=', assetId)
+      .orderBy('tag.value')
+      .execute();
+    const exif = await ctx.database
+      .selectFrom('asset_exif')
+      .select('tags')
+      .where('assetId', '=', assetId)
+      .executeTakeFirstOrThrow();
+    return { tagAsset: rows.map(({ value }) => value), exif: [...(exif.tags ?? [])].sort() };
+  };
+
+  const getSidecarTags = async (assetId: string) => {
+    const asset = await ctx.get(AssetRepository).getById(assetId);
+    const tags = await ctx.get(MetadataRepository).readTags(`${asset!.originalPath}.xmp`);
+    const list = tags.TagsList ?? [];
+    return (Array.isArray(list) ? list : [list]).map(String).sort();
+  };
+
+  return { sut, ctx, tagService, tagCtx, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags };
 };
 
 beforeAll(async () => {
@@ -223,5 +280,142 @@ describe(MetadataService.name, () => {
         .select('lensModel')
         .executeTakeFirstOrThrow(),
     ).resolves.toEqual({ lensModel: '1.8' });
+  });
+
+  describe('tag changes while the sidecar is written', () => {
+    it('should keep a tag that is added while the sidecar is written', async () => {
+      const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags } =
+        await setupTagging();
+      const asset = await newTaggableAsset();
+      await tagService.addAssets(auth, tagA.id, { ids: [asset.id] });
+
+      const metadataRepository = ctx.get(MetadataRepository);
+      const writeTags = metadataRepository.writeTags.bind(metadataRepository);
+      const spy = vi.spyOn(metadataRepository, 'writeTags').mockImplementationOnce(async (path, tags) => {
+        await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
+        await writeTags(path, tags);
+      });
+
+      await sut.handleSidecarWrite({ id: asset.id });
+      spy.mockRestore();
+      await sut.handleMetadataExtraction({ id: asset.id });
+      await sut.handleSidecarWrite({ id: asset.id });
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+      await expect(getSidecarTags(asset.id)).resolves.toEqual(['tag-a', 'tag-b']);
+    });
+
+    it('should not bring back a tag that is removed while the sidecar is written', async () => {
+      const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags } =
+        await setupTagging();
+      const asset = await newTaggableAsset();
+      await tagService.addAssets(auth, tagA.id, { ids: [asset.id] });
+      await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
+
+      const metadataRepository = ctx.get(MetadataRepository);
+      const writeTags = metadataRepository.writeTags.bind(metadataRepository);
+      const spy = vi.spyOn(metadataRepository, 'writeTags').mockImplementationOnce(async (path, tags) => {
+        await tagService.removeAssets(auth, tagB.id, { ids: [asset.id] });
+        await writeTags(path, tags);
+      });
+
+      await sut.handleSidecarWrite({ id: asset.id });
+      spy.mockRestore();
+      await sut.handleMetadataExtraction({ id: asset.id });
+      await sut.handleSidecarWrite({ id: asset.id });
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a'], exif: ['tag-a'] });
+      await expect(getSidecarTags(asset.id)).resolves.toEqual(['tag-a']);
+    });
+
+    it('should keep a tag that is added while metadata is extracted from an older sidecar', async () => {
+      const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags } =
+        await setupTagging();
+      const asset = await newTaggableAsset();
+      await tagService.addAssets(auth, tagA.id, { ids: [asset.id] });
+      await sut.handleSidecarWrite({ id: asset.id });
+
+      const metadataRepository = ctx.get(MetadataRepository);
+      const readTags = metadataRepository.readTags.bind(metadataRepository);
+      const spy = vi.spyOn(metadataRepository, 'readTags').mockImplementation(async (path) => {
+        const tags = await readTags(path);
+        if (path.endsWith('.xmp')) {
+          // the file was read before the new tag was written to it
+          spy.mockRestore();
+          await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
+          await sut.handleSidecarWrite({ id: asset.id });
+        }
+        return tags;
+      });
+
+      await sut.handleMetadataExtraction({ id: asset.id });
+      spy.mockRestore();
+
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+      await expect(getSidecarTags(asset.id)).resolves.toEqual(['tag-a', 'tag-b']);
+    });
+
+    it('should keep a tag when an older sidecar write finishes after a newer one', async () => {
+      const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags } =
+        await setupTagging();
+      const asset = await newTaggableAsset();
+      await tagService.addAssets(auth, tagA.id, { ids: [asset.id] });
+
+      const metadataRepository = ctx.get(MetadataRepository);
+      const writeTags = metadataRepository.writeTags.bind(metadataRepository);
+      const spy = vi.spyOn(metadataRepository, 'writeTags').mockImplementationOnce(async (path, tags) => {
+        // a second job for the same asset starts and finishes while the first one is still writing
+        await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
+        await sut.handleSidecarWrite({ id: asset.id });
+        await writeTags(path, tags);
+      });
+
+      await sut.handleSidecarWrite({ id: asset.id });
+      spy.mockRestore();
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+
+      // the stale file is written again
+      expect(ctx.getMock(JobRepository).queue).toHaveBeenCalledWith({
+        name: JobName.SidecarWrite,
+        data: { id: asset.id },
+      });
+      await sut.handleSidecarWrite({ id: asset.id });
+      await sut.handleMetadataExtraction({ id: asset.id });
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+      await expect(getSidecarTags(asset.id)).resolves.toEqual(['tag-a', 'tag-b']);
+    });
+
+    it('should keep a tag that is bulk added while metadata is extracted', async () => {
+      const { sut, tagService, tagCtx, auth, tagA, tagB, newTaggableAsset, getTags } = await setupTagging();
+      const assets = [await newTaggableAsset(), await newTaggableAsset(), await newTaggableAsset()];
+      const assetIds = assets.map(({ id }) => id);
+
+      await tagService.bulkTagAssets(auth, { tagIds: [tagA.id], assetIds });
+      for (const id of assetIds) {
+        await sut.handleSidecarWrite({ id });
+      }
+
+      const tagRepository = tagCtx.get(TagRepository);
+      const upsertAssetIds = tagRepository.upsertAssetIds.bind(tagRepository);
+      const spy = vi.spyOn(tagRepository, 'upsertAssetIds').mockImplementationOnce(async (items) => {
+        const results = await upsertAssetIds(items);
+        // metadata extraction finishes right after the new tag is stored
+        for (const id of assetIds) {
+          await sut.handleMetadataExtraction({ id });
+        }
+        return results;
+      });
+
+      await tagService.bulkTagAssets(auth, { tagIds: [tagB.id], assetIds });
+      spy.mockRestore();
+
+      for (const id of assetIds) {
+        await expect(getTags(id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+      }
+    });
   });
 });

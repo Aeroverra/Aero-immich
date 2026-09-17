@@ -87,6 +87,7 @@ describe(MetadataService.name, () => {
 
     mockReadTags();
 
+    mocks.assetJob.getExifUpdateIdForMetadataExtraction.mockResolvedValue(null);
     mocks.config.getWorker.mockReturnValue(ImmichWorker.Microservices);
 
     delete process.env.TZ;
@@ -610,7 +611,7 @@ describe(MetadataService.name, () => {
 
       await sut.handleMetadataExtraction({ id: asset.id });
 
-      expect(mocks.tag.replaceAssetTags).toHaveBeenCalledWith(asset.id, []);
+      expect(mocks.tag.replaceAssetTags).toHaveBeenCalledWith(asset.id, [], null);
     });
 
     it('should not apply motion photos if asset is video', async () => {
@@ -2015,13 +2016,11 @@ describe(MetadataService.name, () => {
         GPSLatitude: gps,
         GPSLongitude: gps,
       });
-      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, [
-        'description',
-        'latitude',
-        'longitude',
-        'dateTimeOriginal',
-        'timeZone',
-      ]);
+      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(
+        asset.id,
+        ['description', 'latitude', 'longitude', 'dateTimeOriginal', 'timeZone'],
+        asset.exifInfo.updateId,
+      );
     });
 
     it('should write rating', async () => {
@@ -2032,7 +2031,7 @@ describe(MetadataService.name, () => {
       mocks.assetJob.getForSidecarWriteJob.mockResolvedValue(getForSidecarWrite(asset));
       await expect(sut.handleSidecarWrite({ id: asset.id })).resolves.toBe(JobStatus.Success);
       expect(mocks.metadata.writeTags).toHaveBeenCalledWith(asset.files[0].path, { Rating: 4 });
-      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, ['rating']);
+      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, ['rating'], asset.exifInfo.updateId);
     });
 
     it('should write null rating as 0', async () => {
@@ -2043,7 +2042,23 @@ describe(MetadataService.name, () => {
       mocks.assetJob.getForSidecarWriteJob.mockResolvedValue(getForSidecarWrite(asset));
       await expect(sut.handleSidecarWrite({ id: asset.id })).resolves.toBe(JobStatus.Success);
       expect(mocks.metadata.writeTags).toHaveBeenCalledWith(asset.files[0].path, { Rating: 0 });
-      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, ['rating']);
+      expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, ['rating'], asset.exifInfo.updateId);
+    });
+
+    it('should keep the properties locked and write again when the asset changed during the write', async () => {
+      const asset = AssetFactory.from().file({ type: AssetFileType.Sidecar }).exif().build();
+      asset.exifInfo.tags = ['tag-1'];
+
+      mocks.assetJob.getLockedPropertiesForMetadataExtraction.mockResolvedValue(['tags']);
+      mocks.assetJob.getForSidecarWriteJob.mockResolvedValue(getForSidecarWrite(asset));
+      mocks.asset.unlockProperties.mockResolvedValue(false);
+      await expect(sut.handleSidecarWrite({ id: asset.id })).resolves.toBe(JobStatus.Success);
+      expect(mocks.metadata.writeTags).toHaveBeenCalledWith(asset.files[0].path, { TagsList: ['tag-1'] });
+      expect(mocks.asset.upsertExif).toHaveBeenCalledWith({
+        exif: { assetId: asset.id, lockedProperties: ['tags'] },
+        lockedPropertiesBehavior: 'append',
+      });
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.SidecarWrite, data: { id: asset.id } });
     });
   });
 
