@@ -31,5 +31,6 @@ String webPathFor(TimelineOrigin origin) => switch (origin) {
   .favorite => '/favorites',
   .trash => '/trash',
   .archive => '/archive',
+  .privateFolder => '/private',
   _ => '',
 };
