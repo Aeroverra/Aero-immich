@@ -38,6 +38,7 @@ enum TimelineOrigin {
   folder,
   recentlyAdded,
   privateFolder,
+  tag,
 }
 
 class TimelineFactory {
@@ -76,6 +77,9 @@ class TimelineFactory {
 
   TimelineService recentlyAdded(String userId) =>
       TimelineService(_timelineRepository.recentlyAdded(userId, groupBy, privateFilter: privateFilter));
+
+  TimelineService tagged(String userId, Set<String> tagIds) =>
+      TimelineService(_timelineRepository.tagged(userId, tagIds, groupBy, privateFilter: privateFilter));
 
   TimelineService favorite(String userId) =>
       TimelineService(_timelineRepository.favorite(userId, groupBy, privateFilter: privateFilter));

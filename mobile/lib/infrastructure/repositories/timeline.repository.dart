@@ -428,6 +428,28 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     privateFilter: privateFilter,
   );
 
+  /// The user's assets carrying any of [tagIds] (pass a tag with its descendants to include child tags), in the
+  /// timeline or the archive
+  TimelineQuery tagged(
+    String userId,
+    Set<String> tagIds,
+    GroupAssetsBy groupBy, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => _remoteQueryBuilder(
+    filter: (row) =>
+        row.deletedAt.isNull() &
+        row.ownerId.equals(userId) &
+        (row.visibility.equalsValue(AssetVisibility.timeline) | row.visibility.equalsValue(AssetVisibility.archive)) &
+        existsQuery(
+          _db.tagAssetEntity.selectOnly()
+            ..addColumns([_db.tagAssetEntity.tagId])
+            ..where(_db.tagAssetEntity.assetId.equalsExp(row.id) & _db.tagAssetEntity.tagId.isIn(tagIds)),
+        ),
+    groupBy: groupBy,
+    origin: TimelineOrigin.tag,
+    privateFilter: privateFilter,
+  );
+
   TimelineQuery favorite(
     String userId,
     GroupAssetsBy groupBy, {
