@@ -552,3 +552,235 @@ describe(SyncRequestType.ViewsV1, () => {
     });
   });
 });
+
+const albumEvents = (response: SyncResponse, type: SyncEntityType) =>
+  response
+    .filter((item) => item.type === type)
+    .map((item) => (item.data as { id?: string; albumId?: string }).id ?? (item.data as { albumId: string }).albumId);
+
+const getAlbumRow = (albumId: string) =>
+  defaultDatabase
+    .selectFrom('album')
+    .select(['updatedAt', 'updateId', 'albumThumbnailAssetId'])
+    .where('id', '=', albumId)
+    .executeTakeFirstOrThrow();
+
+/** another session of the same user, with its own sync checkpoints */
+const newSessionAuth = async (ctx: SyncTestContext, userId: string) => {
+  const { session } = await ctx.newSession({ userId });
+  return factory.auth({ session, user: { id: userId } });
+};
+
+describe('albums for a client without the views flag', () => {
+  const types = [
+    SyncRequestType.AlbumsV2,
+    SyncRequestType.AlbumUsersV1,
+    SyncRequestType.AlbumAssetsV2,
+    SyncRequestType.AlbumToAssetsV1,
+  ];
+
+  it('should delete an album once the default view hides its last asset and send it again with its links', async () => {
+    const { auth, user, ctx, gym, visible, hidden } = await newDefaultView();
+    const { album } = await ctx.newAlbum({ ownerId: user.id }, [visible.id, hidden.id]);
+    const { album: other } = await ctx.newAlbum({ ownerId: user.id }, [visible.id]);
+
+    const first = await ctx.syncStream(auth, types);
+    expect(albumEvents(first, SyncEntityType.AlbumV2).toSorted()).toEqual([album.id, other.id].toSorted());
+    await clientAck(ctx, auth, first);
+    await ctx.assertSyncIsComplete(auth, types);
+    const before = await getAlbumRow(album.id);
+
+    // the last visible asset of the album gets the excluded tag
+    await ctx.newTagAsset({ tagIds: [gym.id], assetIds: [visible.id] });
+    const leaving = await ctx.syncStream(auth, types);
+    expect(albumEvents(leaving, SyncEntityType.AlbumDeleteV1).toSorted()).toEqual([album.id, other.id].toSorted());
+    expect(albumEvents(leaving, SyncEntityType.AlbumV2)).toEqual([]);
+    expect(albumEvents(leaving, SyncEntityType.AlbumUserV1)).toEqual([]);
+    expect(albumEvents(leaving, SyncEntityType.AlbumToAssetV1)).toEqual([]);
+    await clientAck(ctx, auth, leaving);
+    await ctx.assertSyncIsComplete(auth, types);
+
+    // the fork app (another session) still receives the album
+    const fork = await ctx.syncStream(await newSessionAuth(ctx, user.id), types, false, false, true);
+    expect(albumEvents(fork, SyncEntityType.AlbumV2).toSorted()).toEqual([album.id, other.id].toSorted());
+
+    await ctx.get(TagRepository).removeAssetIds(gym.id, [visible.id]);
+    const returning = await ctx.syncStream(auth, types);
+    expect(albumEvents(returning, SyncEntityType.AlbumV2).toSorted()).toEqual([album.id, other.id].toSorted());
+    expect(albumEvents(returning, SyncEntityType.AlbumUserV1).toSorted()).toEqual([album.id, other.id].toSorted());
+    expect(
+      returning
+        .filter(({ type }) => type === SyncEntityType.AlbumToAssetV1)
+        .map(({ data }) => data)
+        .toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    ).toEqual(
+      [
+        { albumId: album.id, assetId: visible.id },
+        { albumId: other.id, assetId: visible.id },
+      ].toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+    );
+    // the returning album keeps its place in a list sorted by modification
+    expect(returning).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: SyncEntityType.AlbumV2,
+          data: expect.objectContaining({ id: album.id, updatedAt: before.updatedAt.toISOString() }),
+        }),
+      ]),
+    );
+    await clientAck(ctx, auth, returning);
+    await ctx.assertSyncIsComplete(auth, types);
+
+    const after = await getAlbumRow(album.id);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.updateId).not.toEqual(before.updateId);
+  });
+
+  it('should delete an album whose assets were tagged before the default view rule was saved', async () => {
+    const { auth, user, ctx, views, viewAuth, unreviewed, assets } = await newTaggedLibrary(3);
+    const { album } = await ctx.newAlbum({ ownerId: user.id }, [assets[0].id, assets[1].id]);
+    const { album: kept } = await ctx.newAlbum({ ownerId: user.id }, [assets[1].id, assets[2].id]);
+    const { album: empty } = await ctx.newAlbum({ ownerId: user.id });
+
+    // the live order: tagged and synced while still visible, the rule comes afterwards
+    await ctx.newTagAsset({ tagIds: [unreviewed.id], assetIds: [assets[0].id, assets[1].id] });
+    await clientAck(ctx, auth, await ctx.syncStream(auth, types));
+    await ctx.assertSyncIsComplete(auth, types);
+    const keptBefore = await getAlbumRow(kept.id);
+
+    await views.create(viewAuth, {
+      name: 'Default',
+      isDefault: true,
+      includeAll: true,
+      excludeTagIds: [unreviewed.id],
+    });
+    const response = await ctx.syncStream(auth, types);
+    expect(albumEvents(response, SyncEntityType.AlbumDeleteV1)).toEqual([album.id]);
+    // an album that still shows an asset is not sent again, and an album without assets stays
+    expect(albumEvents(response, SyncEntityType.AlbumV2)).toEqual([]);
+    await clientAck(ctx, auth, response);
+    await ctx.assertSyncIsComplete(auth, types);
+
+    const keptAfter = await getAlbumRow(kept.id);
+    expect(keptAfter).toEqual(keptBefore);
+    expect(empty.id).toBeDefined();
+
+    // a later sync evaluates nothing again and sends nothing
+    await ctx.assertSyncIsComplete(auth, types);
+  });
+
+  it('should replace an album cover the default view hides with the newest visible asset', async () => {
+    const { auth, user, ctx } = await setup();
+    const gym = await ctx.get(TagRepository).create({ userId: user.id, value: 'Gym' });
+    const { asset: cover } = await ctx.newAsset({ ownerId: user.id, fileCreatedAt: new Date('2024-01-03') });
+    const { asset: older } = await ctx.newAsset({ ownerId: user.id, fileCreatedAt: new Date('2024-01-01') });
+    const { asset: newer } = await ctx.newAsset({ ownerId: user.id, fileCreatedAt: new Date('2024-01-02') });
+    const { album } = await ctx.newAlbum({ ownerId: user.id, albumThumbnailAssetId: cover.id }, [
+      cover.id,
+      older.id,
+      newer.id,
+    ]);
+    await ctx
+      .get(CustomViewRepository)
+      .create(
+        { ownerId: user.id, name: 'Default', isDefault: true, includeAll: true },
+        { includeTagIds: [], excludeTagIds: [gym.id] },
+      );
+
+    const first = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(first).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: SyncEntityType.AlbumV2,
+          data: expect.objectContaining({ id: album.id, thumbnailAssetId: cover.id }),
+        }),
+      ]),
+    );
+    await clientAck(ctx, auth, first);
+    const before = await getAlbumRow(album.id);
+
+    await ctx.newTagAsset({ tagIds: [gym.id], assetIds: [cover.id] });
+    const response = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(response).toEqual([
+      expect.objectContaining({
+        type: SyncEntityType.AlbumV2,
+        data: expect.objectContaining({
+          id: album.id,
+          thumbnailAssetId: newer.id,
+          updatedAt: before.updatedAt.toISOString(),
+        }),
+      }),
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+    await clientAck(ctx, auth, response);
+    await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumsV2]);
+
+    // the album itself keeps its cover, and the fork app receives it unchanged
+    const stored = await getAlbumRow(album.id);
+    expect(stored.albumThumbnailAssetId).toEqual(cover.id);
+    const fork = await ctx.syncStream(
+      await newSessionAuth(ctx, user.id),
+      [SyncRequestType.AlbumsV2],
+      false,
+      false,
+      true,
+    );
+    expect(fork).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: SyncEntityType.AlbumV2,
+          data: expect.objectContaining({ id: album.id, thumbnailAssetId: cover.id }),
+        }),
+      ]),
+    );
+    for (const { data } of fork) {
+      expect(Object.keys(data as object)).not.toEqual(
+        expect.arrayContaining([expect.stringMatching(/viewStateAlbumId|viewThumbnailAssetId|isViewHidden/)]),
+      );
+    }
+
+    // the cover comes back once it is visible again
+    await ctx.get(TagRepository).removeAssetIds(gym.id, [cover.id]);
+    const returning = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(returning).toEqual([
+      expect.objectContaining({
+        type: SyncEntityType.AlbumV2,
+        data: expect.objectContaining({ id: album.id, thumbnailAssetId: cover.id }),
+      }),
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+  });
+
+  it('should evaluate a shared album with the default view of each receiving user', async () => {
+    const { auth: ownerAuth, user: owner, ctx } = await setup();
+    const { auth: sharedAuth, user: shared } = await ctx.newSyncAuthUser();
+    const ownerGym = await ctx.get(TagRepository).create({ userId: owner.id, value: 'Gym' });
+    const sharedFamily = await ctx.get(TagRepository).create({ userId: shared.id, value: 'Family' });
+    const { asset } = await ctx.newAsset({ ownerId: owner.id });
+    const { album } = await ctx.newAlbum({ ownerId: owner.id }, [asset.id]);
+    await ctx.newAlbumUser({ albumId: album.id, userId: shared.id });
+    await ctx.newTagAsset({ tagIds: [ownerGym.id], assetIds: [asset.id] });
+
+    const repository = ctx.get(CustomViewRepository);
+    // the owner hides Gym
+    await repository.create(
+      { ownerId: owner.id, name: 'Default', isDefault: true, includeAll: true },
+      { includeTagIds: [], excludeTagIds: [ownerGym.id] },
+    );
+    const ownerResponse = await ctx.syncStream(ownerAuth, [SyncRequestType.AlbumsV2]);
+    expect(albumEvents(ownerResponse, SyncEntityType.AlbumDeleteV1)).toEqual([album.id]);
+
+    // the tags of the owner mean nothing to the other user, whose view has no rule on them
+    const sharedResponse = await ctx.syncStream(sharedAuth, [SyncRequestType.AlbumsV2]);
+    expect(albumEvents(sharedResponse, SyncEntityType.AlbumV2)).toEqual([album.id]);
+    await clientAck(ctx, sharedAuth, sharedResponse);
+
+    // a view of the other user that only shows its own Family tag hides the owner's asset, which it sees as untagged
+    await repository.create(
+      { ownerId: shared.id, name: 'Default', isDefault: true, includeAll: false, includeUntagged: false },
+      { includeTagIds: [sharedFamily.id], excludeTagIds: [] },
+    );
+    const hiddenForShared = await ctx.syncStream(sharedAuth, [SyncRequestType.AlbumsV2]);
+    expect(albumEvents(hiddenForShared, SyncEntityType.AlbumDeleteV1)).toEqual([album.id]);
+  });
+});
