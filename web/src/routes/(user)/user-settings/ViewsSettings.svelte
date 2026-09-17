@@ -148,10 +148,10 @@
         <ul class="flex flex-col gap-2">
           {#each views as view, index (view.id)}
             <li
-              class="flex items-center gap-2 rounded-xl border border-gray-200 px-4 py-2 dark:border-gray-700"
+              class="flex flex-wrap items-center gap-x-2 rounded-xl border border-gray-200 px-4 py-2 dark:border-gray-700"
               data-testid="view-row"
             >
-              <div class="flex min-w-0 grow flex-col">
+              <div class="flex min-w-0 grow basis-full flex-col sm:basis-0">
                 <div class="flex items-center gap-2">
                   <span class="truncate font-medium">{view.name}</span>
                   {#if view.access === ViewAccess.Locked}
@@ -165,54 +165,56 @@
                 </div>
                 <Text size="tiny" color="muted" class="truncate">{describe(view)}</Text>
               </div>
-              <IconButton
-                shape="round"
-                variant="ghost"
-                color="secondary"
-                size="small"
-                icon={mdiArrowUp}
-                aria-label={$t('move_up')}
-                disabled={index === 0}
-                onclick={() => handleMove(index, -1)}
-              />
-              <IconButton
-                shape="round"
-                variant="ghost"
-                color="secondary"
-                size="small"
-                icon={mdiArrowDown}
-                aria-label={$t('move_down')}
-                disabled={index === views.length - 1}
-                onclick={() => handleMove(index, 1)}
-              />
-              <IconButton
-                shape="round"
-                variant="ghost"
-                color={view.isDefault ? 'primary' : 'secondary'}
-                size="small"
-                icon={view.isDefault ? mdiStar : mdiStarOutline}
-                aria-label={view.isDefault ? $t('custom_view_unset_default') : $t('custom_view_set_default')}
-                title={view.isDefault ? $t('custom_view_unset_default') : $t('custom_view_set_default')}
-                onclick={() => handleSetDefault(view)}
-              />
-              <IconButton
-                shape="round"
-                variant="ghost"
-                color="secondary"
-                size="small"
-                icon={mdiPencilOutline}
-                aria-label={$t('custom_view_edit')}
-                onclick={() => handleEdit(view)}
-              />
-              <IconButton
-                shape="round"
-                variant="ghost"
-                color="danger"
-                size="small"
-                icon={mdiTrashCanOutline}
-                aria-label={$t('custom_view_delete')}
-                onclick={() => handleDelete(view)}
-              />
+              <div class="ms-auto flex items-center">
+                <IconButton
+                  shape="round"
+                  variant="ghost"
+                  color="secondary"
+                  size="small"
+                  icon={mdiArrowUp}
+                  aria-label={$t('move_up')}
+                  disabled={index === 0}
+                  onclick={() => handleMove(index, -1)}
+                />
+                <IconButton
+                  shape="round"
+                  variant="ghost"
+                  color="secondary"
+                  size="small"
+                  icon={mdiArrowDown}
+                  aria-label={$t('move_down')}
+                  disabled={index === views.length - 1}
+                  onclick={() => handleMove(index, 1)}
+                />
+                <IconButton
+                  shape="round"
+                  variant="ghost"
+                  color={view.isDefault ? 'primary' : 'secondary'}
+                  size="small"
+                  icon={view.isDefault ? mdiStar : mdiStarOutline}
+                  aria-label={view.isDefault ? $t('custom_view_unset_default') : $t('custom_view_set_default')}
+                  title={view.isDefault ? $t('custom_view_unset_default') : $t('custom_view_set_default')}
+                  onclick={() => handleSetDefault(view)}
+                />
+                <IconButton
+                  shape="round"
+                  variant="ghost"
+                  color="secondary"
+                  size="small"
+                  icon={mdiPencilOutline}
+                  aria-label={$t('custom_view_edit')}
+                  onclick={() => handleEdit(view)}
+                />
+                <IconButton
+                  shape="round"
+                  variant="ghost"
+                  color="danger"
+                  size="small"
+                  icon={mdiTrashCanOutline}
+                  aria-label={$t('custom_view_delete')}
+                  onclick={() => handleDelete(view)}
+                />
+              </div>
             </li>
           {/each}
         </ul>
