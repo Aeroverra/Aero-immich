@@ -347,6 +347,11 @@ export enum Permission {
   UserProfileImageUpdate = 'userProfileImage.update',
   UserProfileImageDelete = 'userProfileImage.delete',
 
+  ViewCreate = 'view.create',
+  ViewRead = 'view.read',
+  ViewUpdate = 'view.update',
+  ViewDelete = 'view.delete',
+
   QueueRead = 'queue.read',
   QueueUpdate = 'queue.update',
 
@@ -1100,6 +1105,10 @@ export enum SyncRequestType {
   AssetFacesV1 = 'AssetFacesV1',
   AssetFacesV2 = 'AssetFacesV2',
   UserMetadataV1 = 'UserMetadataV1',
+  TagsV1 = 'TagsV1',
+  TagAssetsV1 = 'TagAssetsV1',
+  ViewsV1 = 'ViewsV1',
+  ViewTagsV1 = 'ViewTagsV1',
 }
 
 export const SyncRequestTypeSchema = z
@@ -1188,6 +1197,16 @@ export enum SyncEntityType {
   UserMetadataV1 = 'UserMetadataV1',
   UserMetadataDeleteV1 = 'UserMetadataDeleteV1',
 
+  TagV1 = 'TagV1',
+  TagDeleteV1 = 'TagDeleteV1',
+  TagAssetV1 = 'TagAssetV1',
+  TagAssetDeleteV1 = 'TagAssetDeleteV1',
+
+  ViewV1 = 'ViewV1',
+  ViewDeleteV1 = 'ViewDeleteV1',
+  ViewTagV1 = 'ViewTagV1',
+  ViewTagDeleteV1 = 'ViewTagDeleteV1',
+
   SyncAckV1 = 'SyncAckV1',
   SyncResetV1 = 'SyncResetV1',
   SyncCompleteV1 = 'SyncCompleteV1',
@@ -1268,6 +1287,41 @@ export enum StackUserEditAction {
   Merge = 'merge',
 }
 
+export enum ViewAccess {
+  /** anyone holding the session can switch to the view */
+  Open = 'open',
+  /** switching to the view asks for the PIN code every time */
+  Locked = 'locked',
+  /** the view is listed and usable only while private mode is unlocked */
+  Private = 'private',
+}
+
+export const ViewAccessSchema = z.enum(ViewAccess).describe('Who can switch to the view').meta({ id: 'ViewAccess' });
+
+export enum ViewPrivateAssets {
+  /** private assets are never shown */
+  Hide = 'hide',
+  /** private assets are shown while private mode is unlocked */
+  Unlocked = 'unlocked',
+  /** only private assets are shown, and only while private mode is unlocked */
+  Only = 'only',
+}
+
+export const ViewPrivateAssetsSchema = z
+  .enum(ViewPrivateAssets)
+  .describe('How the view treats private assets')
+  .meta({ id: 'ViewPrivateAssets' });
+
+export enum ViewTagMode {
+  Include = 'include',
+  Exclude = 'exclude',
+}
+
+export const ViewTagModeSchema = z
+  .enum(ViewTagMode)
+  .describe('Whether assets with the tag are included in or excluded from the view')
+  .meta({ id: 'ViewTagMode' });
+
 export enum ReleaseChannel {
   Stable = 'stable',
   ReleaseCandidate = 'releaseCandidate',
@@ -1312,6 +1366,7 @@ export enum ApiTag {
   Notifications = 'Notifications',
   NotificationsAdmin = 'Notifications (admin)',
   ClusterGroups = 'Cluster groups',
+  CustomViews = 'Custom views',
   Partners = 'Partners',
   People = 'People',
   Plugins = 'Plugins',
