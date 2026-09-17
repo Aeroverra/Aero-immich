@@ -14,7 +14,7 @@ import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 
 const isSupported = () => {
   try {
-    return !!featureFlagsManager.value.views;
+    return !!featureFlagsManager.value.customViews;
   } catch {
     return false;
   }

@@ -123,7 +123,7 @@
   <StackActionsSettings />
 </SettingAccordion>
 
-{#if featureFlagsManager.value.views}
+{#if featureFlagsManager.value.customViews}
   <SettingAccordion
     icon={mdiFilterVariant}
     key="views"

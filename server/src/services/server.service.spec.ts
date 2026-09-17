@@ -148,12 +148,12 @@ describe(ServerService.name, () => {
         search: true,
         sidecar: true,
         configFile: false,
+        customViews: true,
         trash: true,
         email: false,
         realtimeTranscoding: false,
         stackSource: true,
         videoFrameAnalysis: false,
-        views: true,
       });
       expect(mocks.systemMetadata.get).toHaveBeenCalled();
     });

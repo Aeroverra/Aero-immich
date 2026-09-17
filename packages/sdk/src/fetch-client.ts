@@ -2893,6 +2893,8 @@ export type ServerConfigDto = {
 export type ServerFeaturesDto = {
     /** Whether config file is available */
     configFile: boolean;
+    /** Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it. */
+    customViews?: boolean;
     /** Whether duplicate detection is enabled */
     duplicateDetection: boolean;
     /** Whether email notifications are enabled */
@@ -2929,8 +2931,6 @@ export type ServerFeaturesDto = {
     trash: boolean;
     /** Whether enhanced video analysis of sampled frames is enabled */
     videoFrameAnalysis: boolean;
-    /** Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it. */
-    views?: boolean;
 };
 export type LicenseKeyDto = {
     /** Activation key */

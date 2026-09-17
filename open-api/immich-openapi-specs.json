@@ -28544,6 +28544,10 @@
             "description": "Whether config file is available",
             "type": "boolean"
           },
+          "customViews": {
+            "description": "Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it.",
+            "type": "boolean"
+          },
           "duplicateDetection": {
             "description": "Whether duplicate detection is enabled",
             "type": "boolean"
@@ -28614,10 +28618,6 @@
           },
           "videoFrameAnalysis": {
             "description": "Whether enhanced video analysis of sampled frames is enabled",
-            "type": "boolean"
-          },
-          "views": {
-            "description": "Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it.",
             "type": "boolean"
           }
         },

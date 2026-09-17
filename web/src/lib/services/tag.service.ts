@@ -85,7 +85,7 @@ const handleDeleteTag = async (tag: TreeNode) => {
 
   // a view rule on this tag (or a child, which is deleted with it) would silently disappear, so name those views
   let views: string[] = [];
-  if (featureFlagsManager.value.views) {
+  if (featureFlagsManager.value.customViews) {
     try {
       const response = await getCustomViews({ tagId });
       views = response.map(({ name }) => name);

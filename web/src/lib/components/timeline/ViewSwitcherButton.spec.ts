@@ -20,7 +20,7 @@ vi.mock('$app/navigation', () => ({
 }));
 
 vi.mock(import('$lib/managers/feature-flags-manager.svelte'), () => ({
-  featureFlagsManager: { init: vi.fn(), value: { views: true } } as never,
+  featureFlagsManager: { init: vi.fn(), value: { customViews: true } } as never,
 }));
 
 const newView = (overrides: Partial<CustomViewResponseDto> = {}): CustomViewResponseDto => ({
@@ -52,7 +52,7 @@ describe('ViewSwitcherButton component', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    featureFlagsManager.value.views = true;
+    featureFlagsManager.value.customViews = true;
     authManager.setUser(userAdminFactory.build());
     authManager.setPreferences(preferencesFactory.build());
     viewManager.reset();
