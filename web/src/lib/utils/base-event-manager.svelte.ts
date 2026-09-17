@@ -15,7 +15,12 @@ const nextId = () => count++;
 const noop = () => {};
 
 export class BaseEventManager<Events extends EventsBase> {
-  #callbacks: EventItem<Events>[] = $state.raw([]);
+  // A plain array, mutated in place: subscriptions and cleanups interleave during page navigation (the new page
+  // subscribes before the old one tears down), and a reactive array read from a tearing-down effect sees a stale
+  // snapshot, so a read-copy-write there would drop the subscriptions added in between.
+  #callbacks: EventItem<Events>[] = [];
+  // bumped on every change so reactive readers (hasListeners) re-evaluate
+  #version = $state(0);
 
   on(subscriptions: EventMap<Events>): () => void {
     const cleanups = Object.entries(subscriptions).map(([event, callback]) =>
@@ -36,10 +41,15 @@ export class BaseEventManager<Events extends EventsBase> {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const item = { id: nextId(), event, callback } as EventItem<Events, any>;
-    this.#callbacks = [...this.#callbacks, item];
+    this.#callbacks.push(item);
+    this.#version++;
 
     return () => {
-      this.#callbacks = this.#callbacks.filter((current) => current.id !== item.id);
+      const index = this.#callbacks.indexOf(item);
+      if (index !== -1) {
+        this.#callbacks.splice(index, 1);
+        this.#version++;
+      }
     };
   }
 
@@ -51,6 +61,8 @@ export class BaseEventManager<Events extends EventsBase> {
   }
 
   hasListeners<T extends keyof Events>(event: T) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    this.#version;
     return this.#callbacks.some((item) => item.event === event);
   }
 

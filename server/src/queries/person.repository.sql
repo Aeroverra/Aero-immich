@@ -102,12 +102,13 @@ where
   and "asset_face"."deletedAt" is null
   and "asset_face"."isVisible" is true
   and "person"."isHidden" = $2
+  and "asset"."isPrivate" = $3
 group by
   "person"."ownerId",
   "person"."personGroupId"
 having
   (
-    "person"."name" != $3
+    "person"."name" != $4
     or count("asset_face"."assetId") >= COALESCE(
       (
         SELECT
@@ -115,7 +116,7 @@ having
         FROM
           user_metadata
         WHERE
-          "userId" = $4
+          "userId" = $5
           AND key = 'preferences'
       ),
       '3'
@@ -129,9 +130,9 @@ order by
   NULLIF(person.name, '') asc nulls last,
   "person"."createdAt"
 limit
-  $5
-offset
   $6
+offset
+  $7
 
 -- PersonRepository.getAllWithoutFaces
 select
@@ -347,6 +348,7 @@ where
   "asset_face"."deletedAt" is null
   and "asset_face"."isVisible" is true
   and "asset_face"."personGroupId" = $3
+  and "asset"."isPrivate" = $4
 
 -- PersonRepository.getNumberOfPeople
 select
@@ -377,9 +379,10 @@ where
           "asset"."id" = "asset_face"."assetId"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $3
       )
   )
-  and "person"."ownerId" = $3
+  and "person"."ownerId" = $4
 
 -- PersonRepository.createGroup
 insert into
@@ -583,10 +586,24 @@ select
   "asset_face".*
 from
   "asset_face"
+  inner join "asset" on "asset"."id" = "asset_face"."assetId"
 where
   "asset_face"."personGroupId" = $1
   and "asset_face"."deletedAt" is null
   and "asset_face"."isVisible" is true
+order by
+  "asset"."isPrivate" asc
+
+-- PersonRepository.isCoverAssetPrivate
+select
+  "asset"."isPrivate"
+from
+  "person"
+  inner join "asset_face" on "asset_face"."id" = "person"."faceAssetId"
+  inner join "asset" on "asset"."id" = "asset_face"."assetId"
+where
+  "person"."ownerId" = $1
+  and "person"."personGroupId" = $2
 
 -- PersonRepository.getLatestFaceDate
 select
