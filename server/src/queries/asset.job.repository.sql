@@ -846,6 +846,100 @@ where
 order by
   "asset"."fileCreatedAt" desc
 
+-- AssetJobRepository.streamForVideoFrameAnalysis
+select
+  "asset"."id"
+from
+  "asset"
+  inner join "asset_job_status" as "job_status" on "assetId" = "asset"."id"
+where
+  "asset"."visibility" != $1
+  and "asset"."deletedAt" is null
+  and exists (
+    select
+    from
+      "asset_file"
+    where
+      "assetId" = "asset"."id"
+      and "asset_file"."type" = $2
+  )
+  and "asset"."type" = 'VIDEO'
+  and "job_status"."videoFramesAnalyzedAt" is null
+order by
+  "asset"."fileCreatedAt" desc
+
+-- AssetJobRepository.getForVideoFrameAnalysis
+select
+  "asset"."id",
+  "asset"."type",
+  "asset"."visibility",
+  "asset"."deletedAt",
+  "asset"."originalPath",
+  "asset"."duration",
+  "smart_search"."embedding" as "thumbnailEmbedding",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "asset_video"."index",
+          "asset_video"."codecName",
+          "asset_video"."profile",
+          "asset_video"."level",
+          "asset_video"."bitrate",
+          "asset_exif"."exifImageWidth" as "width",
+          "asset_exif"."exifImageHeight" as "height",
+          "asset_video"."pixelFormat",
+          "asset_video"."frameCount",
+          "asset_exif"."fps" as "frameRate",
+          "asset_video"."timeBase",
+          case
+            when "asset_exif"."orientation" = '6' then -90
+            when "asset_exif"."orientation" = '8' then 90
+            when "asset_exif"."orientation" = '3' then 180
+            else 0
+          end as "rotation",
+          "asset_video"."colorPrimaries",
+          "asset_video"."colorMatrix",
+          "asset_video"."colorTransfer",
+          "asset_video"."dvProfile",
+          "asset_video"."dvLevel",
+          "asset_video"."dvBlSignalCompatibilityId"
+        from
+          (
+            select
+              1
+          ) as "dummy"
+        where
+          "asset_video"."assetId" is not null
+      ) as obj
+  ) as "videoStream",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "asset_face"."id",
+          "asset_face"."personGroupId",
+          "face_search"."embedding"
+        from
+          "asset_face"
+          left join "face_search" on "face_search"."faceId" = "asset_face"."id"
+        where
+          "asset_face"."assetId" = "asset"."id"
+          and "asset_face"."deletedAt" is null
+      ) as agg
+  ) as "faces"
+from
+  "asset"
+  inner join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  left join "asset_video" on "asset_video"."assetId" = "asset"."id"
+  left join "smart_search" on "smart_search"."assetId" = "asset"."id"
+where
+  "asset"."id" = $1
+
 -- AssetJobRepository.streamForOcrJob
 select
   "asset"."id"

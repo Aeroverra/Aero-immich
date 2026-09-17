@@ -508,4 +508,26 @@ describe(AssetRepository.name, () => {
       await expect(sut.createAll([])).resolves.toStrictEqual([]);
     });
   });
+
+  describe('upsertJobStatus', () => {
+    it('should mark the video frame analysis without touching the other job dates', async () => {
+      const { ctx, sut } = setup();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const facesRecognizedAt = new Date('2026-01-01T00:00:00.000Z');
+      await sut.upsertJobStatus({ assetId: asset.id, facesRecognizedAt });
+
+      const videoFramesAnalyzedAt = new Date('2026-02-01T00:00:00.000Z');
+      await sut.upsertJobStatus({ assetId: asset.id, videoFramesAnalyzedAt });
+      await sut.upsertJobStatus({ assetId: asset.id, videoFramesAnalyzedAt });
+
+      await expect(
+        ctx.database
+          .selectFrom('asset_job_status')
+          .select(['facesRecognizedAt', 'videoFramesAnalyzedAt'])
+          .where('assetId', '=', asset.id)
+          .executeTakeFirstOrThrow(),
+      ).resolves.toEqual({ facesRecognizedAt, videoFramesAnalyzedAt });
+    });
+  });
 });
