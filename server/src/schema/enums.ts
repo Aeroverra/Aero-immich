@@ -7,6 +7,9 @@ import {
   SourceType,
   StackSource,
   VideoCodec,
+  ViewAccess,
+  ViewPrivateAssets,
+  ViewTagMode,
 } from 'src/enum';
 
 export const album_user_role_enum = registerEnum({
@@ -42,4 +45,19 @@ export const stack_source_enum = registerEnum({
 export const video_stream_variant_codec_enum = registerEnum({
   name: 'video_stream_variant_codec_enum',
   values: [VideoCodec.Av1, VideoCodec.Hevc, VideoCodec.H264],
+});
+
+export const view_access_enum = registerEnum({
+  name: 'view_access_enum',
+  values: Object.values(ViewAccess),
+});
+
+export const view_private_assets_enum = registerEnum({
+  name: 'view_private_assets_enum',
+  values: Object.values(ViewPrivateAssets),
+});
+
+export const view_tag_mode_enum = registerEnum({
+  name: 'view_tag_mode_enum',
+  values: Object.values(ViewTagMode),
 });

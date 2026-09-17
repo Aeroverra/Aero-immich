@@ -422,3 +422,93 @@ export const asset_ocr_delete_audit = registerFunction({
       RETURN NULL;
     END`,
 });
+
+export const tag_delete_audit = registerFunction({
+  name: 'tag_delete_audit',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      INSERT INTO tag_audit ("tagId", "userId")
+      SELECT "id", "userId"
+      FROM OLD;
+      RETURN NULL;
+    END`,
+});
+
+export const tag_asset_delete_audit = registerFunction({
+  name: 'tag_asset_delete_audit',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      INSERT INTO tag_asset_audit ("tagId", "assetId", "userId")
+      SELECT o."tagId", o."assetId", t."userId" FROM OLD o
+      INNER JOIN tag t ON t."id" = o."tagId"
+      WHERE o."assetId" IN (SELECT "id" FROM asset WHERE "id" IN (SELECT "assetId" FROM OLD));
+      RETURN NULL;
+    END`,
+});
+
+export const tag_asset_after_insert = registerFunction({
+  name: 'tag_asset_after_insert',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      -- a tag change can move an asset in or out of a view; touching the asset and the rows sync sends with it
+      -- hands out fresh updateIds, so clients that only receive the default view re-evaluate them
+      UPDATE asset SET "updatedAt" = clock_timestamp() WHERE "id" IN (SELECT DISTINCT "assetId" FROM new);
+      UPDATE asset_exif SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM new);
+      UPDATE album_asset SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM new);
+      UPDATE stack SET "updatedAt" = clock_timestamp() WHERE "primaryAssetId" IN (SELECT DISTINCT "assetId" FROM new);
+      UPDATE asset_face SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM new);
+      UPDATE memory_asset SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM new);
+      RETURN NULL;
+    END`,
+});
+
+export const tag_asset_after_delete = registerFunction({
+  name: 'tag_asset_after_delete',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      -- a tag change can move an asset in or out of a view; touching the asset and the rows sync sends with it
+      -- hands out fresh updateIds, so clients that only receive the default view re-evaluate them
+      UPDATE asset SET "updatedAt" = clock_timestamp() WHERE "id" IN (SELECT DISTINCT "assetId" FROM old);
+      UPDATE asset_exif SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM old);
+      UPDATE album_asset SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM old);
+      UPDATE stack SET "updatedAt" = clock_timestamp() WHERE "primaryAssetId" IN (SELECT DISTINCT "assetId" FROM old);
+      UPDATE asset_face SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM old);
+      UPDATE memory_asset SET "updatedAt" = clock_timestamp() WHERE "assetId" IN (SELECT DISTINCT "assetId" FROM old);
+      RETURN NULL;
+    END`,
+});
+
+export const view_delete_audit = registerFunction({
+  name: 'view_delete_audit',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      INSERT INTO view_audit ("viewId", "userId")
+      SELECT "id", "ownerId"
+      FROM OLD;
+      RETURN NULL;
+    END`,
+});
+
+export const view_tag_delete_audit = registerFunction({
+  name: 'view_tag_delete_audit',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      INSERT INTO view_tag_audit ("viewId", "tagId", "userId")
+      SELECT o."viewId", o."tagId", v."ownerId" FROM OLD o
+      INNER JOIN view v ON v."id" = o."viewId"
+      WHERE o."tagId" IN (SELECT "id" FROM tag WHERE "id" IN (SELECT "tagId" FROM OLD));
+      RETURN NULL;
+    END`,
+});
