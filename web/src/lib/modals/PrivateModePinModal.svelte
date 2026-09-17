@@ -11,9 +11,13 @@
 
   interface Props {
     onClose: (enabled?: boolean) => void;
+    /** the same PIN also unlocks other things, such as switching to a locked view */
+    title?: string;
+    description?: string;
+    onPinCode?: (pinCode: string) => Promise<void>;
   }
 
-  let { onClose }: Props = $props();
+  let { onClose, title, description, onPinCode }: Props = $props();
 
   let pinCode = $state('');
   let isVerified = $state(false);
@@ -42,7 +46,7 @@
 
   const handleEnable = async (code: string) => {
     try {
-      await privateModeManager.enable(code);
+      await (onPinCode ? onPinCode(code) : privateModeManager.enable(code));
       isVerified = true;
       await new Promise((resolve) => setTimeout(resolve, 500));
       onClose(true);
@@ -54,7 +58,7 @@
   };
 </script>
 
-<Modal title={$t('private_mode')} icon={mdiLockOutline} onClose={() => onClose()} size="small">
+<Modal title={title ?? $t('private_mode')} icon={mdiLockOutline} onClose={() => onClose()} size="small">
   <ModalBody>
     <div class="flex flex-col items-center justify-center gap-6 py-2">
       {#if hasPinCode === undefined}
@@ -70,7 +74,9 @@
           </div>
         {/if}
 
-        <p class="text-center text-sm" style="text-wrap: pretty;">{$t('private_mode_enable_description')}</p>
+        <p class="text-center text-sm" style="text-wrap: pretty;">
+          {description ?? $t('private_mode_enable_description')}
+        </p>
 
         <div bind:this={pinInputContainer}>
           <PinInput password autofocus bind:value={pinCode} onComplete={handleEnable} />
