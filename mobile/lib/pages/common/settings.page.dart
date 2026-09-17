@@ -1,14 +1,17 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart' hide Store;
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/settings/advanced_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_viewer_settings/asset_viewer_settings.dart';
 import 'package:immich_mobile/widgets/settings/backup_settings/backup_settings.dart';
 import 'package:immich_mobile/widgets/settings/beta_sync_settings/sync_status_and_actions.dart';
+import 'package:immich_mobile/widgets/settings/custom_views_settings.dart';
 import 'package:immich_mobile/widgets/settings/free_up_space_settings.dart';
 import 'package:immich_mobile/widgets/settings/language_settings.dart';
 import 'package:immich_mobile/widgets/settings/networking_settings/networking_settings.dart';
@@ -22,6 +25,7 @@ enum SettingSection {
   advanced(Icons.build_outlined),
   assetViewer(Icons.image_outlined),
   backup(Icons.cloud_upload_outlined),
+  customViews(Icons.filter_alt_outlined),
   freeUpSpace(Icons.cleaning_services_outlined),
   languages(Icons.language),
   networking(Icons.wifi),
@@ -38,6 +42,7 @@ enum SettingSection {
     SettingSection.advanced => t.advanced,
     SettingSection.assetViewer => t.asset_viewer_settings_title,
     SettingSection.backup => t.backup,
+    SettingSection.customViews => t.custom_views,
     SettingSection.freeUpSpace => t.free_up_space,
     SettingSection.languages => t.language,
     SettingSection.networking => t.networking_settings,
@@ -53,6 +58,7 @@ enum SettingSection {
     SettingSection.advanced => t.advanced_settings_tile_subtitle,
     SettingSection.assetViewer => t.asset_viewer_settings_subtitle,
     SettingSection.backup => t.backup_settings_subtitle,
+    SettingSection.customViews => t.custom_views_settings_subtitle,
     SettingSection.freeUpSpace => t.free_up_space_settings_subtitle,
     SettingSection.languages => t.setting_languages_subtitle,
     SettingSection.networking => t.networking_subtitle,
@@ -68,6 +74,7 @@ enum SettingSection {
     SettingSection.advanced => const AdvancedSettings(),
     SettingSection.assetViewer => const AssetViewerSettings(),
     SettingSection.backup => const BackupSettings(),
+    SettingSection.customViews => const CustomViewsSettings(),
     SettingSection.freeUpSpace => const FreeUpSpaceSettings(),
     SettingSection.languages => const LanguageSettings(),
     SettingSection.networking => const NetworkingSettings(),
@@ -95,11 +102,17 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-class _MobileLayout extends StatelessWidget {
+/// The sections this server supports: custom views only for servers that know them
+List<SettingSection> _visibleSections(WidgetRef ref) {
+  final customViews = ref.watch(customViewsSupportedProvider);
+  return SettingSection.values.where((section) => section != SettingSection.customViews || customViews).toList();
+}
+
+class _MobileLayout extends ConsumerWidget {
   const _MobileLayout();
   @override
-  Widget build(BuildContext context) {
-    final List<Widget> settings = SettingSection.values
+  Widget build(BuildContext context, WidgetRef ref) {
+    final List<Widget> settings = _visibleSections(ref)
         .expand(
           (setting) => setting == SettingSection.beta
               ? [
@@ -132,10 +145,10 @@ class _MobileLayout extends StatelessWidget {
   }
 }
 
-class _TabletLayout extends HookWidget {
+class _TabletLayout extends HookConsumerWidget {
   const _TabletLayout();
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final selectedSection = useState<SettingSection>(SettingSection.values.first);
 
     return Row(
@@ -145,7 +158,7 @@ class _TabletLayout extends HookWidget {
           flex: 2,
           child: CustomScrollView(
             slivers: [
-              ...SettingSection.values.map(
+              ..._visibleSections(ref).map(
                 (s) => SliverToBoxAdapter(
                   child: ListTile(
                     title: Text(s.title(context.t)),

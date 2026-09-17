@@ -90,7 +90,16 @@ select
                   "tag"."createdAt",
                   "tag"."updatedAt",
                   "tag"."color",
-                  "tag"."parentId"
+                  "tag"."parentId",
+                  exists (
+                    select
+                    from
+                      "tag_closure"
+                      inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+                    where
+                      "tag_closure"."id_descendant" = "tag"."id"
+                      and "hidden_tag"."isHidden" = $1
+                  ) as "isHidden"
                 from
                   "tag"
                   inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
@@ -142,7 +151,7 @@ select
           "asset"."deletedAt" is null
           and "asset"."stackId" = "stack"."id"
           and "asset"."visibility" in ('archive', 'timeline')
-          and "asset"."isPrivate" = $1
+          and "asset"."isPrivate" = $2
         order by
           "asset"."fileCreatedAt" asc
       ) as agg
@@ -150,7 +159,7 @@ select
 from
   "stack"
 where
-  "id" = $2::uuid
+  "id" = $3::uuid
 
 -- StackRepository.getForUserEdit
 select

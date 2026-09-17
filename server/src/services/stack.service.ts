@@ -4,7 +4,8 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { StackCreateDto, StackResponseDto, StackSearchDto, StackUpdateDto, mapStack } from 'src/dtos/stack.dto';
 import { Permission, StackSource, StackUserEditAction } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
-import { toPrivateScope } from 'src/utils/access';
+import { getActiveView, toPrivateScope } from 'src/utils/access';
+import { isViewUnrestricted } from 'src/utils/database';
 import { findOrFail } from 'src/utils/misc';
 import { UUIDAssetIDParamDto } from 'src/validation';
 
@@ -21,8 +22,13 @@ export class StackService extends BaseService {
 
     return (
       stacks
-        // a stack whose primary asset is hidden by private mode is hidden as a whole
-        .filter((stack) => stack.assets.some(({ id }) => id === stack.primaryAssetId))
+        // a stack whose primary asset is hidden by private mode is hidden as a whole; a view hides a stack only when
+        // it hides every member, and the first visible member stands in for a hidden primary asset
+        .filter((stack) =>
+          isViewUnrestricted(getActiveView(auth))
+            ? stack.assets.some(({ id }) => id === stack.primaryAssetId)
+            : stack.assets.length > 0,
+        )
         .map((stack) => mapStack(stack, { auth }))
     );
   }

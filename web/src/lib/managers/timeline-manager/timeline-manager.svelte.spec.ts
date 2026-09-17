@@ -810,6 +810,39 @@ describe('TimelineManager', () => {
       expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
     });
 
+    it('returns to the original asset when a filter is toggled away and back without scrolling', async () => {
+      const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const anchor = findAnchor(before, 2000);
+
+      // e.g. a view that hides the anchored asset, then back to a view that shows it
+      hiddenAssetId = anchor.id;
+      await timelineManager.reset();
+      hiddenAssetId = undefined;
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const position = after.findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+    });
+
+    it('anchors on what is on screen again once the user scrolled after a stand-in was used', async () => {
+      const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const anchor = findAnchor(before, 2000);
+      hiddenAssetId = anchor.id;
+      await timelineManager.reset();
+
+      timelineManager.scrollTo(timelineManager.scrollTop + 600);
+      timelineManager.updateSlidingWindow();
+      const scrolled = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const current = findAnchor(scrolled, timelineManager.scrollTop);
+      hiddenAssetId = undefined;
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const position = after.findAssetAbsolutePosition(current.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(current.offset);
+    });
+
     it('does not look up a private asset that is gone because private mode was turned off', async () => {
       privateModeManager.enabled = true;
       const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
