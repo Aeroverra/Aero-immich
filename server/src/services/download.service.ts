@@ -7,6 +7,7 @@ import { DownloadArchiveDto, DownloadArchiveInfo, DownloadInfoDto, DownloadRespo
 import { Permission } from 'src/enum';
 import { ImmichReadStream } from 'src/repositories/storage.repository';
 import { BaseService } from 'src/services/base.service';
+import { toPrivateScope } from 'src/utils/access';
 import { HumanReadableSize } from 'src/utils/bytes';
 import { getPreferences } from 'src/utils/preferences';
 
@@ -22,11 +23,13 @@ export class DownloadService extends BaseService {
     } else if (dto.albumId) {
       const albumId = dto.albumId;
       await this.requireAccess({ auth, permission: Permission.AlbumDownload, ids: [albumId] });
-      assets = this.downloadRepository.downloadAlbumId(albumId);
+      // a shared-link download covers everything the owner put behind the link, private assets included
+      const scope = auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
+      assets = this.downloadRepository.downloadAlbumId(albumId, scope);
     } else if (dto.userId) {
       const userId = dto.userId;
       await this.requireAccess({ auth, permission: Permission.TimelineDownload, ids: [userId] });
-      assets = this.downloadRepository.downloadUserId(userId);
+      assets = this.downloadRepository.downloadUserId(userId, toPrivateScope(auth));
     } else {
       throw new BadRequestException('assetIds, albumId, or userId is required');
     }
