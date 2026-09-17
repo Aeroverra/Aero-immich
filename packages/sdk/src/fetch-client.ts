@@ -975,6 +975,8 @@ export type AlbumResponseDto = {
     endDate?: string;
     /** Has shared link */
     hasSharedLink: boolean;
+    /** Number of assets the active view hides in this album; only sent while private mode is unlocked and a view hides some of them */
+    hiddenByViewCount?: number;
     /** Album ID */
     id: string;
     /** Activity feed enabled */
@@ -1369,6 +1371,8 @@ export type TagResponseDto = {
     createdAt: string;
     /** Tag ID */
     id: string;
+    /** Whether the tag is hidden unless private mode is unlocked (children of a hidden tag are hidden too) */
+    isHidden: boolean;
     /** Tag name */
     name: string;
     /** Parent tag ID */
@@ -2925,6 +2929,8 @@ export type ServerFeaturesDto = {
     trash: boolean;
     /** Whether enhanced video analysis of sampled frames is enabled */
     videoFrameAnalysis: boolean;
+    /** Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it. */
+    views?: boolean;
 };
 export type LicenseKeyDto = {
     /** Activation key */
@@ -3162,6 +3168,8 @@ export type SyncAckSetDto = {
 export type SyncStreamDto = {
     /** Include assets marked private. Without it, private assets are left out of the stream and a delete is emitted when an asset becomes private. */
     includePrivate?: boolean;
+    /** Include every asset regardless of views; the client filters with the views it syncs. Without it, only assets that pass the user default view are sent, and a delete is emitted when an asset leaves the default view. */
+    includeViews?: boolean;
     /** Reset sync state */
     reset?: boolean;
     /** Sync request types */
@@ -3198,6 +3206,8 @@ export type ReverseGeocodingStateResponseDto = {
 export type TagCreateDto = {
     /** Tag color (hex) */
     color?: string | null;
+    /** Hide the tag and its children everywhere unless private mode is unlocked */
+    isHidden?: boolean;
     /** Tag name */
     name: string;
     /** Parent tag ID */
@@ -3220,6 +3230,8 @@ export type TagBulkAssetsResponseDto = {
 export type TagUpdateDto = {
     /** Tag color (hex) */
     color?: string | null;
+    /** Hide the tag and its children everywhere unless private mode is unlocked */
+    isHidden?: boolean;
     /** Tag name */
     name?: string;
 };
@@ -3307,6 +3319,80 @@ export type CreateProfileImageResponseDto = {
     profileImagePath: string;
     /** User ID */
     userId: string;
+};
+export type CustomViewResponseDto = {
+    access: ViewAccess;
+    /** Creation date */
+    createdAt: string;
+    /** Exclude assets with any of these tags or their descendants */
+    excludeTagIds: string[];
+    /** View ID */
+    id: string;
+    /** Include every asset */
+    includeAll: boolean;
+    /** Include assets with any of these tags or their descendants */
+    includeTagIds: string[];
+    /** Include assets without any of the owner tags */
+    includeUntagged: boolean;
+    /** Whether this is the default view */
+    isDefault: boolean;
+    /** View name */
+    name: string;
+    /** Position in the view list */
+    order: number;
+    privateAssets: ViewPrivateAssets;
+    /** Last update date */
+    updatedAt: string;
+};
+export type CustomViewCreateDto = {
+    access?: ViewAccess;
+    /** Exclude assets with any of these tags or their descendants; exclude wins over include */
+    excludeTagIds?: string[];
+    /** Include every asset */
+    includeAll?: boolean;
+    /** Include assets with any of these tags or their descendants */
+    includeTagIds?: string[];
+    /** Include assets without any of your tags */
+    includeUntagged?: boolean;
+    /** Make this the default view, which applies whenever no other view is active (at most one per user) */
+    isDefault?: boolean;
+    /** View name */
+    name: string;
+    /** Position in the view list */
+    order?: number;
+    privateAssets?: ViewPrivateAssets;
+};
+export type CustomViewActiveResponseDto = {
+    /** When a switched view falls back to the default view unless the session stays active */
+    expiresAt: string | null;
+    /** The view that applies to this session (the switched view or the default one); null when nothing is filtered */
+    view: (CustomViewResponseDto) | null;
+    /** The view this session switched to; null when the default view applies */
+    viewId: string | null;
+};
+export type CustomViewActiveUpdateDto = {
+    /** PIN code, required on every switch to a view with locked access */
+    pinCode?: string;
+    /** View to switch to; null returns to the default view */
+    viewId: string | null;
+};
+export type CustomViewUpdateDto = {
+    access?: ViewAccess;
+    /** Exclude assets with any of these tags or their descendants; exclude wins over include */
+    excludeTagIds?: string[];
+    /** Include every asset */
+    includeAll?: boolean;
+    /** Include assets with any of these tags or their descendants */
+    includeTagIds?: string[];
+    /** Include assets without any of your tags */
+    includeUntagged?: boolean;
+    /** Make this the default view, which applies whenever no other view is active (at most one per user) */
+    isDefault?: boolean;
+    /** View name */
+    name?: string;
+    /** Position in the view list */
+    order?: number;
+    privateAssets?: ViewPrivateAssets;
 };
 export type WorkflowStepDto = {
     /** Step configuration */
@@ -3887,6 +3973,40 @@ export type SyncStackV2 = {
     /** Updated at */
     updatedAt: string;
 };
+export type SyncTagAssetDeleteV1 = {
+    /** Asset ID */
+    assetId: string;
+    /** Tag ID */
+    tagId: string;
+};
+export type SyncTagAssetV1 = {
+    /** Asset ID */
+    assetId: string;
+    /** Tag ID */
+    tagId: string;
+};
+export type SyncTagDeleteV1 = {
+    /** Tag ID; its child tags, asset links and view rules are deleted with it */
+    tagId: string;
+};
+export type SyncTagV1 = {
+    /** Tag color (hex) */
+    color: string | null;
+    /** Created at */
+    createdAt: string;
+    /** Tag ID */
+    id: string;
+    /** Hidden unless private mode is unlocked; children of a hidden tag are hidden too */
+    isHidden: boolean;
+    /** Owner ID */
+    ownerId: string;
+    /** Parent tag ID */
+    parentId: string | null;
+    /** Updated at */
+    updatedAt: string;
+    /** Tag value (full path) */
+    value: string;
+};
 export type SyncUserDeleteV1 = {
     /** User ID */
     userId: string;
@@ -3919,6 +4039,45 @@ export type SyncUserV1 = {
     name: string;
     /** User profile changed at */
     profileChangedAt: string;
+};
+export type SyncViewDeleteV1 = {
+    /** View ID; its tag rules are deleted with it */
+    viewId: string;
+};
+export type SyncViewTagDeleteV1 = {
+    /** Tag ID */
+    tagId: string;
+    /** View ID */
+    viewId: string;
+};
+export type SyncViewTagV1 = {
+    mode: ViewTagMode;
+    /** Tag ID */
+    tagId: string;
+    /** View ID */
+    viewId: string;
+};
+export type SyncViewV1 = {
+    access: ViewAccess;
+    /** Created at */
+    createdAt: string;
+    /** View ID */
+    id: string;
+    /** Include every asset */
+    includeAll: boolean;
+    /** Include assets without any of the owner tags */
+    includeUntagged: boolean;
+    /** Whether this is the default view */
+    isDefault: boolean;
+    /** View name */
+    name: string;
+    /** Position in the view list */
+    order: number;
+    /** Owner ID */
+    ownerId: string;
+    privateAssets: ViewPrivateAssets;
+    /** Updated at */
+    updatedAt: string;
 };
 /**
  * List all activities
@@ -7884,6 +8043,102 @@ export function getUniqueOriginalPaths(opts?: Oazapfts.RequestOpts) {
     }));
 }
 /**
+ * Retrieve views
+ */
+export function getCustomViews({ tagId }: {
+    tagId?: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: CustomViewResponseDto[];
+    }>(`/views${QS.query(QS.explode({
+        tagId
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Create a view
+ */
+export function createCustomView({ customViewCreateDto }: {
+    customViewCreateDto: CustomViewCreateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: CustomViewResponseDto;
+    }>("/views", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: customViewCreateDto
+    })));
+}
+/**
+ * Retrieve the active view
+ */
+export function getActiveCustomView(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: CustomViewActiveResponseDto;
+    }>("/views/active", {
+        ...opts
+    }));
+}
+/**
+ * Switch the active view
+ */
+export function setActiveCustomView({ customViewActiveUpdateDto }: {
+    customViewActiveUpdateDto: CustomViewActiveUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: CustomViewActiveResponseDto;
+    }>("/views/active", oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: customViewActiveUpdateDto
+    })));
+}
+/**
+ * Delete a view
+ */
+export function deleteCustomView({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/views/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Retrieve a view
+ */
+export function getCustomView({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: CustomViewResponseDto;
+    }>(`/views/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Update a view
+ */
+export function updateCustomView({ id, customViewUpdateDto }: {
+    id: string;
+    customViewUpdateDto: CustomViewUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: CustomViewResponseDto;
+    }>(`/views/${encodeURIComponent(id)}`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: customViewUpdateDto
+    })));
+}
+/**
  * List all workflows
  */
 export function searchWorkflows({ description, enabled, id, logging, name, trigger }: {
@@ -8331,6 +8586,10 @@ export enum Permission {
     UserProfileImageRead = "userProfileImage.read",
     UserProfileImageUpdate = "userProfileImage.update",
     UserProfileImageDelete = "userProfileImage.delete",
+    ViewCreate = "view.create",
+    ViewRead = "view.read",
+    ViewUpdate = "view.update",
+    ViewDelete = "view.delete",
     QueueRead = "queue.read",
     QueueUpdate = "queue.update",
     QueueJobCreate = "queueJob.create",
@@ -8638,6 +8897,14 @@ export enum SyncEntityType {
     AssetFaceDeleteV1 = "AssetFaceDeleteV1",
     UserMetadataV1 = "UserMetadataV1",
     UserMetadataDeleteV1 = "UserMetadataDeleteV1",
+    TagV1 = "TagV1",
+    TagDeleteV1 = "TagDeleteV1",
+    TagAssetV1 = "TagAssetV1",
+    TagAssetDeleteV1 = "TagAssetDeleteV1",
+    ViewV1 = "ViewV1",
+    ViewDeleteV1 = "ViewDeleteV1",
+    ViewTagV1 = "ViewTagV1",
+    ViewTagDeleteV1 = "ViewTagDeleteV1",
     SyncAckV1 = "SyncAckV1",
     SyncResetV1 = "SyncResetV1",
     SyncCompleteV1 = "SyncCompleteV1"
@@ -8671,11 +8938,25 @@ export enum SyncRequestType {
     PeopleV1 = "PeopleV1",
     AssetFacesV1 = "AssetFacesV1",
     AssetFacesV2 = "AssetFacesV2",
-    UserMetadataV1 = "UserMetadataV1"
+    UserMetadataV1 = "UserMetadataV1",
+    TagsV1 = "TagsV1",
+    TagAssetsV1 = "TagAssetsV1",
+    ViewsV1 = "ViewsV1",
+    ViewTagsV1 = "ViewTagsV1"
 }
 export enum AssetOrderBy {
     TakenAt = "takenAt",
     CreatedAt = "createdAt"
+}
+export enum ViewAccess {
+    Open = "open",
+    Locked = "locked",
+    Private = "private"
+}
+export enum ViewPrivateAssets {
+    Hide = "hide",
+    Unlocked = "unlocked",
+    Only = "only"
 }
 export enum WorkflowResult {
     Completed = "completed",
@@ -8695,4 +8976,8 @@ export enum UserMetadataKey {
     Preferences = "preferences",
     License = "license",
     Onboarding = "onboarding"
+}
+export enum ViewTagMode {
+    Include = "include",
+    Exclude = "exclude"
 }
