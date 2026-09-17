@@ -70,7 +70,48 @@ from
 where
   "userId" = $1
 
--- SyncRepository.albumViewState.getChanged
+-- SyncRepository.albumViewState.getChangedAlbumIds
+select
+  "album"."id"
+from
+  "album"
+  inner join "album_user" on "album_user"."albumId" = "album"."id"
+  and "album_user"."userId" = $1
+where
+  (
+    "album"."updateId" > $2
+    or "album_user"."updateId" > $3
+    or "album"."id" in (
+      select
+        "album_asset"."albumId"
+      from
+        "album_asset"
+      where
+        "album_asset"."updateId" > $4
+    )
+    or "album"."id" in (
+      select
+        "album_asset_audit"."albumId"
+      from
+        "album_asset_audit"
+      where
+        "album_asset_audit"."id" > $5
+    )
+    or "album"."id" in (
+      select
+        "album_asset"."albumId"
+      from
+        "asset"
+        inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
+      where
+        "asset"."updateId" > $6
+    )
+  )
+
+-- SyncRepository.albumViewState.getStates
+begin
+set
+  local jit = off
 select
   "album"."id" as "albumId",
   "album"."albumThumbnailAssetId",
@@ -420,40 +461,11 @@ select
   end as "visibleThumbnailAssetId"
 from
   "album"
-  inner join "album_user" on "album_user"."albumId" = "album"."id"
-  and "album_user"."userId" = $27
   left join "album_view_state" on "album_view_state"."albumId" = "album"."id"
-  and "album_view_state"."userId" = $28
+  and "album_view_state"."userId" = $27
 where
-  (
-    "album"."updateId" > $29
-    or "album_user"."updateId" > $30
-    or "album"."id" in (
-      select
-        "album_asset"."albumId"
-      from
-        "album_asset"
-      where
-        "album_asset"."updateId" > $31
-    )
-    or "album"."id" in (
-      select
-        "album_asset_audit"."albumId"
-      from
-        "album_asset_audit"
-      where
-        "album_asset_audit"."id" > $32
-    )
-    or "album"."id" in (
-      select
-        "album_asset"."albumId"
-      from
-        "asset"
-        inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
-      where
-        "asset"."updateId" > $33
-    )
-  )
+  "album"."id" = any ($28::uuid[])
+commit
 
 -- SyncRepository.albumViewState.getAll
 select
