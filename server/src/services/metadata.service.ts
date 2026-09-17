@@ -525,7 +525,11 @@ export class MetadataService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    await this.metadataRepository.writeTags(sidecarPath, exif);
+    const written = await this.metadataRepository.writeTags(sidecarPath, exif);
+    if (!written) {
+      // the properties stay locked, so metadata extraction keeps them instead of reading the old file
+      return JobStatus.Failed;
+    }
 
     if (asset.files.length === 0) {
       await this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Sidecar, path: sidecarPath });

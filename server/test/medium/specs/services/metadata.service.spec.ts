@@ -4,7 +4,7 @@ import { Stats } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { JobName } from 'src/enum';
+import { JobName, JobStatus } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
@@ -293,7 +293,7 @@ describe(MetadataService.name, () => {
       const writeTags = metadataRepository.writeTags.bind(metadataRepository);
       const spy = vi.spyOn(metadataRepository, 'writeTags').mockImplementationOnce(async (path, tags) => {
         await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
-        await writeTags(path, tags);
+        return writeTags(path, tags);
       });
 
       await sut.handleSidecarWrite({ id: asset.id });
@@ -317,7 +317,7 @@ describe(MetadataService.name, () => {
       const writeTags = metadataRepository.writeTags.bind(metadataRepository);
       const spy = vi.spyOn(metadataRepository, 'writeTags').mockImplementationOnce(async (path, tags) => {
         await tagService.removeAssets(auth, tagB.id, { ids: [asset.id] });
-        await writeTags(path, tags);
+        return writeTags(path, tags);
       });
 
       await sut.handleSidecarWrite({ id: asset.id });
@@ -357,6 +357,22 @@ describe(MetadataService.name, () => {
       await expect(getSidecarTags(asset.id)).resolves.toEqual(['tag-a', 'tag-b']);
     });
 
+    it('should keep a tag when the sidecar cannot be written', async () => {
+      const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags } = await setupTagging();
+      const asset = await newTaggableAsset();
+      await tagService.addAssets(auth, tagA.id, { ids: [asset.id] });
+      await sut.handleSidecarWrite({ id: asset.id });
+      await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
+
+      // for example a read-only library, or another job writing the same file at the same moment
+      const spy = vi.spyOn(ctx.get(MetadataRepository), 'writeTags').mockResolvedValueOnce(false);
+      await expect(sut.handleSidecarWrite({ id: asset.id })).resolves.toBe(JobStatus.Failed);
+      spy.mockRestore();
+      await sut.handleMetadataExtraction({ id: asset.id });
+
+      await expect(getTags(asset.id)).resolves.toEqual({ tagAsset: ['tag-a', 'tag-b'], exif: ['tag-a', 'tag-b'] });
+    });
+
     it('should keep a tag when an older sidecar write finishes after a newer one', async () => {
       const { sut, ctx, tagService, auth, tagA, tagB, newTaggableAsset, getTags, getSidecarTags } =
         await setupTagging();
@@ -369,7 +385,7 @@ describe(MetadataService.name, () => {
         // a second job for the same asset starts and finishes while the first one is still writing
         await tagService.addAssets(auth, tagB.id, { ids: [asset.id] });
         await sut.handleSidecarWrite({ id: asset.id });
-        await writeTags(path, tags);
+        return writeTags(path, tags);
       });
 
       await sut.handleSidecarWrite({ id: asset.id });
