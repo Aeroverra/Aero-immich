@@ -25,6 +25,7 @@ import {
   partner_delete_audit,
   person_delete_audit,
   person_group_delete_audit,
+  preserve_updated_at,
   stack_delete_audit,
   tag_asset_after_delete,
   tag_asset_after_insert,
@@ -42,6 +43,8 @@ import { AlbumAssetTable } from 'src/schema/tables/album-asset.table';
 import { AlbumAuditTable } from 'src/schema/tables/album-audit.table';
 import { AlbumUserAuditTable } from 'src/schema/tables/album-user-audit.table';
 import { AlbumUserTable } from 'src/schema/tables/album-user.table';
+import { AlbumViewStateCheckpointTable } from 'src/schema/tables/album-view-state-checkpoint.table';
+import { AlbumViewStateTable } from 'src/schema/tables/album-view-state.table';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { ApiKeyTable } from 'src/schema/tables/api-key.table';
 import { AssetAuditTable } from 'src/schema/tables/asset-audit.table';
@@ -191,6 +194,8 @@ export class ImmichDatabase {
     ViewAuditTable,
     ViewTagTable,
     ViewTagAuditTable,
+    AlbumViewStateTable,
+    AlbumViewStateCheckpointTable,
     PluginTable,
     PluginMethodTable,
     WorkflowTable,
@@ -227,6 +232,7 @@ export class ImmichDatabase {
     tag_asset_after_delete,
     view_delete_audit,
     view_tag_delete_audit,
+    preserve_updated_at,
   ];
 
   enum = [album_user_role_enum, assets_status_enum, asset_face_source_type, asset_visibility_enum];
@@ -249,6 +255,8 @@ export interface DB {
   album_asset_audit: AlbumAssetAuditTable;
   album_user: AlbumUserTable;
   album_user_audit: AlbumUserAuditTable;
+  album_view_state: AlbumViewStateTable;
+  album_view_state_checkpoint: AlbumViewStateCheckpointTable;
 
   api_key: ApiKeyTable;
 

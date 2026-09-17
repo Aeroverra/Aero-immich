@@ -144,6 +144,24 @@ export const updated_at = registerFunction({
     END;`,
 });
 
+/**
+ * Runs after updated_at (triggers of one event fire in name order) and keeps the previous updatedAt while the
+ * transaction set immich.preserve_updated_at: the row still gets a fresh updateId, so sync clients receive it again,
+ * but clients that sort by updatedAt do not see it as modified.
+ */
+export const preserve_updated_at = registerFunction({
+  name: 'preserve_updated_at',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+        IF current_setting('immich.preserve_updated_at', true) = 'on' THEN
+            new."updatedAt" = old."updatedAt";
+        END IF;
+        return new;
+    END;`,
+});
+
 export const f_concat_ws = registerFunction({
   name: 'f_concat_ws',
   arguments: ['text', 'text[]'],
