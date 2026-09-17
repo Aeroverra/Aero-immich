@@ -8,7 +8,7 @@ import { constants } from 'node:fs/promises';
 import { join, parse } from 'node:path';
 
 import { StorageCore } from 'src/cores/storage.core';
-import { Asset, AssetFile } from 'src/database';
+import { Asset, AssetFile, LockableProperty } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
 import {
   AssetFileType,
@@ -40,6 +40,14 @@ import { Tasks } from 'src/utils/tasks';
 
 const POSTGRES_INT_MAX = 2_147_483_647;
 const POSTGRES_INT_MIN = -2_147_483_648;
+
+/** Properties that metadata extraction derives other values from after they are written to the sidecar */
+const propertiesThatNeedExtraction = new Set<LockableProperty>([
+  'dateTimeOriginal',
+  'timeZone',
+  'latitude',
+  'longitude',
+]);
 
 /** look for a date from these tags (in order) */
 const EXIF_DATE_TAGS: Array<keyof ImmichTags> = [
@@ -532,6 +540,13 @@ export class MetadataService extends BaseService {
         lockedPropertiesBehavior: 'append',
       });
       await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id } });
+    } else if (lockedProperties.some((property) => propertiesThatNeedExtraction.has(property))) {
+      // local date time and reverse geocoding are derived during extraction; tags, description and rating are
+      // already in the database, so reading the file again after writing them would only repeat work
+      await this.jobRepository.queue({
+        name: JobName.AssetExtractMetadata,
+        data: { id, source: 'sidecar-write' },
+      });
     }
 
     return JobStatus.Success;

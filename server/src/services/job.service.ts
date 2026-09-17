@@ -108,14 +108,6 @@ export class JobService extends BaseService {
         break;
       }
 
-      case JobName.SidecarWrite: {
-        await this.jobRepository.queue({
-          name: JobName.AssetExtractMetadata,
-          data: { id: item.data.id, source: 'sidecar-write' },
-        });
-        break;
-      }
-
       case JobName.StorageTemplateMigrationSingle: {
         if (item.data.source === 'upload' || item.data.source === 'copy') {
           await this.jobRepository.queue({ name: JobName.AssetGenerateThumbnails, data: item.data });

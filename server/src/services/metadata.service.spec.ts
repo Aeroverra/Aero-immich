@@ -2021,6 +2021,10 @@ describe(MetadataService.name, () => {
         ['description', 'latitude', 'longitude', 'dateTimeOriginal', 'timeZone'],
         asset.exifInfo.updateId,
       );
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetExtractMetadata,
+        data: { id: asset.id, source: 'sidecar-write' },
+      });
     });
 
     it('should write rating', async () => {
@@ -2032,6 +2036,7 @@ describe(MetadataService.name, () => {
       await expect(sut.handleSidecarWrite({ id: asset.id })).resolves.toBe(JobStatus.Success);
       expect(mocks.metadata.writeTags).toHaveBeenCalledWith(asset.files[0].path, { Rating: 4 });
       expect(mocks.asset.unlockProperties).toHaveBeenCalledWith(asset.id, ['rating'], asset.exifInfo.updateId);
+      expect(mocks.job.queue).not.toHaveBeenCalled();
     });
 
     it('should write null rating as 0', async () => {
