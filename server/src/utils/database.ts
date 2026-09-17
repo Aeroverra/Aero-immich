@@ -141,49 +141,79 @@ export const dummyViewFilter: ViewFilter = {
 export const isViewUnrestricted = (view?: ViewFilter | null): view is null | undefined =>
   !view || (view.includeAll && view.excludeTagIds.length === 0 && view.privateAssets === ViewPrivateAssets.Unlocked);
 
-const viewTagMatch = (eb: ExpressionBuilder<DB, any>, assetIdRef: string, tagIds: string[]) =>
-  eb.exists(
-    eb
-      .selectFrom('tag_asset')
-      .innerJoin('tag_closure', 'tag_closure.id_descendant', 'tag_asset.tagId')
-      .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
-      .where('tag_closure.id_ancestor', '=', anyUuid(tagIds)),
-  );
+type TagMatch = (eb: ExpressionBuilder<DB, any>, assetIdRef: string) => Expression<SqlBool>;
+
+const viewTagMatch =
+  (tagIds: string[]): TagMatch =>
+  (eb, assetIdRef) =>
+    eb.exists(
+      eb
+        .selectFrom('tag_asset')
+        .innerJoin('tag_closure', 'tag_closure.id_descendant', 'tag_asset.tagId')
+        .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
+        .where('tag_closure.id_ancestor', '=', anyUuid(tagIds)),
+    );
+
+const ownerTagMatch =
+  (ownerId: string): TagMatch =>
+  (eb, assetIdRef) =>
+    eb.exists(
+      eb
+        .selectFrom('tag_asset')
+        .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+        .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
+        .where('tag.userId', '=', ownerId),
+    );
 
 /**
- * Whether the asset referenced by `assetIdRef` (with `isPrivate` next to it) passes the view. Exclude wins over
- * include; `includeUntagged` looks at every tag of the view owner, hidden ones included.
+ * The tags of an asset as views see them: its own, plus for the hidden motion part of a live photo the tags of its
+ * still, so tagging the still moves the clip in or out of a view with it.
+ */
+const withLivePhotoStill = (
+  eb: ExpressionBuilder<DB, any>,
+  match: TagMatch,
+  { assetIdRef, visibilityRef }: { assetIdRef: string; visibilityRef: string },
+) =>
+  eb.or([
+    match(eb, assetIdRef),
+    eb.and([
+      eb(eb.ref(visibilityRef), '=', sql.lit(AssetVisibility.Hidden)),
+      eb.exists(
+        eb
+          .selectFrom('asset as live_photo_still')
+          .whereRef('live_photo_still.livePhotoVideoId', '=', eb.ref(assetIdRef))
+          .where((eb) => match(eb, 'live_photo_still.id')),
+      ),
+    ]),
+  ]);
+
+/**
+ * Whether the asset referenced by `assetIdRef` (with `isPrivate` and `visibility` next to it) passes the view. Exclude
+ * wins over include; `includeUntagged` looks at every tag of the view owner, hidden ones included. The hidden motion
+ * part of a live photo also carries the tags of its still.
  */
 export const viewAssetPredicate = (
   eb: ExpressionBuilder<DB, any>,
   view: ViewFilter,
   { assetIdRef = 'asset.id', isPrivateRef = 'asset.isPrivate' }: { assetIdRef?: string; isPrivateRef?: string } = {},
 ): Expression<SqlBool> => {
+  // every caller passes columns of the same asset row
+  const refs = { assetIdRef, visibilityRef: isPrivateRef.replace(/isPrivate$/, 'visibility') };
   const included: Expression<SqlBool>[] = [];
   if (view.includeAll) {
     included.push(eb.lit(true));
   } else {
     if (view.includeUntagged) {
-      included.push(
-        eb.not(
-          eb.exists(
-            eb
-              .selectFrom('tag_asset')
-              .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
-              .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
-              .where('tag.userId', '=', view.ownerId),
-          ),
-        ),
-      );
+      included.push(eb.not(withLivePhotoStill(eb, ownerTagMatch(view.ownerId), refs)));
     }
     if (view.includeTagIds.length > 0) {
-      included.push(viewTagMatch(eb, assetIdRef, view.includeTagIds));
+      included.push(withLivePhotoStill(eb, viewTagMatch(view.includeTagIds), refs));
     }
   }
 
   const predicates: Expression<SqlBool>[] = [included.length > 0 ? eb.or(included) : eb.lit(false)];
   if (view.excludeTagIds.length > 0) {
-    predicates.push(eb.not(viewTagMatch(eb, assetIdRef, view.excludeTagIds)));
+    predicates.push(eb.not(withLivePhotoStill(eb, viewTagMatch(view.excludeTagIds), refs)));
   }
   if (view.privateAssets === ViewPrivateAssets.Hide) {
     predicates.push(eb(eb.ref(isPrivateRef), '=', false));
