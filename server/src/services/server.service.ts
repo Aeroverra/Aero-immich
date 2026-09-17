@@ -112,6 +112,7 @@ export class ServerService extends BaseService {
       realtimeTranscoding: ffmpeg.realtime.enabled,
       stackSource: true,
       videoFrameAnalysis: isVideoFrameAnalysisEnabled(machineLearning),
+      views: true,
     };
   }
 

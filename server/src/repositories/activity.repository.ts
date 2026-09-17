@@ -7,7 +7,7 @@ import { DummyValue, GenerateSql } from 'src/decorators';
 import { AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { ActivityTable } from 'src/schema/tables/activity.table';
-import { asUuid, dummy, PrivateScope } from 'src/utils/database';
+import { asUuid, dummy, isViewUnrestricted, PrivateScope, viewAssetPredicate } from 'src/utils/database';
 
 export interface ActivitySearch {
   albumId?: string;
@@ -46,6 +46,10 @@ export class ActivityRepository {
         // album-level activity has no asset; asset-level activity on a private asset stays hidden outside private mode
         .$if(!scope.privateMode, (qb) =>
           qb.where((eb) => eb.or([eb('asset.id', 'is', null), eb('asset.isPrivate', '=', false)])),
+        )
+        // the same goes for activity on an asset the active view hides
+        .$if(!isViewUnrestricted(scope.view), (qb) =>
+          qb.where((eb) => eb.or([eb('asset.id', 'is', null), viewAssetPredicate(eb, scope.view!)])),
         )
         .orderBy('activity.createdAt', 'asc')
         .execute()
@@ -106,6 +110,9 @@ export class ActivityRepository {
       )
       .$if(!scope.privateMode, (qb) =>
         qb.where((eb) => eb.or([eb('asset.id', 'is', null), eb('asset.isPrivate', '=', false)])),
+      )
+      .$if(!isViewUnrestricted(scope.view), (qb) =>
+        qb.where((eb) => eb.or([eb('asset.id', 'is', null), viewAssetPredicate(eb, scope.view!)])),
       )
       .executeTakeFirstOrThrow();
 
