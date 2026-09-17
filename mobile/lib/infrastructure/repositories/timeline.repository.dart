@@ -68,9 +68,10 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
         .mergedBucket(
           userIds: userIds,
           groupBy: groupBy.index,
-          privateMode: privateFilter.showsOwnPrivate,
-          currentUserId: privateFilter.userId ?? '',
           groupAutoStacks: groupAutoStacks,
+          viewActive: privateFilter.restrictingView != null,
+          member_filter: (_, _, member) => member.privateFilter(privateFilter),
+          asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )
         .map((row) {
           final date = row.bucketDate.truncateDate(groupBy);
@@ -90,9 +91,10 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
         .mergedAsset(
           userIds: userIds,
           limit: (_) => Limit(count, offset),
-          privateMode: privateFilter.showsOwnPrivate,
-          currentUserId: privateFilter.userId ?? '',
           groupAutoStacks: groupAutoStacks,
+          viewActive: privateFilter.restrictingView != null,
+          member_filter: (_, _, member) => member.privateFilter(privateFilter),
+          asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )
         .map(
           (row) => row.remoteId != null && row.ownerId != null
