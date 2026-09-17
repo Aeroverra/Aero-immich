@@ -167,25 +167,27 @@ const ownerTagMatch =
 
 /**
  * The tags of an asset as views see them: its own, plus for the hidden motion part of a live photo the tags of its
- * still, so tagging the still moves the clip in or out of a view with it.
+ * still, so tagging the still moves the clip in or out of a view with it. The negated form is written as NOT EXISTS
+ * terms joined by AND, which Postgres can still plan as an anti join.
  */
 const withLivePhotoStill = (
   eb: ExpressionBuilder<DB, any>,
   match: TagMatch,
   { assetIdRef, visibilityRef }: { assetIdRef: string; visibilityRef: string },
-) =>
-  eb.or([
-    match(eb, assetIdRef),
-    eb.and([
-      eb(eb.ref(visibilityRef), '=', sql.lit(AssetVisibility.Hidden)),
-      eb.exists(
-        eb
-          .selectFrom('asset as live_photo_still')
-          .whereRef('live_photo_still.livePhotoVideoId', '=', eb.ref(assetIdRef))
-          .where((eb) => match(eb, 'live_photo_still.id')),
-      ),
-    ]),
-  ]);
+  { negate = false }: { negate?: boolean } = {},
+) => {
+  const own = match(eb, assetIdRef);
+  const still = eb.exists(
+    eb
+      .selectFrom('asset as live_photo_still')
+      .whereRef('live_photo_still.livePhotoVideoId', '=', eb.ref(assetIdRef))
+      .where((eb) => match(eb, 'live_photo_still.id')),
+  );
+  const visibility = eb.ref(visibilityRef);
+  return negate
+    ? eb.and([eb.not(own), eb.or([eb(visibility, '!=', sql.lit(AssetVisibility.Hidden)), eb.not(still)])])
+    : eb.or([own, eb.and([eb(visibility, '=', sql.lit(AssetVisibility.Hidden)), still])]);
+};
 
 /**
  * Whether the asset referenced by `assetIdRef` (with `isPrivate` and `visibility` next to it) passes the view. Exclude
@@ -204,7 +206,7 @@ export const viewAssetPredicate = (
     included.push(eb.lit(true));
   } else {
     if (view.includeUntagged) {
-      included.push(eb.not(withLivePhotoStill(eb, ownerTagMatch(view.ownerId), refs)));
+      included.push(withLivePhotoStill(eb, ownerTagMatch(view.ownerId), refs, { negate: true }));
     }
     if (view.includeTagIds.length > 0) {
       included.push(withLivePhotoStill(eb, viewTagMatch(view.includeTagIds), refs));
@@ -213,7 +215,7 @@ export const viewAssetPredicate = (
 
   const predicates: Expression<SqlBool>[] = [included.length > 0 ? eb.or(included) : eb.lit(false)];
   if (view.excludeTagIds.length > 0) {
-    predicates.push(eb.not(withLivePhotoStill(eb, viewTagMatch(view.excludeTagIds), refs)));
+    predicates.push(withLivePhotoStill(eb, viewTagMatch(view.excludeTagIds), refs, { negate: true }));
   }
   if (view.privateAssets === ViewPrivateAssets.Hide) {
     predicates.push(eb(eb.ref(isPrivateRef), '=', false));

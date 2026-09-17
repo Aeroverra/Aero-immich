@@ -658,8 +658,8 @@ where
   and "person"."personGroupId" = $2
   and (
     (
-      not (
-        exists (
+      (
+        not exists (
           select
           from
             "tag_asset"
@@ -668,9 +668,9 @@ where
             "tag_asset"."assetId" = "asset"."id"
             and "tag"."userId" = $3
         )
-        or (
-          "asset"."visibility" = 'hidden'
-          and exists (
+        and (
+          "asset"."visibility" != 'hidden'
+          or not exists (
             select
             from
               "asset" as "live_photo_still"
@@ -719,8 +719,8 @@ where
         )
       )
     )
-    and not (
-      exists (
+    and (
+      not exists (
         select
         from
           "tag_asset"
@@ -729,9 +729,9 @@ where
           "tag_asset"."assetId" = "asset"."id"
           and "tag_closure"."id_ancestor" = any ($7::uuid[])
       )
-      or (
-        "asset"."visibility" = 'hidden'
-        and exists (
+      and (
+        "asset"."visibility" != 'hidden'
+        or not exists (
           select
           from
             "asset" as "live_photo_still"
