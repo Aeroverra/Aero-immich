@@ -819,24 +819,3 @@ from
   inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
 where
   "asset"."id" = $1
-
--- AssetRepository.getForUpdateTags
-select
-  (
-    select
-      coalesce(json_agg(agg), '[]')
-    from
-      (
-        select
-          "tag"."value"
-        from
-          "tag"
-          inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
-        where
-          "asset"."id" = "tag_asset"."assetId"
-      ) as agg
-  ) as "tags"
-from
-  "asset"
-where
-  "asset"."id" = $1
