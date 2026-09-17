@@ -1,6 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 
 class StackChildrenNotifier extends AutoDisposeFamilyAsyncNotifier<List<RemoteAsset>, BaseAsset> {
   @override
@@ -9,7 +10,7 @@ class StackChildrenNotifier extends AutoDisposeFamilyAsyncNotifier<List<RemoteAs
       return Future.value(const []);
     }
 
-    return ref.watch(assetServiceProvider).getStack(asset);
+    return ref.watch(assetServiceProvider).getStack(asset, privateFilter: ref.watch(privateModeFilterProvider));
   }
 
   void setStack(List<RemoteAsset> stack) {

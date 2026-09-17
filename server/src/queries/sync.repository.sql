@@ -131,7 +131,8 @@ select
     else $2
   end as "isFavorite",
   "asset"."updateId",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isViewHidden"
 from
   "asset" as "asset"
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
@@ -172,7 +173,8 @@ select
     when "asset"."ownerId" = $1 then "asset"."isFavorite"
     else $2
   end as "isFavorite",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isViewHidden"
 from
   "album_asset" as "album_asset"
   inner join "asset" on "asset"."id" = "album_asset"."assetId"
@@ -388,7 +390,8 @@ select
   "album_asset"."assetId" as "assetId",
   "album_asset"."albumId" as "albumId",
   "album_asset"."updateId",
-  "album"."isPrivate" as "isAlbumPrivate"
+  "album"."isPrivate" as "isAlbumPrivate",
+  false as "isViewHidden"
 from
   "album_asset" as "album_asset"
   inner join "album" on "album"."id" = "album_asset"."albumId"
@@ -505,7 +508,8 @@ select
   "asset"."width",
   "asset"."height",
   "asset"."isEdited",
-  "asset"."updateId"
+  "asset"."updateId",
+  false as "isViewHidden"
 from
   "asset" as "asset"
 where
@@ -582,7 +586,8 @@ select
   "asset_edit"."action",
   "asset_edit"."parameters",
   "asset_edit"."updateId",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "asset_edit" as "asset_edit"
   inner join "asset" on "asset"."id" = "asset_edit"."assetId"
@@ -622,7 +627,8 @@ select
   "isVisible",
   "asset_face"."deletedAt",
   "asset_face"."updateId",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "asset_face" as "asset_face"
   inner join "asset" on "asset"."id" = "asset_face"."assetId"
@@ -654,7 +660,8 @@ select
   "key",
   "value",
   "asset_metadata"."updateId",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "asset_metadata" as "asset_metadata"
   inner join "asset" on "asset"."id" = "asset_metadata"."assetId"
@@ -697,7 +704,8 @@ select
   "asset_ocr"."textScore",
   "asset_ocr"."updateId",
   "asset_ocr"."isVisible",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "asset_ocr" as "asset_ocr"
   inner join "asset" on "asset"."id" = "asset_ocr"."assetId"
@@ -815,7 +823,8 @@ select
     where
       "memory_asset"."memoriesId" = "memory_asset"."memoriesId"
       and "asset"."isPrivate" = $1
-  ) as "isMemoryPrivate"
+  ) as "isMemoryPrivate",
+  false as "isViewHidden"
 from
   "memory_asset" as "memory_asset"
 where
@@ -958,7 +967,8 @@ select
   "asset"."height",
   "asset"."isEdited",
   $1 as "isFavorite",
-  "asset"."updateId"
+  "asset"."updateId",
+  false as "isViewHidden"
 from
   "asset" as "asset"
 where
@@ -1123,7 +1133,8 @@ select
   "stack"."ownerId",
   "stack"."source",
   "stack"."updateId",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "stack" as "stack"
   inner join "asset" on "asset"."id" = "stack"."primaryAssetId"
@@ -1196,7 +1207,8 @@ select
         and "asset"."deletedAt" is null
         and "asset"."isPrivate" = $4
     )
-  ) as "isPrivate"
+  ) as "isPrivate",
+  false as "isViewHidden"
 from
   "person" as "person"
 where
@@ -1228,7 +1240,8 @@ select
   "stack"."ownerId",
   "stack"."source",
   "stack"."updateId",
-  "asset"."isPrivate" as "isAssetPrivate"
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
 from
   "stack" as "stack"
   inner join "asset" on "asset"."id" = "stack"."primaryAssetId"
@@ -1238,6 +1251,71 @@ where
   and "stack"."ownerId" = $3
 order by
   "stack"."updateId" asc
+
+-- SyncRepository.tag.getDeletes
+select
+  "id",
+  "tagId"
+from
+  "tag_audit" as "tag_audit"
+where
+  "tag_audit"."id" < $1
+  and "tag_audit"."id" > $2
+  and "userId" = $3
+order by
+  "tag_audit"."id" asc
+
+-- SyncRepository.tag.getUpserts
+select
+  "tag"."id",
+  "tag"."userId" as "ownerId",
+  "tag"."value",
+  "tag"."parentId",
+  "tag"."color",
+  "tag"."isHidden",
+  "tag"."createdAt",
+  "tag"."updatedAt",
+  "tag"."updateId"
+from
+  "tag" as "tag"
+where
+  "tag"."updateId" < $1
+  and "tag"."updateId" > $2
+  and "tag"."userId" = $3
+order by
+  "tag"."updateId" asc
+
+-- SyncRepository.tagAsset.getDeletes
+select
+  "id",
+  "tagId",
+  "assetId"
+from
+  "tag_asset_audit" as "tag_asset_audit"
+where
+  "tag_asset_audit"."id" < $1
+  and "tag_asset_audit"."id" > $2
+  and "userId" = $3
+order by
+  "tag_asset_audit"."id" asc
+
+-- SyncRepository.tagAsset.getUpserts
+select
+  "tag_asset"."tagId",
+  "tag_asset"."assetId",
+  "tag_asset"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate",
+  false as "isViewHidden"
+from
+  "tag_asset" as "tag_asset"
+  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+  inner join "asset" on "asset"."id" = "tag_asset"."assetId"
+where
+  "tag_asset"."updateId" < $1
+  and "tag_asset"."updateId" > $2
+  and "tag"."userId" = $3
+order by
+  "tag_asset"."updateId" asc
 
 -- SyncRepository.user.getDeletes
 select
@@ -1297,3 +1375,69 @@ where
   and "userId" = $3
 order by
   "user_metadata"."updateId" asc
+
+-- SyncRepository.view.getDeletes
+select
+  "id",
+  "viewId"
+from
+  "view_audit" as "view_audit"
+where
+  "view_audit"."id" < $1
+  and "view_audit"."id" > $2
+  and "userId" = $3
+order by
+  "view_audit"."id" asc
+
+-- SyncRepository.view.getUpserts
+select
+  "view"."id",
+  "view"."ownerId",
+  "view"."name",
+  "view"."order",
+  "view"."isDefault",
+  "view"."access",
+  "view"."includeAll",
+  "view"."includeUntagged",
+  "view"."privateAssets",
+  "view"."createdAt",
+  "view"."updatedAt",
+  "view"."updateId"
+from
+  "view" as "view"
+where
+  "view"."updateId" < $1
+  and "view"."updateId" > $2
+  and "view"."ownerId" = $3
+order by
+  "view"."updateId" asc
+
+-- SyncRepository.viewTag.getDeletes
+select
+  "id",
+  "viewId",
+  "tagId"
+from
+  "view_tag_audit" as "view_tag_audit"
+where
+  "view_tag_audit"."id" < $1
+  and "view_tag_audit"."id" > $2
+  and "userId" = $3
+order by
+  "view_tag_audit"."id" asc
+
+-- SyncRepository.viewTag.getUpserts
+select
+  "view_tag"."viewId",
+  "view_tag"."tagId",
+  "view_tag"."mode",
+  "view_tag"."updateId"
+from
+  "view_tag" as "view_tag"
+  inner join "view" on "view"."id" = "view_tag"."viewId"
+where
+  "view_tag"."updateId" < $1
+  and "view_tag"."updateId" > $2
+  and "view"."ownerId" = $3
+order by
+  "view_tag"."updateId" asc

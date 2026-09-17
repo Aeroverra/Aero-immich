@@ -42,8 +42,9 @@ import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import { BaseService } from 'src/services/base.service';
 import type { JobItem, JobOf } from 'src/types';
-import { isPrivateMode, toPrivateScope } from 'src/utils/access';
+import { getActiveView, isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getDimensions } from 'src/utils/asset.util';
+import { isViewUnrestricted } from 'src/utils/database';
 import { ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
 import { batched, findOrFail, isFacialRecognitionEnabled, isVideoFrameAnalysisEnabled } from 'src/utils/misc';
@@ -187,6 +188,15 @@ export class PersonService extends BaseService {
     if (
       !isPrivateMode(auth) &&
       (await this.personRepository.isCoverAssetPrivate({ ownerId: auth.user.id, personGroupId }))
+    ) {
+      throw new NotFoundException();
+    }
+
+    // the same goes for a feature photo cut from an asset the active view hides
+    const view = getActiveView(auth);
+    if (
+      !isViewUnrestricted(view) &&
+      !(await this.personRepository.isCoverAssetInView({ ownerId: auth.user.id, personGroupId }, view!))
     ) {
       throw new NotFoundException();
     }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:drift/drift.dart' as drift;
 import 'package:drift/native.dart';
@@ -91,6 +92,7 @@ void main() {
         any(),
         serverVersion: any(named: 'serverVersion'),
         supportsStackSource: any(named: 'supportsStackSource'),
+        supportsCustomViews: any(named: 'supportsCustomViews'),
         abortSignal: any(named: 'abortSignal'),
       ),
     ).thenAnswer((invocation) async {
@@ -103,6 +105,7 @@ void main() {
         onReset: any(named: 'onReset'),
         serverVersion: any(named: 'serverVersion'),
         supportsStackSource: any(named: 'supportsStackSource'),
+        supportsCustomViews: any(named: 'supportsCustomViews'),
         abortSignal: any(named: 'abortSignal'),
       ),
     ).thenAnswer((invocation) async {
@@ -678,6 +681,118 @@ void main() {
       when(() => mockServerApi.getServerFeatures()).thenThrow(Exception('offline'));
 
       expect(await syncedWithStackSource(), isFalse);
+    });
+  });
+
+  group('SyncStreamService - custom views', () {
+    late MockCustomViewsApi mockCustomViewsApi;
+
+    ServerFeaturesDto features({required bool customViews}) => ServerFeaturesDto(
+      configFile: false,
+      duplicateDetection: false,
+      email: false,
+      facialRecognition: false,
+      importFaces: false,
+      map: true,
+      oauth: false,
+      oauthAutoLaunch: false,
+      ocr: false,
+      faceAttributes: false,
+      passwordLogin: true,
+      realtimeTranscoding: false,
+      reverseGeocoding: false,
+      search: true,
+      sidecar: true,
+      smartSearch: false,
+      customViews: Optional.present(customViews),
+      trash: true,
+    );
+
+    CustomViewResponseDto view({required bool isDefault}) => CustomViewResponseDto(
+      id: 'view',
+      name: 'view',
+      order: 0,
+      isDefault: isDefault,
+      access: ViewAccess.open,
+      includeAll: true,
+      includeUntagged: false,
+      includeTagIds: const [],
+      excludeTagIds: const [],
+      privateAssets: ViewPrivateAssets.unlocked,
+      createdAt: DateTime(2024),
+      updatedAt: DateTime(2024),
+    );
+
+    setUp(() async {
+      mockCustomViewsApi = MockCustomViewsApi();
+      when(() => mockApi.customViewsApi).thenReturn(mockCustomViewsApi);
+      await Store.put(
+        StoreKey.syncMigrationStatus,
+        jsonEncode(
+          SyncMigrationTask.values
+              .map((task) => task.name)
+              .where((name) => name != SyncMigrationTask.aero_customViews_ResetWithheldAssets.name)
+              .toList(),
+        ),
+      );
+      // the store cache follows its database stream, let the write settle before sync reads it
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    });
+
+    Future<bool?> syncedWithCustomViews() async {
+      await sut.sync();
+      return verify(
+            () => mockSyncApiRepo.streamChanges(
+              any(),
+              serverVersion: any(named: 'serverVersion'),
+              supportsStackSource: any(named: 'supportsStackSource'),
+              supportsCustomViews: captureAny(named: 'supportsCustomViews'),
+              onReset: any(named: 'onReset'),
+              abortSignal: any(named: 'abortSignal'),
+            ),
+          ).captured.single
+          as bool?;
+    }
+
+    bool resetRecorded() => (jsonDecode(Store.get(StoreKey.syncMigrationStatus, '[]')) as List).contains(
+      SyncMigrationTask.aero_customViews_ResetWithheldAssets.name,
+    );
+
+    test('a server with a default view resends the withheld asset streams once', () async {
+      when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => features(customViews: true));
+      when(() => mockCustomViewsApi.getCustomViews()).thenAnswer((_) async => [view(isDefault: true)]);
+
+      expect(await syncedWithCustomViews(), isTrue);
+      verify(() => mockSyncApiRepo.deleteSyncAck(kCustomViewWithheldTypes)).called(1);
+      expect(resetRecorded(), isTrue);
+
+      await sut.sync();
+      verifyNever(() => mockSyncApiRepo.deleteSyncAck(kCustomViewWithheldTypes));
+    });
+
+    test('without a default view nothing was withheld and nothing is resent', () async {
+      when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => features(customViews: true));
+      when(() => mockCustomViewsApi.getCustomViews()).thenAnswer((_) async => [view(isDefault: false)]);
+
+      expect(await syncedWithCustomViews(), isTrue);
+      verifyNever(() => mockSyncApiRepo.deleteSyncAck(kCustomViewWithheldTypes));
+      expect(resetRecorded(), isTrue);
+    });
+
+    test('the check is retried when the views cannot be read', () async {
+      when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => features(customViews: true));
+      when(() => mockCustomViewsApi.getCustomViews()).thenThrow(Exception('offline'));
+
+      expect(await syncedWithCustomViews(), isTrue);
+      expect(resetRecorded(), isFalse);
+    });
+
+    test('a server without the feature syncs as before', () async {
+      when(() => mockServerApi.getServerFeatures()).thenAnswer((_) async => features(customViews: false));
+
+      expect(await syncedWithCustomViews(), isFalse);
+      verifyNever(() => mockCustomViewsApi.getCustomViews());
+      expect(resetRecorded(), isFalse);
     });
   });
 }

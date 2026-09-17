@@ -190,6 +190,8 @@ describe(AuthService.name, () => {
         oauthBearerToken: 'id-token',
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
       });
       mocks.session.delete.mockResolvedValue();
 
@@ -242,6 +244,8 @@ describe(AuthService.name, () => {
         oauthBearerToken: null,
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
       });
       mocks.session.delete.mockResolvedValue();
 
@@ -366,6 +370,10 @@ describe(AuthService.name, () => {
         user: UserFactory.create(),
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
+        view: null,
+        defaultView: null,
         appVersion: null,
         oauthSid: null,
       };
@@ -535,6 +543,10 @@ describe(AuthService.name, () => {
         user: UserFactory.create(),
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
+        view: null,
+        defaultView: null,
         appVersion: null,
         oauthSid: null,
       };
@@ -566,6 +578,10 @@ describe(AuthService.name, () => {
         isPendingSyncReset: false,
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
+        view: null,
+        defaultView: null,
         appVersion: null,
         oauthSid: null,
       };
@@ -590,6 +606,10 @@ describe(AuthService.name, () => {
         isPendingSyncReset: false,
         pinExpiresAt: null,
         privateModeExpiresAt: null,
+        viewId: null,
+        viewExpiresAt: null,
+        view: null,
+        defaultView: null,
         appVersion: null,
         oauthSid: null,
       };
