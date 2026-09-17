@@ -1,5 +1,6 @@
 import {
   AfterDeleteTrigger,
+  Column,
   CreateDateColumn,
   ForeignKeyColumn,
   Generated,
@@ -9,6 +10,8 @@ import {
   UpdateDateColumn,
 } from '@immich/sql-tools';
 import { UpdatedAtTrigger, UpdateIdColumn } from 'src/decorators';
+import { StackSource } from 'src/enum';
+import { stack_source_enum } from 'src/schema/enums';
 import { stack_delete_audit } from 'src/schema/functions';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import { UserTable } from 'src/schema/tables/user.table';
@@ -40,4 +43,7 @@ export class StackTable {
 
   @ForeignKeyColumn(() => UserTable, { onDelete: 'CASCADE', onUpdate: 'CASCADE' })
   ownerId!: string;
+
+  @Column({ enum: stack_source_enum, default: StackSource.Manual })
+  source!: Generated<StackSource>;
 }
