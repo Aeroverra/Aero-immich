@@ -17,6 +17,7 @@
   import { Route } from '$lib/route';
   import { keyboardManager } from '$lib/stores/keyboard-manager.svelte';
   import { showDeleteModal } from '$lib/stores/preferences.store';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { searchStore } from '$lib/stores/search.svelte';
   import { handlePromiseError } from '$lib/utils';
   import { deleteAssets, updateStackedAssetInTimeline } from '$lib/utils/actions';
@@ -36,9 +37,13 @@
   const trashOrDelete = async (forceRequested?: boolean) => {
     const force = forceRequested || !featureFlagsManager.value.trash;
     const selectedAssets = assetInteraction.assets;
+    const assetIds = await resolveStackSelection(selectedAssets);
+    if (!assetIds) {
+      return;
+    }
 
     if ($showDeleteModal && force) {
-      const confirmed = await modalManager.show(AssetDeleteConfirmModal, { size: selectedAssets.length });
+      const confirmed = await modalManager.show(AssetDeleteConfirmModal, { size: assetIds.length });
       if (!confirmed) {
         return;
       }
@@ -49,6 +54,7 @@
       (assetIds) => timelineManager.removeAssets(assetIds),
       selectedAssets,
       force ? undefined : (assets) => timelineManager.upsertAssets(assets),
+      assetIds.slice(selectedAssets.length),
     );
     assetInteraction.clear();
   };
@@ -68,7 +74,13 @@
 
   const toggleArchive = async () => {
     const visibility = assetInteraction.isAllArchived ? AssetVisibility.Timeline : AssetVisibility.Archive;
-    const ids = await archiveAssets(assetInteraction.assets, visibility);
+    const assets = assetInteraction.assets;
+    const assetIds = await resolveStackSelection(assets);
+    if (!assetIds) {
+      return;
+    }
+
+    const ids = await archiveAssets(assets, visibility, assetIds.slice(assets.length));
     timelineManager.update(ids, (asset) => (asset.visibility = visibility));
     eventManager.emit('AssetsArchive', ids);
     assetInteraction.clear();
