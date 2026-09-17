@@ -3,9 +3,10 @@ import { ExpressionBuilder, Kysely, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns, ViewFilter } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
+import { AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { SyncAck } from 'src/types';
-import { isViewUnrestricted, viewAssetPredicate } from 'src/utils/database';
+import { anyUuid, dummyViewFilter, isViewUnrestricted, viewAssetPredicate } from 'src/utils/database';
 
 export type SyncBackfillOptions = {
   nowId: string;
@@ -14,6 +15,8 @@ export type SyncBackfillOptions = {
   includePrivate?: boolean;
   /** the default view a client without the views flag is limited to; null or undefined sends everything */
   view?: ViewFilter | null;
+  /** the receiving user, whose default view decides which albums are withheld */
+  userId?: string;
 };
 
 const dummyBackfillOptions = {
@@ -51,9 +54,38 @@ const dummyQueryOptions = {
   },
 };
 
+export type AlbumViewStateRow = {
+  albumId: string;
+  albumThumbnailAssetId: string | null;
+  /** whether the album holds any asset album listings count, before the view is applied */
+  hasAssets: boolean;
+  /** whether any of those assets passes the view */
+  hasVisibleAssets: boolean;
+  /**
+   * the cover under the view: the album cover when the view shows it (or when the album has none), else the newest
+   * asset the view shows
+   */
+  visibleThumbnailAssetId: string | null;
+  stateAlbumId: string | null;
+  stateIsHidden: boolean | null;
+  stateThumbnailAssetId: string | null;
+};
+
+export type AlbumViewStateChanges = {
+  /** state rows to write, with the cover clients limited to the default view receive */
+  upserts: Array<{ albumId: string; isHidden: boolean; thumbnailAssetId: string | null }>;
+  /** albums whose state row goes, because they look the same as for everyone else again */
+  deletes: string[];
+  /** albums sent again: hidden or shown under the default view, or given another cover */
+  touched: string[];
+  /** albums shown again, whose users and asset links are sent again too (the clients dropped them with the album) */
+  shown: string[];
+};
+
 @Injectable()
 export class SyncRepository {
   album: AlbumSync;
+  albumViewState: AlbumViewStateSync;
   albumAsset: AlbumAssetSync;
   albumAssetExif: AlbumAssetExifSync;
   albumToAsset: AlbumToAssetSync;
@@ -83,6 +115,7 @@ export class SyncRepository {
 
   constructor(@InjectKysely() private db: Kysely<DB>) {
     this.album = new AlbumSync(this.db);
+    this.albumViewState = new AlbumViewStateSync(this.db);
     this.albumAsset = new AlbumAssetSync(this.db);
     this.albumAssetExif = new AlbumAssetExifSync(this.db);
     this.albumToAsset = new AlbumToAssetSync(this.db);
@@ -144,6 +177,32 @@ const isViewHidden = (eb: ExpressionBuilder<DB, any>, { view }: ViewOptions, ass
   isViewUnrestricted(view)
     ? eb.lit(false).$castTo<boolean>()
     : eb.not(viewAssetExists(eb, view!, assetIdRef)).$castTo<boolean>();
+
+/**
+ * true when the client is limited to the default view and that view hides the album as a whole for the receiving user
+ * (see album_view_state)
+ */
+const isAlbumViewHidden = (
+  eb: ExpressionBuilder<DB, any>,
+  { view, userId }: ViewOptions & { userId?: string },
+  albumIdRef: string,
+) =>
+  isViewUnrestricted(view) || !userId
+    ? eb.lit(false).$castTo<boolean>()
+    : eb
+        .exists(
+          eb
+            .selectFrom('album_view_state')
+            .whereRef('album_view_state.albumId', '=', eb.ref(albumIdRef))
+            .where('album_view_state.userId', '=', userId)
+            .where('album_view_state.isHidden', '=', true),
+        )
+        .$castTo<boolean>();
+
+/** rows of albums the default view does not hide; used where the stream leaves rows out instead of withholding them */
+const albumViewFilter =
+  (options: ViewOptions & { userId?: string }, albumIdRef: string) => (eb: ExpressionBuilder<DB, any>) =>
+    eb.not(isAlbumViewHidden(eb, options, albumIdRef));
 
 /** a memory is private as a whole while it holds any private asset */
 const isMemoryPrivate = (eb: ExpressionBuilder<DB, any>, memoryIdRef: string) =>
@@ -262,6 +321,16 @@ class AlbumSync extends BaseSync {
         'album.isPrivate',
         'album.updateId',
       ])
+      .$if(!isViewUnrestricted(options.view), (qb) =>
+        qb
+          .leftJoin('album_view_state', (join) =>
+            join.onRef('album_view_state.albumId', '=', 'album.id').on('album_view_state.userId', '=', userId),
+          )
+          // a client limited to the default view gets a cover that view shows (see album_view_state)
+          .select('album_view_state.albumId as viewStateAlbumId')
+          .select('album_view_state.thumbnailAssetId as viewThumbnailAssetId'),
+      )
+      .select((eb) => isAlbumViewHidden(eb, options, 'album.id').as('isViewHidden'))
       .stream();
   }
 
@@ -291,6 +360,9 @@ class AlbumAssetSync extends BaseSync {
       .$if(!options.includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
+      .$if(!isViewUnrestricted(options.view), (qb) =>
+        qb.where(albumViewFilter({ ...options, userId }, 'album_asset.albumId')),
+      )
       .stream();
   }
 
@@ -313,6 +385,7 @@ class AlbumAssetSync extends BaseSync {
       .select('asset.updateId')
       .select('album.isPrivate as isAlbumPrivate')
       .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
+      .select((eb) => isAlbumViewHidden(eb, options, 'album.id').as('isAlbumViewHidden'))
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
@@ -338,6 +411,7 @@ class AlbumAssetSync extends BaseSync {
       )
       .select('album.isPrivate as isAlbumPrivate')
       .select((eb) => isViewHidden(eb, options, 'asset.id').as('isViewHidden'))
+      .select((eb) => isAlbumViewHidden(eb, options, 'album.id').as('isAlbumViewHidden'))
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -355,6 +429,7 @@ class AlbumAssetExifSync extends BaseSync {
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'album_asset.assetId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(albumViewFilter(options, 'album_asset.albumId')))
       .stream();
   }
 
@@ -367,6 +442,7 @@ class AlbumAssetExifSync extends BaseSync {
       .select(columns.syncAssetExif)
       .select('asset_exif.updateId')
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isAlbumViewHidden(eb, options, 'album.id').as('isAlbumViewHidden'))
       .where('album_asset.updateId', '<=', albumToAssetAck.updateId) // Ensure we only send exif updates for assets that the client already knows about
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
@@ -384,6 +460,7 @@ class AlbumAssetExifSync extends BaseSync {
       .select(columns.syncAssetExif)
       .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isAlbumViewHidden(eb, options, 'album.id').as('isAlbumViewHidden'))
       .leftJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAssetPredicate('album_asset.assetId')))
@@ -400,6 +477,7 @@ class AlbumToAssetSync extends BaseSync {
       .where('album_asset.albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_asset.albumId')))
       .$if(!isViewUnrestricted(options.view), (qb) => qb.where(viewAssetFilter(options, 'album_asset.assetId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(albumViewFilter(options, 'album_asset.albumId')))
       .stream();
   }
 
@@ -430,6 +508,7 @@ class AlbumToAssetSync extends BaseSync {
       .innerJoin('album', 'album.id', 'album_asset.albumId')
       .select('album.isPrivate as isAlbumPrivate')
       .select((eb) => isViewHidden(eb, options, 'album_asset.assetId').as('isViewHidden'))
+      .select((eb) => isAlbumViewHidden(eb, options, 'album_asset.albumId').as('isAlbumViewHidden'))
       .innerJoin('album_user', 'album_user.albumId', 'album_asset.albumId')
       .where('album_user.userId', '=', userId)
       .stream();
@@ -444,6 +523,7 @@ class AlbumUserSync extends BaseSync {
       .select('album_user.updateId')
       .where('albumId', '=', albumId)
       .$if(!options.includePrivate, (qb) => qb.where(privateAlbumPredicate('album_user.albumId')))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where(albumViewFilter(options, 'album_user.albumId')))
       .stream();
   }
 
@@ -474,6 +554,7 @@ class AlbumUserSync extends BaseSync {
       .select('album_user.updateId')
       .innerJoin('album', 'album.id', 'album_user.albumId')
       .select('album.isPrivate as isAlbumPrivate')
+      .select((eb) => isAlbumViewHidden(eb, options, 'album_user.albumId').as('isAlbumViewHidden'))
       .where((eb) =>
         eb(
           'album_user.albumId',
@@ -1099,5 +1180,227 @@ class ViewTagSync extends BaseSync {
       .select(['view_tag.viewId', 'view_tag.tagId', 'view_tag.mode', 'view_tag.updateId'])
       .where('view.ownerId', '=', options.userId)
       .stream();
+  }
+}
+
+/** the assets of an album that album listings count, as the album endpoints do while private mode is locked */
+const albumViewAssets = (eb: ExpressionBuilder<DB, 'album'>) =>
+  eb
+    .selectFrom('album_asset')
+    .innerJoin('asset', 'asset.id', 'album_asset.assetId')
+    .select('asset.id')
+    .whereRef('album_asset.albumId', '=', 'album.id')
+    .where('asset.deletedAt', 'is', null)
+    .where('asset.visibility', 'in', [sql.lit(AssetVisibility.Archive), sql.lit(AssetVisibility.Timeline)])
+    .where('asset.isPrivate', '=', false);
+
+/**
+ * Keeps album_view_state up to date for the users whose sync clients only receive the default view. Only albums that
+ * changed since the last run are evaluated: their own row, their users, their asset links (tag changes and default
+ * view rule changes touch these) or their assets moved past the checkpoint.
+ */
+class AlbumViewStateSync {
+  constructor(private db: Kysely<DB>) {}
+
+  /** where the next run starts: a few minutes back, so rows of transactions that committed late are seen too */
+  @GenerateSql()
+  getNextCheckpoint() {
+    return this.db
+      .selectNoFrom((eb) => [
+        eb.fn<string>('immich_uuid_v7', [sql.raw<Date>("now() - interval '5 minutes'")]).as('updateId'),
+      ])
+      .executeTakeFirstOrThrow();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getCheckpoint(userId: string) {
+    return this.db
+      .selectFrom('album_view_state_checkpoint')
+      .select('updateId')
+      .where('userId', '=', userId)
+      .executeTakeFirst();
+  }
+
+  /** the albums of the user that changed after `afterUpdateId` (all of them without it), with their state */
+  @GenerateSql({ params: [DummyValue.UUID, dummyViewFilter, DummyValue.UUID] })
+  getChanged(userId: string, view: ViewFilter, afterUpdateId?: string): Promise<AlbumViewStateRow[]> {
+    return this.db
+      .selectFrom('album')
+      .innerJoin('album_user', (join) =>
+        join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', userId),
+      )
+      .leftJoin('album_view_state', (join) =>
+        join.onRef('album_view_state.albumId', '=', 'album.id').on('album_view_state.userId', '=', userId),
+      )
+      .select([
+        'album.id as albumId',
+        'album.albumThumbnailAssetId',
+        'album_view_state.albumId as stateAlbumId',
+        'album_view_state.isHidden as stateIsHidden',
+        'album_view_state.thumbnailAssetId as stateThumbnailAssetId',
+      ])
+      .select((eb) => eb.exists(albumViewAssets(eb)).as('hasAssets'))
+      .select((eb) => eb.exists(albumViewAssets(eb).where((eb) => viewAssetPredicate(eb, view))).as('hasVisibleAssets'))
+      .select((eb) =>
+        eb
+          .case()
+          .when('album.albumThumbnailAssetId', 'is', null)
+          .then(eb.lit(null))
+          .when(
+            eb.exists(
+              albumViewAssets(eb)
+                .whereRef('asset.id', '=', 'album.albumThumbnailAssetId')
+                .where((eb) => viewAssetPredicate(eb, view)),
+            ),
+          )
+          .then(eb.ref('album.albumThumbnailAssetId'))
+          // the same replacement cover the album endpoints pick
+          .else(
+            albumViewAssets(eb)
+              .where((eb) => viewAssetPredicate(eb, view))
+              .orderBy('asset.fileCreatedAt', 'desc')
+              .limit(1),
+          )
+          .end()
+          .as('visibleThumbnailAssetId'),
+      )
+      .$if(!!afterUpdateId, (qb) =>
+        qb.where((eb) =>
+          eb.or([
+            eb('album.updateId', '>', afterUpdateId!),
+            eb('album_user.updateId', '>', afterUpdateId!),
+            eb(
+              'album.id',
+              'in',
+              eb
+                .selectFrom('album_asset')
+                .select('album_asset.albumId')
+                .where('album_asset.updateId', '>', afterUpdateId!),
+            ),
+            eb(
+              'album.id',
+              'in',
+              eb
+                .selectFrom('album_asset_audit')
+                .select('album_asset_audit.albumId')
+                .where('album_asset_audit.id', '>', afterUpdateId!),
+            ),
+            eb(
+              'album.id',
+              'in',
+              eb
+                .selectFrom('asset')
+                .innerJoin('album_asset', 'album_asset.assetId', 'asset.id')
+                .select('album_asset.albumId')
+                .where('asset.updateId', '>', afterUpdateId!),
+            ),
+          ]),
+        ),
+      )
+      .$castTo<AlbumViewStateRow>()
+      .execute();
+  }
+
+  /** every state row of the user, for when no default view restricts the user anymore */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getAll(userId: string): Promise<AlbumViewStateRow[]> {
+    return this.db
+      .selectFrom('album_view_state')
+      .innerJoin('album', 'album.id', 'album_view_state.albumId')
+      .select([
+        'album.id as albumId',
+        'album.albumThumbnailAssetId',
+        'album_view_state.albumId as stateAlbumId',
+        'album_view_state.isHidden as stateIsHidden',
+        'album_view_state.thumbnailAssetId as stateThumbnailAssetId',
+      ])
+      .select((eb) => [
+        eb.lit(true).as('hasAssets'),
+        eb.lit(true).as('hasVisibleAssets'),
+        eb.ref('album.albumThumbnailAssetId').as('visibleThumbnailAssetId'),
+      ])
+      .where('album_view_state.userId', '=', userId)
+      .$castTo<AlbumViewStateRow>()
+      .execute();
+  }
+
+  /**
+   * Writes the new state and hands out fresh updateIds for the albums whose state changed. Their updatedAt stays as it
+   * is (preserve_updated_at), so apps that sort albums by modification do not move them. Albums shown again also get
+   * their users and asset links touched, because the clients dropped those together with the album.
+   */
+  async update(userId: string, changes: AlbumViewStateChanges, checkpoint: string | null) {
+    await this.db.transaction().execute(async (tx) => {
+      if (changes.deletes.length > 0) {
+        await tx
+          .deleteFrom('album_view_state')
+          .where('userId', '=', userId)
+          .where('albumId', '=', anyUuid(changes.deletes))
+          .execute();
+      }
+
+      if (changes.upserts.length > 0) {
+        await tx
+          .insertInto('album_view_state')
+          .values(changes.upserts.map((row) => ({ ...row, userId })))
+          .onConflict((oc) =>
+            oc.columns(['albumId', 'userId']).doUpdateSet((eb) => ({
+              isHidden: eb.ref('excluded.isHidden'),
+              thumbnailAssetId: eb.ref('excluded.thumbnailAssetId'),
+            })),
+          )
+          .execute();
+      }
+
+      if (changes.touched.length > 0) {
+        await sql`SELECT set_config('immich.preserve_updated_at', 'on', true)`.execute(tx);
+        await tx
+          .updateTable('album')
+          .set((eb) => ({ updateId: eb.fn<string>('immich_uuid_v7', []) }))
+          .where('id', '=', anyUuid(changes.touched))
+          .execute();
+        await sql`SELECT set_config('immich.preserve_updated_at', '', true)`.execute(tx);
+      }
+
+      if (changes.shown.length > 0) {
+        const now = sql<Date>`clock_timestamp()`;
+        await tx
+          .updateTable('album_user')
+          .set({ updatedAt: now })
+          .where('albumId', '=', anyUuid(changes.shown))
+          .execute();
+        await tx
+          .updateTable('album_asset')
+          .set({ updatedAt: now })
+          .where('albumId', '=', anyUuid(changes.shown))
+          .execute();
+      }
+
+      // rows of albums the user left
+      await tx
+        .deleteFrom('album_view_state')
+        .where('userId', '=', userId)
+        .where((eb) =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('album_user')
+                .whereRef('album_user.albumId', '=', 'album_view_state.albumId')
+                .where('album_user.userId', '=', userId),
+            ),
+          ),
+        )
+        .execute();
+
+      if (checkpoint) {
+        await tx
+          .insertInto('album_view_state_checkpoint')
+          .values({ userId, updateId: checkpoint })
+          .onConflict((oc) => oc.column('userId').doUpdateSet({ updateId: checkpoint }))
+          .execute();
+      } else {
+        await tx.deleteFrom('album_view_state_checkpoint').where('userId', '=', userId).execute();
+      }
+    });
   }
 }
