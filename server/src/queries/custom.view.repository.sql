@@ -168,35 +168,98 @@ where
   and (
     (
       (
-        not exists (
-          select
-          from
-            "tag_asset"
-            inner join "tag" on "tag"."id" = "tag_asset"."tagId"
-          where
-            "tag_asset"."assetId" = "asset"."id"
-            and "tag"."userId" = $4
+        not (
+          exists (
+            select
+            from
+              "tag_asset"
+              inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+            where
+              "tag_asset"."assetId" = "asset"."id"
+              and "tag"."userId" = $4
+          )
+          or (
+            "asset"."visibility" = 'hidden'
+            and exists (
+              select
+              from
+                "asset" as "live_photo_still"
+              where
+                "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                and exists (
+                  select
+                  from
+                    "tag_asset"
+                    inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                  where
+                    "tag_asset"."assetId" = "live_photo_still"."id"
+                    and "tag"."userId" = $5
+                )
+            )
+          )
         )
-        or exists (
+        or (
+          exists (
+            select
+            from
+              "tag_asset"
+              inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+            where
+              "tag_asset"."assetId" = "asset"."id"
+              and "tag_closure"."id_ancestor" = any ($6::uuid[])
+          )
+          or (
+            "asset"."visibility" = 'hidden'
+            and exists (
+              select
+              from
+                "asset" as "live_photo_still"
+              where
+                "live_photo_still"."livePhotoVideoId" = "asset"."id"
+                and exists (
+                  select
+                  from
+                    "tag_asset"
+                    inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                  where
+                    "tag_asset"."assetId" = "live_photo_still"."id"
+                    and "tag_closure"."id_ancestor" = any ($7::uuid[])
+                )
+            )
+          )
+        )
+      )
+      and not (
+        exists (
           select
           from
             "tag_asset"
             inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
           where
             "tag_asset"."assetId" = "asset"."id"
-            and "tag_closure"."id_ancestor" = any ($5::uuid[])
+            and "tag_closure"."id_ancestor" = any ($8::uuid[])
+        )
+        or (
+          "asset"."visibility" = 'hidden'
+          and exists (
+            select
+            from
+              "asset" as "live_photo_still"
+            where
+              "live_photo_still"."livePhotoVideoId" = "asset"."id"
+              and exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "live_photo_still"."id"
+                  and "tag_closure"."id_ancestor" = any ($9::uuid[])
+              )
+          )
         )
       )
-      and not exists (
-        select
-        from
-          "tag_asset"
-          inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
-        where
-          "tag_asset"."assetId" = "asset"."id"
-          and "tag_closure"."id_ancestor" = any ($6::uuid[])
-      )
-      and "asset"."isPrivate" = $7
+      and "asset"."isPrivate" = $10
     )
   ) is distinct from (true)
 

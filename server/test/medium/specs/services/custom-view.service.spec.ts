@@ -3,7 +3,7 @@ import { hash } from 'bcrypt';
 import { Kysely } from 'kysely';
 import { DateTime } from 'luxon';
 import { AuthDto } from 'src/dtos/auth.dto';
-import { AssetVisibility, Permission, StackSource, ViewAccess, ViewPrivateAssets } from 'src/enum';
+import { AssetType, AssetVisibility, Permission, StackSource, ViewAccess, ViewPrivateAssets } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
@@ -473,6 +473,37 @@ describe(CustomViewService.name, () => {
         assetCount: 1,
         hiddenByViewCount: 1,
       });
+    });
+
+    it('should hide an album of hidden stills whose untagged motion parts are in it too', async () => {
+      const context = setup();
+      const { ctx, user, login, tags } = await newLibrary(context);
+      const { asset: motion } = await ctx.newAsset({
+        ownerId: user.id,
+        type: AssetType.Video,
+        visibility: AssetVisibility.Hidden,
+      });
+      const { asset: still } = await ctx.newAsset({ ownerId: user.id, livePhotoVideoId: motion.id });
+      await ctx.newTagAsset({ tagIds: [tags.gym.id], assetIds: [still.id] });
+      const { album } = await ctx.newAlbum({ ownerId: user.id, albumThumbnailAssetId: still.id }, [
+        still.id,
+        motion.id,
+      ]);
+
+      const unlocked = await unlock(context, login);
+      await context.sut.create(unlocked, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [tags.gym.id],
+      });
+      await context.auth.disablePrivateMode(await login());
+      const locked = await login();
+
+      const list = await context.albums.getAll(locked, {});
+      expect(list.map(({ id }) => id)).not.toContain(album.id);
+      await expect(context.albums.get(locked, album.id)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(context.assets.get(locked, motion.id)).rejects.toBeInstanceOf(BadRequestException);
     });
   });
 
