@@ -4,7 +4,7 @@ import '../table/local/asset.dart';
 import '../table/local/album.dart';
 import '../table/local/album_asset.dart';
 
-mergedAsset(:group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN):
+mergedAsset(:group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN, :show_local AS BOOLEAN):
 SELECT
 	rae.id as remote_id,
 	(SELECT lae.id FROM local_asset_entity lae WHERE lae.checksum = rae.checksum LIMIT 1) as local_id,
@@ -84,7 +84,9 @@ SELECT
 	0 as is_private
 FROM
 	local_asset_entity lae
-WHERE NOT EXISTS (
+-- local only assets carry no tags and are never private: every view shows them except a private only one
+WHERE :show_local
+AND NOT EXISTS (
 	SELECT 1 FROM remote_asset_entity rae WHERE rae.checksum = lae.checksum AND rae.owner_id IN :user_ids
 )
 AND EXISTS (
@@ -100,7 +102,7 @@ AND NOT EXISTS (
 ORDER BY created_at DESC
 LIMIT $limit;
 
-mergedBucket(:group_by AS INTEGER, :group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN):
+mergedBucket(:group_by AS INTEGER, :group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN, :show_local AS BOOLEAN):
 SELECT
 	COUNT(*) as asset_count,
 	bucket_date
@@ -149,7 +151,8 @@ FROM
 		END as bucket_date
 	FROM
 		local_asset_entity lae
-	WHERE NOT EXISTS (
+	WHERE :show_local
+	AND NOT EXISTS (
 		SELECT 1 FROM remote_asset_entity rae WHERE rae.checksum = lae.checksum AND rae.owner_id IN :user_ids
 	)
 	AND EXISTS (

@@ -70,6 +70,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
           groupBy: groupBy.index,
           groupAutoStacks: groupAutoStacks,
           viewActive: privateFilter.restrictingView != null,
+          showLocal: privateFilter.showsLocalOnly,
           member_filter: (_, _, member) => member.privateFilter(privateFilter),
           asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )
@@ -93,6 +94,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
           limit: (_) => Limit(count, offset),
           groupAutoStacks: groupAutoStacks,
           viewActive: privateFilter.restrictingView != null,
+          showLocal: privateFilter.showsLocalOnly,
           member_filter: (_, _, member) => member.privateFilter(privateFilter),
           asset_filter: (asset, _) => asset.privateFilter(privateFilter),
         )

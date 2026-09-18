@@ -182,7 +182,7 @@ void main() {
     expect(await mainIds(untagged, userIds: [me, partner]), ['partner']);
   });
 
-  test('local only assets show in every view', () async {
+  test('local only assets show in a view that matches nothing remote', () async {
     final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
     final local = await ctx.newLocalAsset(createdAt: DateTime.utc(2024, 1, 2));
     await ctx.newLocalAlbumAsset(albumId: album.id, assetId: local.id);
@@ -191,6 +191,81 @@ void main() {
     final nothing = await filter(CustomView(id: 'v', ownerId: me, name: 'v', includeAll: false));
     expect(await mainIds(nothing), [local.id]);
     expect(await mainCount(nothing), 1);
+  });
+
+  group('local only assets under a default view excluding a tag', () {
+    late String local;
+    late String unselectedLocal;
+
+    setUp(() async {
+      await tag('Unreviewed');
+      await asset('reviewed', minute: 1);
+      await asset('unreviewed', tags: ['Unreviewed'], minute: 2);
+      await asset('private', isPrivate: true, minute: 3);
+
+      final camera = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+      local = (await ctx.newLocalAsset(checksum: 'camera', createdAt: DateTime.utc(2024, 1, 2))).id;
+      await ctx.newLocalAlbumAsset(albumId: camera.id, assetId: local);
+
+      // upstream lists local only assets in the main timeline only from albums selected for backup
+      final other = await ctx.newLocalAlbum(backupSelection: BackupSelection.none);
+      unselectedLocal = (await ctx.newLocalAsset(createdAt: DateTime.utc(2024, 1, 3))).id;
+      await ctx.newLocalAlbumAsset(albumId: other.id, assetId: unselectedLocal);
+    });
+
+    CustomView defaultView(ViewPrivateAssets privateAssets) => CustomView(
+      id: 'default',
+      ownerId: me,
+      name: 'Default',
+      isDefault: true,
+      excludeTagIds: const ['Unreviewed'],
+      privateAssets: privateAssets,
+    );
+
+    for (final privateMode in [false, true]) {
+      test('hide private assets, private mode ${privateMode ? 'on' : 'off'}', () async {
+        final privateFilter = await filter(defaultView(ViewPrivateAssets.hide), privateMode: privateMode);
+
+        expect(await mainIds(privateFilter), unorderedEquals([local, 'reviewed']));
+        expect(await mainCount(privateFilter), 2);
+      });
+
+      test('private assets while unlocked, private mode ${privateMode ? 'on' : 'off'}', () async {
+        final privateFilter = await filter(defaultView(ViewPrivateAssets.unlocked), privateMode: privateMode);
+        final expected = [local, 'reviewed', if (privateMode) 'private'];
+
+        expect(await mainIds(privateFilter), unorderedEquals(expected));
+        expect(await mainCount(privateFilter), expected.length);
+      });
+
+      // a local only asset is never private, so it can never pass a private only rule
+      test('private only view leaves them out, private mode ${privateMode ? 'on' : 'off'}', () async {
+        final privateFilter = await filter(defaultView(ViewPrivateAssets.only), privateMode: privateMode);
+        final expected = [if (privateMode) 'private'];
+
+        expect(await mainIds(privateFilter), unorderedEquals(expected));
+        expect(await mainCount(privateFilter), expected.length);
+      });
+    }
+
+    test('no view and private mode alone keep them too', () async {
+      for (final privateMode in [false, true]) {
+        final privateFilter = PrivateModeFilter(enabled: privateMode, userId: me);
+        final ids = await mainIds(privateFilter);
+
+        expect(ids, contains(local));
+        expect(ids, isNot(contains(unselectedLocal)));
+      }
+    });
+
+    test('once uploaded, the remote row decides', () async {
+      await ctx.newRemoteAsset(id: 'uploaded', ownerId: me, checksum: 'camera', createdAt: DateTime.utc(2024, 1, 2));
+      final privateFilter = await filter(defaultView(ViewPrivateAssets.hide));
+      expect(await mainIds(privateFilter), unorderedEquals(['uploaded', 'reviewed']));
+
+      await views.addTagAssets(['Unreviewed'], ['uploaded']);
+      expect(await mainIds(privateFilter), ['reviewed']);
+    });
   });
 
   test('a stack whose primary asset is hidden is shown by its first visible member', () async {

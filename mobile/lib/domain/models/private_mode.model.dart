@@ -27,6 +27,11 @@ class PrivateModeFilter {
   /// The view to evaluate, null when there is none or it lets every asset through
   ViewFilter? get restrictingView => view == null || view!.isUnrestricted ? null : view;
 
+  /// Whether local only (not yet uploaded) assets are listed next to the remote ones. They carry no tags yet and are
+  /// never private, so every view shows them (they are on the device anyway) except a view of private assets only,
+  /// whose rule they can never meet
+  bool get showsLocalOnly => restrictingView?.privateAssets != ViewPrivateAssets.only;
+
   @override
   bool operator ==(Object other) =>
       other is PrivateModeFilter && other.enabled == enabled && other.userId == userId && other.view == view;
