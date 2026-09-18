@@ -14,8 +14,6 @@ import '../../widget_tester_extensions.dart';
 
 class _MockCustomViewApiRepository extends Mock implements CustomViewApiRepository {}
 
-class _MockTaggingService extends Mock implements TaggingService {}
-
 class _TestPrivateModeNotifier extends PrivateModeNotifier {
   _TestPrivateModeNotifier(super.ref, bool enabled) {
     state = enabled;
@@ -40,13 +38,11 @@ const _gymView = CustomView(
 
 void main() {
   late _MockCustomViewApiRepository api;
-  late _MockTaggingService tagging;
 
   setUpAll(TestUtils.init);
 
   setUp(() {
     api = _MockCustomViewApiRepository();
-    tagging = _MockTaggingService();
     when(() => api.getAll()).thenAnswer((_) async => const [_gymView, _vetted]);
   });
 
@@ -57,7 +53,6 @@ void main() {
         customViewsSupportedProvider.overrideWithValue(true),
         privateModeProvider.overrideWith((ref) => _TestPrivateModeNotifier(ref, privateMode)),
         customViewApiRepositoryProvider.overrideWithValue(api),
-        taggingServiceProvider.overrideWithValue(tagging),
         tagTreeProvider.overrideWithValue(buildTagTree(const [_gym])),
       ],
     );
@@ -88,26 +83,15 @@ void main() {
     expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
   });
 
-  testWidgets('deleting a tag names the views that use it before it is deleted', (tester) async {
-    when(() => tagging.viewsUsingTag('gym')).thenAnswer((_) async => const [_vetted, _gymView]);
-    when(() => tagging.deleteTag('gym')).thenAnswer((_) async {});
+  testWidgets('the views screen lists no tags and links to the tags screen', (tester) async {
     await pump(tester, privateMode: true);
     final t = Translations.of(tester.element(find.byType(CustomViewsSettings)));
 
-    await tester.ensureVisible(find.byKey(const Key('tag-setting-gym')));
-    await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(of: find.byKey(const Key('tag-setting-gym')), matching: find.byIcon(Icons.delete_outline)),
-    );
-    await tester.pumpAndSettle();
-
-    final warning = tester.widget<Text>(find.byKey(const Key('delete-tag-views-warning')));
-    expect(warning.data, contains('Vetted'));
-    expect(warning.data, contains('Gym only'));
-    verifyNever(() => tagging.deleteTag(any()));
-
-    await tester.tap(find.text(t.delete).last);
-    await tester.pumpAndSettle();
-    verify(() => tagging.deleteTag('gym')).called(1);
+    expect(find.byKey(const Key('tag-setting-gym')), findsNothing);
+    expect(find.byType(Switch), findsNothing);
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
+    expect(find.text(t.tag_review), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('custom-views-manage-tags')));
+    expect(find.text(t.custom_views_manage_tags_description), findsOneWidget);
   });
 }

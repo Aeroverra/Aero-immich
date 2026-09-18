@@ -6,10 +6,10 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/pages/common/settings.page.dart';
 import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
-import 'package:immich_mobile/providers/tagging.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/repositories/custom_view_api.repository.dart';
 import 'package:immich_mobile/routing/router.dart';
@@ -60,8 +60,8 @@ Future<CustomView> saveCustomView(WidgetRef ref, CustomView view, {required bool
   return local;
 }
 
-/// Settings > Views: the views (list, reorder, default, delete, create and edit, while private mode is unlocked) and
-/// the tags (hidden switch, delete with the views that use the tag, review)
+/// Settings > Views: only the views (list, reorder, default, delete, create and edit, while private mode is unlocked).
+/// Tags are managed in Settings > Tags, linked at the bottom
 class CustomViewsSettings extends ConsumerWidget {
   const CustomViewsSettings({super.key});
 
@@ -101,8 +101,15 @@ class CustomViewsSettings extends ConsumerWidget {
           )
         else
           const _ViewList(),
-        const SizedBox(height: 24),
-        const _TagSettings(),
+        const Divider(height: 32),
+        ListTile(
+          key: const Key('custom-views-manage-tags'),
+          leading: const Icon(Icons.sell_outlined),
+          title: Text(context.t.custom_views_manage_tags),
+          subtitle: Text(context.t.custom_views_manage_tags_description),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => unawaited(context.pushRoute(SettingsSubRoute(section: SettingSection.tags))),
+        ),
       ],
     );
   }
@@ -254,124 +261,4 @@ class _ViewList extends ConsumerWidget {
       ),
     );
   }
-}
-
-class _TagSettings extends ConsumerWidget {
-  const _TagSettings();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final tree = ref.watch(tagTreeProvider);
-    final service = ref.watch(taggingServiceProvider);
-
-    void showError() {
-      if (context.mounted) {
-        ImmichToast.show(context: context, msg: context.t.scaffold_body_error_occurred, toastType: ToastType.error);
-      }
-    }
-
-    Future<void> setHidden(TagEntry tag, bool isHidden) async {
-      try {
-        await service.setHidden(tag, isHidden);
-      } catch (error, stack) {
-        _log.warning('Failed to update tag ${tag.id}', error, stack);
-        showError();
-      }
-    }
-
-    Future<void> delete(TagEntry tag) async {
-      List<CustomView> views;
-      try {
-        views = await service.viewsUsingTag(tag.id);
-      } catch (error, stack) {
-        _log.warning('Failed to read the views using tag ${tag.id}', error, stack);
-        views = const [];
-      }
-      if (!context.mounted) {
-        return;
-      }
-
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: Text(context.t.delete_tag),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 12,
-            children: [
-              Text(context.t.delete_tag_confirmation_prompt(tagName: tag.value)),
-              if (views.isNotEmpty)
-                Text(
-                  tagUsedByViewsMessage(context.t, views),
-                  key: const Key('delete-tag-views-warning'),
-                  style: TextStyle(color: context.colorScheme.error),
-                ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: Text(context.t.cancel)),
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: Text(context.t.delete, style: TextStyle(color: context.colorScheme.error)),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) {
-        return;
-      }
-      try {
-        await service.deleteTag(tag.id);
-      } catch (error, stack) {
-        _log.warning('Failed to delete tag ${tag.id}', error, stack);
-        showError();
-      }
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SettingGroupTitle(title: context.t.tags, icon: Icons.sell_outlined),
-        ListTile(
-          key: const Key('tag-review-open'),
-          leading: const Icon(Icons.fact_check_outlined),
-          title: Text(context.t.tag_review),
-          subtitle: Text(context.t.tag_review_description),
-          onTap: () => unawaited(context.pushRoute(TagReviewRoute())),
-        ),
-        for (final entry in tree)
-          ListTile(
-            key: Key('tag-setting-${entry.tag.id}'),
-            contentPadding: EdgeInsets.only(left: 20.0 + entry.depth * 20, right: 8),
-            title: Text(entry.tag.name),
-            subtitle: entry.tag.isHidden ? Text(context.t.tag_hidden) : null,
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Tooltip(
-                  message: context.t.tag_hidden_description,
-                  child: Switch(
-                    value: entry.tag.isHidden,
-                    onChanged: (value) => unawaited(setHidden(entry.tag, value)),
-                  ),
-                ),
-                IconButton(
-                  tooltip: context.t.delete_tag,
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => unawaited(delete(entry.tag)),
-                ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// "The views Gym and Travel use this tag and lose those rules."
-String tagUsedByViewsMessage(Translations t, List<CustomView> views) {
-  final names = views.map((view) => view.name).join(', ');
-  final message = t.delete_tag_used_by_views(count: views.length);
-  return message.contains('{views}') ? message.replaceAll('{views}', names) : '$message ($names)';
 }

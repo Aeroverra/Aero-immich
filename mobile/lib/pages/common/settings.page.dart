@@ -20,6 +20,7 @@ import 'package:immich_mobile/widgets/settings/preference_settings/preference_se
 import 'package:immich_mobile/widgets/settings/previously_deleted_settings/previously_deleted_settings.dart';
 import 'package:immich_mobile/widgets/settings/settings_card.dart';
 import 'package:immich_mobile/widgets/settings/stack_actions_settings/stack_actions_settings.dart';
+import 'package:immich_mobile/widgets/settings/tags_settings.dart';
 
 enum SettingSection {
   advanced(Icons.build_outlined),
@@ -33,6 +34,7 @@ enum SettingSection {
   preferences(Icons.interests_outlined),
   previouslyDeleted(Icons.restore_from_trash_outlined),
   stackActions(Icons.burst_mode_outlined),
+  tags(Icons.sell_outlined),
   timeline(Icons.auto_awesome_mosaic_outlined),
   beta(Icons.sync_outlined);
 
@@ -50,6 +52,7 @@ enum SettingSection {
     SettingSection.preferences => t.preferences_settings_title,
     SettingSection.previouslyDeleted => t.previously_deleted_files,
     SettingSection.stackActions => t.stack_actions,
+    SettingSection.tags => t.tags,
     SettingSection.timeline => t.asset_list_settings_title,
     SettingSection.beta => t.sync_status,
   };
@@ -66,6 +69,7 @@ enum SettingSection {
     SettingSection.preferences => t.preferences_settings_subtitle,
     SettingSection.previouslyDeleted => t.previously_deleted_files_description,
     SettingSection.stackActions => t.stack_actions_description,
+    SettingSection.tags => t.tags_settings_subtitle,
     SettingSection.timeline => t.asset_list_settings_subtitle,
     SettingSection.beta => t.sync_status_subtitle,
   };
@@ -82,6 +86,7 @@ enum SettingSection {
     SettingSection.preferences => const PreferenceSetting(),
     SettingSection.previouslyDeleted => const PreviouslyDeletedSettings(),
     SettingSection.stackActions => const StackActionsSettings(),
+    SettingSection.tags => const TagsSettings(),
     SettingSection.timeline => const AssetListSettings(),
     SettingSection.beta => const SyncStatusAndActions(),
   };
@@ -102,10 +107,13 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-/// The sections this server supports: custom views only for servers that know them
+/// The sections this server supports: custom views and tag management (tags sync with them) only for servers that
+/// know custom views
 List<SettingSection> _visibleSections(WidgetRef ref) {
   final customViews = ref.watch(customViewsSupportedProvider);
-  return SettingSection.values.where((section) => section != SettingSection.customViews || customViews).toList();
+  return SettingSection.values
+      .where((section) => customViews || (section != SettingSection.customViews && section != SettingSection.tags))
+      .toList();
 }
 
 class _MobileLayout extends ConsumerWidget {
