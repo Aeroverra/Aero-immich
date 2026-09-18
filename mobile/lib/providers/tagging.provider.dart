@@ -122,6 +122,17 @@ class TaggingService {
     _onTagsChanged();
   }
 
+  /// Renames the last part of the tag path to [name]; child tags follow
+  Future<TagEntry> renameTag(TagEntry tag, String name) async {
+    final dto = await _api.updateTag(tag.id, name: name);
+    await _repository.renameTag(tag.id, dto.value);
+    _onTagsChanged();
+    return _toEntry(dto);
+  }
+
+  /// How many photos and videos carry the tag or one of its child tags, and how many child tags it has
+  Future<({int assets, int children})> countTagUsage(String tagId) => _repository.countTagUsage(tagId);
+
   /// The views whose rules name the tag, for the warning before deleting it
   Future<List<CustomView>> viewsUsingTag(String tagId) => _viewApi.getAll(tagId: tagId);
 

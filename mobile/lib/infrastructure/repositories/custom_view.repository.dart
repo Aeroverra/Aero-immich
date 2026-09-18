@@ -105,22 +105,73 @@ class CustomViewRepository extends DatabaseAccessor<Drift> with $CustomViewRepos
     return _db.tagEntity.insertOne(companion.copyWith(id: Value(tag.id)), onConflict: DoUpdate((_) => companion));
   }
 
+  static const _subtree = '''
+      WITH RECURSIVE subtree(id) AS (
+        SELECT value FROM json_each(?)
+        UNION
+        SELECT t.id FROM tag_entity t INNER JOIN subtree s ON t.parent_id = s.id
+      )''';
+
+  /// How many assets carry [tagId] or one of its child tags, and how many child tags it has (all levels), for the
+  /// confirmation before deleting it
+  Future<({int assets, int children})> countTagUsage(String tagId) async {
+    final variables = [
+      Variable<String>(jsonEncode([tagId])),
+    ];
+    final row = await _db
+        .customSelect(
+          '$_subtree SELECT '
+          '(SELECT COUNT(DISTINCT ta.asset_id) FROM tag_asset_entity ta WHERE ta.tag_id IN (SELECT id FROM subtree)) '
+          'AS assets, (SELECT COUNT(*) - 1 FROM subtree) AS children',
+          variables: variables,
+          readsFrom: {_db.tagEntity, _db.tagAssetEntity},
+        )
+        .getSingle();
+    return (assets: row.read<int>('assets'), children: row.read<int>('children'));
+  }
+
+  /// Gives [tagId] the full [value] after a rename and moves the values of its child tags along, as the server does
+  Future<void> renameTag(String tagId, String value) async {
+    await _db.transaction(() async {
+      final tag = await (_db.tagEntity.select()..where((row) => row.id.equals(tagId))).getSingleOrNull();
+      if (tag == null) {
+        return;
+      }
+      final variables = [
+        Variable<String>(jsonEncode([tagId])),
+      ];
+      final ids = await _db
+          .customSelect('$_subtree SELECT id FROM subtree', variables: variables, readsFrom: {_db.tagEntity})
+          .map((row) => row.read<String>('id'))
+          .get();
+      final children = await (_db.tagEntity.select()..where((row) => row.id.isIn(ids) & row.id.equals(tagId).not()))
+          .get();
+      final prefix = '${tag.value}/';
+      await _db.batch((batch) {
+        batch.update(_db.tagEntity, TagEntityCompanion(value: Value(value)), where: (row) => row.id.equals(tagId));
+        for (final child in children) {
+          if (child.value.startsWith(prefix)) {
+            batch.update(
+              _db.tagEntity,
+              TagEntityCompanion(value: Value('$value/${child.value.substring(prefix.length)}')),
+              where: (row) => row.id.equals(child.id),
+            );
+          }
+        }
+      });
+    });
+  }
+
   /// Deletes the tags with their child tags, their asset links and the view rules naming any of them
   Future<void> deleteTags(Iterable<String> tagIds) async {
     if (tagIds.isEmpty) {
       return;
     }
 
-    const subtree = '''
-      WITH RECURSIVE subtree(id) AS (
-        SELECT value FROM json_each(?)
-        UNION
-        SELECT t.id FROM tag_entity t INNER JOIN subtree s ON t.parent_id = s.id
-      )''';
     final variables = [Variable<String>(jsonEncode(tagIds.toList()))];
     await _db.transaction(() async {
       final ids = await _db
-          .customSelect('$subtree SELECT id FROM subtree', variables: variables, readsFrom: {_db.tagEntity})
+          .customSelect('$_subtree SELECT id FROM subtree', variables: variables, readsFrom: {_db.tagEntity})
           .map((row) => row.read<String>('id'))
           .get();
       await _db.batch((batch) {

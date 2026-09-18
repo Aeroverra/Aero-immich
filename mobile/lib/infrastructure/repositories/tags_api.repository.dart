@@ -37,11 +37,12 @@ class TagsApiRepository extends ApiRepository {
     );
   }
 
-  Future<TagResponseDto> updateTag(String id, {bool? isHidden, String? color}) {
+  Future<TagResponseDto> updateTag(String id, {bool? isHidden, String? color, String? name}) {
     return checkNull(
       _api.updateTag(
         id,
         TagUpdateDto(
+          name: name == null ? const Optional.absent() : Optional.present(name),
           isHidden: isHidden == null ? const Optional.absent() : Optional.present(isHidden),
           color: color == null ? const Optional.absent() : Optional.present(color),
         ),

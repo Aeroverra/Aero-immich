@@ -401,6 +401,40 @@ void main() {
       expect(await ctx.db.viewTagEntity.select().get(), isEmpty);
     });
 
+    test('tag usage counts the photos of the tag and its children once, and the child tags', () async {
+      await tag('Gym');
+      await tag('Progress', parentId: 'Gym');
+      await views.upsertTag(TagEntry(id: 'Legs', ownerId: me, value: 'Gym/Progress/Legs', parentId: 'Progress'));
+      await tag('Travel');
+      await asset('a', tags: ['Gym', 'Progress']);
+      await asset('b', tags: ['Legs']);
+      await asset('c', tags: ['Travel']);
+
+      final gym = await views.countTagUsage('Gym');
+      expect(gym.assets, 2);
+      expect(gym.children, 2);
+      final travel = await views.countTagUsage('Travel');
+      expect(travel.assets, 1);
+      expect(travel.children, 0);
+    });
+
+    test('renaming a tag moves the values of its children along', () async {
+      await tag('Gym');
+      await tag('Progress', parentId: 'Gym');
+      await views.upsertTag(TagEntry(id: 'Legs', ownerId: me, value: 'Gym/Progress/Legs', parentId: 'Progress'));
+      await tag('Gymnastics');
+
+      await views.renameTag('Gym', 'Fitness');
+
+      final values = {for (final tag in await views.getTags(me)) tag.id: tag.value};
+      expect(values, {
+        'Gym': 'Fitness',
+        'Progress': 'Fitness/Progress',
+        'Legs': 'Fitness/Progress/Legs',
+        'Gymnastics': 'Gymnastics',
+      });
+    });
+
     test('hidden tags hide their descendants', () {
       final tags = [
         TagEntry(id: 'a', ownerId: me, value: 'a', isHidden: true),
