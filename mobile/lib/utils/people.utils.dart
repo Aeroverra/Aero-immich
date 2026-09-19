@@ -3,6 +3,24 @@ import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/widgets/people/person_edit_birthday_modal.widget.dart';
 import 'package:immich_mobile/presentation/widgets/people/person_edit_name_modal.widget.dart';
+import 'package:openapi/api.dart';
+
+/// Groups the video frame positions (in milliseconds) where each person was seen.
+///
+/// Only faces detected in a sampled video frame (non-null frameTimestamp) that are
+/// assigned to a person are included. Timestamps are distinct and sorted ascending.
+Map<String, List<int>> groupFaceTimestampsByPerson(Iterable<AssetFaceResponseDto> faces) {
+  final grouped = <String, Set<int>>{};
+  for (final face in faces) {
+    final personId = face.person?.id;
+    final timestamp = face.frameTimestamp.orElse(null);
+    if (personId == null || timestamp == null) {
+      continue;
+    }
+    grouped.putIfAbsent(personId, () => <int>{}).add(timestamp);
+  }
+  return {for (final entry in grouped.entries) entry.key: entry.value.toList()..sort()};
+}
 
 String? formatAge(DateTime birthDate, DateTime referenceDate) {
   final int ageInYears = _calculateAge(birthDate, referenceDate);
