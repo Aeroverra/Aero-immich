@@ -42,6 +42,9 @@ class _TestActiveViewNotifier extends ActiveViewNotifier {
 
 /// A screen state service that never touches the platform, so a test can say when the screen turned off
 class _FakeScreenStateService extends ScreenStateService {
+  _FakeScreenStateService({this.reported = true});
+
+  final bool reported;
   final _controller = StreamController<void>.broadcast();
 
   @override
@@ -51,7 +54,7 @@ class _FakeScreenStateService extends ScreenStateService {
   void listen() {}
 
   @override
-  Future<bool> isReported() async => true;
+  Future<bool> isReported() async => reported;
 
   void turnScreenOff() => _controller.add(null);
 
@@ -66,12 +69,13 @@ void main() {
   late _TestActiveViewNotifier view;
 
   /// Builds a container where private mode and views lock the given way, and turns both on
-  void build({
+  Future<void> build({
     LockTrigger privateModeTrigger = LockTrigger.appPause,
     LockTrigger viewTrigger = LockTrigger.screenOff,
     int timeoutMinutes = 30,
-  }) {
-    screen = _FakeScreenStateService();
+    bool screenOffReported = true,
+  }) async {
+    screen = _FakeScreenStateService(reported: screenOffReported);
     container = ProviderContainer(
       overrides: [
         privateModeProvider.overrideWith(_TestPrivateModeNotifier.new),
@@ -86,15 +90,15 @@ void main() {
     view = container.read(activeViewProvider.notifier) as _TestActiveViewNotifier;
     privateMode.state = true;
     view.state = 'view-1';
-    container.read(appLockServiceProvider).start();
+    await container.read(appLockServiceProvider).start();
   }
 
   tearDown(() {
     container.dispose();
   });
 
-  test('lock when leaving the app locks both on app pause', () {
-    build(privateModeTrigger: LockTrigger.appPause, viewTrigger: LockTrigger.appPause);
+  test('lock when leaving the app locks both on app pause', () async {
+    await build(privateModeTrigger: LockTrigger.appPause, viewTrigger: LockTrigger.appPause);
 
     container.read(appLockServiceProvider).handleAppPause();
 
@@ -104,8 +108,8 @@ void main() {
     expect(view.state, isNull);
   });
 
-  test('lock when the screen turns off keeps the app pause unlocked', () {
-    build(privateModeTrigger: LockTrigger.screenOff, viewTrigger: LockTrigger.screenOff);
+  test('lock when the screen turns off keeps the app pause unlocked', () async {
+    await build(privateModeTrigger: LockTrigger.screenOff, viewTrigger: LockTrigger.screenOff);
 
     container.read(appLockServiceProvider).handleAppPause();
 
@@ -116,7 +120,7 @@ void main() {
   });
 
   test('lock when the screen turns off locks on the screen turning off', () async {
-    build(privateModeTrigger: LockTrigger.screenOff, viewTrigger: LockTrigger.screenOff);
+    await build(privateModeTrigger: LockTrigger.screenOff, viewTrigger: LockTrigger.screenOff);
 
     container.read(appLockServiceProvider).handleAppPause();
     screen.turnScreenOff();
@@ -129,7 +133,7 @@ void main() {
   });
 
   test('lock only after the timeout ignores the app pause and the screen turning off', () async {
-    build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout);
+    await build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout);
 
     container.read(appLockServiceProvider).handleAppPause();
     screen.turnScreenOff();
@@ -143,7 +147,8 @@ void main() {
 
   test('the timeout still locks both while the app is in the background', () {
     fakeAsync((async) {
-      build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.screenOff, timeoutMinutes: 15);
+      unawaited(build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.screenOff, timeoutMinutes: 15));
+      async.flushMicrotasks();
 
       container.read(appLockServiceProvider).handleAppPause();
       async.elapse(const Duration(minutes: 14));
@@ -163,7 +168,8 @@ void main() {
 
   test('coming back to the app drops the pending timeout, the server timeout takes over', () {
     fakeAsync((async) {
-      build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout, timeoutMinutes: 5);
+      unawaited(build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout, timeoutMinutes: 5));
+      async.flushMicrotasks();
       final service = container.read(appLockServiceProvider);
 
       service.handleAppPause();
@@ -182,7 +188,7 @@ void main() {
   });
 
   test('a manual lock always works, whatever the trigger is', () async {
-    build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout);
+    await build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.timeout);
 
     await container.read(privateModeProvider.notifier).disable();
     container.read(activeViewProvider.notifier).resetToDefault();
@@ -191,8 +197,8 @@ void main() {
     expect(view.state, isNull);
   });
 
-  test('views follow their own trigger, private mode keeps its own', () {
-    build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.appPause);
+  test('views follow their own trigger, private mode keeps its own', () async {
+    await build(privateModeTrigger: LockTrigger.timeout, viewTrigger: LockTrigger.appPause);
 
     container.read(appLockServiceProvider).handleAppPause();
 
@@ -202,8 +208,23 @@ void main() {
     expect(view.state, isNull);
   });
 
+  test('a platform without the screen off signal falls back to locking on app pause', () async {
+    await build(
+      privateModeTrigger: LockTrigger.screenOff,
+      viewTrigger: LockTrigger.screenOff,
+      screenOffReported: false,
+    );
+
+    container.read(appLockServiceProvider).handleAppPause();
+
+    expect(privateMode.disableCount, 1);
+    expect(privateMode.state, isFalse);
+    expect(view.resetCount, 1);
+    expect(view.state, isNull);
+  });
+
   test('private mode follows its own trigger, views keep theirs', () async {
-    build(privateModeTrigger: LockTrigger.appPause, viewTrigger: LockTrigger.timeout);
+    await build(privateModeTrigger: LockTrigger.appPause, viewTrigger: LockTrigger.timeout);
 
     container.read(appLockServiceProvider).handleAppPause();
     await Future<void>.delayed(Duration.zero);

@@ -27,29 +27,36 @@ class AppLockService {
   StreamSubscription<void>? _screenOff;
   Timer? _privateModeTimer;
   Timer? _viewTimer;
+  bool _screenOffReported = false;
 
   /// Starts listening for the screen turning off. Safe to call more than once.
-  void start() {
+  Future<void> start() async {
     if (_screenOff != null) {
       return;
     }
     final service = _ref.read(screenStateServiceProvider);
     service.listen();
     _screenOff = service.screenOff.listen((_) => handleScreenOff());
+    _screenOffReported = await service.isReported();
   }
+
+  /// A platform that does not report the screen turning off falls back to the stricter app pause, so
+  /// "lock when the screen turns off" never leaves a session unlocked with nothing to lock it
+  LockTrigger _effective(LockTrigger trigger) =>
+      trigger == LockTrigger.screenOff && !_screenOffReported ? LockTrigger.appPause : trigger;
 
   /// The app left the foreground: lock what is set to lock on an app switch, and start the timeout for the rest
   void handleAppPause() {
     final timeout = Duration(minutes: _ref.read(privateModeTimeoutMinutesProvider));
 
-    if (_ref.read(privateModeLockTriggerProvider) == LockTrigger.appPause) {
+    if (_effective(_ref.read(privateModeLockTriggerProvider)) == LockTrigger.appPause) {
       unawaited(_lockPrivateMode());
     } else {
       _privateModeTimer?.cancel();
       _privateModeTimer = Timer(timeout, () => unawaited(_lockPrivateMode()));
     }
 
-    if (_ref.read(customViewLockTriggerProvider) == LockTrigger.appPause) {
+    if (_effective(_ref.read(customViewLockTriggerProvider)) == LockTrigger.appPause) {
       _resetView();
     } else {
       _viewTimer?.cancel();

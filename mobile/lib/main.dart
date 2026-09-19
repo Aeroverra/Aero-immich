@@ -148,7 +148,7 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
   Future<void> initApp() async {
     WidgetsBinding.instance.addObserver(this);
     // the screen turning off relocks private mode and views, so listen for it from the start
-    ref.read(appLockServiceProvider).start();
+    unawaited(ref.read(appLockServiceProvider).start());
     // Draw the app from edge to edge
     unawaited(SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge));
     await _setNavigationBarColor();
