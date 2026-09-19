@@ -1,15 +1,24 @@
-import { AssetOrderBy, AssetVisibility, type AssetResponseDto, type TimeBucketAssetResponseDto } from '@immich/sdk';
+import {
+  AssetOrderBy,
+  AssetVisibility,
+  StackSource,
+  type AssetResponseDto,
+  type TimeBucketAssetResponseDto,
+} from '@immich/sdk';
 import { tick } from 'svelte';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
-import { getTimelineMonthByDate } from '$lib/managers/timeline-manager/internal/search-support.svelte';
+import {
+  findClosestTimelineMonthForDate,
+  getTimelineMonthByDate,
+} from '$lib/managers/timeline-manager/internal/search-support.svelte';
 import { AbortError } from '$lib/utils';
 import { fromISODateTimeUTCToObject } from '$lib/utils/timeline-util';
 import { assetFactory, timelineAssetFactory, toResponseDto } from '@test-data/factories/asset-factory';
 import { TimelineManager } from './timeline-manager.svelte';
 import type { TimelineMonth } from './timeline-month.svelte';
-import type { TimelineAsset } from './types';
+import type { TimelineAsset, TimelineManagerOptions } from './types';
 
 async function getAssets(timelineManager: TimelineManager) {
   const assets = [];
@@ -699,6 +708,7 @@ describe('TimelineManager', () => {
   describe('scroll anchor across resets', () => {
     let timelineManager: TimelineManager;
     let hiddenAssetId: string | undefined;
+    let privateAssetIds: Set<string>;
     const scrollable = new FakeScrollable();
     const bucketAssets: Record<string, TimelineAsset[]> = {
       '2024-03-01T00:00:00.000Z': timelineAssetFactory.buildList(1).map((asset) =>
@@ -735,6 +745,7 @@ describe('TimelineManager', () => {
     beforeEach(async () => {
       privateModeManager.enabled = false;
       hiddenAssetId = undefined;
+      privateAssetIds = new Set();
       scrollable.scrollTop = 0;
       timelineManager = new TimelineManager();
       timelineManager.scrollableElement = scrollable as unknown as HTMLElement;
@@ -744,8 +755,15 @@ describe('TimelineManager', () => {
         { count: 3, timeBucket: '2024-01-01T00:00:00.000Z' },
       ]);
       sdkMock.getTimeBucket.mockImplementation(({ timeBucket }) =>
-        Promise.resolve(toResponseDto(...bucketAssets[timeBucket].filter((asset) => asset.id !== hiddenAssetId))),
+        Promise.resolve(
+          toResponseDto(
+            ...bucketAssets[timeBucket]
+              .filter((asset) => asset.id !== hiddenAssetId)
+              .map((asset) => ({ ...asset, isPrivate: privateAssetIds.has(asset.id) })),
+          ),
+        ),
       );
+      sdkMock.getAssetInfo.mockRejectedValue(new Error('Not found or no asset.read access'));
 
       await timelineManager.updateViewport({ width: 1588, height: 1000 });
       await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
@@ -774,10 +792,12 @@ describe('TimelineManager', () => {
       expect(timelineManager.scrollTop).toBe(2000);
     });
 
-    it('falls back to the same relative position in the month when the anchored asset is gone', async () => {
+    it('puts the photo closest in time at the same offset when the anchored asset is gone', async () => {
       const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
       const anchor = findAnchor(before, 2000);
-      const viewportTopRatioInMonth = (2000 - before.top) / before.height;
+      const ids = [...before.assetsIterator()].map((asset) => asset.id);
+      // every photo of the month shares one timestamp, so the photo that took the anchor's place wins
+      const next = ids[ids.indexOf(anchor.id) + 1];
       // the anchored asset became hidden (e.g. it is private and the mode turned off)
       hiddenAssetId = anchor.id;
 
@@ -786,8 +806,44 @@ describe('TimelineManager', () => {
       const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
       expect(after.isLoaded).toBe(true);
       expect(after.findAssetById({ id: anchor.id })).toBeUndefined();
-      expect(timelineManager.scrollTop).toBeCloseTo(after.top + after.height * viewportTopRatioInMonth, 5);
-      expect(timelineManager.scrollTop).not.toBe(2000);
+      const position = after.findAssetAbsolutePosition(next)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+    });
+
+    it('does not look up a private asset that is gone because private mode was turned off', async () => {
+      privateModeManager.enabled = true;
+      const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const anchor = findAnchor(before, 2000);
+      privateAssetIds.add(anchor.id);
+      await timelineManager.reset();
+      const ids = [...getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!.assetsIterator()].map(
+        (asset) => asset.id,
+      );
+      const next = ids[ids.indexOf(anchor.id) + 1];
+      expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
+
+      privateModeManager.enabled = false;
+      hiddenAssetId = anchor.id;
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const position = after.findAssetAbsolutePosition(next)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+      expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
+    });
+
+    it('lands in the closest month when the whole month of the anchored asset is gone', async () => {
+      sdkMock.getTimeBuckets.mockResolvedValue([
+        { count: 1, timeBucket: '2024-03-01T00:00:00.000Z' },
+        { count: 3, timeBucket: '2024-01-01T00:00:00.000Z' },
+      ]);
+
+      await timelineManager.reset();
+
+      expect(getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })).toBeUndefined();
+      const closest = findClosestTimelineMonthForDate(timelineManager.months, { year: 2024, month: 2 })!;
+      expect(timelineManager.scrollTop).toBeGreaterThanOrEqual(closest.top);
+      expect(timelineManager.scrollTop).toBeLessThanOrEqual(closest.top + closest.height);
     });
 
     it('restores the anchor after a reset while scrolled to the bottom with every month loaded', async () => {
@@ -813,6 +869,138 @@ describe('TimelineManager', () => {
       await timelineManager.reset();
 
       expect(timelineManager.scrollTop).toBe(0);
+    });
+  });
+
+  describe('scroll anchor across option changes', () => {
+    let timelineManager: TimelineManager;
+    const scrollable = new FakeScrollable();
+    const februaryAssets = timelineAssetFactory.buildList(100).map((asset, index) =>
+      deriveLocalDateTimeFromFileCreatedAt({
+        ...asset,
+        // one minute apart, newest first
+        fileCreatedAt: fromISODateTimeUTCToObject(new Date(Date.UTC(2024, 1, 20, 12, 100 - index)).toISOString()),
+      }),
+    );
+    // automatic stack: the first id is the cover, the rest are hidden while automatic stacks are grouped
+    let stackIds: string[];
+    const photos: TimelineManagerOptions = { visibility: AssetVisibility.Timeline, withStacked: true };
+    const photosUngrouped: TimelineManagerOptions = { ...photos, withAutoStacked: false };
+
+    const visibleAssets = (withAutoStacked: boolean | undefined) =>
+      februaryAssets
+        .filter((asset) => withAutoStacked === false || !stackIds.slice(1).includes(asset.id))
+        .map((asset) =>
+          withAutoStacked !== false && asset.id === stackIds[0]
+            ? { ...asset, stack: { id: 'auto-stack', primaryAssetId: asset.id, assetCount: stackIds.length } }
+            : asset,
+        );
+
+    // the first asset whose box crosses the viewport top, and how far below the viewport top it starts
+    const findAnchor = (month: TimelineMonth, viewportTop: number) => {
+      for (const asset of month.assetsIterator()) {
+        const position = month.findAssetAbsolutePosition(asset.id)!;
+        if (position.top + position.height > viewportTop) {
+          return { id: asset.id, offset: position.top - viewportTop };
+        }
+      }
+      throw new Error('no asset intersects the viewport top');
+    };
+
+    const february = () => getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+
+    const setup = async (options: TimelineManagerOptions) => {
+      scrollable.scrollTop = 0;
+      timelineManager = new TimelineManager();
+      timelineManager.scrollableElement = scrollable as unknown as HTMLElement;
+      sdkMock.getTimeBuckets.mockImplementation(({ withAutoStacked }) =>
+        Promise.resolve([
+          { count: visibleAssets(withAutoStacked).length, timeBucket: '2024-02-01T00:00:00.000Z' },
+          { count: 3, timeBucket: '2024-01-01T00:00:00.000Z' },
+        ]),
+      );
+      sdkMock.getTimeBucket.mockImplementation(({ timeBucket, withAutoStacked }) =>
+        Promise.resolve(
+          toResponseDto(...(timeBucket.startsWith('2024-02') ? visibleAssets(withAutoStacked) : januaryAssets)),
+        ),
+      );
+      await timelineManager.updateViewport({ width: 1588, height: 1000 });
+      await timelineManager.updateOptions(options);
+      await timelineManager.loadTimelineMonth({ year: 2024, month: 2 });
+      timelineManager.scrollTo(2000);
+    };
+    const januaryAssets = timelineAssetFactory.buildList(3).map((asset) =>
+      deriveLocalDateTimeFromFileCreatedAt({
+        ...asset,
+        fileCreatedAt: fromISODateTimeUTCToObject('2024-01-01T00:00:00.000Z'),
+      }),
+    );
+
+    beforeEach(() => {
+      stackIds = [];
+    });
+
+    afterEach(() => {
+      timelineManager.destroy();
+    });
+
+    it('lands on the stack cover when grouping automatic stacks hides the anchored photo', async () => {
+      await setup(photosUngrouped);
+      const anchor = findAnchor(february(), 2000);
+      const index = februaryAssets.findIndex((asset) => asset.id === anchor.id);
+      // the anchored photo is the second photo of an automatic stack, which carries no stack while shown one by one
+      stackIds = [februaryAssets[index - 1].id, anchor.id, februaryAssets[index + 1].id];
+      sdkMock.getAssetInfo.mockResolvedValue(
+        assetFactory.build({
+          id: anchor.id,
+          stack: { id: 'auto-stack', primaryAssetId: stackIds[0], assetCount: 3, source: StackSource.Auto },
+        }),
+      );
+
+      await timelineManager.updateOptions(photos);
+
+      expect(february().findAssetById({ id: anchor.id })).toBeUndefined();
+      const position = february().findAssetAbsolutePosition(stackIds[0])!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+      expect(sdkMock.getAssetInfo).toHaveBeenCalledWith(expect.objectContaining({ id: anchor.id }));
+    });
+
+    it('keeps the anchored photo when automatic stacks above it are shown one by one again', async () => {
+      stackIds = februaryAssets.slice(4, 9).map((asset) => asset.id);
+      await setup(photos);
+      const anchor = findAnchor(february(), 2000);
+      expect(stackIds).not.toContain(anchor.id);
+
+      await timelineManager.updateOptions(photosUngrouped);
+
+      expect(february().assetsCount).toBe(100);
+      const position = february().findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+      expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
+    });
+
+    it('keeps the stack cover when automatic stacks are shown one by one again', async () => {
+      await setup(photos);
+      const anchor = findAnchor(february(), 2000);
+      const index = februaryAssets.findIndex((asset) => asset.id === anchor.id);
+      stackIds = [anchor.id, februaryAssets[index + 1].id, februaryAssets[index + 2].id];
+      await timelineManager.reset();
+      const grouped = findAnchor(february(), timelineManager.scrollTop);
+      expect(grouped.id).toBe(anchor.id);
+
+      await timelineManager.updateOptions(photosUngrouped);
+
+      const position = february().findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(grouped.offset);
+    });
+
+    it('does not restore the anchor when the options switch to another timeline', async () => {
+      await setup(photos);
+      const scrollTo = vi.spyOn(timelineManager, 'scrollTo');
+
+      await timelineManager.updateOptions({ ...photos, personId: 'person-id' });
+
+      expect(scrollTo).not.toHaveBeenCalled();
     });
   });
 
