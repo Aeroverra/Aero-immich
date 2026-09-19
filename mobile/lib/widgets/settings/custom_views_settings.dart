@@ -4,16 +4,19 @@ import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/custom_view.model.dart';
+import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/pages/common/settings.page.dart';
 import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/repositories/custom_view_api.repository.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
+import 'package:immich_mobile/widgets/settings/lock_trigger_setting.dart';
 import 'package:immich_mobile/widgets/settings/setting_group_title.dart';
 import 'package:logging/logging.dart';
 
@@ -60,6 +63,18 @@ Future<CustomView> saveCustomView(WidgetRef ref, CustomView view, {required bool
   return local;
 }
 
+/// Saves when a switched view returns to the default view, and tells the user when the server refuses
+Future<void> _saveLockTrigger(BuildContext context, WidgetRef ref, LockTrigger trigger) async {
+  try {
+    await ref.read(updateCustomViewLockTriggerProvider)(trigger);
+  } catch (error, stack) {
+    _log.warning('Failed to update when a view returns to the default view', error, stack);
+    if (context.mounted) {
+      ImmichToast.show(context: context, msg: context.t.errors.unable_to_update_settings, toastType: ToastType.error);
+    }
+  }
+}
+
 /// Settings > Views: only the views (list, reorder, default, delete, create and edit, while private mode is unlocked).
 /// Tags are managed in Settings > Tags, linked at the bottom
 class CustomViewsSettings extends ConsumerWidget {
@@ -101,6 +116,14 @@ class CustomViewsSettings extends ConsumerWidget {
           )
         else
           const _ViewList(),
+        const Divider(height: 32),
+        LockTriggerSetting(
+          title: context.t.custom_view_lock_trigger,
+          description: context.t.custom_view_lock_trigger_description,
+          icon: Icons.lock_clock,
+          trigger: ref.watch(customViewLockTriggerProvider),
+          onChanged: (trigger) => unawaited(_saveLockTrigger(context, ref, trigger)),
+        ),
         const Divider(height: 32),
         ListTile(
           key: const Key('custom-views-manage-tags'),
