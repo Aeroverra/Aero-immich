@@ -9,7 +9,7 @@ import { AssetType, VectorIndex } from 'src/enum';
 import { probes } from 'src/repositories/database.repository';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { anyUuid, asUuid, withDefaultVisibility } from 'src/utils/database';
+import { anyUuid, asUuid, PrivateScope, withDefaultVisibility, withPrivateScope } from 'src/utils/database';
 
 // Maximum number of candidate duplicates to return from vector search
 const DUPLICATE_SEARCH_LIMIT = 64;
@@ -32,14 +32,15 @@ interface DuplicateMergeOptions {
 export class DuplicateRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getAll(userId: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getAll(userId: string, scope: PrivateScope) {
     return (
       this.db
         .with('duplicates', (qb) =>
           qb
             .selectFrom('asset')
             .$call(withDefaultVisibility)
+            .$call(withPrivateScope(scope))
             // Use innerJoinLateral to build a composite object per asset that includes
             // exifInfo and tags. This "asset2" object is then aggregated via jsonAgg.
             // Tags must be included here (not via separate joins) so they appear in the
@@ -111,11 +112,15 @@ export class DuplicateRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
-  async get(duplicateId: string): Promise<{ duplicateId: string; assets: MapAsset[] } | undefined> {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  async get(
+    duplicateId: string,
+    scope: PrivateScope,
+  ): Promise<{ duplicateId: string; assets: MapAsset[] } | undefined> {
     const result = await this.db
       .selectFrom('asset')
       .$call(withDefaultVisibility)
+      .$call(withPrivateScope(scope))
       // Use innerJoinLateral to build a composite object per asset that includes
       // exifInfo and tags. This "asset2" object is then aggregated via jsonAgg.
       // Tags must be included here (not via separate joins) so they appear in the

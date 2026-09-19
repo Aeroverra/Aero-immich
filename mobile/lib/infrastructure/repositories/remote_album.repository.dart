@@ -9,8 +9,10 @@ import 'package:immich_mobile/data/db/main/table/remote/album_asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/album_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_album.repository.drift.dart';
 
@@ -22,7 +24,10 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
 
   Drift get _db => attachedDatabase;
 
-  Future<List<RemoteAlbum>> getAll({Set<SortRemoteAlbumsBy> sortBy = const {SortRemoteAlbumsBy.updatedAt}}) {
+  Future<List<RemoteAlbum>> getAll({
+    Set<SortRemoteAlbumsBy> sortBy = const {SortRemoteAlbumsBy.updatedAt},
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
     // Count non-trashed assets via the joined asset table. Filtering trashed assets in the
     // join condition (instead of the where clause) keeps albums whose assets are all trashed
     // in the result, the same way truly empty albums are kept
@@ -37,7 +42,8 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
       leftOuterJoin(
         _db.remoteAssetEntity,
         _db.remoteAssetEntity.id.equalsExp(_db.remoteAlbumAssetEntity.assetId) &
-            _db.remoteAssetEntity.deletedAt.isNull(),
+            _db.remoteAssetEntity.deletedAt.isNull() &
+            _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
         useColumns: false,
       ),
       leftOuterJoin(
@@ -54,6 +60,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
       ),
     ]);
     query
+      ..where(_db.remoteAlbumEntity.privateFilter(privateFilter))
       ..addColumns([assetCount])
       ..addColumns([_db.userEntity.name, _db.userEntity.id])
       ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
@@ -84,7 +91,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
         .get();
   }
 
-  Future<RemoteAlbum?> get(String albumId) {
+  Future<RemoteAlbum?> get(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final assetCount = _db.remoteAssetEntity.id.count(distinct: true);
 
     final query =
@@ -97,7 +104,8 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             leftOuterJoin(
               _db.remoteAssetEntity,
               _db.remoteAssetEntity.id.equalsExp(_db.remoteAlbumAssetEntity.assetId) &
-                  _db.remoteAssetEntity.deletedAt.isNull(),
+                  _db.remoteAssetEntity.deletedAt.isNull() &
+                  _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
               useColumns: false,
             ),
             leftOuterJoin(
@@ -113,7 +121,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
               useColumns: false,
             ),
           ])
-          ..where(_db.remoteAlbumEntity.id.equals(albumId))
+          ..where(_db.remoteAlbumEntity.id.equals(albumId) & _db.remoteAlbumEntity.privateFilter(privateFilter))
           ..addColumns([assetCount])
           ..addColumns([_db.userEntity.name, _db.userEntity.id])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
@@ -220,9 +228,14 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     });
   }
 
-  Stream<(DateTime, DateTime)> watchDateRange(String albumId) {
+  Stream<(DateTime, DateTime)> watchDateRange(
+    String albumId, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
     final query = _db.remoteAlbumAssetEntity.selectOnly()
-      ..where(_db.remoteAlbumAssetEntity.albumId.equals(albumId))
+      ..where(
+        _db.remoteAlbumAssetEntity.albumId.equals(albumId) & _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
+      )
       ..addColumns([_db.remoteAssetEntity.createdAt.min(), _db.remoteAssetEntity.createdAt.max()])
       ..join([
         innerJoin(_db.remoteAssetEntity, _db.remoteAssetEntity.id.equalsExp(_db.remoteAlbumAssetEntity.assetId)),
@@ -365,7 +378,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     await query.write(RemoteAlbumEntityCompanion(isActivityEnabled: Value(isEnabled)));
   }
 
-  Stream<RemoteAlbum?> watchAlbum(String albumId) {
+  Stream<RemoteAlbum?> watchAlbum(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final query =
         _db.remoteAlbumEntity.select().join([
             leftOuterJoin(
@@ -391,7 +404,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
               useColumns: false,
             ),
           ])
-          ..where(_db.remoteAlbumEntity.id.equals(albumId))
+          ..where(_db.remoteAlbumEntity.id.equals(albumId) & _db.remoteAlbumEntity.privateFilter(privateFilter))
           ..addColumns([_db.userEntity.name, _db.userEntity.id])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
           ..groupBy([_db.remoteAlbumEntity.id]);
@@ -439,8 +452,20 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     return rows.map((row) => row.read<String>('album_id')).toList();
   }
 
-  Future<int> getCount() {
-    return _db.managers.remoteAlbumEntity.count();
+  Future<int> getCount({PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _db.remoteAlbumEntity.count(where: (row) => row.privateFilter(privateFilter)).getSingle();
+  }
+
+  /// The subset of [assetIds] that is private, used to keep private assets out of shared albums
+  Future<List<String>> getPrivateAssetIds(List<String> assetIds) {
+    if (assetIds.isEmpty) {
+      return Future.value(const []);
+    }
+
+    final query = _db.remoteAssetEntity.selectOnly()
+      ..addColumns([_db.remoteAssetEntity.id])
+      ..where(_db.remoteAssetEntity.id.isIn(assetIds) & _db.remoteAssetEntity.isPrivate.equals(true));
+    return query.map((row) => row.read(_db.remoteAssetEntity.id)!).get();
   }
 
   Future<UserDto> getOwner(String albumId) {
@@ -510,11 +535,24 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     return query.map((row) => row.read(_db.remoteAssetEntity.id)!).get();
   }
 
-  Future<List<RemoteAlbum>> getAlbumsContainingAsset(String assetId) async {
+  Future<List<RemoteAlbum>> getAlbumsContainingAsset(
+    String assetId, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => getAlbumsContainingAssets([assetId], privateFilter: privateFilter);
+
+  /// Every album holding at least one of [assetIds], each listed once
+  Future<List<RemoteAlbum>> getAlbumsContainingAssets(
+    List<String> assetIds, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) async {
+    if (assetIds.isEmpty) {
+      return [];
+    }
+
     // Note: this needs to be 2 queries as the where clause filtering causes the assetCount to always be 1
-    final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly()
+    final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly(distinct: true)
       ..addColumns([_db.remoteAlbumAssetEntity.albumId])
-      ..where(_db.remoteAlbumAssetEntity.assetId.equals(assetId));
+      ..where(_db.remoteAlbumAssetEntity.assetId.isIn(assetIds));
 
     final albumIds = await albumIdsQuery.map((row) => row.read(_db.remoteAlbumAssetEntity.albumId)!).get();
 
@@ -533,7 +571,8 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             leftOuterJoin(
               _db.remoteAssetEntity,
               _db.remoteAssetEntity.id.equalsExp(_db.remoteAlbumAssetEntity.assetId) &
-                  _db.remoteAssetEntity.deletedAt.isNull(),
+                  _db.remoteAssetEntity.deletedAt.isNull() &
+                  _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
               useColumns: false,
             ),
             leftOuterJoin(
@@ -549,7 +588,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
               useColumns: false,
             ),
           ])
-          ..where(_db.remoteAlbumEntity.id.isIn(albumIds))
+          ..where(_db.remoteAlbumEntity.id.isIn(albumIds) & _db.remoteAlbumEntity.privateFilter(privateFilter))
           ..addColumns([assetCount])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
           ..addColumns([_db.userEntity.name, _db.userEntity.id])
@@ -585,6 +624,7 @@ extension on RemoteAlbumEntityData {
       assetCount: assetCount,
       ownerName: ownerName,
       isShared: isShared,
+      isPrivate: isPrivate,
     );
   }
 }

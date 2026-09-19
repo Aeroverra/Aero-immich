@@ -106,6 +106,15 @@ const RecentlyAddedUpdateSchema = z
   .optional()
   .meta({ id: 'RecentlyAddedUpdate' });
 
+const PrivateModeUpdateSchema = z
+  .object({
+    timeoutMinutes: z.int().min(1).max(1440).optional().describe('Minutes of inactivity before private mode turns off'),
+    sidebarWeb: z.boolean().optional().describe('Whether the private page appears in the web sidebar'),
+    includeInMemories: z.boolean().optional().describe('Whether private assets are included in generated memories'),
+  })
+  .optional()
+  .meta({ id: 'PrivateModeUpdate' });
+
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
@@ -121,6 +130,7 @@ const UserPreferencesUpdateSchema = z
     sharedLinks: SharedLinksUpdateSchema,
     tags: TagsUpdateSchema,
     recentlyAdded: RecentlyAddedUpdateSchema,
+    privateMode: PrivateModeUpdateSchema,
   })
   .meta({ id: 'UserPreferencesUpdateDto' });
 
@@ -207,6 +217,14 @@ const RecentlyAddedResponseSchema = z
   })
   .meta({ id: 'RecentlyAddedResponse' });
 
+const PrivateModeResponseSchema = z
+  .object({
+    timeoutMinutes: z.int().describe('Minutes of inactivity before private mode turns off'),
+    sidebarWeb: z.boolean().describe('Whether the private page appears in the web sidebar'),
+    includeInMemories: z.boolean().describe('Whether private assets are included in generated memories'),
+  })
+  .meta({ id: 'PrivateModeResponse' });
+
 const UserPreferencesResponseSchema = z
   .object({
     albums: AlbumsResponseSchema,
@@ -221,6 +239,7 @@ const UserPreferencesResponseSchema = z
     purchase: PurchaseResponseSchema,
     cast: CastResponseSchema,
     recentlyAdded: RecentlyAddedResponseSchema,
+    privateMode: PrivateModeResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });
 

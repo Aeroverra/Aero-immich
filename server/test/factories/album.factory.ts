@@ -28,6 +28,7 @@ export class AlbumFactory {
       albumThumbnailAssetId: null,
       createdAt: newDate(),
       deletedAt: null,
+      isPrivate: false,
       description: 'Album description',
       isActivityEnabled: false,
       order: AssetOrder.Desc,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:immich_mobile/presentation/widgets/images/local_image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
@@ -9,6 +10,9 @@ final class CustomImageCache implements ImageCache {
   final _thumbhash = ImageCache()..maximumSize = 0;
   final _small = ImageCache();
   final _large = ImageCache()..maximumSize = 5; // Maximum 5 images
+
+  /// Remote asset id -> cache keys, so private images can be dropped when private mode turns off
+  final _assetKeys = <String, Set<Object>>{};
 
   @override
   int get maximumSize => _small.maximumSize + _large.maximumSize;
@@ -26,7 +30,30 @@ final class CustomImageCache implements ImageCache {
   void clear() {
     _small.clear();
     _large.clear();
+    _assetKeys.clear();
   }
+
+  /// Evicts every cached image (thumbnail, preview and original) of the given remote assets
+  void evictAssets(Iterable<String> assetIds) {
+    for (final assetId in assetIds) {
+      final keys = _assetKeys.remove(assetId);
+      if (keys == null) {
+        continue;
+      }
+      for (final key in keys) {
+        _cacheForKey(key).evict(key);
+      }
+    }
+  }
+
+  @visibleForTesting
+  int get trackedAssetCount => _assetKeys.length;
+
+  String? _assetIdForKey(Object key) => switch (key) {
+    RemoteImageProvider() => key.assetId,
+    RemoteFullImageProvider() => key.assetId,
+    _ => null,
+  };
 
   @override
   void clearLiveImages() {
@@ -66,11 +93,13 @@ final class CustomImageCache implements ImageCache {
   int get pendingImageCount => _small.pendingImageCount + _large.pendingImageCount;
 
   @override
-  ImageStreamCompleter? putIfAbsent(
-    Object key,
-    ImageStreamCompleter Function() loader, {
-    ImageErrorListener? onError,
-  }) => _cacheForKey(key).putIfAbsent(key, loader, onError: onError);
+  ImageStreamCompleter? putIfAbsent(Object key, ImageStreamCompleter Function() loader, {ImageErrorListener? onError}) {
+    final assetId = _assetIdForKey(key);
+    if (assetId != null) {
+      _assetKeys.putIfAbsent(assetId, () => {}).add(key);
+    }
+    return _cacheForKey(key).putIfAbsent(key, loader, onError: onError);
+  }
 
   @override
   ImageCacheStatus statusForKey(Object key) => _cacheForKey(key).statusForKey(key);
