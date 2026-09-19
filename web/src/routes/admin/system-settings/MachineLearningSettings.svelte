@@ -176,6 +176,126 @@
       </SettingAccordion>
 
       <SettingAccordion
+        key="auto-stack"
+        title={$t('admin.machine_learning_auto_stack')}
+        subtitle={$t('admin.machine_learning_auto_stack_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_auto_stack_enabled')}
+            subtitle={$t('admin.machine_learning_auto_stack_enabled_description')}
+            bind:checked={configToEdit.machineLearning.autoStack.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled || !configToEdit.machineLearning.clip.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_gap')}
+            description={$t('admin.machine_learning_auto_stack_max_gap_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxGapSeconds}
+            step="0.5"
+            min={0}
+            max={60}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxGapSeconds !==
+              config.machineLearning.autoStack.maxGapSeconds}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_span')}
+            description={$t('admin.machine_learning_auto_stack_max_span_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxSpanSeconds}
+            step="1"
+            min={0}
+            max={600}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxSpanSeconds !==
+              config.machineLearning.autoStack.maxSpanSeconds}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_assets')}
+            description={$t('admin.machine_learning_auto_stack_max_assets_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxAssets}
+            step="1"
+            min={2}
+            max={100}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxAssets !== config.machineLearning.autoStack.maxAssets}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_distance')}
+            description={$t('admin.machine_learning_auto_stack_max_distance_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxDistance}
+            step="0.005"
+            min={0.001}
+            max={0.2}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxDistance !==
+              config.machineLearning.autoStack.maxDistance}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_face_shift')}
+            description={$t('admin.machine_learning_auto_stack_max_face_shift_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxFaceShift}
+            step="0.01"
+            min={0}
+            max={1}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxFaceShift !==
+              config.machineLearning.autoStack.maxFaceShift}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_face_size_change')}
+            description={$t('admin.machine_learning_auto_stack_max_face_size_change_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxFaceSizeChange}
+            step="0.01"
+            min={0}
+            max={1}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxFaceSizeChange !==
+              config.machineLearning.autoStack.maxFaceSizeChange}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_yaw_change')}
+            description={$t('admin.machine_learning_auto_stack_max_yaw_change_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxYawChange}
+            step="1"
+            min={0}
+            max={180}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxYawChange !==
+              config.machineLearning.autoStack.maxYawChange}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_auto_stack_max_smile_change')}
+            description={$t('admin.machine_learning_auto_stack_max_smile_change_description')}
+            bind:value={configToEdit.machineLearning.autoStack.maxSmileChange}
+            step="0.05"
+            min={0}
+            max={1}
+            disabled={disabled || !configToEdit.machineLearning.autoStack.enabled}
+            isEdited={configToEdit.machineLearning.autoStack.maxSmileChange !==
+              config.machineLearning.autoStack.maxSmileChange}
+          />
+        </div>
+      </SettingAccordion>
+
+      <SettingAccordion
         key="facial-recognition"
         title={$t('admin.machine_learning_facial_recognition')}
         subtitle={$t('admin.machine_learning_facial_recognition_description')}
