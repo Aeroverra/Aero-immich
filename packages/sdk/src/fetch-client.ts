@@ -704,6 +704,9 @@ export type CastResponse = {
     /** Whether Google Cast is enabled */
     gCastEnabled: boolean;
 };
+export type CustomViewsResponse = {
+    lockTrigger: LockTrigger;
+};
 export type DeletedReimportResponse = {
     /** The "Previously deleted" album re-uploads are added to in album mode, once it exists */
     albumId: string | null;
@@ -748,6 +751,7 @@ export type PeopleResponse = {
 export type PrivateModeResponse = {
     /** Whether private assets are included in generated memories */
     includeInMemories: boolean;
+    lockTrigger: LockTrigger;
     /** Whether the private page appears in the web sidebar */
     sidebarWeb: boolean;
     /** Minutes of inactivity before private mode turns off */
@@ -790,6 +794,7 @@ export type UserPreferencesResponseDto = {
     albums: AlbumsResponse;
     autoStack: AutoStackResponse;
     cast: CastResponse;
+    customViews: CustomViewsResponse;
     deletedReimport: DeletedReimportResponse;
     download: DownloadResponse;
     emailNotifications: EmailNotificationsResponse;
@@ -818,6 +823,9 @@ export type AvatarUpdate = {
 export type CastUpdate = {
     /** Whether Google Cast is enabled */
     gCastEnabled?: boolean;
+};
+export type CustomViewsUpdate = {
+    lockTrigger?: LockTrigger;
 };
 export type DeletedReimportUpdate = {
     mode?: DeletedReimportMode;
@@ -861,6 +869,7 @@ export type PeopleUpdate = {
 export type PrivateModeUpdate = {
     /** Whether private assets are included in generated memories */
     includeInMemories?: boolean;
+    lockTrigger?: LockTrigger;
     /** Whether the private page appears in the web sidebar */
     sidebarWeb?: boolean;
     /** Minutes of inactivity before private mode turns off */
@@ -904,6 +913,7 @@ export type UserPreferencesUpdateDto = {
     autoStack?: AutoStackUpdate;
     avatar?: AvatarUpdate;
     cast?: CastUpdate;
+    customViews?: CustomViewsUpdate;
     deletedReimport?: DeletedReimportUpdate;
     download?: DownloadUpdate;
     emailNotifications?: EmailNotificationsUpdate;
@@ -8402,6 +8412,11 @@ export enum CalendarHeatmapType {
 export enum AssetOrder {
     Asc = "asc",
     Desc = "desc"
+}
+export enum LockTrigger {
+    AppPause = "appPause",
+    ScreenOff = "screenOff",
+    Timeout = "timeout"
 }
 export enum DeletedReimportMode {
     Trash = "trash",

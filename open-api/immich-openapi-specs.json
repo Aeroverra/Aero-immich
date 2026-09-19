@@ -22815,6 +22815,25 @@
         },
         "type": "object"
       },
+      "CustomViewsResponse": {
+        "properties": {
+          "lockTrigger": {
+            "$ref": "#/components/schemas/LockTrigger"
+          }
+        },
+        "required": [
+          "lockTrigger"
+        ],
+        "type": "object"
+      },
+      "CustomViewsUpdate": {
+        "properties": {
+          "lockTrigger": {
+            "$ref": "#/components/schemas/LockTrigger"
+          }
+        },
+        "type": "object"
+      },
       "DatabaseBackupDeleteDto": {
         "properties": {
           "backups": {
@@ -23891,6 +23910,15 @@
       },
       "LicenseResponseDto": {
         "$ref": "#/components/schemas/UserLicense"
+      },
+      "LockTrigger": {
+        "description": "When a mobile client locks an unlocked session again",
+        "enum": [
+          "appPause",
+          "screenOff",
+          "timeout"
+        ],
+        "type": "string"
       },
       "LogLevel": {
         "description": "Log level",
@@ -26592,6 +26620,9 @@
             "description": "Whether private assets are included in generated memories",
             "type": "boolean"
           },
+          "lockTrigger": {
+            "$ref": "#/components/schemas/LockTrigger"
+          },
           "sidebarWeb": {
             "description": "Whether the private page appears in the web sidebar",
             "type": "boolean"
@@ -26605,6 +26636,7 @@
         },
         "required": [
           "includeInMemories",
+          "lockTrigger",
           "sidebarWeb",
           "timeoutMinutes"
         ],
@@ -26615,6 +26647,9 @@
           "includeInMemories": {
             "description": "Whether private assets are included in generated memories",
             "type": "boolean"
+          },
+          "lockTrigger": {
+            "$ref": "#/components/schemas/LockTrigger"
           },
           "sidebarWeb": {
             "description": "Whether the private page appears in the web sidebar",
@@ -34508,6 +34543,9 @@
           "cast": {
             "$ref": "#/components/schemas/CastResponse"
           },
+          "customViews": {
+            "$ref": "#/components/schemas/CustomViewsResponse"
+          },
           "deletedReimport": {
             "$ref": "#/components/schemas/DeletedReimportResponse"
           },
@@ -34555,6 +34593,7 @@
           "albums",
           "autoStack",
           "cast",
+          "customViews",
           "deletedReimport",
           "download",
           "emailNotifications",
@@ -34585,6 +34624,9 @@
           },
           "cast": {
             "$ref": "#/components/schemas/CastUpdate"
+          },
+          "customViews": {
+            "$ref": "#/components/schemas/CustomViewsUpdate"
           },
           "deletedReimport": {
             "$ref": "#/components/schemas/DeletedReimportUpdate"

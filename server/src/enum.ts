@@ -116,6 +116,20 @@ export const StackActionModeSchema = z
   .describe('Whether actions on a selection include the stacked assets of the selected stacks')
   .meta({ id: 'StackActionMode' });
 
+export enum LockTrigger {
+  /** lock as soon as the app leaves the foreground */
+  AppPause = 'appPause',
+  /** keep the unlock across app switches, lock when the screen turns off or the device locks */
+  ScreenOff = 'screenOff',
+  /** only the inactivity timeout, a manual lock or a logout lock */
+  Timeout = 'timeout',
+}
+
+export const LockTriggerSchema = z
+  .enum(LockTrigger)
+  .describe('When a mobile client locks an unlocked session again')
+  .meta({ id: 'LockTrigger' });
+
 export enum AssetOrderBy {
   TakenAt = 'takenAt',
   CreatedAt = 'createdAt',
