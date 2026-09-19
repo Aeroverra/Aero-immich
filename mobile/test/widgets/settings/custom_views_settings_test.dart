@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/custom_view.model.dart';
+import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
@@ -91,7 +92,33 @@ void main() {
     expect(find.byType(Switch), findsNothing);
     expect(find.byIcon(Icons.delete_outline), findsNothing);
     expect(find.text(t.tag_review), findsNothing);
-    await tester.ensureVisible(find.byKey(const Key('custom-views-manage-tags')));
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('custom-views-manage-tags')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text(t.custom_views_manage_tags_description), findsOneWidget);
+  });
+
+  testWidgets('offers the three lock triggers, on the screen turning off by default', (tester) async {
+    await pump(tester, privateMode: true);
+    final t = Translations.of(tester.element(find.byType(CustomViewsSettings)));
+
+    await tester.scrollUntilVisible(find.text(t.lock_trigger_timeout), 200, scrollable: find.byType(Scrollable).first);
+    expect(find.text(t.custom_view_lock_trigger), findsOneWidget);
+    expect(find.text(t.lock_trigger_app_pause), findsOneWidget);
+    expect(find.text(t.lock_trigger_screen_off), findsOneWidget);
+    expect(find.text(t.lock_trigger_timeout), findsOneWidget);
+
+    final selected = tester.widgetList<RadioListTile<LockTrigger>>(find.byType(RadioListTile<LockTrigger>));
+    expect(selected.map((tile) => tile.value), [LockTrigger.appPause, LockTrigger.screenOff, LockTrigger.timeout]);
+  });
+
+  testWidgets('the lock trigger is offered while private mode is locked', (tester) async {
+    await pump(tester, privateMode: false);
+    final t = Translations.of(tester.element(find.byType(CustomViewsSettings)));
+
+    await tester.scrollUntilVisible(find.text(t.lock_trigger_timeout), 200);
+    expect(find.text(t.custom_view_lock_trigger), findsOneWidget);
   });
 }

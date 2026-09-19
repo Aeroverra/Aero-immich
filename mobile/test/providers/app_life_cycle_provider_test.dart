@@ -261,14 +261,14 @@ void main() {
     expect(notifier.state, isFalse);
   });
 
-  test('pause returns to the default view', () async {
+  test('pause keeps the switched view, views lock when the screen turns off by default', () async {
     final notifier = container.read(activeViewProvider.notifier) as TestActiveViewNotifier;
     notifier.state = 'view-1';
 
     await lifeCycle.handleAppPause();
 
-    expect(notifier.resetCount, 1);
-    expect(notifier.state, isNull);
+    expect(notifier.resetCount, 0);
+    expect(notifier.state, 'view-1');
   });
 
   test('resume re-queries the memory lane', () async {
