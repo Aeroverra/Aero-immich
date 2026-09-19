@@ -11,10 +11,9 @@ import {
   Updateable,
   UpdateResult,
 } from 'kysely';
-import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { isEmpty, isUndefined, omitBy } from 'lodash';
 import { InjectKysely } from 'nestjs-kysely';
-import { LockableProperty, Stack } from 'src/database';
+import { lockableProperties, LockableProperty, Stack } from 'src/database';
 import { Chunked, ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
@@ -152,6 +151,11 @@ type UpsertExifOptions = {
   video?: Insertable<AssetVideoTable>;
   keyframes?: Insertable<AssetKeyframeTable>;
   lockedPropertiesBehavior: 'override' | 'append' | 'skip';
+  /**
+   * With `skip`: the `updateId` the row had before the values were read. Lockable properties are kept when the row
+   * changed since then, for example when a user edit was written to the sidecar while the file was being read.
+   */
+  updateId?: string | null;
 };
 
 const distinctLocked = <T extends LockableProperty[] | null>(eb: ExpressionBuilder<DB, 'asset_exif'>, columns: T) =>
@@ -234,7 +238,14 @@ export class AssetRepository {
       },
     ],
   })
-  async upsertExif({ exif, audio, video, keyframes, lockedPropertiesBehavior }: UpsertExifOptions): Promise<void> {
+  async upsertExif({
+    exif,
+    audio,
+    video,
+    keyframes,
+    lockedPropertiesBehavior,
+    updateId,
+  }: UpsertExifOptions): Promise<void> {
     let query = this.db;
     if (audio) {
       (query as any) = this.db.with('audio', (qb) =>
@@ -307,7 +318,14 @@ export class AssetRepository {
           const skipLocked = <T extends keyof AssetExifTable>(col: T) =>
             eb
               .case()
-              .when(sql`${col}`, '=', eb.fn.any('asset_exif.lockedProperties'))
+              .when(
+                eb.or([
+                  eb(sql`${col}`, '=', eb.fn.any('asset_exif.lockedProperties')),
+                  ...(updateId !== undefined && (lockableProperties as readonly string[]).includes(col)
+                    ? [eb('asset_exif.updateId', 'is distinct from', updateId)]
+                    : []),
+                ]),
+              )
               .then(eb.ref(`asset_exif.${col}`))
               .else(eb.ref(`excluded.${col}`))
               .end();
@@ -438,14 +456,20 @@ export class AssetRepository {
   }
 
   @GenerateSql({ params: [DummyValue.UUID, ['description']] })
-  unlockProperties(assetId: string, properties: LockableProperty[]) {
-    return this.db
+  /**
+   * @param updateId only unlock while the row still has this `updateId`, a newer edit keeps its lock
+   * @returns whether the properties were unlocked
+   */
+  async unlockProperties(assetId: string, properties: LockableProperty[], updateId?: string): Promise<boolean> {
+    const result = await this.db
       .updateTable('asset_exif')
       .where('assetId', '=', assetId)
+      .$if(updateId !== undefined, (qb) => qb.where('updateId', '=', updateId!))
       .set((eb) => ({
         lockedProperties: sql`nullif(array(select distinct property from unnest(${eb.ref('asset_exif.lockedProperties')}) property where not property = any(${properties})), '{}')`,
       }))
-      .execute();
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows) > 0;
   }
 
   async upsertJobStatus(...jobStatus: Insertable<AssetJobStatusTable>[]): Promise<void> {
@@ -1439,23 +1463,6 @@ export class AssetRepository {
       .innerJoin('asset_exif', (join) => join.onRef('asset_exif.assetId', '=', 'asset.id'))
       .select(['asset_exif.exifImageHeight', 'asset_exif.exifImageWidth', 'asset_exif.orientation'])
       .select(withEdits)
-      .where('asset.id', '=', id)
-      .executeTakeFirstOrThrow();
-  }
-
-  @GenerateSql({ params: [DummyValue.UUID] })
-  async getForUpdateTags(id: string) {
-    return this.db
-      .selectFrom('asset')
-      .select((eb) =>
-        jsonArrayFrom(
-          eb
-            .selectFrom('tag')
-            .select('tag.value')
-            .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
-            .whereRef('asset.id', '=', 'tag_asset.assetId'),
-        ).as('tags'),
-      )
       .where('asset.id', '=', id)
       .executeTakeFirstOrThrow();
   }

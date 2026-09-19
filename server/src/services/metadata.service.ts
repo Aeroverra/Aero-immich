@@ -8,7 +8,7 @@ import { constants } from 'node:fs/promises';
 import { join, parse } from 'node:path';
 
 import { StorageCore } from 'src/cores/storage.core';
-import { Asset, AssetFile } from 'src/database';
+import { Asset, AssetFile, LockableProperty } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
 import {
   AssetFileType,
@@ -40,6 +40,14 @@ import { Tasks } from 'src/utils/tasks';
 
 const POSTGRES_INT_MAX = 2_147_483_647;
 const POSTGRES_INT_MIN = -2_147_483_648;
+
+/** Properties that metadata extraction derives other values from after they are written to the sidecar */
+const propertiesThatNeedExtraction = new Set<LockableProperty>([
+  'dateTimeOriginal',
+  'timeZone',
+  'latitude',
+  'longitude',
+]);
 
 /** look for a date from these tags (in order) */
 const EXIF_DATE_TAGS: Array<keyof ImmichTags> = [
@@ -228,9 +236,11 @@ export class MetadataService extends BaseService {
 
   @OnJob({ name: JobName.AssetExtractMetadata, queue: QueueName.MetadataExtraction })
   async handleMetadataExtraction(data: JobOf<JobName.AssetExtractMetadata>) {
-    const [{ metadata, reverseGeocoding }, asset] = await Promise.all([
+    const [{ metadata, reverseGeocoding }, asset, updateId] = await Promise.all([
       this.getConfig({ withCache: true }),
       this.assetJobRepository.getForMetadataExtraction(data.id),
+      // read before the file, so an edit that is written to the sidecar in the meantime is not overwritten
+      this.assetJobRepository.getExifUpdateIdForMetadataExtraction(data.id),
     ]);
 
     if (!asset) {
@@ -381,6 +391,7 @@ export class MetadataService extends BaseService {
           video: videoData,
           keyframes: keyframeData,
           lockedPropertiesBehavior: 'skip',
+          updateId,
         });
         await this.applyTagList(asset);
       },
@@ -514,13 +525,33 @@ export class MetadataService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    await this.metadataRepository.writeTags(sidecarPath, exif);
+    const written = await this.metadataRepository.writeTags(sidecarPath, exif);
+    if (!written) {
+      // the properties stay locked, so metadata extraction keeps them instead of reading the old file
+      return JobStatus.Failed;
+    }
 
     if (asset.files.length === 0) {
       await this.assetRepository.upsertFile({ assetId: id, type: AssetFileType.Sidecar, path: sidecarPath });
     }
 
-    await this.assetRepository.unlockProperties(asset.id, lockedProperties);
+    const unlocked = await this.assetRepository.unlockProperties(asset.id, lockedProperties, asset.exifInfo.updateId);
+    if (!unlocked) {
+      // the asset changed while the file was written. A newer write may already have finished and unlocked the
+      // properties, so they are locked again until the file is written with the current values.
+      await this.assetRepository.upsertExif({
+        exif: { assetId: asset.id, lockedProperties },
+        lockedPropertiesBehavior: 'append',
+      });
+      await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id } });
+    } else if (lockedProperties.some((property) => propertiesThatNeedExtraction.has(property))) {
+      // local date time and reverse geocoding are derived during extraction; tags, description and rating are
+      // already in the database, so reading the file again after writing them would only repeat work
+      await this.jobRepository.queue({
+        name: JobName.AssetExtractMetadata,
+        data: { id, source: 'sidecar-write' },
+      });
+    }
 
     return JobStatus.Success;
   }
@@ -655,6 +686,7 @@ export class MetadataService extends BaseService {
     await this.tagRepository.replaceAssetTags(
       id,
       results.map((tag) => tag.id),
+      asset?.tags ?? null,
     );
   }
 
