@@ -10,6 +10,7 @@ import 'package:immich_mobile/providers/infrastructure/asset_viewer/asset.provid
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/location_picker.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -46,11 +47,18 @@ class EditLocationAction extends AssetActionBuilder {
       return;
     }
 
-    final (:assetIds, :origin) = state;
+    final (assetIds: selectedIds, :origin) = state;
     final remoteAssetRepository = ref.read(driftProvider).remoteAssetRepository;
     final clearSelection = ref.read(clearSelectionProvider(source));
 
     try {
+      final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+      final stacked = await resolveStackedAssets(context, ref, source, selected);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
+      final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
       LatLng? initialLatLng;
       if (origin != null) {
         final exif = await remoteAssetRepository.getExif(origin.id);
