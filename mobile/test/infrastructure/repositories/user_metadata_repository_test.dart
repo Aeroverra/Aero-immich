@@ -72,4 +72,59 @@ void main() {
       );
     });
   });
+
+  group('lock triggers', () {
+    test('locks private mode on app pause and views on screen off while nothing is synced', () {
+      const preferences = Preferences();
+
+      expect(preferences.privateModeLockTrigger, LockTrigger.appPause);
+      expect(preferences.customViewLockTrigger, LockTrigger.screenOff);
+      expect(preferences.privateModeTimeoutMinutes, 30);
+    });
+
+    test('reads both triggers and the timeout from the synced preferences', () {
+      final preferences = Preferences.fromMap({
+        'privateMode': {'lockTrigger': 'timeout', 'timeoutMinutes': 5},
+        'customViews': {'lockTrigger': 'appPause'},
+      });
+
+      expect(preferences.privateModeLockTrigger, LockTrigger.timeout);
+      expect(preferences.customViewLockTrigger, LockTrigger.appPause);
+      expect(preferences.privateModeTimeoutMinutes, 5);
+    });
+
+    test('falls back to the defaults for a trigger it does not know', () {
+      final preferences = Preferences.fromMap({
+        'privateMode': {'lockTrigger': 'something-new'},
+        'customViews': {'lockTrigger': 'something-new'},
+      });
+
+      expect(preferences.privateModeLockTrigger, LockTrigger.appPause);
+      expect(preferences.customViewLockTrigger, LockTrigger.screenOff);
+    });
+
+    test('stores each trigger and keeps the other synced preferences', () async {
+      await db
+          .into(db.userMetadataEntity)
+          .insert(
+            UserMetadataEntityCompanion.insert(
+              userId: userId,
+              key: UserMetadataKey.preferences,
+              value: {
+                'privateMode': {'timeoutMinutes': 45},
+                'tags': {'enabled': true},
+              },
+            ),
+          );
+
+      await sut.setPrivateModeLockTrigger(userId, LockTrigger.screenOff);
+      await sut.setCustomViewLockTrigger(userId, LockTrigger.timeout);
+
+      final preferences = (await sut.getUserMetadata(userId)).single.preferences!;
+      expect(preferences.privateModeLockTrigger, LockTrigger.screenOff);
+      expect(preferences.customViewLockTrigger, LockTrigger.timeout);
+      expect(preferences.privateModeTimeoutMinutes, 45);
+      expect(preferences.tagsEnabled, isTrue);
+    });
+  });
 }

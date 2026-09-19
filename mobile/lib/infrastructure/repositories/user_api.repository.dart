@@ -37,6 +37,26 @@ class UserApiRepository extends ApiRepository {
     );
   }
 
+  Future<void> updatePrivateModeLockTrigger(domain.LockTrigger trigger) async {
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(
+          privateMode: Optional.present(PrivateModeUpdate(lockTrigger: Optional.present(trigger.toDto()))),
+        ),
+      ),
+    );
+  }
+
+  Future<void> updateCustomViewLockTrigger(domain.LockTrigger trigger) async {
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(
+          customViews: Optional.present(CustomViewsUpdate(lockTrigger: Optional.present(trigger.toDto()))),
+        ),
+      ),
+    );
+  }
+
   Future<void> updateGroupAutoStacks(bool groupAuto) async {
     await checkNull(
       _api.updateMyPreferences(
@@ -119,4 +139,12 @@ class UserApiRepository extends ApiRepository {
   }
 
   Future<void> forgetDeletedChecksums() => _api.deleteMyDeletedChecksums();
+}
+
+extension on domain.LockTrigger {
+  LockTrigger toDto() => switch (this) {
+    domain.LockTrigger.appPause => LockTrigger.appPause,
+    domain.LockTrigger.screenOff => LockTrigger.screenOff,
+    domain.LockTrigger.timeout => LockTrigger.timeout,
+  };
 }

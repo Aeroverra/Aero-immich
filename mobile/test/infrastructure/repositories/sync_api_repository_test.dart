@@ -127,6 +127,38 @@ void main() {
     });
   });
 
+  group('custom views', () {
+    Future<Map<String, dynamic>> requestBody({required bool supportsCustomViews}) async {
+      final future = sut.streamChanges(
+        (_, _, _) async {},
+        batchSize: testBatchSize,
+        httpClient: mockHttpClient,
+        serverVersion: const SemVer(major: 3, minor: 2, patch: 2),
+        supportsCustomViews: supportsCustomViews,
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+      await responseStreamController.close();
+      await expectLater(future, completes);
+
+      final request = verify(() => mockHttpClient.send(captureAny())).captured.single as http.Request;
+      return jsonDecode(request.body) as Map<String, dynamic>;
+    }
+
+    test('requests the tag and view streams and every asset when the server reports customViews', () async {
+      final body = await requestBody(supportsCustomViews: true);
+      expect(body['types'], containsAll(['TagsV1', 'TagAssetsV1', 'ViewsV1', 'ViewTagsV1']));
+      expect(body['includeViews'], isTrue);
+      expect(body['includePrivate'], isTrue);
+    });
+
+    test('leaves them out for servers without it', () async {
+      final body = await requestBody(supportsCustomViews: false);
+      expect(body['types'], isNot(anyOf(contains('TagsV1'), contains('TagAssetsV1'), contains('ViewsV1'))));
+      expect(body['types'], isNot(contains('ViewTagsV1')));
+      expect(body.containsKey('includeViews'), isFalse);
+    });
+  });
+
   test('streamChanges stops processing stream when abort is called', () async {
     int onDataCallCount = 0;
     bool abortWasCalledInCallback = false;

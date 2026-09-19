@@ -31,11 +31,16 @@ import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/cloud_id.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.dart';
 import 'package:immich_mobile/data/db/main/table/remote/stack.dart';
+import 'package:immich_mobile/data/db/main/table/tag/tag.dart';
+import 'package:immich_mobile/data/db/main/table/tag/tag_asset.dart';
 import 'package:immich_mobile/data/db/main/table/user/auth_user.dart';
 import 'package:immich_mobile/data/db/main/table/user/metadata.dart';
 import 'package:immich_mobile/data/db/main/table/user/partner.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.dart';
+import 'package:immich_mobile/data/db/main/table/view/view.dart';
+import 'package:immich_mobile/data/db/main/table/view/view_tag.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.dart';
+import 'package:immich_mobile/infrastructure/repositories/custom_view.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_album.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_asset.repository.dart';
 import 'package:immich_mobile/infrastructure/repositories/map.repository.dart';
@@ -86,11 +91,16 @@ import 'package:sqlite_async/sqlite_async.dart';
     AssetEditEntity,
     SettingsEntity,
     AssetOcrEntity,
+    TagEntity,
+    TagAssetEntity,
+    ViewEntity,
+    ViewTagEntity,
   ],
   include: {'package:immich_mobile/data/db/main/query/merged_asset.drift'},
   daos: [
     AuthUserRepository,
     BackupRepository,
+    CustomViewRepository,
     LocalAlbumRepository,
     LocalAssetRepository,
     MapRepository,
@@ -161,7 +171,7 @@ class Drift extends $Drift {
   }
 
   @override
-  int get schemaVersion => 33;
+  int get schemaVersion => 35;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -366,6 +376,18 @@ class Drift extends $Drift {
               },
               from32To33: (m, v33) async {
                 await m.addColumn(v33.stackEntity, v33.stackEntity.source);
+              },
+              from33To34: (m, v34) async {
+                await m.create(v34.tagEntity);
+                await m.create(v34.idxTagParentId);
+                await m.create(v34.tagAssetEntity);
+                await m.create(v34.idxTagAssetAssetId);
+                await m.create(v34.viewEntity);
+                await m.create(v34.viewTagEntity);
+                await m.create(v34.idxViewTagTagId);
+              },
+              from34To35: (m, v35) async {
+                await m.create(v35.idxRemoteAssetLivePhotoVideoId);
               },
             ),
           ),

@@ -5,9 +5,11 @@ import 'package:immich_mobile/domain/models/store.model.dart';
 import 'package:immich_mobile/domain/services/log.service.dart';
 import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/extensions/platform_extensions.dart';
+import 'package:immich_mobile/providers/app_lock.provider.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/gallery_permission.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
@@ -72,6 +74,7 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
       return;
     }
     _wasPaused = false;
+    _ref.read(appLockServiceProvider).handleAppResume();
 
     final isAuthenticated = _ref.read(authProvider).isAuthenticated;
 
@@ -83,6 +86,7 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
 
       await _ref.read(serverInfoProvider.notifier).getServerVersion();
       await _ref.read(privateModeProvider.notifier).refresh();
+      await _ref.read(activeViewProvider.notifier).refresh();
     }
 
     if (!_shouldContinueOperation()) {
@@ -217,8 +221,8 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
 
       _ref.read(websocketProvider.notifier).disconnect();
 
-      // Private mode never survives the app leaving the foreground
-      unawaited(_ref.read(privateModeProvider.notifier).disable());
+      // private mode and the switched view lock again as their lockTrigger preferences say
+      _ref.read(appLockServiceProvider).handleAppPause();
     }
 
     return LogService.I.flush().catchError((_) {});
