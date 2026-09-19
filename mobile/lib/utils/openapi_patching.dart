@@ -37,7 +37,9 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'stacks': StacksResponse(groupAuto: true).toJson(),
     'autoStack': AutoStackResponse(enabled: false).toJson(),
     'stackActions': StackActionsResponse(mode: StackActionMode.ask).toJson(),
+    'customViews': CustomViewsResponse(lockTrigger: LockTrigger.screenOff).toJson(),
   },
+  'PrivateModeResponse': {'lockTrigger': LockTrigger.appPause.toJson()},
   'ServerConfigDto': {
     'mapLightStyleUrl': 'https://tiles.immich.cloud/v1/style/light.json',
     'mapDarkStyleUrl': 'https://tiles.immich.cloud/v1/style/dark.json',

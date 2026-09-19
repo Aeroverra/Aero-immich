@@ -51,6 +51,8 @@ void main() {
       expect(preferences!.stacks.groupAuto, isTrue);
       expect(preferences.autoStack.enabled, isFalse);
       expect(preferences.stackActions.mode, StackActionMode.ask);
+      expect(preferences.privateMode.lockTrigger, LockTrigger.appPause);
+      expect(preferences.customViews.lockTrigger, LockTrigger.screenOff);
 
       final stack = StackResponseDto.fromJson(
         jsonDecode('{"id": "stack-1", "primaryAssetId": "asset-1", "assets": []}'),
