@@ -16,6 +16,77 @@ set
     '{}'
   )
 
+-- AssetRepository.touchPrivateRelations
+update "asset_exif"
+set
+  "updatedAt" = $1
+where
+  "assetId" in ($2::uuid)
+update "asset_face"
+set
+  "updatedAt" = $1
+where
+  "assetId" in ($2::uuid)
+update "asset_ocr"
+set
+  "updatedAt" = $1
+where
+  "assetId" in ($2::uuid)
+update "asset_metadata"
+set
+  "updatedAt" = $1
+where
+  "assetId" in ($2::uuid)
+update "asset_edit"
+set
+  "updatedAt" = $1
+where
+  "assetId" in ($2::uuid)
+update "stack"
+set
+  "updatedAt" = $1
+where
+  "primaryAssetId" in ($2::uuid)
+update "memory"
+set
+  "updatedAt" = $1
+where
+  "id" in (
+    select
+      "memoriesId"
+    from
+      "memory_asset"
+    where
+      "assetId" in ($2::uuid)
+  )
+update "memory_asset"
+set
+  "updatedAt" = $1
+where
+  "memoriesId" in (
+    select
+      "memoriesId"
+    from
+      "memory_asset"
+    where
+      "assetId" in ($2::uuid)
+  )
+update "person"
+set
+  "updatedAt" = $1
+where
+  exists (
+    select
+      "asset_face"."id"
+    from
+      "asset_face"
+      inner join "asset" on "asset"."id" = "asset_face"."assetId"
+    where
+      "asset_face"."personGroupId" = "person"."personGroupId"
+      and "asset"."ownerId" = "person"."ownerId"
+      and "asset_face"."assetId" in ($2::uuid)
+  )
+
 -- AssetRepository.updateAllExif
 update "asset_exif"
 set
