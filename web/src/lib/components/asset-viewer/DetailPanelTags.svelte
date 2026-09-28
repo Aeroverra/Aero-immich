@@ -41,13 +41,18 @@
     }
   });
 
-  // the viewer can move to another asset while a request runs, so a response only updates the asset it was for
+  // the viewer can move to another asset while a request runs, so a response only updates the asset it was for.
+  // AssetUpdate also gives the viewer (and its cache of assets) the new tags, so going back to the asset shows them
   const refresh = async (id: string) => {
     try {
       const updated = await getAssetInfo({ id });
-      if (asset.id === id && (pending[id] ?? 0) === 0) {
+      if ((pending[id] ?? 0) > 0) {
+        return;
+      }
+      if (asset.id === id) {
         asset = updated;
       }
+      eventManager.emit('AssetUpdate', updated);
     } catch (error) {
       handleError(error, $t('errors.something_went_wrong'));
     }
@@ -57,9 +62,10 @@
     const current = asset;
     asset = { ...current, tags: checked ? [...tags, tag] : tags.filter(({ id }) => id !== tag.id) };
     pending[current.id] = (pending[current.id] ?? 0) + 1;
+    let assetIds = [current.id];
     try {
       // a manual stack (a Video Boost pair, RAW and JPEG) is one item: its tags change together
-      const assetIds = await resolveAssetStackIds(current);
+      assetIds = await resolveAssetStackIds(current);
       if (checked) {
         await tagAssets({ tagIds: [tag.id], assetIds, showNotification: false });
         rememberRecentTags([tag.id]);
@@ -72,6 +78,11 @@
       pending[current.id] -= 1;
     }
     await refresh(current.id);
+    // the other assets of the stack changed too; the viewer may have them cached
+    const others = assetIds.filter((id) => id !== current.id);
+    if (others.length > 0) {
+      eventManager.emit('AssetsTag', others);
+    }
   };
 
   const createTag = async (path: string) => {
