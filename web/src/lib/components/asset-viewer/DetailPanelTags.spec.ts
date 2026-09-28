@@ -6,6 +6,7 @@ import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import DetailPanelTags from '$lib/components/asset-viewer/DetailPanelTags.svelte';
 import { tagPicker, tagPickerSearch } from '$lib/components/tags/tag-picker.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
+import { eventManager } from '$lib/managers/event-manager.svelte';
 import { renderWithTooltips } from '$tests/helpers';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { userAdminFactory } from '@test-data/factories/user-factory';
@@ -100,6 +101,18 @@ describe('DetailPanelTags', () => {
     expect(screen.getByTestId('tag-tree-picker')).toBeInTheDocument();
     expect(screen.getByRole('treeitem', { name: /Drinks/ })).toBeInTheDocument();
     expect(tagPicker.expanded.current).toEqual(['Food']);
+  });
+
+  it('gives the viewer the new tags, so going back to the asset shows them', async () => {
+    const emit = vi.spyOn(eventManager, 'emit');
+    const untagged = { ...video, tags: [] };
+    sdkMock.getAssetInfo.mockResolvedValue(untagged);
+    renderWithTooltips(DetailPanelTags, { asset: video, isOwner: true });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Remove tag' }));
+
+    await waitFor(() => expect(emit).toHaveBeenCalledWith('AssetUpdate', untagged));
+    expect(emit).toHaveBeenCalledWith('AssetsTag', ['boosted']);
   });
 
   it('keeps the search when the viewer closes and opens another asset', async () => {
