@@ -110,7 +110,7 @@
 
   <div>
     <div class="flex justify-between">
-      <Text size="small">{$t('takeout_scanning')}</Text>
+      <Text size="small">{$t('takeout_archive_read')}</Text>
       <Text size="small" color="muted">
         {getByteUnitString(run.archiveBytesRead, $locale)} / {getByteUnitString(run.archiveBytesTotal, $locale)}
       </Text>
@@ -118,7 +118,7 @@
     <ProgressBar progress={archiveProgress} size="tiny" color="secondary" />
   </div>
 
-  {#if run.currentFile}
+  {#if run.currentFile && active}
     <Text size="tiny" color="muted" class="break-all">{run.currentFile}</Text>
   {/if}
 

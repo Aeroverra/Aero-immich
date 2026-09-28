@@ -44,6 +44,14 @@ import { JobItem } from 'src/types';
 
 export const TAKEOUT_ROOT_FOLDER = 'takeouts';
 
+/**
+ * Row flags that are internal bookkeeping (quota accounting and the result counters of counters.ts), not
+ * fallbacks the user needs to review: hidden from the per-file report and the CSV.
+ */
+const INTERNAL_FLAGS = new Set(['quotaCounted', 'albumAdded', 'tagged', 'metadataSaved', 'stacked']);
+export const reportFallbacks = (fallbacks: string[] | null | undefined): string[] =>
+  (fallbacks ?? []).filter((flag) => !INTERNAL_FLAGS.has(flag) && !flag.startsWith('albumCreated:'));
+
 const UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024;
 const MAX_PUT_CHUNK = 64 * 1024 * 1024;
 const STALE_UPLOAD_MS = 7 * 24 * 60 * 60 * 1000;
@@ -852,7 +860,7 @@ export class TakeoutService extends BaseService {
           row.captureDate ? row.captureDate.toISOString() : '',
           row.zone ?? '',
           row.zoneSource ?? '',
-          (row.fallbacks ?? []).join('|'),
+          reportFallbacks(row.fallbacks).join('|'),
           (plan.albums ?? []).map((a) => a.title).join('|'),
           (plan.tags ?? []).join('|'),
           String(row.rotation ?? 0),
@@ -1351,7 +1359,7 @@ function mapRunFile(row: any) {
     captureDate: row.captureDate ? row.captureDate.toISOString() : null,
     zone: row.zone,
     zoneSource: row.zoneSource,
-    fallbacks: row.fallbacks ?? [],
+    fallbacks: reportFallbacks(row.fallbacks),
     albums: (plan.albums ?? []).map((a) => a.title),
     tags: plan.tags ?? [],
     rotation: row.rotation ?? 0,
