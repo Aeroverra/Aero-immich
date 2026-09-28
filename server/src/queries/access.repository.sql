@@ -31,9 +31,10 @@ from
   inner join "user" on "user"."id" = "albumUsers"."userId"
   and "user"."deletedAt" is null
 where
-  "album"."id" in ($1)
-  and "album"."isActivityEnabled" = $2
-  and "user"."id" = $3
+  "album"."isPrivate" = $1
+  and "album"."id" in ($2)
+  and "album"."isActivityEnabled" = $3
+  and "user"."id" = $4
   and "album"."deletedAt" is null
 
 -- AccessRepository.album.checkOwnerAccess
@@ -45,7 +46,8 @@ from
   and "album_user"."role" = 'owner'
   and "album_user"."userId" = $1
 where
-  "album"."id" in ($2)
+  "album"."isPrivate" = $2
+  and "album"."id" in ($3)
   and "album"."deletedAt" is null
 
 -- AccessRepository.album.checkSharedAlbumAccess
@@ -57,10 +59,11 @@ from
   inner join "user" on "user"."id" = "album_user"."userId"
   and "user"."deletedAt" is null
 where
-  "album"."id" in ($1)
+  "album"."isPrivate" = $1
+  and "album"."id" in ($2)
   and "album"."deletedAt" is null
-  and "user"."id" = $2
-  and "album_user"."role" in ($3, $4)
+  and "user"."id" = $3
+  and "album_user"."role" in ($4, $5)
 
 -- AccessRepository.album.checkSharedLinkAccess
 select
@@ -90,11 +93,13 @@ from
   and "user"."deletedAt" is null
   cross join "target"
 where
-  (
+  "album"."isPrivate" = $2
+  and "asset"."isPrivate" = $3
+  and (
     "asset"."id" = any (target.ids)
     or "asset"."livePhotoVideoId" = any (target.ids)
   )
-  and "user"."id" = $2
+  and "user"."id" = $4
   and "album"."deletedAt" is null
 
 -- AccessRepository.asset.checkOwnerAccess
@@ -106,6 +111,7 @@ where
   "asset"."id" in ($1)
   and "asset"."ownerId" = $2
   and "asset"."visibility" != $3
+  and "asset"."isPrivate" = $4
 
 -- AccessRepository.asset.checkPartnerAccess
 select
@@ -122,7 +128,8 @@ where
     "asset"."visibility" = 'timeline'
     or "asset"."visibility" = 'hidden'
   )
-  and "asset"."id" in ($2)
+  and "asset"."isPrivate" = $2
+  and "asset"."id" in ($3)
 
 -- AccessRepository.asset.checkSharedLinkAccess
 select
@@ -157,8 +164,9 @@ from
   inner join "asset" on "asset"."id" = "asset_file"."assetId"
 where
   "asset"."visibility" != $1
-  and "asset"."ownerId" = $2
-  and "asset_file"."id" in ($3)
+  and "asset"."isPrivate" = $2
+  and "asset"."ownerId" = $3
+  and "asset_file"."id" in ($4)
 
 -- AccessRepository.authDevice.checkOwnerAccess
 select

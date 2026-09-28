@@ -16,8 +16,10 @@ import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_mobile/widgets/common/remote_album_sliver_app_bar.dart';
 
@@ -50,12 +52,25 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
       AssetSelectionTimelineRoute(lockedSelectionAssets: albumAssets.toSet()),
     );
 
-    if (newAssets == null || newAssets.isEmpty) {
+    if (newAssets == null || newAssets.isEmpty || !context.mounted) {
       return;
     }
 
-    final added = await notifier.addAssetsToAlbum(_album.id, newAssets);
+    // The shared state may have changed since the page opened, read it fresh
+    final album = await ref
+        .read(remoteAlbumServiceProvider)
+        .get(_album.id, privateFilter: ref.read(privateModeFilterProvider));
     if (!context.mounted) {
+      return;
+    }
+
+    final added = await addWithPrivateShareConfirmation(
+      context,
+      warning: privateAddWarning(context, album ?? _album, newAssets),
+      add: ({required confirmPrivate}) =>
+          notifier.addAssetsToAlbum(_album.id, newAssets, confirmPrivate: confirmPrivate),
+    );
+    if (added == null || !context.mounted) {
       return;
     }
 
@@ -75,12 +90,14 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
       return;
     }
 
+    if (!context.mounted) {
+      return;
+    }
+
     try {
-      if (!context.mounted) {
+      if (!await addUsersWithPrivateConfirmation(context, ref, _album, newUsers)) {
         return;
       }
-
-      await ref.read(remoteAlbumProvider.notifier).addUsers(_album.id, newUsers);
       ref.invalidate(remoteAlbumSharedUsersProvider(_album.id));
       if (!context.mounted) {
         return;
@@ -187,6 +204,14 @@ class _RemoteAlbumPageState extends ConsumerState<RemoteAlbumPage> {
   Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
     final isOwner = user != null ? user.id == _album.ownerId : false;
+
+    // A private album is hidden as a whole once private mode turns off (timeout, app pause, toggle),
+    // so an open page of it goes back to the albums tab rather than showing an empty album
+    ref.listen(remoteAlbumVisibleProvider(_album.id), (previous, next) {
+      if (previous?.valueOrNull == true && next.valueOrNull == false) {
+        unawaited(context.router.navigate(const TabShellRoute(children: [AlbumsRoute()])));
+      }
+    });
 
     return ProviderScope(
       overrides: [

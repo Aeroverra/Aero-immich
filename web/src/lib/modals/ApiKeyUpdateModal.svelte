@@ -1,6 +1,7 @@
 <script lang="ts">
   import ApiKeyPermissionsPicker from '$lib/components/ApiKeyPermissionsPicker.svelte';
   import { handleUpdateApiKey } from '$lib/services/api-key.service';
+  import { fromApiKeyPermissions, toApiKeyPermissions } from '$lib/utils/api-key-permissions';
   import { Permission } from '@immich/sdk';
   import { Field, FormModal, Input } from '@immich/ui';
   import { mdiKeyVariant } from '@mdi/js';
@@ -13,20 +14,13 @@
 
   let { apiKey, onClose }: Props = $props();
 
-  const isAllPermissions = (permissions: Permission[]) => permissions.length === Object.keys(Permission).length - 1;
-
-  const mapPermissions = (permissions: Permission[]) =>
-    permissions.includes(Permission.All)
-      ? Object.values(Permission).filter((permission) => permission !== Permission.All)
-      : permissions;
-
   let name = $state(apiKey.name);
-  let selectedPermissions = $state<Permission[]>(mapPermissions(apiKey.permissions));
+  let selectedPermissions = $state<Permission[]>(fromApiKeyPermissions(apiKey.permissions));
 
   const onSubmit = async () => {
     const success = await handleUpdateApiKey(apiKey, {
       name,
-      permissions: isAllPermissions(selectedPermissions) ? [Permission.All] : selectedPermissions,
+      permissions: toApiKeyPermissions(selectedPermissions),
     });
     if (success) {
       onClose();
