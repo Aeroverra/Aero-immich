@@ -13,6 +13,7 @@ import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/permission.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/websocket.provider.dart';
 import 'package:logging/logging.dart';
@@ -81,6 +82,7 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
       _log.info("Using server URL: $endpoint");
 
       await _ref.read(serverInfoProvider.notifier).getServerVersion();
+      await _ref.read(privateModeProvider.notifier).refresh();
     }
 
     if (!_shouldContinueOperation()) {
@@ -214,6 +216,9 @@ class AppLifeCycleNotifier extends StateNotifier<AppLifeCycleEnum> {
       _ref.read(backupProvider.notifier).stopForegroundBackup(reason: "the app being sent to the background");
 
       _ref.read(websocketProvider.notifier).disconnect();
+
+      // Private mode never survives the app leaving the foreground
+      unawaited(_ref.read(privateModeProvider.notifier).disable());
     }
 
     return LogService.I.flush().catchError((_) {});

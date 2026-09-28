@@ -28,7 +28,10 @@ describe(ActivityService.name, () => {
 
       await expect(sut.getAll(AuthFactory.create({ id: userId }), { assetId, albumId })).resolves.toEqual([]);
 
-      expect(mocks.activity.search).toHaveBeenCalledWith({ assetId, albumId, isLiked: undefined });
+      expect(mocks.activity.search).toHaveBeenCalledWith(
+        { assetId, albumId, isLiked: undefined },
+        { privateMode: false, userId: expect.any(String) },
+      );
     });
 
     it('should filter by type=like', async () => {
@@ -41,7 +44,10 @@ describe(ActivityService.name, () => {
         sut.getAll(AuthFactory.create({ id: userId }), { assetId, albumId, type: ReactionType.LIKE }),
       ).resolves.toEqual([]);
 
-      expect(mocks.activity.search).toHaveBeenCalledWith({ assetId, albumId, isLiked: true });
+      expect(mocks.activity.search).toHaveBeenCalledWith(
+        { assetId, albumId, isLiked: true },
+        { privateMode: false, userId: expect.any(String) },
+      );
     });
 
     it('should filter by type=comment', async () => {
@@ -54,7 +60,10 @@ describe(ActivityService.name, () => {
         [],
       );
 
-      expect(mocks.activity.search).toHaveBeenCalledWith({ assetId, albumId, isLiked: false });
+      expect(mocks.activity.search).toHaveBeenCalledWith(
+        { assetId, albumId, isLiked: false },
+        { privateMode: false, userId: expect.any(String) },
+      );
     });
   });
 
