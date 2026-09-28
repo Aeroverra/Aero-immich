@@ -58,6 +58,20 @@ export class TagRepository {
     );
   }
 
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID], { withHidden: false }] })
+  async getAssetCounts(userId: string, assetIds: string[], { withHidden = true }: { withHidden?: boolean } = {}) {
+    const rows = await this.db
+      .selectFrom('tag_asset')
+      .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+      .select(['tag_asset.tagId', (eb) => eb.fn.countAll<string>().as('count')])
+      .where('tag.userId', '=', userId)
+      .where('tag_asset.assetId', 'in', assetIds)
+      .$if(!withHidden, (qb) => qb.where((eb) => eb.not(isTagHidden(eb, 'tag.id'))))
+      .groupBy('tag_asset.tagId')
+      .execute();
+    return rows.map(({ tagId, count }) => ({ tagId, count: Number(count) }));
+  }
+
   @GenerateSql({ params: [{ userId: DummyValue.UUID, color: DummyValue.STRING, value: DummyValue.STRING }] })
   create(tag: Insertable<TagTable>) {
     return this.insertTagWithClosures((db) => db.insertInto('tag').values(tag).returningAll());

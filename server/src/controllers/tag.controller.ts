@@ -4,6 +4,8 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
 import { BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
+  TagAssetCountResponseDto,
+  TagAssetCountsDto,
   TagBulkAssetsDto,
   TagBulkAssetsResponseDto,
   TagCreateDto,
@@ -63,6 +65,19 @@ export class TagController {
   })
   bulkTagAssets(@Auth() auth: AuthDto, @Body() dto: TagBulkAssetsDto): Promise<TagBulkAssetsResponseDto> {
     return this.service.bulkTagAssets(auth, dto);
+  }
+
+  @Post('assets/counts')
+  @Authenticated({ permission: Permission.TagRead })
+  @HttpCode(HttpStatus.OK)
+  @Endpoint({
+    summary: 'Count the tags of assets',
+    description:
+      'For every tag that any of the assets carries, how many of them carry it, so a selection can show which tags all, some or none of its assets have.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  getTagAssetCounts(@Auth() auth: AuthDto, @Body() dto: TagAssetCountsDto): Promise<TagAssetCountResponseDto[]> {
+    return this.service.getAssetCounts(auth, dto);
   }
 
   @Get(':id')
