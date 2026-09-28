@@ -15792,6 +15792,65 @@
         "x-immich-state": "Stable"
       }
     },
+    "/tags/assets/counts": {
+      "post": {
+        "description": "For every tag that any of the assets carries, how many of them carry it, so a selection can show which tags all, some or none of its assets have.",
+        "operationId": "getTagAssetCounts",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagAssetCountsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagAssetCountResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Count the tags of assets",
+        "tags": [
+          "Tags"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "tag.read",
+        "x-immich-state": "Beta"
+      }
+    },
     "/tags/{id}": {
       "delete": {
         "description": "Delete a specific tag by its ID.",
@@ -34694,6 +34753,45 @@
           "secondOptions",
           "weekOptions",
           "yearOptions"
+        ],
+        "type": "object"
+      },
+      "TagAssetCountResponseDto": {
+        "properties": {
+          "count": {
+            "description": "How many of the assets carry the tag itself (a child tag does not count)",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tagId": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "count",
+          "tagId"
+        ],
+        "type": "object"
+      },
+      "TagAssetCountsDto": {
+        "properties": {
+          "assetIds": {
+            "description": "Asset IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "assetIds"
         ],
         "type": "object"
       },
