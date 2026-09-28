@@ -1026,8 +1026,9 @@ export class TakeoutRunService extends BaseService {
     }
     if (Object.keys(sidecarTags).length > 0) {
       const sidecarPath = `${originalPath}.xmp`;
-      const written = await this.metadataRepository.writeTags(sidecarPath, sidecarTags as any);
-      if (written) {
+      // writeTags reports false on a failed write once fix/tag-sidecar-race is present; older builds return void
+      const written: unknown = await this.metadataRepository.writeTags(sidecarPath, sidecarTags as any);
+      if (written !== false) {
         await this.assetRepository.upsertFile({ assetId: asset.id, type: AssetFileType.Sidecar, path: sidecarPath });
         if (locked.length > 0) {
           await this.assetRepository.unlockProperties(asset.id, locked);

@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { createHash, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { join } from 'node:path';
 import { StorageCore } from 'src/cores/storage.core';
 import { OnJob } from 'src/decorators';
 import { JobName, JobStatus, QueueName, TakeoutArchiveKind, TakeoutCompleteness, TakeoutScanStatus } from 'src/enum';
@@ -105,7 +105,10 @@ export class TakeoutScanService extends BaseService {
       const next = await this.takeoutRepository.getNextPendingPart(part.exportId);
       if (next) {
         await this.jobRepository.removeJob(JobName.TakeoutScanPart, `${next.id}/${next.attempt}`).catch(() => {});
-        await this.jobRepository.queue({ name: JobName.TakeoutScanPart, data: { partId: next.id, attempt: next.attempt } });
+        await this.jobRepository.queue({
+          name: JobName.TakeoutScanPart,
+          data: { partId: next.id, attempt: next.attempt },
+        });
       }
 
       await this.finalizeExportScan(part.exportId);
@@ -113,7 +116,11 @@ export class TakeoutScanService extends BaseService {
     } catch (error: any) {
       this.logger.error(`Takeout scan of part ${partId} failed: ${error?.message ?? error}`);
       await this.takeoutRepository
-        .updatePart(partId, { scanStatus: TakeoutScanStatus.Error, scanError: String(error?.message ?? error), scanOwner: null })
+        .updatePart(partId, {
+          scanStatus: TakeoutScanStatus.Error,
+          scanError: String(error?.message ?? error),
+          scanOwner: null,
+        })
         .catch(() => {});
       return JobStatus.Failed;
     }
@@ -169,7 +176,12 @@ export class TakeoutScanService extends BaseService {
       let indexFiles: string[] | null = null;
       const indexPart = parts.find((p) => p.isIndex);
       if (indexPart && folder) {
-        const indexPath = join(StorageCore.getMediaLocation(), TAKEOUT_ROOT_FOLDER, folder.folderName, indexPart.fileName);
+        const indexPath = join(
+          StorageCore.getMediaLocation(),
+          TAKEOUT_ROOT_FOLDER,
+          folder.folderName,
+          indexPart.fileName,
+        );
         const html = await readArchiveEntry(indexPath, 'tgz', 'Takeout/archive_browser.html', 64 * 1024 * 1024).catch(
           () => null,
         );
@@ -221,19 +233,23 @@ export class TakeoutScanService extends BaseService {
         splitSize: analysis.splitSize ?? null,
         analyzedAt: new Date(),
         ...(index && {
-              accountEmail: index.accountEmail,
-              googleJobId: index.googleJobId,
-              indexTotalSize: index.totalSizeText,
-              indexCreatedText: index.createdText,
-              indexFileCount: index.files.length,
-            }),
+          accountEmail: index.accountEmail,
+          googleJobId: index.googleJobId,
+          indexTotalSize: index.totalSizeText,
+          indexCreatedText: index.createdText,
+          indexFileCount: index.files.length,
+        }),
         ...(indexPart && { indexFileName: indexPart.fileName }),
       });
 
       const fresh = await this.takeoutRepository.getExport(exportId);
       const runs = await this.takeoutRepository.getRunsByExport(exportId);
       if (fresh) {
-        this.websocketRepository.clientSend('on_takeout_export', fresh.userId, mapExportForEvent(fresh, parts, runs[0]));
+        this.websocketRepository.clientSend(
+          'on_takeout_export',
+          fresh.userId,
+          mapExportForEvent(fresh, parts, runs[0]),
+        );
       }
       return JobStatus.Success;
     } catch (error: any) {
@@ -381,7 +397,20 @@ export async function performPartScan(
     }
   };
 
+  let beating = false;
   const heartbeat = async () => {
+    if (beating || aborted) {
+      return;
+    }
+    beating = true;
+    try {
+      await beat();
+    } finally {
+      beating = false;
+    }
+  };
+
+  const beat = async () => {
     lastHeartbeat = Date.now();
     await repo.updatePart(part.id, { bytesScanned: bytesRead, heartbeatAt: new Date() });
     const fresh = await repo.getPart(part.id);
@@ -390,7 +419,10 @@ export async function performPartScan(
       controller.abort();
       return;
     }
-    if (Number(fresh.size) !== Number(part.scanStartSize ?? part.size) || fresh.mtime.getTime() !== (part.scanStartMtime ?? part.mtime).getTime()) {
+    if (
+      Number(fresh.size) !== Number(part.scanStartSize ?? part.size) ||
+      fresh.mtime.getTime() !== (part.scanStartMtime ?? part.mtime).getTime()
+    ) {
       aborted = true;
       controller.abort();
     }
@@ -427,7 +459,9 @@ export async function performPartScan(
         try {
           const buf = await streamToBuffer(await openStream(), JSON_READ_LIMIT);
           const text = buf.toString('utf8');
-          row.json = text.includes('immich-go version:') ? { immichGo: true } : (compactGoogleJson(JSON.parse(text)) as object);
+          row.json = text.includes('immich-go version:')
+            ? { immichGo: true }
+            : (compactGoogleJson(JSON.parse(text)) as object);
         } catch (error: any) {
           row.jsonError = String(error?.message ?? error);
         }
@@ -470,6 +504,8 @@ export async function performPartScan(
     }
   };
 
+  // a single large entry can take minutes to hash; folder sync treats a scan silent for 120 s as dead
+  const timer = setInterval(() => void heartbeat().catch(() => {}), HEARTBEAT_MS);
   try {
     await walkArchive(filePath, kind === TakeoutArchiveKind.Zip ? 'zip' : 'tgz', handler as any, {
       signal: controller.signal,
@@ -478,8 +514,10 @@ export async function performPartScan(
       },
       startSeq: isZip ? startSeq : undefined,
     });
+    clearInterval(timer);
     await flush();
   } catch (error: any) {
+    clearInterval(timer);
     await flush().catch(() => {});
     if (aborted) {
       return { status: 'aborted' };
