@@ -9,10 +9,12 @@ import 'package:immich_mobile/presentation/widgets/images/local_album_thumbnail.
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/thumbnail.widget.dart';
 import 'package:immich_mobile/presentation/widgets/people/partner_user_avatar.widget.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
@@ -426,6 +428,9 @@ class _QuickAccessButtonList extends ConsumerWidget {
     final partnerSharedWithAsync = ref.watch(sharedWithPartnerProvider);
     final partners = partnerSharedWithAsync.valueOrNull ?? [];
     final isPrivateMode = ref.watch(isPrivateModeProvider);
+    final canReviewTags =
+        ref.watch(customViewsSupportedProvider) &&
+        ref.watch(userMetadataPreferencesProvider.select((value) => value.valueOrNull?.tagsEnabled ?? false));
 
     return SliverPadding(
       padding: const EdgeInsets.only(left: 16, top: 12, right: 16, bottom: 32),
@@ -481,6 +486,16 @@ class _QuickAccessButtonList extends ConsumerWidget {
                     style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w500),
                   ),
                   onTap: () => context.pushRoute(const PrivateFolderRoute()),
+                ),
+              if (canReviewTags)
+                ListTile(
+                  key: const Key('library-tag-review'),
+                  leading: const Icon(Icons.fact_check_outlined, size: 26),
+                  title: Text(
+                    context.t.tag_review,
+                    style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w500),
+                  ),
+                  onTap: () => context.pushRoute(TagReviewRoute()),
                 ),
               ListTile(
                 leading: const Icon(Icons.group_outlined, size: 26),
