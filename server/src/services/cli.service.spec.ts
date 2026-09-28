@@ -1,6 +1,7 @@
 import { jwtVerify } from 'jose';
 import { MaintenanceAction, SystemMetadataKey } from 'src/enum';
 import { CliService } from 'src/services/cli.service';
+import { forkMigrationFolder, upstreamMigrationFolder } from 'src/utils/migration';
 import { UserFactory } from 'test/factories/user.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 import { describe, it } from 'vitest';
@@ -11,6 +12,71 @@ describe(CliService.name, () => {
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(CliService));
+  });
+
+  describe('schemaReport', () => {
+    const drift = { items: [], asSql: () => [], asHuman: () => [] };
+    const folders: Record<string, string[]> = {};
+
+    beforeEach(() => {
+      mocks.database.getSchemaDrift.mockResolvedValue(drift);
+      mocks.storage.readdir.mockImplementation((folder: string) => {
+        const files = folders[folder];
+        return files
+          ? Promise.resolve(files)
+          : Promise.reject(Object.assign(new Error('no such file or directory'), { code: 'ENOENT' }));
+      });
+    });
+
+    it('should report the migrations of both folders as applied', async () => {
+      folders[upstreamMigrationFolder] = ['1-Initial.js', '2-Later.js', '1-Initial.js.map'];
+      folders[forkMigrationFolder] = ['1789200000000-PrivateMode.js'];
+      mocks.database.getMigrations.mockResolvedValue([
+        { name: '1-Initial', timestamp: '2025-01-01' },
+        { name: '1789200000000-PrivateMode', timestamp: '2025-01-03' },
+        { name: '2-Later', timestamp: '2025-01-02' },
+      ]);
+
+      await expect(sut.schemaReport()).resolves.toEqual({
+        migrations: [
+          { name: '1-Initial', status: 'applied' },
+          { name: '1789200000000-PrivateMode', status: 'applied' },
+          { name: '2-Later', status: 'applied' },
+        ],
+        drift,
+      });
+      expect(mocks.storage.readdir).toHaveBeenCalledWith(upstreamMigrationFolder);
+      expect(mocks.storage.readdir).toHaveBeenCalledWith(forkMigrationFolder);
+    });
+
+    it('should report a fork migration the database does not have as missing', async () => {
+      folders[upstreamMigrationFolder] = ['1-Initial.js'];
+      folders[forkMigrationFolder] = ['1789200000000-PrivateMode.js'];
+      mocks.database.getMigrations.mockResolvedValue([{ name: '1-Initial', timestamp: '2025-01-01' }]);
+
+      await expect(sut.schemaReport()).resolves.toMatchObject({
+        migrations: [
+          { name: '1-Initial', status: 'applied' },
+          { name: '1789200000000-PrivateMode', status: 'missing' },
+        ],
+      });
+    });
+
+    it('should report a database row without a file in either folder as deleted', async () => {
+      folders[upstreamMigrationFolder] = ['1-Initial.js'];
+      delete folders[forkMigrationFolder];
+      mocks.database.getMigrations.mockResolvedValue([
+        { name: '1-Initial', timestamp: '2025-01-01' },
+        { name: '1789200000000-PrivateMode', timestamp: '2025-01-03' },
+      ]);
+
+      await expect(sut.schemaReport()).resolves.toMatchObject({
+        migrations: [
+          { name: '1-Initial', status: 'applied' },
+          { name: '1789200000000-PrivateMode', status: 'deleted' },
+        ],
+      });
+    });
   });
 
   describe('listUsers', () => {
