@@ -9,6 +9,7 @@ import { StorageCore } from 'src/cores/storage.core';
 import { OnEvent, OnJob } from 'src/decorators';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
+  AlbumUserRole,
   AssetFileType,
   AssetType,
   AssetVisibility,
@@ -58,6 +59,8 @@ import { getPreferences } from 'src/utils/preferences';
 import { upsertTags } from 'src/utils/tag';
 
 const LEASE_RENEW_MS = 10_000;
+// spec 2.6: counters persisted and on_takeout_run emitted every 2 s while the run is live
+const PROGRESS_MS = 2000;
 
 const effectiveInstantFor = (capture: { instant?: Date | null }, captureDate: Date | null): Date | null =>
   capture.instant ?? captureDate;
@@ -103,6 +106,22 @@ export class TakeoutRunService extends BaseService {
         })
         .catch(() => {});
     }, LEASE_RENEW_MS);
+    let inflight: Promise<void> | null = null;
+    const progress = setInterval(() => {
+      if (inflight) {
+        return;
+      }
+      inflight = this.tickProgress(runId)
+        .catch(() => {})
+        .finally(() => {
+          inflight = null;
+        });
+    }, PROGRESS_MS);
+    // stop the ticker before the final counters are written, so a late tick cannot overwrite them
+    const stopProgress = async () => {
+      clearInterval(progress);
+      await inflight;
+    };
 
     try {
       if (!run.startedAt) {
@@ -124,12 +143,14 @@ export class TakeoutRunService extends BaseService {
         return JobStatus.Skipped;
       }
 
+      await stopProgress();
       await this.phaseFinishing(runId);
       return JobStatus.Success;
     } catch (error: any) {
       if (controller.signal.aborted) {
         return JobStatus.Skipped;
       }
+      await stopProgress();
       this.logger.error(`Takeout run ${runId} failed: ${error?.message ?? error}`);
       await this.takeoutRepository
         .updateRun(runId, {
@@ -142,6 +163,7 @@ export class TakeoutRunService extends BaseService {
       return JobStatus.Failed;
     } finally {
       clearInterval(lease);
+      clearInterval(progress);
       this.controllers.delete(runId);
       this.albumCache.delete(runId);
     }
@@ -577,8 +599,9 @@ export class TakeoutRunService extends BaseService {
           await mkdir(join(targetPath, '..'), { recursive: true });
           const tap = hashTap();
           try {
+            const source = await openStream();
             await pipeline(
-              openStream() as any,
+              source,
               tap.stream,
               createWriteStream(targetPath, { highWaterMark: 4 * 1024 * 1024 }),
             );
@@ -1140,9 +1163,9 @@ export class TakeoutRunService extends BaseService {
       albumId = existing.id;
     } else {
       const created = await this.albumRepository.create(
-        { ownerId: run.userId, albumName: album.title, description: album.description ?? '' } as any,
+        { albumName: album.title, description: album.description ?? '' },
         [],
-        [{ userId: run.userId, role: 'owner' as any }],
+        [{ userId: run.userId, role: AlbumUserRole.Owner }],
         run.userId,
       );
       albumId = created.id;
@@ -1306,6 +1329,18 @@ export class TakeoutRunService extends BaseService {
     this.websocketRepository.clientSend('on_notification' as any, run.userId, { runId } as any);
     await this.emitRun(runId);
     this.albumCache.delete(runId);
+  }
+
+  /** Periodic progress: recompute the counters from the run file rows while importing and push them to the owner. */
+  private async tickProgress(runId: string) {
+    const run = await this.takeoutRepository.getRun(runId);
+    if (!run || run.status !== TakeoutRunStatus.Importing) {
+      return;
+    }
+    const rows = await this.takeoutRepository.getCounterRows(runId);
+    const counters = countersFromRows(rows as any, { total: Number(run.bytesTotal), done: Number(run.bytesDone) });
+    await this.takeoutRepository.updateRun(runId, { counters: counters as unknown as object });
+    await this.emitRun(runId);
   }
 
   private async emitRun(runId: string) {
