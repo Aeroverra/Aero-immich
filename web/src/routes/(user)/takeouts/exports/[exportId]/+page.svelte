@@ -141,7 +141,9 @@
         <div class="flex items-start justify-between gap-2">
           <div>
             <Text class="font-semibold"
-              >{DateTime.fromISO(detail.exportedAt).toLocaleString(DateTime.DATE_MED, { locale: $locale })}</Text
+              >{DateTime.fromISO(detail.exportedAt, { zone: 'utc' }).toLocaleString(DateTime.DATE_MED, {
+                locale: $locale,
+              })}</Text
             >
             {#if detail.accountEmail}<Text size="small" color="muted" class="block">{detail.accountEmail}</Text>{/if}
           </div>
@@ -183,7 +185,7 @@
 
     {#if detail.runs.length > 0}
       <Card>
-        <CardHeader><CardTitle>{$t('takeout_new_run')}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{$t('takeout_runs')}</CardTitle></CardHeader>
         <CardBody>
           <ul class="flex flex-col gap-1">
             {#each detail.runs as run (run.id)}

@@ -45,7 +45,9 @@
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0">
         <Text class="font-semibold"
-          >{DateTime.fromISO(exp.exportedAt).toLocaleString(DateTime.DATE_MED, { locale: $locale })}</Text
+          >{DateTime.fromISO(exp.exportedAt, { zone: 'utc' }).toLocaleString(DateTime.DATE_MED, {
+            locale: $locale,
+          })}</Text
         >
         {#if exp.accountEmail}
           <Text size="small" color="muted" class="block truncate">{exp.accountEmail}</Text>

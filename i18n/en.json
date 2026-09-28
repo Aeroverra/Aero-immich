@@ -2479,6 +2479,7 @@
   "takeout_run_status_planning": "Planning",
   "takeout_run_status_queued": "Queued",
   "takeout_run_status_scanning": "Scanning",
+  "takeout_runs": "Runs",
   "takeout_scanning": "Scanning",
   "takeout_scans_waiting": "Scans wait while two imports run.",
   "takeout_setting_apply_rotation": "Apply rotations from rotate-only edited copies",
