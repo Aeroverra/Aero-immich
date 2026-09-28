@@ -370,6 +370,14 @@ from
 where
   "asset_exif"."assetId" = $1
 
+-- AssetJobRepository.getExifUpdateIdForMetadataExtraction
+select
+  "asset_exif"."updateId"
+from
+  "asset_exif"
+where
+  "asset_exif"."assetId" = $1
+
 -- AssetJobRepository.getAlbumThumbnailFiles
 select
   "asset_file"."id",
