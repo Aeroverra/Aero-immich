@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tagPicker, tagPickerFocus } from '$lib/components/tags/tag-picker.svelte';
+  import { tagPicker, tagPickerFocus, tagPickerSearch } from '$lib/components/tags/tag-picker.svelte';
   import { parseTagPath } from '$lib/services/tag.service';
   import { buildTagRows, pickTagRow, tagName } from '$lib/utils/tag-tree';
   import type { TagResponseDto } from '@immich/sdk';
@@ -18,12 +18,27 @@
     autofocus?: boolean;
     /** classes of the tree, such as a maximum height in a dialog */
     listClass?: string;
+    /** keep the search when the picker closes, for the detail panel that opens again on the next asset */
+    rememberSearch?: boolean;
   };
 
-  let { tags, checkedIds, onToggle, onCreate, autofocus = false, listClass = '' }: Props = $props();
+  let {
+    tags,
+    checkedIds,
+    onToggle,
+    onCreate,
+    autofocus = false,
+    listClass = '',
+    rememberSearch = false,
+  }: Props = $props();
 
   const uid = $props.id();
-  let query = $state('');
+  let query = $state(rememberSearch ? tagPickerSearch.query : '');
+  $effect(() => {
+    if (rememberSearch) {
+      tagPickerSearch.query = query;
+    }
+  });
   let input = $state<HTMLInputElement>();
 
   const expanded = $derived(new Set(tagPicker.expanded.current));
