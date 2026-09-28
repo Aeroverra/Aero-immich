@@ -10,7 +10,7 @@ export const newAssetRepositoryMock = (): Mocked<RepositoryInterface<AssetReposi
     updateAllExif: vitest.fn(),
     touchPrivateRelations: vitest.fn(),
     updateDateTimeOriginal: vitest.fn().mockResolvedValue([]),
-    unlockProperties: vitest.fn().mockResolvedValue([]),
+    unlockProperties: vitest.fn().mockResolvedValue(true),
     upsertJobStatus: vitest.fn(),
     getForCopy: vitest.fn(),
     getByDayOfYear: vitest.fn(),
@@ -57,6 +57,5 @@ export const newAssetRepositoryMock = (): Mocked<RepositoryInterface<AssetReposi
     getForOcr: vitest.fn(),
     getForMetadataExtractionTags: vitest.fn(),
     getForFaces: vitest.fn(),
-    getForUpdateTags: vitest.fn(),
   };
 };
