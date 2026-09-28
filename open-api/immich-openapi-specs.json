@@ -11815,6 +11815,60 @@
             }
           },
           {
+            "name": "maxDuration",
+            "required": false,
+            "in": "query",
+            "description": "Only videos at most this long, in milliseconds",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "minDuration",
+            "required": false,
+            "in": "query",
+            "description": "Only videos at least this long, in milliseconds",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          {
             "name": "minFileSize",
             "required": false,
             "in": "query",
@@ -26138,6 +26192,50 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "maxDuration": {
+            "deprecated": true,
+            "description": "Only videos at most this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "minDuration": {
+            "deprecated": true,
+            "description": "Only videos at least this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "model": {
             "deprecated": true,
             "description": "Filter by camera model",
@@ -28679,6 +28777,50 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "maxDuration": {
+            "deprecated": true,
+            "description": "Only videos at most this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "minDuration": {
+            "deprecated": true,
+            "description": "Only videos at least this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "model": {
             "deprecated": true,
             "description": "Filter by camera model",
@@ -30950,6 +31092,50 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "maxDuration": {
+            "deprecated": true,
+            "description": "Only videos at most this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "minDuration": {
+            "deprecated": true,
+            "description": "Only videos at least this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "model": {
             "deprecated": true,
             "description": "Filter by camera model",
@@ -31804,6 +31990,50 @@
             "description": "Filter by camera make",
             "nullable": true,
             "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "maxDuration": {
+            "deprecated": true,
+            "description": "Only videos at most this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "minDuration": {
+            "deprecated": true,
+            "description": "Only videos at least this long, in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
             "x-immich-history": [
               {
                 "version": "v1",
