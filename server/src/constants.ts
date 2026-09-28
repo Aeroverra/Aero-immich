@@ -199,6 +199,8 @@ export const endpointTags: Record<ApiTag, string> = {
   [ApiTag.SystemConfig]: 'Endpoints to view, modify, and validate the system configuration settings.',
   [ApiTag.SystemMetadata]:
     'Endpoints to view, modify, and validate the system metadata, which includes information about things like admin onboarding status.',
+  [ApiTag.Takeouts]:
+    'Import Google Photos exports made with Google Takeout. Archives are read in place from the takeout folder of the user or uploaded in chunks.',
   [ApiTag.Tags]:
     'A tag is a user-defined label that can be applied to assets for organizational purposes. Tags can also be hierarchical, allowing for parent-child relationships between tags.',
   [ApiTag.Timeline]:
