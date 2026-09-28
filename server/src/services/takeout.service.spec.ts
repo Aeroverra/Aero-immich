@@ -94,6 +94,13 @@ describe(TakeoutService.name, () => {
       expect(mocks.takeout.updateRun).toHaveBeenCalledWith('r1', { status: TakeoutRunStatus.Cancelling });
       expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunCancel', { runId: 'r1' });
     });
+
+    it('rejects cancelling a completed run', async () => {
+      const run = { id: 'r1', userId, status: TakeoutRunStatus.Completed, heartbeatAt: new Date(), attempt: 0, createdAt: new Date() };
+      mocks.takeout.getRun.mockResolvedValue(run as any);
+      await expect(sut.cancelRun(authStub.admin, 'r1')).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.takeout.updateRun).not.toHaveBeenCalled();
+    });
   });
 
   describe('resolveLargerVersion', () => {

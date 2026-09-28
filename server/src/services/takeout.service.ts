@@ -721,8 +721,14 @@ export class TakeoutService extends BaseService {
 
   async cancelRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
     const run = await this.findRun(auth.user.id, id);
+    if (run.status === TakeoutRunStatus.Completed) {
+      throw new BadRequestException('A completed run cannot be cancelled');
+    }
+    if (run.status === TakeoutRunStatus.Cancelled) {
+      return mapRun(run);
+    }
     const stale = !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > 60_000;
-    if (run.status === TakeoutRunStatus.Queued || stale) {
+    if (run.status === TakeoutRunStatus.Queued || run.status === TakeoutRunStatus.Failed || stale) {
       await this.cleanupCancelledRun(id);
       const fresh = await this.takeoutRepository.getRun(id);
       return mapRun(fresh!);
