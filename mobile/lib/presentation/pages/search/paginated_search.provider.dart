@@ -33,7 +33,10 @@ class SearchState {
 }
 
 final paginatedSearchProvider = StateNotifierProvider<PaginatedSearchNotifier, SearchState>(
-  (ref) => PaginatedSearchNotifier(ref.watch(searchServiceProvider), () => ref.read(groupAutoStacksProvider)),
+  (ref) => PaginatedSearchNotifier(
+    ref.watch(searchServiceProvider),
+    groupAutoStacks: () => ref.read(groupAutoStacksProvider),
+  ),
 );
 
 class PaginatedSearchNotifier extends StateNotifier<SearchState> {
@@ -41,7 +44,10 @@ class PaginatedSearchNotifier extends StateNotifier<SearchState> {
   final bool Function() _groupAutoStacks;
   final _assetCountController = StreamController<int>.broadcast();
 
-  PaginatedSearchNotifier(this._searchService, this._groupAutoStacks) : super(const SearchState());
+  /// [groupAutoStacks] says whether automatic stacks show once too; without it they do, like the default preference
+  PaginatedSearchNotifier(this._searchService, {bool Function()? groupAutoStacks})
+    : _groupAutoStacks = groupAutoStacks ?? (() => true),
+      super(const SearchState());
 
   Stream<int> get assetCount => _assetCountController.stream;
 
