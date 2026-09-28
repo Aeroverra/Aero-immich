@@ -21,8 +21,12 @@ describe('takeout-asset helpers', () => {
   });
 
   describe('dedupeTags', () => {
-    it('trims, drops blanks and keeps the first occurrence', () => {
-      expect(dedupeTags(['  People/Sue ', 'People/Sue', '', 'takeout-1'])).toEqual(['People/Sue', 'takeout-1']);
+    it('keeps values verbatim, drops blanks and exact duplicates, keeps the first occurrence', () => {
+      expect(dedupeTags(['People/Sue ', 'People/Sue', 'People/Sue ', '', '  ', 'takeout-1'])).toEqual([
+        'People/Sue ',
+        'People/Sue',
+        'takeout-1',
+      ]);
     });
   });
 

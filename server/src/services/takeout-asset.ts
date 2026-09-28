@@ -24,13 +24,15 @@ export function assembleStackIds(
   return ids.filter((id) => (seen.has(id) ? false : (seen.add(id), true)));
 }
 
-/** De-duplicate tags the Go way (0.5 item 4): keep first occurrence, drop exact duplicates. */
+/**
+ * De-duplicate tags (0.5 item 4): keep first occurrence, drop exact duplicates and blank values. Values are kept
+ * verbatim, as Go sends them: Google person names can end in a space and the baseline tags keep it.
+ */
 export function dedupeTags(tags: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
-  for (const raw of tags) {
-    const tag = raw.trim();
-    if (!tag || seen.has(tag)) {
+  for (const tag of tags) {
+    if (!tag.trim() || seen.has(tag)) {
       continue;
     }
     seen.add(tag);

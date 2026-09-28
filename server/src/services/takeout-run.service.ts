@@ -6,6 +6,7 @@ import { mkdir, stat, unlink, utimes } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { StorageCore } from 'src/cores/storage.core';
+import { LockableProperty } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
@@ -53,7 +54,7 @@ import {
 } from 'src/takeout';
 import { JobItem, JobOf } from 'src/types';
 import { updateLockedColumns } from 'src/utils/database';
-import { extractTimeZone } from 'src/utils/date';
+import { extractTimeZone, mergeTimeZone } from 'src/utils/date';
 import { mimeTypes } from 'src/utils/mime-types';
 import { getPreferences } from 'src/utils/preferences';
 import { upsertTags } from 'src/utils/tag';
@@ -69,7 +70,8 @@ const effectiveInstantFor = (capture: { instant?: Date | null }, captureDate: Da
 export class TakeoutRunService extends BaseService {
   private controllers = new Map<string, AbortController>();
 
-  @OnEvent({ name: 'TakeoutRunCancel' })
+  // sent by the API worker with serverSend, so it must listen for server events (spec 2.6 Cancellation)
+  @OnEvent({ name: 'TakeoutRunCancel', server: true })
   onCancel({ runId }: { runId: string }) {
     this.controllers.get(runId)?.abort();
   }
@@ -78,6 +80,11 @@ export class TakeoutRunService extends BaseService {
   async handleRun({ runId, attempt }: JobOf<JobName.TakeoutRun>): Promise<JobStatus> {
     const run = await this.takeoutRepository.getRun(runId);
     if (!run) {
+      return JobStatus.Skipped;
+    }
+    if (run.status === TakeoutRunStatus.Cancelling) {
+      // re-queued at boot while cancelling: finish as cancelled
+      await this.finishCancel(runId);
       return JobStatus.Skipped;
     }
     const token = randomUUID();
@@ -111,7 +118,7 @@ export class TakeoutRunService extends BaseService {
       if (inflight) {
         return;
       }
-      inflight = this.tickProgress(runId)
+      inflight = this.tickProgress(runId, controller)
         .catch(() => {})
         .finally(() => {
           inflight = null;
@@ -130,16 +137,22 @@ export class TakeoutRunService extends BaseService {
 
       await this.phaseScanning(runId, run.exportId, token, controller.signal);
       if (await this.cancelled(runId)) {
+        await stopProgress();
+        await this.finishCancel(runId);
         return JobStatus.Skipped;
       }
 
       await this.phasePlanning(runId);
       if (await this.cancelled(runId)) {
+        await stopProgress();
+        await this.finishCancel(runId);
         return JobStatus.Skipped;
       }
 
       await this.phaseImporting(runId, controller.signal);
       if (await this.cancelled(runId)) {
+        await stopProgress();
+        await this.finishCancel(runId);
         return JobStatus.Skipped;
       }
 
@@ -147,10 +160,13 @@ export class TakeoutRunService extends BaseService {
       await this.phaseFinishing(runId);
       return JobStatus.Success;
     } catch (error: any) {
+      await stopProgress();
       if (controller.signal.aborted) {
+        if (await this.cancelled(runId)) {
+          await this.finishCancel(runId);
+        }
         return JobStatus.Skipped;
       }
-      await stopProgress();
       this.logger.error(`Takeout run ${runId} failed: ${error?.message ?? error}`);
       await this.takeoutRepository
         .updateRun(runId, {
@@ -262,7 +278,10 @@ export class TakeoutRunService extends BaseService {
       return;
     }
     if ((await this.takeoutRepository.countRunFiles(runId)) > 0) {
-      return; // already planned
+      // already planned (resume or restart): the plan is frozen, go straight back to importing
+      await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Importing });
+      await this.emitRun(runId);
+      return;
     }
     await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Planning });
     await this.emitRun(runId);
@@ -600,11 +619,7 @@ export class TakeoutRunService extends BaseService {
           const tap = hashTap();
           try {
             const source = await openStream();
-            await pipeline(
-              source,
-              tap.stream,
-              createWriteStream(targetPath, { highWaterMark: 4 * 1024 * 1024 }),
-            );
+            await pipeline(source, tap.stream, createWriteStream(targetPath, { highWaterMark: 4 * 1024 * 1024 }));
           } catch (error: any) {
             await unlink(targetPath).catch(() => {});
             if (error?.code === 'ENOSPC') {
@@ -962,39 +977,67 @@ export class TakeoutRunService extends BaseService {
       lockedPropertiesBehavior: 'override',
     } as any);
 
-    // section 12 IMMICH MECHANICS: only supply a field the file lacks, and NEVER author the capture date into the
-    // pre-extraction sidecar. A sidecar DateTimeOriginal overrides the file's own date+zone, so a phone file that
-    // already carries the right offset (PHONE rule 1, putDate=false) would be clobbered by it. GPS is the only value
-    // ever written to the sidecar, and only when the file itself lacks GPS (writing GPS to XMP forces the zone).
+    // Every exif-side write for a new asset happens BEFORE its single metadata extraction is queued, and nothing
+    // queues a SidecarWrite for it. Extraction drops the file's values of every lockable column (date, zone, GPS,
+    // description, tags) when asset_exif changes while it runs (the updateId guard of fix/tag-sidecar-race), so a
+    // concurrent tag sync or SidecarWrite unlock left dates and GPS empty. The sidecar written here holds exactly
+    // what the AssetTag / PUT-date SidecarWrite jobs would have written, and the locks are released the same way.
+    //
+    // section 12 IMMICH MECHANICS: only supply a field the file lacks. A sidecar DateTimeOriginal overrides the
+    // file's own date+zone, so it is written only when putDate is true (a section 13 rule chose the moment); a phone
+    // file that already carries the right offset (PHONE rule 1, putDate=false) is never clobbered. GPS is written
+    // only when the file itself lacks GPS (writing GPS to XMP forces the zone).
+    const assetTags = await this.tagNewAsset(run, settings, asset.id, plan);
+    const locked: LockableProperty[] = assetTags.length > 0 ? ['tags'] : [];
+    let sidecarDate: string | undefined;
+    // The capture date is stored WITH an explicit offset as locked exif (the same values PUT dateTimeOriginal
+    // stores), so the UI shows it at once and the extraction keeps it. putDate is false when the file already
+    // carries its own date+zone (rule 1) or when there is no instant. The offset is sent only when a section 13
+    // rule supplied one; otherwise the moment is stored with no zone.
+    if (capture.putDate && effectiveInstant) {
+      const putZone = capture.putOffsetZone ?? zone;
+      const dateTimeOriginal = putZone ? sidecarDateString(effectiveInstant, putZone) : effectiveInstant.toISOString();
+      const timeZone = putZone ? (extractTimeZone(dateTimeOriginal)?.name ?? null) : null;
+      await this.assetRepository.upsertExif({
+        exif: updateLockedColumns({ assetId: asset.id, dateTimeOriginal, timeZone }),
+        lockedPropertiesBehavior: 'append',
+      } as any);
+      locked.push('dateTimeOriginal', 'timeZone');
+      // exactly what SidecarWrite writes for a locked date (handleSidecarWrite: mergeTimeZone(...).toISO())
+      sidecarDate = mergeTimeZone(effectiveInstant.toISOString(), timeZone)?.toISO() ?? undefined;
+    }
+
     const wantsGps = capture.writeGpsToSidecar && hasLocation(plan.latitude ?? 0, plan.longitude ?? 0);
-    const wantsSidecar = wantsGps || !!(plan.description && plan.description.length > 0);
-    if (wantsSidecar) {
+    const sidecarTags: Record<string, unknown> = {};
+    if (wantsGps) {
+      sidecarTags.GPSLatitude = plan.latitude;
+      sidecarTags.GPSLongitude = plan.longitude;
+    }
+    if (plan.description) {
+      sidecarTags.Description = plan.description;
+      sidecarTags.ImageDescription = plan.description;
+    }
+    if (sidecarDate) {
+      sidecarTags.DateTimeOriginal = sidecarDate;
+    }
+    if (assetTags.length > 0) {
+      sidecarTags.TagsList = assetTags;
+    }
+    if (Object.keys(sidecarTags).length > 0) {
       const sidecarPath = `${originalPath}.xmp`;
-      const tags: Record<string, unknown> = {};
-      if (wantsGps) {
-        tags.GPSLatitude = plan.latitude;
-        tags.GPSLongitude = plan.longitude;
-      }
-      if (plan.description) {
-        tags.Description = plan.description;
-        tags.ImageDescription = plan.description;
-      }
-      const written = await this.metadataRepository.writeTags(sidecarPath, tags as any);
+      const written = await this.metadataRepository.writeTags(sidecarPath, sidecarTags as any);
       if (written) {
         await this.assetRepository.upsertFile({ assetId: asset.id, type: AssetFileType.Sidecar, path: sidecarPath });
+        if (locked.length > 0) {
+          await this.assetRepository.unlockProperties(asset.id, locked);
+        }
+      } else if (locked.length > 0) {
+        // fall back to the regular path: SidecarWrite retries the file, unlocks and re-extracts when a date is locked
+        await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id: asset.id } });
       }
     }
 
     await this.jobRepository.queue({ name: JobName.AssetExtractMetadata, data: { id: asset.id, source: 'upload' } });
-
-    // The capture date is set via PUT dateTimeOriginal WITH an explicit offset (locked exif + SidecarWrite), the same
-    // mechanism the interactive API uses, instead of the sidecar. The properties stay locked until SidecarWrite
-    // persists them, so the first metadata extraction never overwrites the chosen instant with the file's own clock.
-    // putDate is false when the file already carries its own date+zone (rule 1) or when there is no instant. The
-    // offset is sent only when a section 13 rule supplied one; otherwise the moment is PUT with no zone.
-    if (capture.putDate && effectiveInstant) {
-      await this.putCaptureDate(asset.id, effectiveInstant, capture.putOffsetZone ?? zone);
-    }
 
     if (!(row.fallbacks ?? []).includes('quotaCounted')) {
       await this.eventRepository.emit('AssetCreate', {
@@ -1012,7 +1055,6 @@ export class TakeoutRunService extends BaseService {
     }
 
     await this.addAlbums(run, settings, row, asset.id, plan);
-    await this.addTags(run, settings, row, asset.id, plan, true);
     await this.saveGoogleMetadata(settings, asset.id, plan, false);
 
     // rotation. A rotate-only-pair original (section 11 D1) is NOT queued for the async rotation hook here: the D1
@@ -1118,20 +1160,6 @@ export class TakeoutRunService extends BaseService {
    * no invented zone). The date is never written into the pre-extraction sidecar, so a file that already carries
    * its own date+zone keeps them natively.
    */
-  private async putCaptureDate(assetId: string, instant: Date, zone: string | null) {
-    // yyyy-MM-ddTHH:mm:ss.SSS+/-hh:mm (explicit offset), or the plain UTC moment when there is no zone
-    const dateTimeOriginal = zone ? sidecarDateString(instant, zone) : instant.toISOString();
-    await this.assetRepository.upsertExif({
-      exif: updateLockedColumns({
-        assetId,
-        dateTimeOriginal,
-        timeZone: zone ? extractTimeZone(dateTimeOriginal)?.name : null,
-      }),
-      lockedPropertiesBehavior: 'append',
-    } as any);
-    await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id: assetId } });
-  }
-
   private async addAlbums(run: any, settings: any, row: any, assetId: string, plan: any) {
     if (!settings.syncAlbums) {
       return;
@@ -1172,6 +1200,24 @@ export class TakeoutRunService extends BaseService {
     }
     cache.set(key, albumId);
     return albumId;
+  }
+
+  /**
+   * Tag a newly created asset without the AssetTag event (its SidecarWrite would race the metadata extraction). The
+   * caller writes the returned values into the pre-extraction sidecar as TagsList and releases the tags lock.
+   */
+  private async tagNewAsset(run: any, settings: any, assetId: string, plan: any): Promise<string[]> {
+    const vars = run.templateVars as { date: string; user: string; start: string };
+    const tags = dedupeTags([...(plan.tags ?? []), ...runTags(settings, vars)]);
+    if (tags.length === 0) {
+      return [];
+    }
+    const leaves = await upsertTags(this.tagRepository, { userId: run.userId, tags });
+    if (leaves.length === 0) {
+      return [];
+    }
+    await this.tagRepository.upsertAssetIds(leaves.map((t) => ({ tagId: t.id, assetId })));
+    return leaves.map((t) => t.value);
   }
 
   private async addTags(run: any, settings: any, row: any, assetId: string, plan: any, _isUpload: boolean) {
@@ -1332,14 +1378,54 @@ export class TakeoutRunService extends BaseService {
   }
 
   /** Periodic progress: recompute the counters from the run file rows while importing and push them to the owner. */
-  private async tickProgress(runId: string) {
+  private async tickProgress(runId: string, controller: AbortController) {
     const run = await this.takeoutRepository.getRun(runId);
-    if (!run || run.status !== TakeoutRunStatus.Importing) {
+    if (!run || run.status === TakeoutRunStatus.Cancelling) {
+      // the 2 s poll is the fallback when the TakeoutRunCancel server event did not reach this worker
+      controller.abort();
+      return;
+    }
+    if (run.status !== TakeoutRunStatus.Importing) {
       return;
     }
     const rows = await this.takeoutRepository.getCounterRows(runId);
     const counters = countersFromRows(rows as any, { total: Number(run.bytesTotal), done: Number(run.bytesDone) });
     await this.takeoutRepository.updateRun(runId, { counters: counters as unknown as object });
+    await this.emitRun(runId);
+  }
+
+  /**
+   * Cancel cleanup run by the job itself (spec 2.6): the same steps as TakeoutService.cleanupCancelledRun, which the
+   * cancel endpoint uses for queued or stale runs. Unlink partial and written files, mark those rows skipped, set the
+   * run cancelled and emit.
+   */
+  private async finishCancel(runId: string) {
+    const rows = await this.takeoutRepository.getRunFilesWithTargetPath(runId);
+    for (const row of rows) {
+      if (
+        !row.targetPath ||
+        (row.status !== TakeoutRunFileStatus.Planned && row.status !== TakeoutRunFileStatus.Written)
+      ) {
+        continue;
+      }
+      await unlink(row.targetPath).catch(() => {});
+      await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Skipped, reason: 'cancelled' });
+    }
+    const run = await this.takeoutRepository.getRun(runId);
+    if (!run) {
+      return;
+    }
+    const rowsForCounters = await this.takeoutRepository.getCounterRows(runId);
+    const counters = countersFromRows(rowsForCounters as any, {
+      total: Number(run.bytesTotal),
+      done: Number(run.bytesDone),
+    });
+    await this.takeoutRepository.updateRun(runId, {
+      status: TakeoutRunStatus.Cancelled,
+      counters: counters as unknown as object,
+      finishedAt: new Date(),
+      leaseToken: null,
+    });
     await this.emitRun(runId);
   }
 
