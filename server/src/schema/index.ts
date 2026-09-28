@@ -6,6 +6,8 @@ import {
   assets_status_enum,
 } from 'src/schema/enums';
 import {
+  album_asset_private_after_delete,
+  album_asset_private_after_insert,
   album_user_after_insert,
   album_user_delete,
   album_user_delete_audit,
@@ -13,6 +15,7 @@ import {
   asset_face_audit,
   asset_metadata_audit,
   asset_ocr_delete_audit,
+  asset_private_after_update,
   f_concat_ws,
   f_unaccent,
   immich_uuid_v7,
@@ -177,6 +180,9 @@ export class ImmichDatabase {
     asset_delete_audit,
     album_user_after_insert,
     album_user_delete_audit,
+    album_asset_private_after_insert,
+    album_asset_private_after_delete,
+    asset_private_after_update,
     memory_delete_audit,
     memory_asset_delete_audit,
     stack_delete_audit,
