@@ -60,20 +60,60 @@ export class TagService extends BaseService {
   async update(auth: AuthDto, id: string, dto: TagUpdateDto): Promise<TagResponseDto> {
     await this.requireAccess({ auth, permission: Permission.TagUpdate, ids: [id] });
 
-    const { name, color, isHidden } = dto;
+    const { name, color, isHidden, parentId } = dto;
     const existing = await this.findOrFail(id);
 
-    let value;
-    if (name) {
-      const parts = existing.value.split('/');
-      parts[parts.length - 1] = name;
-      value = parts.join('/');
-    } else {
-      value = existing.value;
+    const parts = existing.value.split('/');
+    const leaf = name || parts.at(-1)!;
+    const moved = parentId !== undefined && parentId !== existing.parentId;
+    const parentValue = moved ? await this.getNewParentValue(auth, id, parentId) : parts.slice(0, -1).join('/');
+    const value = parentValue ? `${parentValue}/${leaf}` : leaf;
+
+    if (value !== existing.value) {
+      const duplicate = await this.tagRepository.getByValue(auth.user.id, value);
+      if (duplicate) {
+        throw new BadRequestException('A tag with that name already exists');
+      }
     }
 
-    const tag = await this.tagRepository.update(id, { value, color, isHidden });
+    const tag = await this.tagRepository.update(id, { value, color, isHidden, ...(moved && { parentId }) });
+    if (value !== existing.value) {
+      await this.onTagPathChange(id, { moved });
+    }
     return mapTag(tag);
+  }
+
+  /** The path of the tag a tag moves under, which must not be the tag itself or one of its children */
+  private async getNewParentValue(auth: AuthDto, id: string, parentId: string | null) {
+    if (!parentId) {
+      return '';
+    }
+
+    await this.requireAccess({ auth, permission: Permission.TagRead, ids: [parentId] });
+    if (await this.tagRepository.isInSubtree(id, parentId)) {
+      throw new BadRequestException('A tag cannot move under itself or one of its children');
+    }
+
+    const parent = await this.findOrFail(parentId);
+    return parent.value;
+  }
+
+  /**
+   * A renamed or moved tag changes the tag names written into the assets' metadata, so the stored values and the
+   * sidecars follow. A move also changes which views include the assets (a rule on a parent tag covers its children),
+   * so they sync again for clients that only receive the default view.
+   */
+  private async onTagPathChange(tagId: string, { moved }: { moved: boolean }) {
+    const assetIds = await this.tagRepository.getSubtreeAssetIds(tagId);
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    await this.tagRepository.refreshAssetTagValues(assetIds);
+    await this.jobRepository.queueAll(assetIds.map((id) => ({ name: JobName.SidecarWrite, data: { id } })));
+    if (moved) {
+      await this.customViewRepository.touchAssets(assetIds);
+    }
   }
 
   async upsert(auth: AuthDto, dto: TagUpsertDto) {
