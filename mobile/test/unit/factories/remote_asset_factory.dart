@@ -15,6 +15,7 @@ class RemoteAssetFactory {
     String? stackId,
     DateTime? deletedAt,
     String? localId,
+    bool isPrivate = false,
   }) {
     final assetId = TestUtils.uuid(id);
 
@@ -32,6 +33,7 @@ class RemoteAssetFactory {
       isEdited: false,
       deletedAt: deletedAt,
       localId: localId,
+      isPrivate: isPrivate,
     );
   }
 }

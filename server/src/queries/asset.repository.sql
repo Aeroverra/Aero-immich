@@ -137,19 +137,20 @@ with
           (asset."localDateTime" at time zone 'UTC')::date = today.date
           and "asset"."ownerId" = any ($4::uuid[])
           and "asset"."visibility" = $5
+          and "asset"."isPrivate" = $6
           and exists (
             select
             from
               "asset_file"
             where
               "assetId" = "asset"."id"
-              and "asset_file"."type" = $6
+              and "asset_file"."type" = $7
           )
           and "asset"."deletedAt" is null
         order by
           (asset."localDateTime" at time zone 'UTC')::date desc
         limit
-          $7
+          $8
       ) as "a" on true
   )
 select
@@ -164,6 +165,24 @@ group by
   ("localDateTime" at time zone 'UTC')::date
 order by
   ("localDateTime" at time zone 'UTC')::date desc
+
+-- AssetRepository.getStackMembers
+select
+  "asset"."id",
+  "asset"."isPrivate"
+from
+  "asset"
+where
+  "asset"."ownerId" = $1
+  and "asset"."stackId" in (
+    select
+      "target"."stackId"
+    from
+      "asset" as "target"
+    where
+      "target"."id" = any ($2::uuid[])
+      and "target"."stackId" is not null
+  )
 
 -- AssetRepository.getByIds
 select
@@ -340,6 +359,32 @@ where
 limit
   $3
 
+-- AssetRepository.getStatistics
+select
+  count(*) filter (
+    where
+      "type" = $1
+  ) as "AUDIO",
+  count(*) filter (
+    where
+      "type" = $2
+  ) as "IMAGE",
+  count(*) filter (
+    where
+      "type" = $3
+  ) as "VIDEO",
+  count(*) filter (
+    where
+      "type" = $4
+  ) as "OTHER"
+from
+  "asset"
+where
+  "ownerId" = $5::uuid
+  and "asset"."visibility" in ('archive', 'timeline')
+  and "asset"."isPrivate" = $6
+  and "deletedAt" is null
+
 -- AssetRepository.getCalendarHeatmap
 select
   date_trunc('DAY', "asset"."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' as "date",
@@ -351,6 +396,7 @@ where
   and "createdAt" >= $2
   and "createdAt" < $3
   and "deletedAt" is null
+  and "asset"."isPrivate" = $4
 group by
   date_trunc('DAY', "asset"."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
 order by
@@ -366,6 +412,7 @@ with
     where
       "asset"."deletedAt" is null
       and "asset"."visibility" in ('archive', 'timeline')
+      and "asset"."isPrivate" = $1
   )
 select
   ("timeBucket" AT TIME ZONE 'UTC')::date::text as "timeBucket",
@@ -386,6 +433,7 @@ with
       "asset"."visibility",
       asset."isFavorite"
       and asset."ownerId" = $1 as "isFavorite",
+      "asset"."isPrivate",
       asset.type = 'IMAGE' as "isImage",
       asset."deletedAt" is not null as "isTrashed",
       "asset"."livePhotoVideoId",
@@ -428,13 +476,15 @@ with
           "stacked"."stackId" = "asset"."stackId"
           and "stacked"."deletedAt" is null
           and "stacked"."visibility" = $2
+          and "stacked"."isPrivate" = $3
         group by
           "stacked"."stackId"
       ) as "stacked_assets" on true
     where
       "asset"."deletedAt" is null
       and "asset"."visibility" in ('archive', 'timeline')
-      and date_trunc('MONTH', "localDateTime" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' = $3
+      and "asset"."isPrivate" = $4
+      and date_trunc('MONTH', "localDateTime" AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' = $5
       and not exists (
         select
         from
@@ -454,6 +504,7 @@ with
       coalesce(array_agg("id"), '{}') as "id",
       coalesce(array_agg("visibility"), '{}') as "visibility",
       coalesce(array_agg("isFavorite"), '{}') as "isFavorite",
+      coalesce(array_agg("isPrivate"), '{}') as "isPrivate",
       coalesce(array_agg("isImage"), '{}') as "isImage",
       coalesce(array_agg("isTrashed"), '{}') as "isTrashed",
       coalesce(array_agg("livePhotoVideoId"), '{}') as "livePhotoVideoId",
@@ -502,8 +553,9 @@ where
   and "visibility" = $3
   and "type" = $4
   and "deletedAt" is null
+  and "asset"."isPrivate" = $5
 limit
-  $5
+  $6
 
 -- AssetRepository.getRecentlyCreatedAssetIds
 select
@@ -516,10 +568,11 @@ where
   and "asset"."visibility" = $2
   and "type" = $3
   and "deletedAt" is null
+  and "asset"."isPrivate" = $4
 order by
   "value" desc
 limit
-  $4
+  $5
 
 -- AssetRepository.detectOfflineExternalAssets
 update "asset"

@@ -48,6 +48,9 @@ class AssetCacheManager {
       AssetUpdate: (asset) => {
         this.invalidateAsset(asset.id);
       },
+      PrivateModeChange: () => {
+        this.invalidate();
+      },
     });
   }
 
