@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
@@ -20,6 +21,7 @@ import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_shee
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/utils/private_share.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class FavoriteBottomSheet extends ConsumerWidget {
@@ -36,12 +38,18 @@ class FavoriteBottomSheet extends ConsumerWidget {
       }
 
       final remoteAssets = selectedAssets.whereType<RemoteAsset>();
+      final stacked = await resolveStackedAssets(context, ref, ActionSource.timeline, remoteAssets);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
       final result = await addWithPrivateShareConfirmation(
         context,
         warning: privateAddWarning(context, album, remoteAssets),
-        add: ({required confirmPrivate}) => ref
-            .read(remoteAlbumProvider.notifier)
-            .addAssets(album.id, remoteAssets.map((e) => e.id).toList(), confirmPrivate: confirmPrivate),
+        add: ({required confirmPrivate}) => ref.read(remoteAlbumProvider.notifier).addAssets(album.id, [
+          ...remoteAssets.map((e) => e.id),
+          ...stacked.map((e) => e.id),
+        ], confirmPrivate: confirmPrivate),
       );
       if (result == null || !context.mounted) {
         return;
