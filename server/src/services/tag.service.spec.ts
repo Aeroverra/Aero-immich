@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
-import { JobStatus } from 'src/enum';
+import { JobName, JobStatus } from 'src/enum';
 import { TagService } from 'src/services/tag.service';
 import { authStub } from 'test/fixtures/auth.stub';
 import { tagResponseStub, tagStub } from 'test/fixtures/tag.stub';
@@ -123,10 +123,45 @@ describe(TagService.name, () => {
       mocks.access.tag.checkOwnerAccess.mockResolvedValue(new Set(['tag-1']));
       mocks.tag.update.mockResolvedValue(tagStub.colorCreate);
       mocks.tag.get.mockResolvedValue(tagStub.tag);
+      mocks.tag.getSubtreeAssetIds.mockResolvedValue([]);
       await expect(sut.update(authStub.admin, 'tag-1', { name: 'tag', color: '#000000' })).resolves.toEqual(
         tagResponseStub.color1,
       );
       expect(mocks.tag.update).toHaveBeenCalledWith('tag-1', { value: 'tag', color: '#000000' });
+    });
+
+    it('should move a tag under another tag and refresh its assets', async () => {
+      mocks.access.tag.checkOwnerAccess.mockImplementation((_, ids) => Promise.resolve(new Set(ids)));
+      mocks.tag.get.mockImplementation((id) =>
+        Promise.resolve(id === 'parent-1' ? { ...tagStub.tag, id: 'parent-1', value: 'Parent' } : tagStub.tag),
+      );
+      mocks.tag.isInSubtree.mockResolvedValue(false);
+      mocks.tag.update.mockResolvedValue({ ...tagStub.tagCreate, value: 'Parent/Tag1', parentId: 'parent-1' });
+      mocks.tag.getSubtreeAssetIds.mockResolvedValue(['asset-1']);
+      mocks.tag.refreshAssetTagValues.mockResolvedValue();
+      mocks.job.queueAll.mockResolvedValue();
+      mocks.customView.touchAssets.mockResolvedValue();
+
+      await sut.update(authStub.admin, 'tag-1', { parentId: 'parent-1' });
+
+      expect(mocks.tag.update).toHaveBeenCalledWith(
+        'tag-1',
+        expect.objectContaining({ value: 'Parent/Tag1', parentId: 'parent-1' }),
+      );
+      expect(mocks.tag.refreshAssetTagValues).toHaveBeenCalledWith(['asset-1']);
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([{ name: JobName.SidecarWrite, data: { id: 'asset-1' } }]);
+      expect(mocks.customView.touchAssets).toHaveBeenCalledWith(['asset-1']);
+    });
+
+    it('should not move a tag under one of its children', async () => {
+      mocks.access.tag.checkOwnerAccess.mockImplementation((_, ids) => Promise.resolve(new Set(ids)));
+      mocks.tag.get.mockResolvedValue(tagStub.tag);
+      mocks.tag.isInSubtree.mockResolvedValue(true);
+
+      await expect(sut.update(authStub.admin, 'tag-1', { parentId: 'child-1' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(mocks.tag.update).not.toHaveBeenCalled();
     });
   });
 
