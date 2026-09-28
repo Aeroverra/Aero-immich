@@ -16,6 +16,7 @@ import 'package:immich_mobile/data/db/main/table/remote/album_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/cloud_id.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
+import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/auth_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/partner.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.drift.dart';
@@ -23,6 +24,7 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/utils/option.dart';
 import 'package:uuid/uuid.dart';
@@ -237,6 +239,24 @@ class MediumRepositoryContext {
     return db
         .into(db.remoteAlbumAssetEntity)
         .insert(RemoteAlbumAssetEntityCompanion(albumId: .new(albumId), assetId: .new(assetId)));
+  }
+
+  Future<StackEntityData> newStack({
+    String? id,
+    required String ownerId,
+    required String primaryAssetId,
+    StackSource? source,
+  }) {
+    return db
+        .into(db.stackEntity)
+        .insertReturning(
+          StackEntityCompanion(
+            id: .new(id ?? const Uuid().v4()),
+            ownerId: .new(ownerId),
+            primaryAssetId: .new(primaryAssetId),
+            source: .new(source ?? StackSource.manual),
+          ),
+        );
   }
 
   Future<PersonEntityData> newPerson({String? id, String? ownerId, String? name, bool? isFavorite, bool? isHidden}) {

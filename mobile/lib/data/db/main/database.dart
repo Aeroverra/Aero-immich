@@ -161,7 +161,7 @@ class Drift extends $Drift {
   }
 
   @override
-  int get schemaVersion => 32;
+  int get schemaVersion => 33;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -363,6 +363,9 @@ class Drift extends $Drift {
                 await m.addColumn(v32.remoteAssetEntity, v32.remoteAssetEntity.isPrivate);
                 await m.addColumn(v32.remoteAlbumEntity, v32.remoteAlbumEntity.isPrivate);
                 await m.createIndex(v32.idxRemoteAssetOwnerPrivate);
+              },
+              from32To33: (m, v33) async {
+                await m.addColumn(v33.stackEntity, v33.stackEntity.source);
               },
             ),
           ),
