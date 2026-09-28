@@ -11,6 +11,8 @@
   type Props = {
     tags: TagResponseDto[];
     checkedIds: ReadonlySet<string>;
+    /** tags only some of the assets carry, shown with a dash until they are checked or unchecked */
+    partialIds?: ReadonlySet<string>;
     onToggle: (tag: TagResponseDto, checked: boolean) => void;
     /** creates the tag [path] (with the parents it needs) and checks it */
     onCreate: (path: string) => void | Promise<void>;
@@ -25,6 +27,7 @@
   let {
     tags,
     checkedIds,
+    partialIds = new Set<string>(),
     onToggle,
     onCreate,
     autofocus = false,
@@ -170,6 +173,7 @@
           aria-level={row.depth + 1}
           aria-expanded={row.hasChildren ? row.isOpen : undefined}
           aria-selected={checked}
+          data-partial={partialIds.has(row.tag.id) ? '' : undefined}
           class="flex min-h-8 items-center gap-1 rounded-lg pe-2 hover:bg-gray-100 dark:hover:bg-gray-800"
           style:padding-inline-start="{row.depth * 16}px"
           data-testid="tag-picker-row"
@@ -187,7 +191,13 @@
           {:else}
             <span class="size-6 shrink-0"></span>
           {/if}
-          <Checkbox id={checkboxId} size="tiny" {checked} onCheckedChange={(value) => onToggle(row.tag, value)} />
+          <Checkbox
+            id={checkboxId}
+            size="tiny"
+            {checked}
+            indeterminate={!checked && partialIds.has(row.tag.id)}
+            onCheckedChange={(value) => onToggle(row.tag, value)}
+          />
           <label
             for={checkboxId}
             class="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 ps-1 text-sm {row.isMatch
