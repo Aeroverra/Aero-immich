@@ -30,6 +30,7 @@
   import { getAssetBulkActions } from '$lib/services/asset.service';
   import { lang, locale } from '$lib/stores/preferences.store';
   import { handlePromiseError } from '$lib/utils';
+  import { withoutShownStacks } from '$lib/utils/asset-utils';
   import { parseUtcDate } from '$lib/utils/date-time';
   import { handleError } from '$lib/utils/handle-error';
   import { isAlbumsRoute, isPeopleRoute } from '$lib/utils/navigation';
@@ -178,7 +179,7 @@
           : await searchAssets({ metadataSearchDto: { visibility: AssetVisibility.Timeline, ...searchDto } });
 
       searchResultAlbums.push(...albums.items);
-      searchResultAssets.push(...assets.items);
+      searchResultAssets.push(...withoutShownStacks(assets.items, searchResultAssets));
 
       nextPage = Number(assets.nextPage) || 0;
     } catch (error) {
