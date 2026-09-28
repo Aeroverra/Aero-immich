@@ -156,6 +156,11 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
     }
   }
 
+  /// Forgets the status saved by [hold], so the next [release] leaves playback as it is.
+  void discardHold() {
+    _holdStatus = null;
+  }
+
   Future<void> restart() async {
     seekTo(Duration.zero);
     await play();
