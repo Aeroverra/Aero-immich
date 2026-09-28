@@ -20,6 +20,9 @@ export const tagPicker = {
 /** When the tag shortcut last asked for the search field of the detail panel picker */
 export const tagPickerFocus = $state({ requestedAt: 0 });
 
+/** The search of the detail panel picker, kept while the viewer closes and opens other assets */
+export const tagPickerSearch = $state({ query: '' });
+
 export const rememberRecentTags = (tagIds: string[]) => {
   tagPicker.recent.current = [...tagIds, ...tagPicker.recent.current.filter((id) => !tagIds.includes(id))].slice(
     0,
