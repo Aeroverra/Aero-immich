@@ -1,12 +1,13 @@
 import { schemaDiff } from '@immich/sql-tools';
 import { Injectable } from '@nestjs/common';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { SALT_ROUNDS } from 'src/constants';
 import { MaintenanceAuthDto } from 'src/dtos/maintenance.dto';
 import { UserAdminResponseDto, mapUserAdmin } from 'src/dtos/user.dto';
 import { MaintenanceAction, SystemMetadataKey } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { createMaintenanceLoginUrl, generateMaintenanceSecret } from 'src/utils/maintenance';
+import { listMigrationFiles, migrationFolders, migrationName } from 'src/utils/migration';
 import { getExternalDomain } from 'src/utils/misc';
 
 export type SchemaReport = {
@@ -22,13 +23,16 @@ type MigrationStatus = {
 @Injectable()
 export class CliService extends BaseService {
   async schemaReport(): Promise<SchemaReport> {
-    // eslint-disable-next-line unicorn/prefer-module
-    const allFiles = await this.storageRepository.readdir(join(__dirname, '../schema/migrations'));
-    const files = allFiles.filter((file) => file.endsWith('.js')).map((file) => file.slice(0, -3));
+    const files: string[] = [];
+    for (const folder of migrationFolders) {
+      for (const file of await listMigrationFiles(folder, this.storageRepository)) {
+        files.push(migrationName(file));
+      }
+    }
     const rows = await this.databaseRepository.getMigrations();
     const filesSet = new Set(files);
     const rowsSet = new Set(rows.map((item) => item.name));
-    const combined = [...filesSet, ...rowsSet].toSorted();
+    const combined = [...filesSet.union(rowsSet)].toSorted();
 
     const migrations: MigrationStatus[] = [];
 
