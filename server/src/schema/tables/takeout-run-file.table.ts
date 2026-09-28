@@ -7,6 +7,7 @@ import {
   PrimaryColumn,
   Table,
   Timestamp,
+  Unique,
   UpdateDateColumn,
 } from '@immich/sql-tools';
 import {
@@ -23,7 +24,7 @@ import { TakeoutRunTable } from 'src/schema/tables/takeout-run.table';
 
 /** The plan of a takeout run and its per-file report */
 @Table('takeout_run_file')
-@Index({ columns: ['runId', 'seq'] })
+@Unique({ columns: ['runId', 'seq'] })
 @Index({ columns: ['runId', 'groupIndex'] })
 export class TakeoutRunFileTable {
   @PrimaryColumn({ type: 'bigint', identity: true })
@@ -41,6 +42,10 @@ export class TakeoutRunFileTable {
 
   @Column({ type: 'character varying', nullable: true })
   partName!: string | null;
+
+  /** seq of the entry inside partName, for targeted re-reads; null for report-only rows and rows planned by the old code */
+  @Column({ type: 'integer', nullable: true })
+  entrySeq!: number | null;
 
   @Column({ type: 'bigint' })
   size!: Int8;

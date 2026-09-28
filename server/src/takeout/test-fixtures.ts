@@ -9,6 +9,14 @@ export interface ZipInput {
   method?: 0 | 8;
   utf8Flag?: boolean;
   zip64?: boolean;
+  /** CRC written to both headers instead of the real one (a corrupt entry) */
+  crcOverride?: number;
+  /** name written to the local header instead of nameBytes */
+  localNameBytes?: Buffer;
+  /** stored data written instead of the real (compressed) data, same length or shorter */
+  storedOverride?: Buffer;
+  /** bytes written before the local header (a gap between entries) */
+  gapBefore?: number;
 }
 
 function crc32(buf: Buffer): number {
@@ -19,7 +27,7 @@ function crc32(buf: Buffer): number {
       crc = (crc >>> 1) ^ (0xed_b8_83_20 & -(crc & 1));
     }
   }
-  return (~crc) >>> 0;
+  return ~crc >>> 0;
 }
 
 export function buildZip(inputs: ZipInput[], options?: { zip64Eocd?: boolean }): Buffer {
@@ -29,8 +37,13 @@ export function buildZip(inputs: ZipInput[], options?: { zip64Eocd?: boolean }):
 
   for (const input of inputs) {
     const method = input.method ?? 8;
-    const stored = method === 0 ? input.data : deflateRawSync(input.data);
-    const crc = crc32(input.data);
+    if (input.gapBefore) {
+      locals.push(Buffer.alloc(input.gapBefore, 0x5a));
+      offset += input.gapBefore;
+    }
+    const realStored = method === 0 ? input.data : deflateRawSync(input.data);
+    const stored = input.storedOverride ?? realStored;
+    const crc = input.crcOverride ?? crc32(input.data);
     const flags = input.utf8Flag ? 0x08_00 : 0;
     const zip64 = input.zip64 === true;
 
@@ -45,9 +58,10 @@ export function buildZip(inputs: ZipInput[], options?: { zip64Eocd?: boolean }):
     local.writeUInt32LE(crc, 14);
     local.writeUInt32LE(zip64 ? 0xff_ff_ff_ff : stored.length, 18);
     local.writeUInt32LE(zip64 ? 0xff_ff_ff_ff : input.data.length, 22);
-    local.writeUInt16LE(input.nameBytes.length, 26);
+    const localName = input.localNameBytes ?? input.nameBytes;
+    local.writeUInt16LE(localName.length, 26);
     local.writeUInt16LE(localExtra.length, 28);
-    locals.push(local, input.nameBytes, localExtra, stored);
+    locals.push(local, localName, localExtra, stored);
 
     const centralExtra = zip64 ? buildZip64Extra(input.data.length, stored.length, offset) : Buffer.alloc(0);
     const central = Buffer.alloc(46);
@@ -70,7 +84,7 @@ export function buildZip(inputs: ZipInput[], options?: { zip64Eocd?: boolean }):
     central.writeUInt32LE(zip64 ? 0xff_ff_ff_ff : offset, 42);
     centrals.push(central, input.nameBytes, centralExtra);
 
-    offset += local.length + input.nameBytes.length + localExtra.length + stored.length;
+    offset += local.length + localName.length + localExtra.length + stored.length;
   }
 
   const localPart = Buffer.concat(locals);
@@ -216,6 +230,21 @@ export function buildTarGzConcatenated(inputs: TarInput[]): Buffer {
   const tar = buildTar(inputs);
   const half = Math.floor(tar.length / 1024 / 2) * 1024 || 512;
   return Buffer.concat([gzipSync(tar.subarray(0, half)), gzipSync(tar.subarray(half))]);
+}
+
+export { crc32 as fixtureCrc32 };
+
+/** Deterministic pseudo-random bytes (incompressible, so a gzip of them is mostly stored blocks) */
+export function randomBytesSeeded(length: number, seed = 1): Buffer {
+  const out = Buffer.allocUnsafe(length);
+  let x = seed >>> 0 || 1;
+  for (let i = 0; i < length; i++) {
+    x ^= x << 13;
+    x ^= x >>> 17;
+    x ^= x << 5;
+    out[i] = x & 0xff;
+  }
+  return out;
 }
 
 export function sha1(data: Buffer): Buffer {

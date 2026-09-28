@@ -26,6 +26,8 @@ export function emptyCounters(): TakeoutCounters {
       rotateOnlyDropped: 0,
       failedVideos: 0,
       previouslyDeleted: 0,
+      unreadable: 0,
+      missingFromArchive: 0,
     },
     result: {
       toUpload: 0,
@@ -150,6 +152,14 @@ export function countersFromRows(rows: CounterRow[], bytes: { total: number; don
         c.discarded.previouslyDeleted += n;
         break;
       }
+      case 'partUnreadable': {
+        c.discarded.unreadable += n;
+        break;
+      }
+      case 'missingFromArchive': {
+        c.discarded.missingFromArchive += n;
+        break;
+      }
       case 'upload': {
         c.result.toUpload += n;
         if (row.status === 'created' || row.status === 'done') {
@@ -206,29 +216,30 @@ export function countersFromRows(rows: CounterRow[], bytes: { total: number; don
 
     for (const fallback of row.fallbacks) {
       switch (fallback) {
-      case 'zoneAssumed': {
-        c.result.zoneAssumed += n;
-      
-      break;
-      }
-      case 'stacked': {
-        c.result.stacked += n;
-      
-      break;
-      }
-      case 'albumAdded': {
-        c.result.albumAdds += n;
-      
-      break;
-      }
-      default: { if (fallback.startsWith('albumCreated:')) {
-        c.result.albumsCreated += n;
-      } else if (fallback === 'tagged') {
-        c.result.tagged += n;
-      } else if (fallback === 'metadataSaved') {
-        c.result.metadataSaved += n;
-      }
-      }
+        case 'zoneAssumed': {
+          c.result.zoneAssumed += n;
+
+          break;
+        }
+        case 'stacked': {
+          c.result.stacked += n;
+
+          break;
+        }
+        case 'albumAdded': {
+          c.result.albumAdds += n;
+
+          break;
+        }
+        default: {
+          if (fallback.startsWith('albumCreated:')) {
+            c.result.albumsCreated += n;
+          } else if (fallback === 'tagged') {
+            c.result.tagged += n;
+          } else if (fallback === 'metadataSaved') {
+            c.result.metadataSaved += n;
+          }
+        }
       }
     }
   }

@@ -10,7 +10,7 @@ import {
   Unique,
   UpdateDateColumn,
 } from '@immich/sql-tools';
-import { TakeoutCompleteness, TakeoutScanStatus } from 'src/enum';
+import { TakeoutCompleteness } from 'src/enum';
 import { UserTable } from 'src/schema/tables/user.table';
 
 /** One Google Takeout export: a chain of archive parts plus its optional index archive */
@@ -35,9 +35,6 @@ export class TakeoutExportTable {
 
   @Column({ type: 'character varying', default: TakeoutCompleteness.Unknown })
   completeness!: Generated<TakeoutCompleteness>;
-
-  @Column({ type: 'character varying', default: TakeoutScanStatus.Pending })
-  scanStatus!: Generated<TakeoutScanStatus>;
 
   @Column({ type: 'character varying', nullable: true })
   indexFileName!: string | null;

@@ -1,10 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { sql } from 'kysely';
 import { randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { mkdir, stat, unlink, utimes } from 'node:fs/promises';
-import { basename, extname, join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
+import { statfs, unlink, utimes } from 'node:fs/promises';
+import { basename, extname } from 'node:path';
 import { StorageCore } from 'src/cores/storage.core';
 import { LockableProperty } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
@@ -12,7 +9,6 @@ import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
   AlbumUserRole,
   AssetFileType,
-  AssetType,
   AssetVisibility,
   ChecksumAlgorithm,
   DeletedReimportMode,
@@ -23,57 +19,162 @@ import {
   StackSource,
   StackUserEditAction,
   StorageFolder,
+  TakeoutCatalogStatus,
   TakeoutOnErrors,
   TakeoutRotationState,
   TakeoutRunFileAction,
   TakeoutRunFileStatus,
   TakeoutRunStatus,
-  TakeoutScanStatus,
   TakeoutZoneSource,
 } from 'src/enum';
 import type { ImmichTags } from 'src/repositories/metadata.repository';
+import { TAKEOUT_RUNNING_RUN_STATUSES } from 'src/repositories/takeout.repository';
 import { BaseService } from 'src/services/base.service';
+import { storedAnalysisInput } from 'src/services/takeout-analyze.service';
 import { assembleStackIds, dedupeTags, hasLocation } from 'src/services/takeout-asset';
-import { performPartScan } from 'src/services/takeout-scan.service';
-import { TAKEOUT_ROOT_FOLDER } from 'src/services/takeout.service';
+import {
+  LifecycleDeps,
+  applyReclaim,
+  cleanupCancelledRun,
+  emitExport,
+  emitRun,
+  openRunStaging,
+  queueAnalysis,
+  reclaimRunTargets,
+  takeoutFolderPath,
+  verifyAndRequeue,
+} from 'src/services/takeout-lifecycle';
+import {
+  CATALOG_VERSION,
+  CancelReason,
+  DEFAULT_READ_LIMITS,
+  FetchOccurrence,
+  FetchRequest,
+  LeaseLost,
+  ProcessResources,
+  ReadContext,
+  ReadLimits,
+  ReadPartRow,
+  ReadStatsTracker,
+  RunFailure,
+  asRunReason,
+  catalogUsable,
+  fetchEntries,
+  getProcessResources,
+  isStableNow,
+  keyEqual,
+  readPartWithRetry,
+  readerPool,
+  statFingerprint,
+} from 'src/services/takeout-read';
+import { STAGING_TTL_MS, StagingFs, StagingStore } from 'src/services/takeout-staging';
 import {
   CaptureExifInput,
   CatalogInput,
   DEFAULT_BANNED_PATTERNS,
+  FileSourceFs,
   ImportPlan,
+  LastReadAnalysis,
+  UnreadablePart,
+  analyzeExport,
   buildCatalog,
   countersFromRows,
-  hashTap,
+  groupEdges,
+  hex,
+  messageOf,
+  orderGroups,
+  parseArchiveBrowser,
+  pathKey,
   planImport,
+  readArchiveEntry,
+  readZipDirectory,
   resolveCaptureTime,
   runTags,
+  samplePairsToKeep,
   sampleRotationProbe,
   sidecarDateString,
-  walkArchive,
   wallTimeAsUtc,
 } from 'src/takeout';
-import { JobItem, JobOf } from 'src/types';
+import { JobOf } from 'src/types';
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone, mergeTimeZone } from 'src/utils/date';
 import { mimeTypes } from 'src/utils/mime-types';
 import { getPreferences } from 'src/utils/preferences';
 import { upsertTags } from 'src/utils/tag';
 
+export { RunFailure } from 'src/services/takeout-read';
+
 const LEASE_RENEW_MS = 10_000;
-// spec 2.6: counters persisted and on_takeout_run emitted every 2 s while the run is live
+// progress persisted and on_takeout_run emitted every 2 s while the run is live (all phases)
 const PROGRESS_MS = 2000;
+const STATFS_REFRESH_MS = 10_000;
+const TERMINAL_ROW_STATUSES = new Set<string>([
+  TakeoutRunFileStatus.Done,
+  TakeoutRunFileStatus.Skipped,
+  TakeoutRunFileStatus.Error,
+]);
+
+const uploadFirst = (row: { action: string }) => (row.action === TakeoutRunFileAction.Upload ? 0 : 1);
 
 const effectiveInstantFor = (capture: { instant?: Date | null }, captureDate: Date | null): Date | null =>
   capture.instant ?? captureDate;
 
+const formatBytes = (bytes: number): string => {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = Math.max(0, bytes);
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+};
+
+/** Everything one job attempt of a run holds (single-pass design 6.3, 6.9) */
+interface Attempt {
+  runId: string;
+  run: any;
+  token: string;
+  controller: AbortController;
+  signal: AbortSignal;
+  folderName: string;
+  userFolder: string;
+  staging: StagingStore | null;
+  ctx: ReadContext | null;
+  stats: ReadStatsTracker;
+  parts: ReadPartRow[];
+  settings: any;
+  status: TakeoutRunStatus;
+  lastStatfs: number;
+  lastExportEmit: number;
+}
+
 @Injectable()
 export class TakeoutRunService extends BaseService {
   private controllers = new Map<string, AbortController>();
+  /** overridable in tests: small limits, own process resources, fault-injecting file systems */
+  readLimits: ReadLimits = DEFAULT_READ_LIMITS;
+  processResources: ProcessResources | null = null;
+  archiveFs?: FileSourceFs;
+  stagingFs?: StagingFs;
+  /** free bytes of the staging disk (statfs); overridable in tests */
+  diskAvailable?: (path: string) => Promise<number>;
+
+  private get lifecycle(): LifecycleDeps {
+    return {
+      takeout: this.takeoutRepository,
+      asset: this.assetRepository,
+      job: this.jobRepository,
+      websocket: this.websocketRepository,
+      logger: this.logger,
+      stagingFs: this.stagingFs,
+    };
+  }
 
   // sent by the API worker with serverSend, so it must listen for server events (spec 2.6 Cancellation)
   @OnEvent({ name: 'TakeoutRunCancel', server: true })
   onCancel({ runId }: { runId: string }) {
-    this.controllers.get(runId)?.abort();
+    this.controllers.get(runId)?.abort(new CancelReason());
   }
 
   @OnJob({ name: JobName.TakeoutRun, queue: QueueName.Takeout })
@@ -84,32 +185,57 @@ export class TakeoutRunService extends BaseService {
     }
     if (run.status === TakeoutRunStatus.Cancelling) {
       // re-queued at boot while cancelling: finish as cancelled
-      await this.finishCancel(runId);
+      await cleanupCancelledRun(this.lifecycle, runId, { token: null, from: [TakeoutRunStatus.Cancelling] });
+      return JobStatus.Skipped;
+    }
+    if (!TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+      // a stale job for a failed, cancelled or completed run: never run a phase again (I10)
+      this.logger.log(`Takeout run ${runId} is ${run.status}: nothing to do`);
       return JobStatus.Skipped;
     }
     const token = randomUUID();
     if (!(await this.takeoutRepository.takeLease(runId, token))) {
-      // another live worker holds the lease: re-queue and let it run
-      await this.jobRepository.queue({
-        name: JobName.TakeoutRun,
-        data: { runId, attempt: attempt + 1, delay: 70_000 },
-      });
+      const fresh = await this.takeoutRepository.getRun(runId);
+      if (fresh && TAKEOUT_RUNNING_RUN_STATUSES.includes(fresh.status)) {
+        // another live worker holds the lease: look again later, the lease expires if that worker died
+        await this.jobRepository.queue({
+          name: JobName.TakeoutRun,
+          data: { runId, attempt: attempt + 1, delay: 70_000 },
+        });
+      }
       return JobStatus.Skipped;
     }
 
     const controller = new AbortController();
     this.controllers.set(runId, controller);
+    const a: Attempt = {
+      runId,
+      run,
+      token,
+      controller,
+      signal: controller.signal,
+      folderName: '',
+      userFolder: '',
+      staging: null,
+      ctx: null,
+      stats: new ReadStatsTracker(run.readStats),
+      parts: [],
+      settings: run.settings,
+      status: run.status,
+      lastStatfs: 0,
+      lastExportEmit: 0,
+    };
+
     const lease = setInterval(() => {
       void this.takeoutRepository
         .takeLease(runId, token)
-        .then((held) => {
+        .then(async (held) => {
           if (held) {
             return;
           }
-
-          // another worker took over this run; stop promptly instead of racing the new owner
-          clearInterval(lease);
-          controller.abort();
+          // the lease CAS only renews running runs: a cancel request is not a lost lease
+          const current = await this.takeoutRepository.getRun(runId);
+          controller.abort(current?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost());
         })
         .catch(() => {});
     }, LEASE_RENEW_MS);
@@ -118,14 +244,15 @@ export class TakeoutRunService extends BaseService {
       if (inflight) {
         return;
       }
-      inflight = this.tickProgress(runId, controller)
-        .catch(() => {})
+      inflight = this.tickProgress(a)
+        .catch((error: unknown) => this.logger.warn(`Takeout run ${runId} progress: ${messageOf(error)}`))
         .finally(() => {
           inflight = null;
         });
     }, PROGRESS_MS);
-    // stop the ticker before the final counters are written, so a late tick cannot overwrite them
-    const stopProgress = async () => {
+    // stop the ticker before the final writes, so a late tick cannot overwrite them
+    const stopTimers = async () => {
+      clearInterval(lease);
       clearInterval(progress);
       await inflight;
     };
@@ -134,169 +261,285 @@ export class TakeoutRunService extends BaseService {
       if (!run.startedAt) {
         await this.takeoutRepository.updateRun(runId, { startedAt: new Date() });
       }
-
-      await this.phaseScanning(runId, run.exportId, token, controller.signal);
-      if (await this.cancelled(runId)) {
-        await stopProgress();
-        await this.finishCancel(runId);
-        return JobStatus.Skipped;
+      const folder = await this.takeoutRepository.getFolder(run.userId);
+      if (!folder) {
+        throw new RunFailure('The takeout folder of the user is missing');
       }
-
-      await this.phasePlanning(runId);
-      if (await this.cancelled(runId)) {
-        await stopProgress();
-        await this.finishCancel(runId);
-        return JobStatus.Skipped;
+      a.folderName = folder.folderName;
+      a.userFolder = takeoutFolderPath(folder.folderName);
+      a.staging = await openRunStaging(this.lifecycle, run, folder.folderName);
+      a.stats.stats.crossDevice ||= a.staging.crossDevice;
+      // adoption (10.4): a target the previous run left behind (normally none) moves into this run's staging
+      for (const old of await this.takeoutRepository.getRunsSupersededBy(runId)) {
+        await reclaimRunTargets(this.lifecycle, old.id, a.staging, 'stage', { includeSkipped: true });
       }
+      a.ctx = new ReadContext({
+        run,
+        deps: { repo: this.takeoutRepository, logger: this.logger, fs: this.archiveFs },
+        limits: this.readLimits,
+        resources: this.resources(),
+        staging: a.staging,
+        stats: a.stats,
+        partPath: (fileName) => `${a.userFolder}/${fileName}`,
+        signal: controller.signal,
+      });
+      const allParts = await this.takeoutRepository.getPartsByExport(run.exportId);
+      a.parts = allParts.filter((p) => !p.isIndex) as any;
 
-      await this.phaseImporting(runId, controller.signal);
-      if (await this.cancelled(runId)) {
-        await stopProgress();
-        await this.finishCancel(runId);
-        return JobStatus.Skipped;
+      // a run whose plan rows exist skips reading and planning on every resume (R3-12)
+      const planned = (await this.takeoutRepository.countRunFiles(runId)) > 0;
+      if (!planned) {
+        await this.phaseReading(a);
+        await this.phasePlanning(a);
       }
-
-      await stopProgress();
-      await this.phaseFinishing(runId);
+      await this.phaseRepair(a);
+      await this.phaseFetching(a);
+      await this.phaseImporting(a);
+      this.throwIfAborted(a);
+      await stopTimers();
+      await this.phaseFinishing(a);
       return JobStatus.Success;
-    } catch (error: any) {
-      await stopProgress();
-      if (controller.signal.aborted) {
-        if (await this.cancelled(runId)) {
-          await this.finishCancel(runId);
-        }
+    } catch (error: unknown) {
+      await stopTimers();
+      const reason = this.abortReason(a, error);
+      const current = await this.takeoutRepository.getRun(runId);
+      if (reason instanceof LeaseLost && current?.status !== TakeoutRunStatus.Cancelling) {
+        this.logger.log(`Takeout run ${runId}: another worker owns the run now`);
         return JobStatus.Skipped;
       }
-      this.logger.error(`Takeout run ${runId} failed: ${error?.message ?? error}`);
-      await this.takeoutRepository
-        .updateRun(runId, {
-          status: TakeoutRunStatus.Failed,
-          error: String(error?.message ?? error),
-          finishedAt: new Date(),
-        })
-        .catch(() => {});
-      await this.emitRun(runId);
+      if (reason instanceof CancelReason || current?.status === TakeoutRunStatus.Cancelling) {
+        await cleanupCancelledRun(this.lifecycle, runId, {
+          token: null,
+          from: [TakeoutRunStatus.Cancelling, ...TAKEOUT_RUNNING_RUN_STATUSES],
+          readStats: this.snapshotStats(a),
+        });
+        return JobStatus.Skipped;
+      }
+      await this.failRun(a, reason);
       return JobStatus.Failed;
     } finally {
       clearInterval(lease);
       clearInterval(progress);
+      a.ctx?.dispose();
       this.controllers.delete(runId);
       this.albumCache.delete(runId);
     }
   }
 
-  private async cancelled(runId: string) {
-    const run = await this.takeoutRepository.getRun(runId);
-    return !run || run.status === TakeoutRunStatus.Cancelling || run.status === TakeoutRunStatus.Cancelled;
+  private resources(): ProcessResources {
+    return this.processResources ?? getProcessResources();
   }
 
-  // ---------- phase: scanning ----------
+  private abortReason(a: Attempt, error: unknown): Error {
+    if (a.signal.aborted) {
+      return a.signal.reason as Error;
+    }
+    if (a.ctx?.readAbort.signal.aborted) {
+      return asRunReason(a.ctx.readAbort.signal.reason);
+    }
+    return asRunReason(error);
+  }
 
-  private async phaseScanning(runId: string, exportId: string, token: string, signal: AbortSignal) {
-    await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Scanning });
-    await this.emitRun(runId);
+  private throwIfAborted(a: Attempt) {
+    if (a.signal.aborted) {
+      throw a.signal.reason;
+    }
+  }
 
-    const folder = await this.takeoutRepository.getFolder((await this.takeoutRepository.getRun(runId))!.userId);
-    const parts = await this.takeoutRepository.getPartsByExport(exportId);
-    for (const part of parts) {
-      if (part.isIndex || !folder) {
+  /** Every status change is a check-and-set on (id, lease, running status); a lost one aborts the attempt (I10) */
+  private async setStatus(a: Attempt, status: TakeoutRunStatus, patch: Record<string, unknown> = {}) {
+    this.throwIfAborted(a);
+    const ok = await this.takeoutRepository.setRunStatusCas(a.runId, a.token, status, patch);
+    if (!ok) {
+      const current = await this.takeoutRepository.getRun(a.runId);
+      const reason = current?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost();
+      a.controller.abort(reason);
+      throw reason;
+    }
+    a.status = status;
+    await emitRun(this.lifecycle, a.runId);
+  }
+
+  // ---------- phase: reading (single-pass design 6.4) ----------
+
+  private async phaseReading(a: Attempt) {
+    await this.setStatus(a, TakeoutRunStatus.Reading);
+    const ctx = a.ctx!;
+    const limits = this.readLimits;
+    const todo: ReadPartRow[] = [];
+    for (const part of a.parts) {
+      const ps = a.stats.part(part);
+      const st = await statFingerprint(ctx.partPath(part.fileName), limits);
+      if (!st) {
+        // what folder sync would do; its report row is written by planning
+        if (!part.isMissing) {
+          await this.takeoutRepository.markPartMissing(part.id);
+        }
+        part.isMissing = true;
+        part.catalogStatus = TakeoutCatalogStatus.None;
+        ctx.missingThisAttempt.add(part.id);
+        a.stats.finish(ps, 'missing');
         continue;
       }
-      // Loop the part through claim/scan until it reaches a terminal state. A scan job that
-      // died mid-scan can be reset from 'scanning' back to 'pending' (syncUserFolder's stale
-      // rule); waiting alone would leave it unscanned and silently drop its entries.
-      let current: typeof part | null | undefined = part;
-      for (let attempt = 0; attempt < 4 && current; attempt++) {
-        if (current.scanStatus === TakeoutScanStatus.Scanning) {
-          await this.waitForScan(current.id);
-          current = await this.takeoutRepository.getPart(current.id);
-          continue;
-        }
-        if (current.scanStatus !== TakeoutScanStatus.Pending) {
-          break;
-        }
-        const claimed = await this.takeoutRepository.claimPart(current.id, token);
-        if (!claimed) {
-          current = await this.takeoutRepository.getPart(current.id);
-          continue;
-        }
-        await this.scanClaimedPart(claimed, folder.folderName, token, signal);
-        current = await this.takeoutRepository.getPart(current.id);
+      if (part.isMissing) {
+        await this.takeoutRepository.updatePart(part.id, { isMissing: false });
+        part.isMissing = false;
       }
+      if (catalogUsable(part, st)) {
+        ps.status = part.lastReadRunId === a.runId && ps.passes > 0 ? 'read' : 'cached';
+        ps.position = ps.size;
+        continue;
+      }
+      if (part.catalogStatus === TakeoutCatalogStatus.Error && keyEqual(part, st)) {
+        // sticky until the file changes
+        ps.status = 'error';
+        ps.error = part.catalogError;
+        ps.position = ps.size;
+        continue;
+      }
+      if (!isStableNow(st, limits)) {
+        throw new RunFailure(`${part.fileName} is still being copied`);
+      }
+      ps.status = 'pending';
+      todo.push(part);
     }
-  }
-
-  private async scanClaimedPart(claimed: any, folderName: string, token: string, signal: AbortSignal) {
-    const part = claimed as any;
-    const filePath = join(StorageCore.getMediaLocation(), TAKEOUT_ROOT_FOLDER, folderName, part.fileName);
-    const result = await performPartScan(this.takeoutRepository, claimed, filePath, token, null, signal);
-    switch (result.status) {
-      case 'scanned': {
-        await this.takeoutRepository.updatePart(part.id, {
-          scanStatus: TakeoutScanStatus.Scanned,
-          scannedSize: result.scannedSize,
-          scannedMtime: result.scannedMtime,
-          entryCount: result.entryCount,
-          scanOwner: null,
-        });
-
-        break;
-      }
-      case 'error': {
-        await this.takeoutRepository.updatePart(part.id, {
-          scanStatus: TakeoutScanStatus.Error,
-          scanError: result.error ?? 'scan failed',
-          scanOwner: null,
-        });
-
-        break;
-      }
-      case 'missing': {
-        await this.takeoutRepository.updatePart(part.id, { scanStatus: TakeoutScanStatus.Missing, scanOwner: null });
-
-        break;
-      }
-      // No default
+    if (Number(a.run.archiveBytesTotal ?? 0) === 0) {
+      a.run.archiveBytesTotal = todo.reduce((sum, part) => sum + Number(part.size), 0);
     }
-  }
-
-  private async waitForScan(partId: string) {
-    for (let i = 0; i < 360; i++) {
-      const part = await this.takeoutRepository.getPart(partId);
-      if (!part || part.scanStatus !== TakeoutScanStatus.Scanning) {
-        return;
-      }
-      await new Promise((r) => setTimeout(r, 5000));
-    }
-  }
-
-  // ---------- phase: planning ----------
-
-  private async phasePlanning(runId: string) {
-    const run = await this.takeoutRepository.getRun(runId);
-    if (!run) {
+    // largest first: no small part is left alone at the end
+    todo.sort(
+      (x, y) => Number(y.size) - Number(x.size) || (x.segment ?? -1) - (y.segment ?? -1) || x.partNumber - y.partNumber,
+    );
+    await this.persistProgress(a);
+    if (todo.length === 0) {
       return;
     }
-    if ((await this.takeoutRepository.countRunFiles(runId)) > 0) {
-      // already planned (resume or restart): the plan is frozen, go straight back to importing
-      await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Importing });
-      await this.emitRun(runId);
-      return;
-    }
-    await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Planning });
-    await this.emitRun(runId);
 
+    const user = await this.userRepository.get(a.run.userId, {} as any).catch(() => null);
+    const preferences = getPreferences(await this.userRepository.getMetadata(a.run.userId));
+    await ctx.prepareReading({
+      deletedSkip: preferences.deletedReimport.mode === DeletedReimportMode.Skip,
+      quotaLimit: user?.quotaSizeInBytes ?? null,
+      quotaUsage: Number(user?.quotaUsageInBytes ?? 0),
+      statfs: () => this.availableBytes(a),
+    });
+    ctx.sampleSet = await this.buildSampleSet(a);
+    a.stats.stats.readers = Math.min(limits.readers, todo.length);
+    a.stats.stats.readahead = limits.readaheadDepth;
+    await readerPool(ctx, todo, Math.min(limits.readers, todo.length), (part, token) =>
+      this.readOnePart(a, part, token),
+    );
+    if (a.staging!.fatal) {
+      throw new RunFailure(messageOf(a.staging!.fatal));
+    }
+    await this.persistProgress(a);
+  }
+
+  private async readOnePart(a: Attempt, part: ReadPartRow, token: { detached: boolean }) {
+    this.emitExportThrottled(a, true);
+    await readPartWithRetry(a.ctx!, part, token);
+    this.emitExportThrottled(a, true);
+  }
+
+  private async availableBytes(a: Attempt): Promise<number> {
+    const path = a.staging?.dir ?? a.userFolder;
+    if (this.diskAvailable) {
+      return this.diskAvailable(path);
+    }
+    const stats = await statfs(path);
+    return Number(stats.bavail) * Number(stats.bsize);
+  }
+
+  /**
+   * The sampling set (single-pass design 6.6, fix F4): export-wide. All zip: the central-directory names of the
+   * parts to read plus the catalogued paths; else the index file list; else every decodable image.
+   */
+  private async buildSampleSet(a: Attempt): Promise<Set<string> | 'all'> {
+    const ctx = a.ctx!;
+    const present = a.parts.filter((p) => !p.isMissing);
+    if (present.length > 0 && present.every((p) => p.kind === 'zip')) {
+      const names: string[] = await this.takeoutRepository.getCataloguedMediaPaths(a.run.exportId, CATALOG_VERSION);
+      for (const part of present) {
+        if (part.catalogStatus === TakeoutCatalogStatus.Complete && part.catalogVersion === CATALOG_VERSION) {
+          continue;
+        }
+        try {
+          const directory = await readZipDirectory(ctx.partPath(part.fileName), {
+            signal: ctx.readAbort.signal,
+            source: { ...ctx.sourceOptions(), memory: null },
+          });
+          a.stats.stats.directoryBytesRead += directory.bytesRead;
+          for (const entry of directory.entries) {
+            if (!entry.isDirectory) {
+              names.push(entry.name);
+            }
+          }
+        } catch {
+          // the reader reports an unreadable central directory
+        }
+      }
+      return new Set([...samplePairsToKeep(names)].map((path) => pathKey(path)));
+    }
+    const indexFiles = await this.indexFiles(a);
+    if (indexFiles) {
+      return new Set([...samplePairsToKeep(indexFiles)].map((path) => pathKey(path)));
+    }
+    return 'all';
+  }
+
+  private async indexFiles(a: Attempt): Promise<string[] | null> {
+    const exp = await this.takeoutRepository.getExport(a.run.exportId);
+    const stored = (exp?.analysis ?? {}) as { indexFiles?: unknown };
+    if (Array.isArray(stored.indexFiles)) {
+      return stored.indexFiles as string[];
+    }
+    if (!exp?.indexFileName) {
+      return null;
+    }
+    const html = await readArchiveEntry(
+      `${a.userFolder}/${exp.indexFileName}`,
+      'tgz',
+      'Takeout/archive_browser.html',
+      64 * 1024 * 1024,
+    ).catch(() => null);
+    return html ? parseArchiveBrowser(html.toString('utf8')).files : null;
+  }
+
+  // ---------- phase: planning (single-pass design 7) ----------
+
+  private async phasePlanning(a: Attempt) {
+    await this.setStatus(a, TakeoutRunStatus.Planning);
+    const run = a.run;
+    const exportId = run.exportId;
     const settings = mergeRunSettings(run.settings);
+
+    // samples: prune to the keep set, then backfill pairs that have none (a part added after the others were read)
+    const keep = samplePairsToKeep(await this.takeoutRepository.getMediaEntryPaths(exportId));
+    await this.takeoutRepository.pruneSamples(exportId, [...keep]);
+    await this.sampleBackfill(a, keep);
+
+    const entryRefs: Array<{ partName: string; seq: number; readError: string | null }> = [];
     const catalogInputs: CatalogInput[] = [];
-    for await (const row of this.takeoutRepository.streamEntriesForExport(run.exportId)) {
+    const catalogKeys = new Set<string>();
+    let unreadableEntries = 0;
+    for await (const row of this.takeoutRepository.streamEntriesForExport(exportId, {
+      catalogVersion: CATALOG_VERSION,
+      excludePartIds: [...(a.ctx?.missingThisAttempt ?? [])],
+    })) {
+      entryRefs.push({ partName: row.partName, seq: row.seq, readError: row.readError });
+      if (row.readError) {
+        unreadableEntries++;
+      }
+      catalogKeys.add(pathKey(row.path));
       catalogInputs.push({
         partName: row.partName,
         path: row.path,
         size: Number(row.size),
         mtime: row.mtime,
-        kind: row.kind as CatalogInput['kind'],
+        // an unreadable entry is 'other' for the planner; its row is overridden below (fix F5)
+        kind: (row.readError ? 'other' : row.kind) as CatalogInput['kind'],
         json: (row.json as CatalogInput['json']) ?? null,
-        checksum: row.checksum,
+        checksum: row.readError ? null : row.checksum,
         sample:
           row.width !== null && row.height !== null && row.sample
             ? { width: row.width, height: row.height, sample: row.sample }
@@ -306,31 +549,665 @@ export class TakeoutRunService extends BaseService {
 
     const catalog = await buildCatalog(catalogInputs, { banned: DEFAULT_BANNED_PATTERNS });
     const plan = await planImport(catalog, settings as any, { rotationProbe: sampleRotationProbe(catalog) });
-
     const rows = await this.buildRunFileRows(run, plan);
+    for (const [i, file] of plan.files.entries()) {
+      const ref = entryRefs[file.catalogIndex];
+      rows[i].entrySeq = ref?.seq ?? null;
+      if (ref?.readError) {
+        rows[i].action = TakeoutRunFileAction.PartUnreadable;
+        rows[i].status = TakeoutRunFileStatus.Skipped;
+        rows[i].reason = ref.readError;
+      }
+    }
+
+    // report-only rows after the plan rows (single-pass design 7.2)
+    const exp = await this.takeoutRepository.getExport(exportId);
+    const parts = await this.takeoutRepository.getPartsByExport(exportId);
+    const missingNow = a.ctx?.missingThisAttempt ?? new Set<string>();
+    const unreadableParts: UnreadablePart[] = [];
+    let seq = rows.length;
+    const reportRow = (takeoutPath: string, partName: string | null, action: TakeoutRunFileAction, reason: string) => {
+      rows.push({
+        runId: run.id,
+        seq: seq++,
+        takeoutPath,
+        partName,
+        entrySeq: null,
+        size: 0,
+        mtime: null,
+        checksum: null,
+        fileKind: 'other',
+        jsonPath: null,
+        matcher: null,
+        originalFileName: null,
+        groupIndex: null,
+        groupOrder: null,
+        groupKind: null,
+        isCover: false,
+        action,
+        status: TakeoutRunFileStatus.Skipped,
+        reason,
+        assetId: null,
+        smallerAssetId: null,
+        plan: null,
+        dependsOnSeq: null,
+        rotation: 0,
+        captureDate: null,
+      });
+    };
+    for (const part of parts) {
+      if (part.isIndex) {
+        continue;
+      }
+      const size = Number(part.size);
+      if (missingNow.has(part.id) || part.isMissing) {
+        reportRow(part.fileName, part.fileName, TakeoutRunFileAction.PartUnreadable, 'archive file missing');
+        unreadableParts.push({ fileName: part.fileName, error: 'archive file missing', offset: null, size });
+        continue;
+      }
+      if (part.catalogStatus !== TakeoutCatalogStatus.Error || part.catalogVersion !== CATALOG_VERSION) {
+        continue;
+      }
+      const error = part.catalogError ?? 'unreadable';
+      const offset = part.catalogErrorOffset === null ? null : Number(part.catalogErrorOffset);
+      let reason: string;
+      if (error.startsWith('gzip CRC mismatch')) {
+        reason = 'the part is corrupt (gzip CRC mismatch); none of its files was imported; download this part again';
+      } else if (part.kind === 'zip') {
+        reason = `${error}; no file of this part could be read`;
+      } else {
+        reason = `${error} at byte ${offset ?? '?'} of ${size}; later files of this part could not be read`;
+      }
+      reportRow(part.fileName, part.fileName, TakeoutRunFileAction.PartUnreadable, reason);
+      unreadableParts.push({ fileName: part.fileName, error, offset, size });
+    }
+
+    // index cross-check against the catalog (by pathKey)
+    const indexFiles = await this.indexFiles(a);
+    let indexMissing: string[] | null = null;
+    let notInIndex = 0;
+    if (indexFiles) {
+      indexMissing = [];
+      const indexKeys = new Set<string>();
+      for (const path of indexFiles) {
+        const key = pathKey(path);
+        indexKeys.add(key);
+        if (!catalogKeys.has(key)) {
+          indexMissing.push(path);
+          reportRow(
+            path,
+            null,
+            TakeoutRunFileAction.MissingFromArchive,
+            'listed in the Takeout index but not found in any readable part',
+          );
+        }
+      }
+      for (const key of catalogKeys) {
+        if (!indexKeys.has(key)) {
+          notInIndex++;
+        }
+      }
+    }
+
+    const lastRead: LastReadAnalysis = {
+      at: new Date().toISOString(),
+      runId: run.id,
+      catalogSummary: catalog.summary,
+      indexMissingFiles: indexMissing ? { count: indexMissing.length, sample: indexMissing.slice(0, 200) } : null,
+      notInIndex,
+      unreadableParts,
+      unreadableEntries,
+    };
+    const input = storedAnalysisInput(exp, parts, lastRead);
+    const analysis = analyzeExport(input);
+    const storedAnalysis = { ...(exp?.analysis as object), ...analysis, lastRead };
+
     const bytesTotal = rows
       .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
-      .reduce((s, r) => s + Number(r.size), 0);
-    const writeParts = new Set(
-      rows
-        .filter((r) => r.status === TakeoutRunFileStatus.Planned && r.action === TakeoutRunFileAction.Upload)
-        .map((r) => r.partName),
+      .reduce((sum, r) => sum + Number(r.size), 0);
+    // "deferred" is recounted as planned uploads without a blob
+    const withoutBlob = rows.filter(
+      (r) =>
+        r.action === TakeoutRunFileAction.Upload &&
+        r.status === TakeoutRunFileStatus.Planned &&
+        r.checksum &&
+        !a.staging!.hasBlob(hex(r.checksum)),
     );
-    const partSizes = await this.takeoutRepository.getPartsByExport(run.exportId);
-    const archiveBytesTotal = partSizes
-      .filter((p) => writeParts.has(p.fileName))
-      .reduce((s, p) => s + Number(p.size), 0);
+    a.stats.stats.deferredFiles = withoutBlob.length;
+    a.stats.stats.deferredBytes = withoutBlob.reduce((sum, r) => sum + Number(r.size), 0);
+    const nextStatus = withoutBlob.length > 0 ? TakeoutRunStatus.Fetching : TakeoutRunStatus.Importing;
 
-    await this.ensureFreeSpace(run, bytesTotal);
-    await this.takeoutRepository.insertRunFiles(rows);
-    await this.takeoutRepository.updateRun(runId, {
-      status: TakeoutRunStatus.Importing,
-      bytesTotal,
-      archiveBytesTotal,
+    this.throwIfAborted(a);
+    const ok = await this.takeoutRepository.commitPlan({
+      runId: run.id,
+      token: a.token,
+      rows,
+      nextStatus,
+      runPatch: {
+        bytesTotal,
+        readStats: this.snapshotStats(a) as unknown as object,
+        archiveBytesTotal: this.archiveTotal(a),
+        archiveBytesRead: Math.min(a.stats.covered(), this.archiveTotal(a)),
+      },
+      exportId,
+      exportPatch: {
+        analysis: storedAnalysis,
+        completeness: analysis.completeness as any,
+        analyzedAt: new Date(),
+      },
     });
-    await this.emitRun(runId);
+    if (!ok) {
+      const reason = new LeaseLost();
+      a.controller.abort(reason);
+      throw reason;
+    }
+    a.status = nextStatus;
+    await emitRun(this.lifecycle, run.id);
+    await emitExport(this.lifecycle, exportId);
   }
 
+  /** Samples for pairs that have none: from a staged blob, a server original, zip random access, tgz last */
+  private async sampleBackfill(a: Attempt, keep: Set<string>) {
+    const keepKeys = new Set([...keep].map((path) => pathKey(path)));
+    const withoutSample = await this.takeoutRepository.getEntriesWithoutSample(a.run.exportId);
+    const candidates = withoutSample.filter((row) => keepKeys.has(pathKey(row.path)));
+    if (candidates.length === 0) {
+      return;
+    }
+    const parts = this.usablePartsByName(a);
+    const requests: FetchRequest[] = candidates.map((row) => ({
+      kind: 'sample',
+      checksum: row.checksum!,
+      size: Number(row.size),
+      occurrences: [
+        {
+          partName: row.partName,
+          kind: parts.get(row.partName)?.kind ?? 'tgz',
+          seq: row.seq,
+          path: row.path,
+          size: Number(row.size),
+          endOffset: null,
+        },
+      ],
+      cursor: 0,
+      satisfied: false,
+      failure: null,
+      entryId: row.id,
+    }));
+    const unserved = await fetchEntries(a.ctx!, parts, requests);
+    for (const request of unserved) {
+      await this.takeoutRepository.updateEntry(request.entryId!, { sampleSkipped: 'decodeError' as any });
+    }
+  }
+
+  private usablePartsByName(a: Attempt): Map<string, ReadPartRow> {
+    return new Map(a.parts.filter((p) => !p.isMissing).map((p) => [p.fileName, p]));
+  }
+
+  // ---------- repair (single-pass design 9.1) ----------
+
+  /** Every asset-less target back to staging (complete) or unlinked; a target whose asset exists becomes created */
+  private async phaseRepair(a: Attempt) {
+    this.throwIfAborted(a);
+    await reclaimRunTargets(this.lifecycle, a.runId, a.staging, 'stage');
+  }
+
+  // ---------- phase: fetching (single-pass design 8) ----------
+
+  private async phaseFetching(a: Attempt) {
+    this.throwIfAborted(a);
+    const run = a.run;
+    let rows = await this.takeoutRepository.getRunFilesForImport(a.runId);
+
+    // 8.1.1 server re-check: files imported meanwhile by another client are neither fetched nor moved
+    const plannedUploads = rows.filter(
+      (r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned && r.checksum,
+    );
+    for (let i = 0; i < plannedUploads.length; i += 500) {
+      const batch = plannedUploads.slice(i, i + 500);
+      const hits = await this.takeoutRepository.getUploadAssetsByChecksums(
+        run.userId,
+        batch.map((r) => r.checksum!),
+      );
+      const byHex = new Map(hits.map((hit) => [hit.checksum.toString('hex'), hit]));
+      for (const row of batch) {
+        const hit = byHex.get(row.checksum!.toString('hex'));
+        if (hit) {
+          await this.takeoutRepository.updateRunFile(row.id, {
+            action: TakeoutRunFileAction.ServerDuplicate,
+            assetId: hit.id,
+            reason: hit.deletedAt ? 'already on the server (in trash)' : 'already on the server',
+          });
+        }
+      }
+    }
+    rows = await this.takeoutRepository.getRunFilesForImport(a.runId);
+    const missing = rows.filter(
+      (r) =>
+        r.action === TakeoutRunFileAction.Upload &&
+        r.status === TakeoutRunFileStatus.Planned &&
+        r.checksum &&
+        !a.staging!.hasBlob(hex(r.checksum)),
+    );
+    if (missing.length === 0) {
+      return;
+    }
+    await this.setStatus(a, TakeoutRunStatus.Fetching);
+
+    // 8.1.2 exact space check (plan rows are committed: a Resume after freeing space skips reading and planning)
+    let need = missing.reduce((sum, r) => sum + Number(r.size), 0);
+    if (a.staging!.crossDevice) {
+      need += rows
+        .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
+        .reduce((sum, r) => sum + Number(r.size), 0);
+    }
+    const available = await this.availableBytes(a).catch(() => Infinity);
+    const usable = available - this.readLimits.freeSpaceReserve;
+    if (usable < need) {
+      throw new RunFailure(`Not enough free space: ${formatBytes(need - usable)} more needed`);
+    }
+
+    const unserved = await fetchEntries(a.ctx!, this.usablePartsByName(a), await this.fetchRequests(a, missing));
+    const failures = new Map(unserved.map((request) => [hex(request.checksum), request.failure]));
+    for (const row of missing) {
+      const failure = failures.get(hex(row.checksum!));
+      if (failure === undefined) {
+        continue;
+      }
+      await this.takeoutRepository.updateRunFile(row.id, {
+        status: TakeoutRunFileStatus.Error,
+        error: failure ?? 'file not found in the archive',
+      });
+    }
+    await this.persistProgress(a);
+  }
+
+  /** One request per distinct checksum (R2-B3), every catalogued occurrence a fallback; legacy rows by path */
+  private async fetchRequests(a: Attempt, rows: any[]): Promise<FetchRequest[]> {
+    const parts = this.usablePartsByName(a);
+    const byHex = new Map<string, FetchRequest>();
+    for (const row of rows) {
+      const h = hex(row.checksum);
+      let request = byHex.get(h);
+      if (!request) {
+        request = {
+          kind: 'blob',
+          checksum: row.checksum,
+          size: Number(row.size),
+          occurrences: [],
+          cursor: 0,
+          satisfied: false,
+          failure: null,
+        };
+        byHex.set(h, request);
+      }
+      if (row.entrySeq === null && row.partName) {
+        // planned by the old code: no entry position, located by (part, path, size)
+        request.occurrences.push({
+          partName: row.partName,
+          kind: parts.get(row.partName)?.kind ?? 'tgz',
+          seq: null,
+          path: row.takeoutPath,
+          size: Number(row.size),
+          endOffset: null,
+        });
+      }
+    }
+    const checksums = byHex
+      .values()
+      .map((request) => request.checksum)
+      .toArray();
+    for (let i = 0; i < checksums.length; i += 500) {
+      const occurrences = await this.takeoutRepository.getEntryOccurrences(
+        a.run.exportId,
+        checksums.slice(i, i + 500),
+        CATALOG_VERSION,
+      );
+      for (const occurrence of occurrences) {
+        const request = byHex.get(occurrence.checksum!.toString('hex'));
+        request?.occurrences.push({
+          partName: occurrence.partName,
+          kind: occurrence.kind,
+          seq: occurrence.seq,
+          path: occurrence.path,
+          size: Number(occurrence.size),
+          endOffset: occurrence.endOffset === null ? null : Number(occurrence.endOffset),
+        } satisfies FetchOccurrence);
+      }
+    }
+    return byHex.values().toArray();
+  }
+
+  // ---------- phase: importing (single-pass design 9.2) ----------
+
+  private async phaseImporting(a: Attempt) {
+    await this.setStatus(a, TakeoutRunStatus.Importing);
+    const run = a.run;
+    const settings = mergeRunSettings(run.settings);
+    const rows = await this.takeoutRepository.getRunFilesForImport(a.runId);
+    // fix F17: the error policy counts the errors of this attempt only
+    const errorBaseline = rows.filter((r) => r.status === TakeoutRunFileStatus.Error).length;
+
+    const byGroup = new Map<number, any[]>();
+    for (const row of rows) {
+      if (row.groupIndex === null) {
+        continue;
+      }
+      const list = byGroup.get(row.groupIndex) ?? [];
+      list.push(row);
+      byGroup.set(row.groupIndex, list);
+    }
+
+    const quotaUser = await this.userRepository.get(run.userId, {} as any).catch(() => null);
+    const quota = {
+      limit: quotaUser?.quotaSizeInBytes ?? null,
+      base: Number(quotaUser?.quotaUsageInBytes ?? 0),
+      created: 0,
+    };
+    let bytesDone = Number(run.bytesDone ?? 0);
+
+    const order = orderGroups(
+      byGroup.keys(),
+      groupEdges(
+        rows.map((row) => ({
+          seq: row.seq,
+          groupIndex: row.groupIndex,
+          dependsOnSeq: row.dependsOnSeq,
+          isCover: row.isCover,
+          links: ((row.plan as any)?.links ?? []) as number[],
+        })),
+      ),
+    );
+    for (const groupIndex of order) {
+      if (a.signal.aborted) {
+        break;
+      }
+      const members = byGroup.get(groupIndex)!;
+      if (members.every((m) => TERMINAL_ROW_STATUSES.has(m.status)) && !this.stackPending(members, rows)) {
+        continue;
+      }
+      let pending = 0;
+      const written: any[] = [];
+      for (const m of members) {
+        if (m.action !== TakeoutRunFileAction.Upload || m.status !== TakeoutRunFileStatus.Planned) {
+          continue;
+        }
+        if (!m.checksum) {
+          await this.takeoutRepository.updateRunFile(m.id, {
+            status: TakeoutRunFileStatus.Error,
+            error: 'the file has no checksum',
+          });
+          m.status = TakeoutRunFileStatus.Error;
+          continue;
+        }
+        if (quota.limit !== null && quota.base + quota.created + pending + Number(m.size) > quota.limit) {
+          // the row stays planned: Resume imports it once the quota allows (fix F16)
+          throw new RunFailure('quota exceeded');
+        }
+        const uuid = m.newAssetId ?? randomUUID();
+        const ext = extname(m.originalFileName ?? m.takeoutPath).toLowerCase();
+        const targetPath = StorageCore.getNestedPath(StorageFolder.Upload, run.userId, `${uuid}${ext}`);
+        // recorded before the rename: repair relies on it
+        await this.takeoutRepository.updateRunFile(m.id, { newAssetId: uuid, targetPath });
+        m.newAssetId = uuid;
+        m.targetPath = targetPath;
+        let moved = await a.staging!.moveTo(hex(m.checksum), targetPath, Number(m.size));
+        if (moved === 'missing') {
+          // the blob vanished (hand deletion, race): fetch this one entry inline
+          await fetchEntries(a.ctx!, this.usablePartsByName(a), await this.fetchRequests(a, [m]));
+          moved = await a.staging!.moveTo(hex(m.checksum), targetPath, Number(m.size));
+          if (moved === 'missing') {
+            await this.takeoutRepository.updateRunFile(m.id, {
+              targetPath: null,
+              status: TakeoutRunFileStatus.Error,
+              error: 'staged file missing',
+            });
+            m.targetPath = null;
+            m.status = TakeoutRunFileStatus.Error;
+            continue;
+          }
+        }
+        await this.takeoutRepository.updateRunFile(m.id, { status: TakeoutRunFileStatus.Written });
+        m.status = TakeoutRunFileStatus.Written;
+        pending += Number(m.size);
+        written.push(m);
+      }
+      if (written.length > 0) {
+        await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, { currentFile: written[0].takeoutPath });
+      }
+      await this.processGroup(run, settings, groupIndex, byGroup, rows, errorBaseline, a.staging);
+      // only assets actually created count for the quota and the progress (a server duplicate does not)
+      const created = written
+        .filter(
+          (m) =>
+            m.action === TakeoutRunFileAction.Upload &&
+            (m.status === TakeoutRunFileStatus.Created || m.status === TakeoutRunFileStatus.Done),
+        )
+        .reduce((sum, m) => sum + Number(m.size), 0);
+      quota.created += created;
+      if (created > 0) {
+        bytesDone += created;
+        await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, { bytesDone });
+      }
+    }
+    if (a.signal.aborted) {
+      return;
+    }
+
+    // section 11 D1: rotate each rotate-only-pair original, re-detect its faces and reconcile the dropped copy's
+    // named people, then drop the copy. Runs after uploads so the originals exist.
+    if (settings.applyRotation) {
+      await this.phaseRotateFaces(run, settings, rows);
+    }
+  }
+
+  /** assembleStackIds would stack 2 or more assets and no member carries the stacked flag yet */
+  private stackPending(members: any[], allRows: any[]): boolean {
+    const ids = assembleStackIds(
+      members
+        .filter((m) => m.status === TakeoutRunFileStatus.Done && m.assetId)
+        .sort((x, y) => (x.groupOrder ?? 0) - (y.groupOrder ?? 0))
+        .map((m) => ({ assetId: m.assetId, smallerAssetId: m.smallerAssetId })),
+      this.linkAssetIds(members, allRows),
+    );
+    return ids.length >= 2 && members.every((m) => !(m.fallbacks ?? []).includes('stacked'));
+  }
+
+  // ---------- phase: finishing (single-pass design 9.3) ----------
+
+  private async phaseFinishing(a: Attempt) {
+    await this.setStatus(a, TakeoutRunStatus.Finishing);
+    const runId = a.runId;
+    // error rows keep no file: staging is discarded next, so unlink
+    for (const row of await this.takeoutRepository.getRunFilesWithTarget(runId)) {
+      if (row.status !== TakeoutRunFileStatus.Error || row.action !== TakeoutRunFileAction.Upload) {
+        continue;
+      }
+      const result = await a.staging!.reclaim(row, 'unlink');
+      await applyReclaim(this.takeoutRepository, row, result);
+    }
+
+    // Finding T9/#9: verify each created asset's post-import state and re-queue the jobs that silently did not run
+    await verifyAndRequeue(this.lifecycle, await this.takeoutRepository.getRunFilesForImport(runId));
+
+    const run = (await this.takeoutRepository.getRun(runId))!;
+    const counters = countersFromRows((await this.takeoutRepository.getCounterRows(runId)) as any, {
+      total: Number(run.bytesTotal),
+      done: Number(run.bytesDone),
+    });
+    const held = await a.staging!.bytesHeld();
+    a.stats.stats.discardedStagedFiles = held.files;
+    a.stats.stats.discardedStagedBytes = held.bytes;
+    a.stats.stats.stagingBytes = 0;
+    a.stats.stats.stagingExpiresAt = null;
+    a.stats.stats.etaSeconds = null;
+    await a.staging!.discard();
+    const ok = await this.takeoutRepository.finishRunCas(
+      runId,
+      [TakeoutRunStatus.Finishing],
+      a.token,
+      TakeoutRunStatus.Completed,
+      {
+        counters: counters as unknown as object,
+        finishedAt: new Date(),
+        currentFile: null,
+        hasStaging: false,
+        readStats: this.snapshotStats(a) as unknown as object,
+        archiveBytesRead: this.archiveTotal(a),
+      },
+    );
+    if (!ok) {
+      return;
+    }
+
+    const uploaded = counters.result.uploaded;
+    const dupes = counters.result.serverDuplicates;
+    const errors = counters.result.errors;
+    await this.notificationRepository
+      .create({
+        userId: run.userId,
+        type: NotificationType.Custom,
+        title: `Takeout import finished: ${uploaded} uploaded, ${dupes} duplicates, ${errors} errors`,
+        data: { runId } as any,
+      } as any)
+      .catch(() => {});
+    this.websocketRepository.clientSend('on_notification' as any, run.userId, { runId } as any);
+    await queueAnalysis(this.lifecycle, run.exportId).catch(() => {});
+    await emitRun(this.lifecycle, runId);
+    this.albumCache.delete(runId);
+  }
+
+  // ---------- failure (single-pass design 10.2) ----------
+
+  private async failRun(a: Attempt, reason: Error) {
+    const runId = a.runId;
+    this.logger.error(`Takeout run ${runId} failed: ${reason.message}`);
+    try {
+      await reclaimRunTargets(this.lifecycle, runId, a.staging, 'stage');
+    } catch (error) {
+      // the share is unreachable: the boot step finishes the reclaim
+      this.logger.warn(`Takeout run ${runId}: reclaim failed, boot recovery retries it: ${messageOf(error)}`);
+    }
+    await this.takeoutRepository.updatePartsOfRun(runId).catch(() => {});
+    if (a.staging) {
+      const held = await a.staging.bytesHeld().catch(() => ({ bytes: 0 }));
+      a.stats.stats.stagingBytes = held.bytes;
+      a.stats.stats.stagingExpiresAt = new Date(Date.now() + STAGING_TTL_MS).toISOString();
+    }
+    a.stats.stats.etaSeconds = null;
+    const run = await this.takeoutRepository.getRun(runId);
+    const counters = run
+      ? countersFromRows((await this.takeoutRepository.getCounterRows(runId)) as any, {
+          total: Number(run.bytesTotal),
+          done: Number(run.bytesDone),
+        })
+      : null;
+    const ok = await this.takeoutRepository
+      .finishRunCas(runId, TAKEOUT_RUNNING_RUN_STATUSES, a.token, TakeoutRunStatus.Failed, {
+        error: reason.message,
+        finishedAt: new Date(),
+        currentFile: null,
+        readStats: this.snapshotStats(a) as unknown as object,
+        ...(counters && { counters: counters as unknown as object }),
+      })
+      .catch(() => false);
+    if (!ok) {
+      return;
+    }
+    if (run) {
+      await queueAnalysis(this.lifecycle, run.exportId).catch(() => {});
+    }
+    await emitRun(this.lifecycle, runId);
+  }
+
+  // ---------- progress (single-pass design 6.9, 13.2) ----------
+
+  private archiveTotal(a: Attempt): number {
+    return Number(a.run.archiveBytesTotal ?? 0) + (a.ctx?.archiveTotalGrowth ?? 0);
+  }
+
+  private snapshotStats(a: Attempt) {
+    const stats = a.stats.stats;
+    for (const ps of Object.values(stats.parts)) {
+      a.stats.sync(ps);
+    }
+    stats.transportRetries = a.stats.transportRetries();
+    if (a.staging) {
+      stats.crossDevice ||= a.staging.crossDevice;
+    }
+    return stats;
+  }
+
+  private async persistProgress(a: Attempt) {
+    const total = this.archiveTotal(a);
+    await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, {
+      readStats: this.snapshotStats(a) as unknown as object,
+      archiveBytesTotal: total,
+      archiveBytesRead: Math.min(a.stats.covered(), total),
+    });
+  }
+
+  private emitExportThrottled(a: Attempt, force = false) {
+    const now = Date.now();
+    if (!force && now - a.lastExportEmit < 1000) {
+      return;
+    }
+    a.lastExportEmit = now;
+    void emitExport(this.lifecycle, a.run.exportId).catch(() => {});
+  }
+
+  /** The 2 s tick: cancel fallback, stall watchdog, budget refresh, persisted progress and the run event */
+  private async tickProgress(a: Attempt) {
+    const run = await this.takeoutRepository.getRun(a.runId);
+    if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+      // the 2 s poll is the fallback when the TakeoutRunCancel server event did not reach this worker
+      a.controller.abort(run?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost());
+      return;
+    }
+    a.ctx?.checkStall();
+    const now = Date.now();
+    if (a.ctx && now - a.lastStatfs >= STATFS_REFRESH_MS) {
+      a.lastStatfs = now;
+      await a.ctx.budget.refresh();
+      // the bytes read so far of the parts being read, for the parts table
+      for (const { partId } of a.stats.meters()) {
+        const ps = a.stats.stats.parts[partId];
+        a.stats.sync(ps);
+        await this.takeoutRepository.updatePart(partId, { bytesRead: ps.bytesRead });
+      }
+    }
+    const total = this.archiveTotal(a);
+    if (a.status === TakeoutRunStatus.Reading || a.status === TakeoutRunStatus.Fetching) {
+      a.stats.stats.etaSeconds =
+        a.status === TakeoutRunStatus.Reading
+          ? a.stats.eta(total, Math.max(1, a.stats.stats.readers))
+          : a.stats.eta(a.stats.stats.fetchBytesTotal, Math.max(1, this.readLimits.readers));
+    } else {
+      a.stats.stats.etaSeconds = null;
+    }
+    const patch: Record<string, unknown> = {
+      readStats: this.snapshotStats(a),
+      archiveBytesTotal: total,
+      archiveBytesRead: Math.min(a.stats.covered(), total),
+    };
+    if (a.status === TakeoutRunStatus.Importing) {
+      const rows = await this.takeoutRepository.getCounterRows(a.runId);
+      patch.counters = countersFromRows(rows as any, { total: Number(run.bytesTotal), done: Number(run.bytesDone) });
+    }
+    if (await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, patch)) {
+      await emitRun(this.lifecycle, a.runId);
+    }
+    if (a.status === TakeoutRunStatus.Reading) {
+      this.emitExportThrottled(a);
+    }
+  }
+
+  /** @deprecated kept for the existing specs: see verifyAndRequeue in takeout-lifecycle */
+  private async verifyAndRequeue(rows: any[]) {
+    await verifyAndRequeue(this.lifecycle, rows);
+  }
+
+  /** Map the frozen plan into takeout_run_file rows, applying the server pre-check (2.6 step 4). */
   /** Map the frozen plan into takeout_run_file rows, applying the server pre-check (2.6 step 4). */
   private async buildRunFileRows(run: any, plan: ImportPlan) {
     const groupOfKey = new Map<
@@ -512,179 +1389,6 @@ export class TakeoutRunService extends BaseService {
     return rows;
   }
 
-  // ---------- phase: importing ----------
-
-  private async phaseImporting(runId: string, signal: AbortSignal) {
-    const run = await this.takeoutRepository.getRun(runId);
-    if (!run) {
-      return;
-    }
-    const settings = mergeRunSettings(run.settings);
-    const folder = await this.takeoutRepository.getFolder(run.userId);
-    const rows = await this.takeoutRepository.getRunFilesForImport(runId);
-
-    // quota: read the user's cap and usage once, keep a running total of bytes written this run
-    const quotaUser = await this.userRepository.get(run.userId, {} as any).catch(() => null);
-    const quotaLimit = quotaUser?.quotaSizeInBytes ?? null;
-    const quotaBase = Number(quotaUser?.quotaUsageInBytes ?? 0);
-    let quotaWritten = 0;
-
-    // resume repair
-    for (const row of rows) {
-      if (row.status === TakeoutRunFileStatus.Planned && row.targetPath) {
-        await unlink(row.targetPath).catch(() => {});
-      } else if (row.status === TakeoutRunFileStatus.Written && row.targetPath) {
-        const ok = await this.verifyWritten(row.targetPath, row.checksum, Number(row.size));
-        if (!ok) {
-          await unlink(row.targetPath).catch(() => {});
-          await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Planned });
-          row.status = TakeoutRunFileStatus.Planned;
-        }
-      }
-    }
-
-    const byGroup = new Map<number, any[]>();
-    for (const row of rows) {
-      if (row.groupIndex === null) {
-        continue;
-      }
-      const list = byGroup.get(row.groupIndex) ?? [];
-      list.push(row);
-      byGroup.set(row.groupIndex, list);
-    }
-
-    const needWrite = rows.filter(
-      (r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned,
-    );
-    const wantByPart = new Map<string, Map<string, any>>();
-    for (const row of needWrite) {
-      const part = row.partName ?? '';
-      const map = wantByPart.get(part) ?? new Map();
-      map.set(row.takeoutPath, row);
-      wantByPart.set(part, map);
-    }
-
-    // process groups already fully ready (server duplicates, resume)
-    for (const [groupIndex, members] of byGroup) {
-      if (members.every((m) => this.rowReady(m, rows))) {
-        await this.processGroup(run, settings, groupIndex, byGroup, rows);
-      }
-    }
-
-    // walk the parts that have pending writes
-    const allExportParts = await this.takeoutRepository.getPartsByExport(run.exportId);
-    const parts = allExportParts
-      .filter((p) => !p.isIndex && wantByPart.has(p.fileName))
-      .sort((a, b) => (a.segment ?? -1) - (b.segment ?? -1) || a.partNumber - b.partNumber);
-
-    for (const part of parts) {
-      if (signal.aborted) {
-        return;
-      }
-      const wanted = wantByPart.get(part.fileName)!;
-      if (!folder) {
-        continue;
-      }
-      const remaining = rows
-        .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
-        .reduce((s, r) => s + Number(r.size), 0);
-      await this.ensureFreeSpace(run, remaining);
-      const filePath = join(StorageCore.getMediaLocation(), TAKEOUT_ROOT_FOLDER, folder.folderName, part.fileName);
-      const kind = part.kind === 'zip' ? 'zip' : 'tgz';
-
-      await walkArchive(
-        filePath,
-        kind as any,
-        async (entry: any, openStream: () => Promise<NodeJS.ReadableStream>) => {
-          const row = wanted.get(entry.path);
-          if (!row) {
-            return;
-          }
-          if (quotaLimit !== null && quotaBase + quotaWritten + Number(row.size) > quotaLimit) {
-            await this.takeoutRepository.updateRunFile(row.id, {
-              status: TakeoutRunFileStatus.Error,
-              error: 'quota exceeded',
-            });
-            row.status = TakeoutRunFileStatus.Error;
-            throw new RunFailure('quota exceeded');
-          }
-          const uuid = row.newAssetId ?? randomUUID();
-          const ext = extname(row.originalFileName ?? entry.path).toLowerCase();
-          const targetPath = StorageCore.getNestedPath(StorageFolder.Upload, run.userId, `${uuid}${ext}`);
-          await this.takeoutRepository.updateRunFile(row.id, { newAssetId: uuid, targetPath });
-          row.newAssetId = uuid;
-          row.targetPath = targetPath;
-
-          await mkdir(join(targetPath, '..'), { recursive: true });
-          const tap = hashTap();
-          try {
-            const source = await openStream();
-            await pipeline(source, tap.stream, createWriteStream(targetPath, { highWaterMark: 4 * 1024 * 1024 }));
-          } catch (error: any) {
-            await unlink(targetPath).catch(() => {});
-            if (error?.code === 'ENOSPC') {
-              await this.takeoutRepository.updateRunFile(row.id, {
-                status: TakeoutRunFileStatus.Error,
-                error: 'disk full',
-              });
-              throw new RunFailure('Not enough free space');
-            }
-            await this.takeoutRepository.updateRunFile(row.id, {
-              status: TakeoutRunFileStatus.Error,
-              error: String(error?.message ?? error),
-            });
-            row.status = TakeoutRunFileStatus.Error;
-            this.evaluateErrorPolicy(settings, rows, true);
-            return;
-          }
-          const { checksum, size } = tap.result();
-          if (row.checksum && !checksum.equals(row.checksum)) {
-            await unlink(targetPath).catch(() => {});
-            await this.takeoutRepository.updateRunFile(row.id, {
-              status: TakeoutRunFileStatus.Error,
-              error: 'archive changed since the scan',
-            });
-            row.status = TakeoutRunFileStatus.Error;
-            this.evaluateErrorPolicy(settings, rows, true);
-            return;
-          }
-          quotaWritten += size;
-          await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Written });
-          row.status = TakeoutRunFileStatus.Written;
-          await this.takeoutRepository.updateRun(runId, {
-            bytesDone: sqlIncrement('bytesDone', size),
-            currentFile: row.takeoutPath,
-          } as any);
-
-          if (row.groupIndex !== null) {
-            const members = byGroup.get(row.groupIndex)!;
-            if (members.every((m) => this.rowReady(m, rows))) {
-              await this.processGroup(run, settings, row.groupIndex, byGroup, rows);
-            }
-          }
-        },
-        {
-          onBytes: (n) => void this.takeoutRepository.updateRun(runId, { archiveBytesRead: n } as any).catch(() => {}),
-          signal,
-        },
-      );
-    }
-
-    // any group not yet processed: process with ready members only
-    for (const [groupIndex, members] of byGroup) {
-      if (members.some((m) => m.status === TakeoutRunFileStatus.Done)) {
-        continue;
-      }
-      await this.processGroup(run, settings, groupIndex, byGroup, rows);
-    }
-
-    // section 11 D1: rotate each rotate-only-pair original, re-detect its faces and reconcile the dropped copy's
-    // named people, then drop the copy. Runs after uploads so the originals exist.
-    if (settings.applyRotation) {
-      await this.phaseRotateFaces(run, settings, rows);
-    }
-  }
-
   // ---------- section 11 D1: rotate-only face preservation ----------
 
   /**
@@ -782,39 +1486,22 @@ export class TakeoutRunService extends BaseService {
     }
   }
 
-  private rowReady(row: any, allRows: any[]): boolean {
-    if ([TakeoutRunFileStatus.Written, TakeoutRunFileStatus.Created, TakeoutRunFileStatus.Done].includes(row.status)) {
-      return true;
-    }
-    if (row.action === TakeoutRunFileAction.ServerDuplicate || row.action === TakeoutRunFileAction.BetterOnServer) {
-      return true;
-    }
-    if (row.action === TakeoutRunFileAction.AlreadyProcessed && row.dependsOnSeq !== null) {
-      const dep = allRows.find((r) => r.seq === row.dependsOnSeq);
-      return dep ? [TakeoutRunFileStatus.Created, TakeoutRunFileStatus.Done].includes(dep.status) : false;
-    }
-    return false;
-  }
-
-  private async verifyWritten(path: string, checksum: Buffer | null, size: number) {
-    const info = await stat(path).catch(() => null);
-    if (!info || Number(info.size) !== size) {
-      return false;
-    }
-    if (!checksum) {
-      return true;
-    }
-    const tap = hashTap();
-    const { createReadStream } = await import('node:fs');
-    const { Writable } = await import('node:stream');
-    await pipeline(createReadStream(path), tap.stream, new Writable({ write: (_c, _e, cb) => cb() }));
-    return tap.result().checksum.equals(checksum);
-  }
-
   // ---------- per-group processing (2.7) ----------
 
-  private async processGroup(run: any, settings: any, groupIndex: number, byGroup: Map<number, any[]>, allRows: any[]) {
-    const members = [...(byGroup.get(groupIndex) ?? [])].sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
+  private async processGroup(
+    run: any,
+    settings: any,
+    groupIndex: number,
+    byGroup: Map<number, any[]>,
+    allRows: any[],
+    errorBaseline = 0,
+    staging: StagingStore | null = null,
+  ) {
+    // upload members first, then existing-asset members, each by group order (R1-D1): an alreadyProcessed row always
+    // finds its source's asset when both are in one group
+    const members = [...(byGroup.get(groupIndex) ?? [])].sort(
+      (x, y) => uploadFirst(x) - uploadFirst(y) || (x.groupOrder ?? 0) - (y.groupOrder ?? 0),
+    );
     const preError = new Set(members.filter((m) => m.status === TakeoutRunFileStatus.Error).map((m) => m.id));
     for (const row of members) {
       if ([TakeoutRunFileStatus.Done, TakeoutRunFileStatus.Skipped, TakeoutRunFileStatus.Error].includes(row.status)) {
@@ -837,20 +1524,52 @@ export class TakeoutRunService extends BaseService {
           status: TakeoutRunFileStatus.Error,
           error: String(error?.message ?? error),
         });
+        const previous = row.status;
         row.status = TakeoutRunFileStatus.Error;
+        // fix F18: a row that errors without an asset leaves no file under upload/
+        if (row.action === TakeoutRunFileAction.Upload && row.targetPath) {
+          await this.reclaimErrorRow(row, previous, staging);
+        }
       }
     }
     await this.stackGroup(run, members, allRows);
     const groupHadError = members.some((m) => m.status === TakeoutRunFileStatus.Error && !preError.has(m.id));
-    this.evaluateErrorPolicy(settings, allRows, groupHadError);
+    this.evaluateErrorPolicy(settings, allRows, groupHadError, errorBaseline);
+  }
+
+  private async reclaimErrorRow(row: any, previousStatus: string, staging: StagingStore | null) {
+    const reclaimRow = {
+      id: row.id,
+      status: previousStatus,
+      targetPath: row.targetPath,
+      newAssetId: row.newAssetId,
+      size: row.size,
+      checksum: row.checksum,
+      entrySeq: row.entrySeq ?? null,
+    };
+    try {
+      const [asset] = row.newAssetId ? await this.assetRepository.getByIds([row.newAssetId]) : [];
+      if (asset) {
+        return;
+      }
+      if (staging) {
+        await staging.reclaim(reclaimRow, 'stage');
+      } else {
+        await unlink(row.targetPath).catch(() => {});
+      }
+      await this.takeoutRepository.updateRunFile(row.id, { targetPath: null });
+      row.targetPath = null;
+    } catch (error) {
+      this.logger.warn(`Takeout: could not reclaim ${row.targetPath}: ${messageOf(error)}`);
+    }
   }
 
   /**
-   * Apply the onErrors / stopAfterErrors policy (2.6). `stop` halts the run as failed after the
-   * first group that produced an errored row; `continue` with stopAfterErrors=N halts once the
-   * run's total error count reaches N. Both are resumable through handleRun's failure path.
+   * Apply the onErrors / stopAfterErrors policy (2.6). `stop` halts the run as failed after the first group that
+   * produced an errored row; `continue` with stopAfterErrors=N halts once N errors happened in this attempt (fix F17:
+   * errors of earlier attempts do not count again). Both are resumable through handleRun's failure path.
    */
-  private evaluateErrorPolicy(settings: any, allRows: any[], justErrored: boolean) {
+  private evaluateErrorPolicy(settings: any, allRows: any[], justErrored: boolean, errorBaseline = 0) {
     if (settings.onErrors === TakeoutOnErrors.Stop) {
       if (justErrored) {
         throw new RunFailure('stopped after an error');
@@ -859,25 +1578,10 @@ export class TakeoutRunService extends BaseService {
     }
     const limit = Number(settings.stopAfterErrors ?? 0);
     if (limit > 0) {
-      const errors = allRows.filter((r) => r.status === TakeoutRunFileStatus.Error).length;
+      const errors = allRows.filter((r) => r.status === TakeoutRunFileStatus.Error).length - errorBaseline;
       if (errors >= limit) {
         throw new RunFailure('stopped after reaching the error limit');
       }
-    }
-  }
-
-  private async ensureFreeSpace(run: any, remainingBytes: number) {
-    if (run.importAnyway) {
-      return;
-    }
-    const folder = await this.takeoutRepository.getFolder(run.userId);
-    const path = folder
-      ? join(StorageCore.getMediaLocation(), TAKEOUT_ROOT_FOLDER, folder.folderName)
-      : join(StorageCore.getMediaLocation(), TAKEOUT_ROOT_FOLDER);
-    const need = remainingBytes * 1.15 + 5 * 2 ** 30;
-    const usage = await this.storageRepository.checkDiskUsage(path).catch(() => null);
-    if (usage && usage.available < need) {
-      throw new RunFailure('Not enough free space');
     }
   }
 
@@ -1157,7 +1861,12 @@ export class TakeoutRunService extends BaseService {
     if (plan.rotateCopyOf !== undefined) {
       reduced.rotateCopyOf = plan.rotateCopyOf;
     }
-    await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Done, plan: reduced });
+    // an alreadyProcessed row resolved its asset from its source row: keep it on the report
+    await this.takeoutRepository.updateRunFile(row.id, {
+      status: TakeoutRunFileStatus.Done,
+      plan: reduced,
+      ...(row.assetId && { assetId: row.assetId }),
+    });
     row.status = TakeoutRunFileStatus.Done;
     row.plan = reduced;
   }
@@ -1348,151 +2057,6 @@ export class TakeoutRunService extends BaseService {
     return links.map((seq) => allRows.find((r) => r.seq === seq)?.assetId ?? null);
   }
 
-  // ---------- finding T9/#9: post-import verification ----------
-
-  /**
-   * Finding T9/#9 (section 12): the metadata / thumbnail / video-conversion jobs sometimes silently never ran. Verify
-   * the post state of every asset this run created and re-queue exactly the jobs that are missing, rather than trusting
-   * the queue. Re-queued jobs are idempotent (they no-op when the work is already done), so this is safe to run even
-   * while the original jobs may still be in flight.
-   */
-  private async verifyAndRequeue(rows: any[]) {
-    const assetIds = [
-      ...new Set(
-        rows
-          .filter(
-            (r) =>
-              r.assetId &&
-              r.action === TakeoutRunFileAction.Upload &&
-              (r.status === TakeoutRunFileStatus.Created || r.status === TakeoutRunFileStatus.Done),
-          )
-          .map((r) => r.assetId as string),
-      ),
-    ];
-    if (assetIds.length === 0) {
-      return;
-    }
-
-    const jobs: JobItem[] = [];
-    for (let i = 0; i < assetIds.length; i += 500) {
-      const batch = assetIds.slice(i, i + 500);
-      const states = await this.takeoutRepository.getPostImportState(batch);
-      for (const state of states) {
-        const id = state.id;
-        if (!state.metadataDone) {
-          jobs.push({ name: JobName.AssetExtractMetadata, data: { id, source: 'upload' } });
-        }
-        if (!state.hasThumbhash || !state.hasPreview || !state.hasThumbnail) {
-          jobs.push({ name: JobName.AssetGenerateThumbnails, data: { id, source: 'upload' } });
-        }
-        if (state.type === AssetType.Video && !state.hasEncodedVideo) {
-          jobs.push({ name: JobName.AssetEncodeVideo, data: { id } });
-        }
-      }
-    }
-
-    if (jobs.length > 0) {
-      await this.jobRepository.queueAll(jobs);
-    }
-  }
-
-  // ---------- phase: finishing ----------
-
-  private async phaseFinishing(runId: string) {
-    await this.takeoutRepository.updateRun(runId, { status: TakeoutRunStatus.Finishing });
-    const run = await this.takeoutRepository.getRun(runId);
-    if (!run) {
-      return;
-    }
-
-    // Finding T9/#9: verify each created asset's post-import state and re-queue the jobs that silently did not run,
-    // rather than trusting the queue.
-    await this.verifyAndRequeue(await this.takeoutRepository.getRunFilesForImport(runId));
-
-    const rows = await this.takeoutRepository.getCounterRows(runId);
-    const counters = countersFromRows(rows as any, { total: Number(run.bytesTotal), done: Number(run.bytesDone) });
-    await this.takeoutRepository.updateRun(runId, {
-      status: TakeoutRunStatus.Completed,
-      counters: counters as unknown as object,
-      finishedAt: new Date(),
-    });
-
-    const uploaded = counters.result.uploaded;
-    const dupes = counters.result.serverDuplicates;
-    const errors = counters.result.errors;
-    await this.notificationRepository
-      .create({
-        userId: run.userId,
-        type: NotificationType.Custom,
-        title: `Takeout import finished: ${uploaded} uploaded, ${dupes} duplicates, ${errors} errors`,
-        data: { runId } as any,
-      } as any)
-      .catch(() => {});
-    this.websocketRepository.clientSend('on_notification' as any, run.userId, { runId } as any);
-    await this.emitRun(runId);
-    this.albumCache.delete(runId);
-  }
-
-  /** Periodic progress: recompute the counters from the run file rows while importing and push them to the owner. */
-  private async tickProgress(runId: string, controller: AbortController) {
-    const run = await this.takeoutRepository.getRun(runId);
-    if (!run || run.status === TakeoutRunStatus.Cancelling) {
-      // the 2 s poll is the fallback when the TakeoutRunCancel server event did not reach this worker
-      controller.abort();
-      return;
-    }
-    if (run.status !== TakeoutRunStatus.Importing) {
-      return;
-    }
-    const rows = await this.takeoutRepository.getCounterRows(runId);
-    const counters = countersFromRows(rows as any, { total: Number(run.bytesTotal), done: Number(run.bytesDone) });
-    await this.takeoutRepository.updateRun(runId, { counters: counters as unknown as object });
-    await this.emitRun(runId);
-  }
-
-  /**
-   * Cancel cleanup run by the job itself (spec 2.6): the same steps as TakeoutService.cleanupCancelledRun, which the
-   * cancel endpoint uses for queued or stale runs. Unlink partial and written files, mark those rows skipped, set the
-   * run cancelled and emit.
-   */
-  private async finishCancel(runId: string) {
-    const rows = await this.takeoutRepository.getRunFilesWithTargetPath(runId);
-    for (const row of rows) {
-      if (
-        !row.targetPath ||
-        (row.status !== TakeoutRunFileStatus.Planned && row.status !== TakeoutRunFileStatus.Written)
-      ) {
-        continue;
-      }
-      await unlink(row.targetPath).catch(() => {});
-      await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Skipped, reason: 'cancelled' });
-    }
-    const run = await this.takeoutRepository.getRun(runId);
-    if (!run) {
-      return;
-    }
-    const rowsForCounters = await this.takeoutRepository.getCounterRows(runId);
-    const counters = countersFromRows(rowsForCounters as any, {
-      total: Number(run.bytesTotal),
-      done: Number(run.bytesDone),
-    });
-    await this.takeoutRepository.updateRun(runId, {
-      status: TakeoutRunStatus.Cancelled,
-      counters: counters as unknown as object,
-      finishedAt: new Date(),
-      leaseToken: null,
-    });
-    await this.emitRun(runId);
-  }
-
-  private async emitRun(runId: string) {
-    const run = await this.takeoutRepository.getRun(runId);
-    if (run) {
-      const rotationCounts = await this.takeoutRepository.getRotationCounts(runId);
-      this.websocketRepository.clientSend('on_takeout_run', run.userId, mapRunForEvent(run, rotationCounts));
-    }
-  }
-
   // ---------- rotation hook (2.10) ----------
 
   @OnEvent({ name: 'AssetMetadataExtracted' })
@@ -1534,8 +2098,6 @@ export class TakeoutRunService extends BaseService {
     return TakeoutRotationState.Applied;
   }
 }
-
-class RunFailure extends Error {}
 
 function firstString(...values: unknown[]): string | null {
   for (const v of values) {
@@ -1677,30 +2239,4 @@ function buildRowPlan(
     return { ...base, ...rotatePlan };
   }
   return base;
-}
-
-function sqlIncrement(column: string, amount: number) {
-  // Kysely raw increment for a bigint column
-  return sql`${sql.ref(column)} + ${amount}`;
-}
-
-function mapRunForEvent(run: any, _rotationCounts: Record<string, number>) {
-  const counters = (run.counters ?? {}) as any;
-  return {
-    id: run.id,
-    exportId: run.exportId,
-    status: run.status,
-    importAnyway: run.importAnyway,
-    settings: run.settings,
-    counters,
-    bytesTotal: Number(run.bytesTotal ?? 0),
-    bytesDone: Number(run.bytesDone ?? 0),
-    archiveBytesTotal: Number(run.archiveBytesTotal ?? 0),
-    archiveBytesRead: Number(run.archiveBytesRead ?? 0),
-    currentFile: run.currentFile,
-    error: run.error,
-    startedAt: run.startedAt ? run.startedAt.toISOString() : null,
-    finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,
-    createdAt: run.createdAt.toISOString(),
-  };
 }

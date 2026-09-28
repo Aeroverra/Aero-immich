@@ -1,94 +1,140 @@
 // Public API of the pure takeout library (spec section 5.4). B consumes only these exports.
 
+export { ANALYSIS_REASONS } from 'src/takeout/types';
 export type {
-  ArchiveKind,
-  PartName,
-  FolderFile,
-  DetectedPart,
-  DetectedExport,
-  ArchiveBrowserIndex,
-  Completeness,
-  ExportAnalysisInput,
-  ExportAnalysis,
-  ExportAnalysisPart,
-  AnalysisReason,
-  ArchiveEntryInfo,
-  EntryHandler,
-  WalkOptions,
-  EntryKind,
-  ImageSample,
-  ImageSampleResult,
-  Rotation,
-  GoogleMetadata,
-  CompactGoogleJson,
-  AssetMetadataFromJson,
   AlbumFromJson,
-  CatalogInput,
-  MatcherName,
-  CatalogSummary,
-  RawJpgMode,
+  AnalysisReason,
+  ArchiveBrowserIndex,
+  ArchiveEntryInfo,
+  ArchiveKind,
+  AssetMetadataFromJson,
   BurstMode,
-  HeicJpgMode,
-  VideoBoostMode,
-  TakeoutSettings,
-  TemplateVars,
-  DateRange,
-  GroupKind,
-  PlanAction,
-  PlannedAssetData,
-  PlannedFile,
-  PlannedGroup,
-  ImportPlan,
-  RotatePair,
-  PlanContext,
-  ZoneSource,
-  DeviceClass,
   CaptureExifInput,
   CaptureTimeInput,
   CaptureTimeResult,
-  TakeoutCounters,
+  CatalogInput,
+  CatalogStatus,
+  CatalogSummary,
+  CompactGoogleJson,
+  Completeness,
   CounterRow,
+  DateRange,
+  DetectedExport,
+  DetectedPart,
+  DeviceClass,
+  EntryHandler,
+  EntryKind,
+  EntryOpener,
+  ExportAnalysis,
+  ExportAnalysisInput,
+  ExportAnalysisPart,
+  FileFingerprint,
+  FolderFile,
+  GoogleMetadata,
+  GroupKind,
+  HeicJpgMode,
+  ImageSample,
+  ImageSampleResult,
+  ImportPlan,
+  LastReadAnalysis,
+  MatcherName,
+  PartName,
+  PlanAction,
+  PlanContext,
+  PlannedAssetData,
+  PlannedFile,
+  PlannedGroup,
+  RawJpgMode,
+  ReadMeter,
+  RotatePair,
+  Rotation,
+  RunPartStatus,
+  SizeCheck,
+  TakeoutCounters,
+  TakeoutReadStats,
+  TakeoutRunPartStats,
+  TakeoutSettings,
+  TemplateVars,
+  UnreadablePart,
+  VideoBoostMode,
+  WalkOptions,
+  WalkResult,
+  WalkSourceOptions,
+  ZoneSource,
 } from 'src/takeout/types';
 
 export { compareBytes, sortBytes } from 'src/takeout/byte-order';
 export { nfc } from 'src/takeout/paths';
 
-export { parsePartName, groupExports, takeoutTagName } from 'src/takeout/part-names';
-export { parseArchiveBrowser } from 'src/takeout/archive-browser';
-export { analyzeExport } from 'src/takeout/export-analysis';
+export { parseArchiveBrowser, parseSizeText } from 'src/takeout/archive-browser';
+export { SIZE_RATIO_LOW, SIZE_RATIO_SHORT, analyzeExport } from 'src/takeout/export-analysis';
+export { groupExports, parsePartName, takeoutTagName } from 'src/takeout/part-names';
 
-export { walkArchive, listZipNames, readArchiveEntry } from 'src/takeout/archive-reader';
-export { hashTap } from 'src/takeout/hashing';
+export { readArchiveEntry, readZipDirectory, readZipEntriesAt, walkArchive } from 'src/takeout/archive-reader';
+export type { ZipDirectory, ZipDirectoryEntry } from 'src/takeout/archive-reader';
+export { ByteLease, ByteSemaphore } from 'src/takeout/byte-semaphore';
+export { ChecksumSet } from 'src/takeout/checksum-set';
+export {
+  ArchiveChangedError,
+  ArchiveDataError,
+  EntryDataError,
+  GzipIntegrityError,
+  PartMissingError,
+  isArchiveDataError,
+  messageOf,
+} from 'src/takeout/errors';
+export {
+  FileSource,
+  fingerprintOf,
+  isTransportError,
+  newReadMeter,
+  nodeFileSourceFs,
+  realClock,
+  sameFingerprint,
+} from 'src/takeout/file-source';
+export type { FileHandleLike, FileSourceClock, FileSourceFs, FileSourceOptions } from 'src/takeout/file-source';
+export { groupEdges, orderGroups } from 'src/takeout/group-order';
+export type { GroupOrderRow } from 'src/takeout/group-order';
+export { hashTap, sha1 } from 'src/takeout/hashing';
+export { pathKey } from 'src/takeout/path-key';
+export { chooseReadMode, decideAfterHash, decideAfterProbe, hex } from 'src/takeout/staging-policy';
+export type { ReadMode, StageDecision, StagingLimits, StagingView } from 'src/takeout/staging-policy';
 
-export { classifyEntry, isDecodable } from 'src/takeout/media-types';
+export { EDITED_NAME_RE, isEditedCopy, originalNameOfEdited, samplePairsToKeep } from 'src/takeout/edited';
 export { computeImageSample, detectRotationFromSamples, rotateSample } from 'src/takeout/image-sample';
-export { EDITED_NAME_RE, originalNameOfEdited, isEditedCopy, samplePairsToKeep } from 'src/takeout/edited';
+export { classifyEntry, isDecodable } from 'src/takeout/media-types';
 
 export {
-  compactGoogleJson,
-  parseGoogleJson,
-  isAsset,
-  isAlbum,
-  asMetadata,
-  googlePhotosExtra,
   albumFromJson,
+  asMetadata,
+  compactGoogleJson,
+  googlePhotosExtra,
+  isAlbum,
+  isAsset,
+  parseGoogleJson,
   sanitizedTitle,
 } from 'src/takeout/google-json';
 
-export { buildCatalog } from 'src/takeout/catalog';
-export type { TakeoutCatalog, CatalogAsset } from 'src/takeout/catalog';
 export { DEFAULT_BANNED_PATTERNS } from 'src/takeout/banned';
+export { buildCatalog } from 'src/takeout/catalog';
+export type { CatalogAsset, TakeoutCatalog } from 'src/takeout/catalog';
 
 export {
   DEFAULT_TAKEOUT_SETTINGS,
   mergeSettings,
-  validateSettings,
   renderTemplate,
   runTags,
+  validateSettings,
 } from 'src/takeout/settings';
 
-export { parseDateRange, inRange } from 'src/takeout/date-range';
+export { inRange, parseDateRange } from 'src/takeout/date-range';
 
+export { countersFromRows, emptyCounters } from 'src/takeout/counters';
 export { planImport, sampleRotationProbe } from 'src/takeout/planner';
-export { resolveCaptureTime, classifyDevice, sidecarDateString, wallTimeAsUtc, toLuxonZone } from 'src/takeout/timezone';
-export { emptyCounters, countersFromRows } from 'src/takeout/counters';
+export {
+  classifyDevice,
+  resolveCaptureTime,
+  sidecarDateString,
+  toLuxonZone,
+  wallTimeAsUtc,
+} from 'src/takeout/timezone';

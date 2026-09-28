@@ -21,7 +21,14 @@ function row(partial: Partial<CounterRow>): CounterRow {
 describe('countersFromRows', () => {
   it('derives every counter from grouped rows', () => {
     const rows: CounterRow[] = [
-      row({ action: 'upload', status: 'done', fileKind: 'image', matcher: 'fastTrack', count: 3, fallbacks: ['tagged', 'albumAdded'] }),
+      row({
+        action: 'upload',
+        status: 'done',
+        fileKind: 'image',
+        matcher: 'fastTrack',
+        count: 3,
+        fallbacks: ['tagged', 'albumAdded'],
+      }),
       row({ action: 'upload', status: 'planned', fileKind: 'video', matcher: 'normal', count: 2 }),
       row({ action: 'upload', status: 'done', fileKind: 'image', reason: 'server had a smaller version', count: 1 }),
       row({ action: 'serverDuplicate', status: 'done', fileKind: 'image', count: 4 }),
@@ -37,7 +44,14 @@ describe('countersFromRows', () => {
       row({ action: 'banned', status: 'skipped', fileKind: 'banned', count: 1 }),
       row({ action: 'sidecarXmp', status: 'skipped', fileKind: 'sidecar', count: 2 }),
       row({ action: 'missingMetadata', status: 'skipped', fileKind: 'image', count: 1 }),
-      row({ action: 'upload', status: 'done', fileKind: 'image', rotationState: 'applied', count: 1, fallbacks: ['zoneAssumed', 'stacked', 'albumCreated:Album A', 'metadataSaved'] }),
+      row({
+        action: 'upload',
+        status: 'done',
+        fileKind: 'image',
+        rotationState: 'applied',
+        count: 1,
+        fallbacks: ['zoneAssumed', 'stacked', 'albumCreated:Album A', 'metadataSaved'],
+      }),
       row({ action: 'upload', status: 'error', fileKind: 'image', count: 1 }),
     ];
 
@@ -72,6 +86,19 @@ describe('countersFromRows', () => {
     expect(c.result.metadataSaved).toBe(1);
     expect(c.result.errors).toBe(1);
     expect(c.bytes).toEqual({ total: 100, done: 40 });
+  });
+
+  it('counts partUnreadable and missingFromArchive rows as discarded, not as files', () => {
+    const c = countersFromRows(
+      [
+        row({ action: 'partUnreadable', status: 'skipped', fileKind: 'other', count: 2 }),
+        row({ action: 'missingFromArchive', status: 'skipped', fileKind: 'other', count: 5 }),
+      ],
+      { total: 0, done: 0 },
+    );
+    expect(c.discarded.unreadable).toBe(2);
+    expect(c.discarded.missingFromArchive).toBe(5);
+    expect(c.scanned.files).toBe(0);
   });
 
   it('emptyCounters is all zero', () => {

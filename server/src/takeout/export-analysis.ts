@@ -1,9 +1,21 @@
-import { AnalysisReason, ExportAnalysis, ExportAnalysisInput, ExportAnalysisPart } from 'src/takeout/types';
+import { pathKey } from 'src/takeout/path-key';
+import {
+  AnalysisReason,
+  ExportAnalysis,
+  ExportAnalysisInput,
+  ExportAnalysisPart,
+  PathSample,
+  SizeCheck,
+  UnreadablePart,
+} from 'src/takeout/types';
 
 const GiB = 2 ** 30;
 const MiB = 2 ** 20;
 const SPLIT_CANDIDATES = [2, 4, 10, 50].map((n) => n * GiB);
 const SAMPLE_LIMIT = 200;
+/** provisional until the family export's real ratio is measured (single-pass design task L1) */
+export const SIZE_RATIO_SHORT = 0.95;
+export const SIZE_RATIO_LOW = 0.99;
 
 function suffixOf(fileName: string): string {
   const m = /\.(zip|tgz|tar\.gz)$/i.exec(fileName);
@@ -16,15 +28,20 @@ function expectedName(sibling: ExportAnalysisPart, partNumber: number): string {
   return `takeout-${sibling.timestamp}-${segment}${num}${suffixOf(sibling.fileName)}`;
 }
 
+function sample(paths: string[]): PathSample {
+  return { count: paths.length, sample: paths.slice(0, SAMPLE_LIMIT) };
+}
+
+// Pre-run detection (single-pass design 11): cheap inputs only (names, sizes, index, zip listings), plus the
+// post-read checks of the last run (lastRead). Rules 1, 2, 3 and 5 of spec 2.3 are unchanged.
 export function analyzeExport(input: ExportAnalysisInput): ExportAnalysis {
   const media = input.parts.filter((p) => !p.isIndex);
   const reasons = new Set<AnalysisReason>();
 
   // 1. Split size.
   let maxPartSize = 0;
-
   for (const p of media) {
-  	maxPartSize = Math.max(maxPartSize, p.size);
+    maxPartSize = Math.max(maxPartSize, p.size);
   }
   const splitSize: number | null =
     maxPartSize <= 50 * GiB + 16 * MiB ? (SPLIT_CANDIDATES.find((c) => c >= maxPartSize - 16 * MiB) ?? null) : null;
@@ -47,9 +64,8 @@ export function analyzeExport(input: ExportAnalysisInput): ExportAnalysis {
     const maxNumber = Math.max(...parts.map((p) => p.partNumber));
     for (let n = 1; n <= maxNumber; n++) {
       if (byNumber.has(n)) {
-      	continue;
+        continue;
       }
-
       let sibling = byNumber.get(n - 1);
       for (let k = n - 1; k >= 1 && !sibling; k--) {
         sibling = byNumber.get(k);
@@ -77,90 +93,127 @@ export function analyzeExport(input: ExportAnalysisInput): ExportAnalysis {
     }
   }
 
-  // 4. Readability and disk presence.
+  // 4. Disk presence, zip listings, stability.
   const corruptParts: string[] = [];
   let partMissingOnDisk = false;
-  let notScanned = false;
+  let unstable = false;
   for (const part of input.parts) {
-    if (part.scanStatus === 'error') {
-      corruptParts.push(part.scanError ? `${part.fileName}: ${part.scanError}` : part.fileName);
-      reasons.add('corrupt_part');
-    } else if (part.scanStatus === 'missing') {
+    if (part.isMissing) {
       partMissingOnDisk = true;
       reasons.add('part_missing_on_disk');
-    } else if (part.scanStatus !== 'scanned') {
-      notScanned = true;
+    } else if (!part.isIndex && !part.stable) {
+      unstable = true;
     }
   }
-  if (notScanned) {
-    reasons.add('not_scanned');
+  for (const listing of input.corruptListings) {
+    corruptParts.push(`${listing.fileName}: ${listing.error}`);
+    reasons.add('corrupt_part');
+  }
+  if (unstable) {
+    reasons.add('part_unstable');
   }
 
-  // 6. Index cross-check.
-  let indexMissingFiles = { count: 0, sample: [] as string[] };
+  // Unreadable parts: what the last run reported, restricted to parts that are still unreadable now (a part
+  // replaced since then is read again at the next run), plus parts in the error state the run did not list.
+  const lastRead = input.lastRead;
+  const byName = new Map(input.parts.map((p) => [p.fileName, p]));
+  const unreadableParts: UnreadablePart[] = [];
+  const listed = new Set<string>();
+  for (const unreadable of lastRead?.unreadableParts ?? []) {
+    const part = byName.get(unreadable.fileName);
+    if (part && (part.catalogStatus === 'error' || part.isMissing)) {
+      unreadableParts.push(unreadable);
+      listed.add(unreadable.fileName);
+    }
+  }
+  for (const part of media) {
+    if (part.catalogStatus === 'error' && !listed.has(part.fileName)) {
+      unreadableParts.push({
+        fileName: part.fileName,
+        error: part.catalogError ?? 'unreadable',
+        offset: null,
+        size: part.size,
+      });
+    }
+  }
+  if (unreadableParts.length > 0) {
+    reasons.add('part_unreadable');
+  }
+
+  // 6. Size check against the index total.
+  const partsTotalBytes = media.reduce((sum, p) => sum + p.size, 0);
+  let sizeCheck: SizeCheck = 'unknown';
+  if (input.indexTotalBytes && input.indexTotalBytes > 0) {
+    const ratio = partsTotalBytes / input.indexTotalBytes;
+    if (ratio < SIZE_RATIO_SHORT) {
+      sizeCheck = 'short';
+      reasons.add('size_shortfall');
+    } else {
+      sizeCheck = ratio < SIZE_RATIO_LOW ? 'low' : 'ok';
+    }
+  }
+
+  // 7. Index cross-check: the catalog of the last run when there is one, else the zip listings (before any read).
+  let indexMissingFiles: PathSample = { count: 0, sample: [] };
   let notInIndex = 0;
   let indexChecked = false;
-  if (input.index && input.catalogPaths) {
+  let listingChecked = false;
+  if (input.index && lastRead?.indexMissingFiles) {
     indexChecked = true;
-    const catalog = input.catalogPaths;
-    const trimmed = new Set<string>();
-    for (const p of catalog) {
-      trimmed.add(p.split('/').map((s) => s.trimEnd()).join('/'));
-    }
+    indexMissingFiles = lastRead.indexMissingFiles;
+    notInIndex = lastRead.notInIndex;
+  } else if (input.index && input.listingPaths) {
+    indexChecked = true;
+    listingChecked = true;
     const missing: string[] = [];
+    const indexKeys = new Set<string>();
     for (const path of input.index.files) {
-      const alt = path.split('/').map((s) => s.trimEnd()).join('/');
-      if (!catalog.has(path) && !trimmed.has(alt)) {
+      const key = pathKey(path);
+      indexKeys.add(key);
+      if (!input.listingPaths.has(key)) {
         missing.push(path);
       }
     }
-    indexMissingFiles = { count: missing.length, sample: missing.slice(0, SAMPLE_LIMIT) };
-    if (missing.length > 0) {
-      reasons.add('index_missing_files');
-    }
-    const indexSet = new Set(input.index.files);
-    for (const p of catalog) {
-      if (!indexSet.has(p)) {
+    indexMissingFiles = sample(missing);
+    for (const key of input.listingPaths) {
+      if (!indexKeys.has(key)) {
         notInIndex++;
       }
     }
-  } else if (input.previous) {
-    indexChecked = input.previous.indexChecked;
-    indexMissingFiles = input.previous.indexMissingFiles;
-    notInIndex = input.previous.notInIndex;
-    if (indexMissingFiles.count > 0) {
-      reasons.add('index_missing_files');
-    }
+  }
+  if (indexMissingFiles.count > 0) {
+    reasons.add('index_missing_files');
   }
 
-  // 7. JSON/media cross-check.
-  const summary = input.catalogSummary ?? input.previous?.catalogSummary ?? null;
-  const jsonWithoutMedia = summary
-    ? { count: summary.jsonWithoutMedia.length, sample: summary.jsonWithoutMedia.slice(0, SAMPLE_LIMIT) }
-    : { count: 0, sample: [] as string[] };
-  const mediaWithoutJson = summary
-    ? { count: summary.mediaWithoutJson.length, sample: summary.mediaWithoutJson.slice(0, SAMPLE_LIMIT) }
-    : { count: 0, sample: [] as string[] };
+  // 8. JSON/media cross-check (post-read only).
+  const summary = lastRead?.catalogSummary ?? null;
+  const jsonWithoutMedia = summary ? sample(summary.jsonWithoutMedia) : { count: 0, sample: [] };
+  const mediaWithoutJson = summary ? sample(summary.mediaWithoutJson) : { count: 0, sample: [] };
   if (jsonWithoutMedia.count > 0) {
     reasons.add('orphan_json');
   }
 
-  // 8. Result.
-  const incomplete = missingParts.length > 0 || corruptParts.length > 0 || indexMissingFiles.count > 0 || partMissingOnDisk;
+  // 9. Result.
+  const allZip = media.length > 0 && media.every((p) => p.kind === 'zip');
+  const incomplete =
+    missingParts.length > 0 ||
+    partMissingOnDisk ||
+    corruptParts.length > 0 ||
+    sizeCheck === 'short' ||
+    indexMissingFiles.count > 0 ||
+    unreadableParts.length > 0;
   let completeness: ExportAnalysis['completeness'];
   if (incomplete) {
     completeness = 'incomplete';
-  } else if (notScanned) {
+  } else if (media.length === 0 || unstable) {
     completeness = 'uncertain';
-  } else if (indexChecked && indexMissingFiles.count === 0) {
-    completeness = 'complete';
-  } else if (!input.index && !lastPartMayBeMissing) {
-    const threshold = Math.max(5, Math.floor((summary?.assetJsons ?? 0) * 0.001));
-    completeness = jsonWithoutMedia.count <= threshold ? 'complete' : 'uncertain';
+  } else if (input.index) {
+    const listingOk = !allZip || indexChecked;
+    completeness = sizeCheck === 'ok' && listingOk ? 'complete' : 'uncertain';
   } else {
-    completeness = 'uncertain';
+    completeness = lastPartMayBeMissing ? 'uncertain' : 'complete';
   }
-  if (completeness === 'uncertain' && lastPartMayBeMissing) {
+  if (completeness === 'uncertain' && lastPartMayBeMissing && !input.index) {
     reasons.add('last_part_may_be_missing');
   }
 
@@ -177,6 +230,14 @@ export function analyzeExport(input: ExportAnalysisInput): ExportAnalysis {
     jsonWithoutMedia,
     mediaWithoutJson,
     catalogSummary: summary,
+    indexTotalBytes: input.indexTotalBytes,
+    partsTotalBytes,
+    sizeCheck,
+    listingChecked,
+    lastReadAt: lastRead?.at ?? null,
+    lastReadRunId: lastRead?.runId ?? null,
+    unreadableParts,
+    unreadableEntries: lastRead?.unreadableEntries ?? 0,
     reasons: [...reasons],
   };
 }

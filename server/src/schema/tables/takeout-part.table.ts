@@ -9,7 +9,7 @@ import {
   Timestamp,
   Unique,
 } from '@immich/sql-tools';
-import { TakeoutArchiveKind, TakeoutScanStatus } from 'src/enum';
+import { TakeoutArchiveKind, TakeoutCatalogStatus } from 'src/enum';
 import { TakeoutExportTable } from 'src/schema/tables/takeout-export.table';
 import { UserTable } from 'src/schema/tables/user.table';
 
@@ -59,40 +59,40 @@ export class TakeoutPartTable {
   @Column({ type: 'bigint', nullable: true })
   prevSyncSize!: Int8 | null;
 
-  @Column({ type: 'character varying', default: TakeoutScanStatus.Pending })
-  scanStatus!: Generated<TakeoutScanStatus>;
+  /** The file is not in the folder any more (its entries are deleted) */
+  @Column({ type: 'boolean', default: false })
+  isMissing!: Generated<boolean>;
 
+  /** none|reading|partial|complete|error: state of this part's rows in takeout_entry */
+  @Column({ type: 'character varying', default: TakeoutCatalogStatus.None })
+  catalogStatus!: Generated<TakeoutCatalogStatus>;
+
+  /** CATALOG_VERSION of the reader that wrote the rows; any other value means "not catalogued" */
+  @Column({ type: 'smallint', nullable: true })
+  catalogVersion!: number | null;
+
+  /** Size and mtime of the file when its rows were written (the persisted cache key) */
+  @Column({ type: 'bigint', nullable: true })
+  catalogSize!: Int8 | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  catalogMtime!: Timestamp | null;
+
+  /** Why the read failed (truncated, bad header, bad gzip, gzip CRC); sticky until the file changes */
   @Column({ type: 'text', nullable: true })
-  scanError!: string | null;
+  catalogError!: string | null;
 
-  /** Token of the scanner that claimed the part */
+  /** Compressed byte offset of the failure (tgz: gunzip input consumed; zip: file offset) */
+  @Column({ type: 'bigint', nullable: true })
+  catalogErrorOffset!: Int8 | null;
+
+  // no foreign key: history only
   @Column({ type: 'uuid', nullable: true })
-  scanOwner!: string | null;
+  lastReadRunId!: string | null;
 
-  @Column({ type: 'bigint', nullable: true })
-  scanStartSize!: Int8 | null;
-
-  @Column({ type: 'timestamp with time zone', nullable: true })
-  scanStartMtime!: Timestamp | null;
-
-  @Column({ type: 'timestamp with time zone', nullable: true })
-  scanStartCtime!: Timestamp | null;
-
-  @Column({ type: 'bigint', nullable: true })
-  scannedSize!: Int8 | null;
-
-  @Column({ type: 'timestamp with time zone', nullable: true })
-  scannedMtime!: Timestamp | null;
-
-  @Column({ type: 'timestamp with time zone', nullable: true })
-  heartbeatAt!: Timestamp | null;
-
-  /** Part of the job id, incremented on every re-queue so a failed job never blocks a new one */
-  @Column({ type: 'integer', default: 0 })
-  attempt!: Generated<number>;
-
+  /** Bytes read from the file by the last run that read it, all passes included */
   @Column({ type: 'bigint', default: 0 })
-  bytesScanned!: Generated<Int8>;
+  bytesRead!: Generated<Int8>;
 
   @Column({ type: 'integer', nullable: true })
   entryCount!: number | null;

@@ -18,7 +18,6 @@ import {
   TakeoutLargerVersionResolveDto,
   TakeoutLargerVersionSearchDto,
   TakeoutOverviewDto,
-  TakeoutPartDto,
   TakeoutRunCreateDto,
   TakeoutRunDto,
   TakeoutRunFilePageDto,
@@ -33,37 +32,66 @@ import {
   ImmichWorker,
   JobName,
   TakeoutArchiveKind,
+  TakeoutCatalogStatus,
   TakeoutLargerVersionStatus,
   TakeoutRunFileStatus,
   TakeoutRunStatus,
-  TakeoutScanStatus,
 } from 'src/enum';
+import { TAKEOUT_RUNNING_RUN_STATUSES } from 'src/repositories/takeout.repository';
 import { BaseService } from 'src/services/base.service';
+import { isStablePart } from 'src/services/takeout-analyze.service';
+import {
+  LifecycleDeps,
+  TAKEOUT_ROOT_FOLDER,
+  cleanupCancelledRun,
+  discardRunStaging,
+  openRunStaging,
+  reclaimRunTargets,
+  takeoutFolderPath,
+} from 'src/services/takeout-lifecycle';
+import {
+  UPLOAD_CHUNK_SIZE,
+  mapAnalysis,
+  mapExport,
+  mapPart,
+  mapRun,
+  mapRunFile,
+  mapUpload,
+  reportFallbacks,
+} from 'src/services/takeout-mappers';
+import { DEFAULT_READ_LIMITS } from 'src/services/takeout-read';
+import { STAGING_TTL_MS, isTrashName, isUuid, listStaging, trashStagingDir } from 'src/services/takeout-staging';
 import { FolderFile, TakeoutSettings, groupExports, mergeSettings, validateSettings } from 'src/takeout';
 import { JobItem } from 'src/types';
 
-export const TAKEOUT_ROOT_FOLDER = 'takeouts';
+export { TAKEOUT_ROOT_FOLDER } from 'src/services/takeout-lifecycle';
+export { reportFallbacks } from 'src/services/takeout-mappers';
 
-/**
- * Row flags that are internal bookkeeping (quota accounting and the result counters of counters.ts), not
- * fallbacks the user needs to review: hidden from the per-file report and the CSV.
- */
-const INTERNAL_FLAGS = new Set(['quotaCounted', 'albumAdded', 'tagged', 'metadataSaved', 'stacked']);
-export const reportFallbacks = (fallbacks: string[] | null | undefined): string[] =>
-  (fallbacks ?? []).filter((flag) => !INTERNAL_FLAGS.has(flag) && !flag.startsWith('albumCreated:'));
-
-const UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024;
 const MAX_PUT_CHUNK = 64 * 1024 * 1024;
-const STALE_UPLOAD_MS = 7 * 24 * 60 * 60 * 1000;
 const PART_NAME_RE = /^takeout-\d{8}T\d{6}Z-(?:\d+-)?\d{3}\.(?:zip|tgz|tar\.gz)$/i;
 const SYNC_INTERVAL_MS = 60_000;
+const SWEEP_INTERVAL_MS = 6 * 3_600_000;
+/** staging entries changed within this time are never swept (a run may be about to adopt or write them) */
+const SWEEP_MIN_AGE_MS = 3_600_000;
 const MAX_ACTIVE_UPLOAD_WRITES = 8;
+const STALE_RUN_MS = 60_000;
 
 @Injectable()
 export class TakeoutService extends BaseService {
   private uploadChains = new Map<string, Promise<unknown>>();
   private activeUploadWrites = new Map<string, number>();
   private syncTimer: NodeJS.Timeout | null = null;
+  private lastSweep = 0;
+
+  private get lifecycle(): LifecycleDeps {
+    return {
+      takeout: this.takeoutRepository,
+      asset: this.assetRepository,
+      job: this.jobRepository,
+      websocket: this.websocketRepository,
+      logger: this.logger,
+    };
+  }
 
   // ---------- storage helpers ----------
 
@@ -88,8 +116,9 @@ export class TakeoutService extends BaseService {
   async onUserTrash({ id }: { id: string }) {
     const runs = await this.takeoutRepository.getActiveRunsByUser(id);
     for (const run of runs) {
-      await this.takeoutRepository.updateRun(run.id, { status: TakeoutRunStatus.Cancelling });
-      this.websocketRepository.serverSend('TakeoutRunCancel', { runId: run.id });
+      if (await this.takeoutRepository.requestCancel(run.id)) {
+        this.websocketRepository.serverSend('TakeoutRunCancel', { runId: run.id });
+      }
     }
   }
 
@@ -99,6 +128,7 @@ export class TakeoutService extends BaseService {
     if (!folder) {
       return;
     }
+    // the whole folder goes, staging included
     await rm(this.userFolderPath(folder.folderName), { recursive: true, force: true }).catch(() => {});
     await this.takeoutRepository.deleteFolder(id);
   }
@@ -108,6 +138,12 @@ export class TakeoutService extends BaseService {
     await this.recoverAtBoot();
     this.syncTimer = setInterval(() => {
       void this.syncAllUsers().catch((error: Error) => this.logger.warn(`Takeout timer sync failed: ${error.message}`));
+      if (Date.now() - this.lastSweep >= SWEEP_INTERVAL_MS) {
+        this.lastSweep = Date.now();
+        void this.sweepStaging().catch((error: Error) =>
+          this.logger.warn(`Takeout staging sweep failed: ${error.message}`),
+        );
+      }
     }, SYNC_INTERVAL_MS);
   }
 
@@ -121,8 +157,9 @@ export class TakeoutService extends BaseService {
     this.syncTimer = null;
   }
 
-  private async recoverAtBoot() {
-    // provision folders for all live users
+  /** Boot recovery (single-pass design 10.5) */
+  async recoverAtBoot() {
+    // 1. provision folders for all live users
     await this.wrapStep('ensure folders', async () => {
       const users = await this.userRepository.getList({ withDeleted: false });
       for (const user of users) {
@@ -132,30 +169,10 @@ export class TakeoutService extends BaseService {
       }
     });
 
-    // parts left scanning by a crash
-    await this.wrapStep('reset scanning parts', async () => {
-      const users = await this.userRepository.getList({ withDeleted: false });
-      for (const user of users) {
-        const parts = await this.takeoutRepository.getPartsByUser(user.id);
-        for (const part of parts) {
-          if (part.scanStatus !== TakeoutScanStatus.Scanning) {
-            continue;
-          }
+    // 3. parts left 'reading' by a run that is not running any more
+    await this.wrapStep('reset reading parts', () => this.takeoutRepository.resetReadingParts());
 
-          await this.takeoutRepository.updatePart(part.id, {
-            scanStatus: TakeoutScanStatus.Pending,
-            scanOwner: null,
-            attempt: part.attempt + 1,
-          });
-          await this.queueUnique(
-            { name: JobName.TakeoutScanPart, data: { partId: part.id, attempt: part.attempt + 1 } },
-            `${part.id}/${part.attempt + 1}`,
-          );
-        }
-      }
-    });
-
-    // runs left non-final by a crash
+    // 4. runs left non-final by a crash: re-queued (a cancelling one finishes as cancelled in its job)
     await this.wrapStep('recover runs', async () => {
       const runs = await this.takeoutRepository.getInterruptedRuns();
       for (const run of runs) {
@@ -171,7 +188,19 @@ export class TakeoutService extends BaseService {
       }
     });
 
-    // exports needing analysis
+    // 5. failed or cancelled runs that still hold files under upload/ (runs of the old code after the upgrade, or a
+    // failure path that could not reach the share): complete files back to staging, partial ones unlinked
+    await this.wrapStep('reclaim targets', async () => {
+      for (const run of await this.takeoutRepository.getStoppedRunsWithTargets()) {
+        await this.takeoutRepository.withUserSyncLock(run.userId, async () => {
+          const folder = await this.takeoutRepository.getFolder(run.userId);
+          const store = folder ? await openRunStaging(this.lifecycle, run, folder.folderName) : null;
+          await reclaimRunTargets(this.lifecycle, run.id, store, 'stage');
+        });
+      }
+    });
+
+    // 6. exports needing analysis
     await this.wrapStep('queue analysis', async () => {
       const pendingExports = await this.takeoutRepository.getExportsNeedingAnalysis();
       for (const exp of pendingExports) {
@@ -179,7 +208,13 @@ export class TakeoutService extends BaseService {
       }
     });
 
-    // orphan folders (user gone)
+    // 7. staging sweep, not awaited
+    this.lastSweep = Date.now();
+    void this.sweepStaging().catch((error: Error) =>
+      this.logger.warn(`Takeout staging sweep failed: ${error.message}`),
+    );
+
+    // 8. orphan folders (user gone)
     await this.wrapStep('remove orphan folders', async () => {
       const orphans = await this.takeoutRepository.getOrphanFolders();
       for (const orphan of orphans) {
@@ -204,6 +239,58 @@ export class TakeoutService extends BaseService {
         this.logger.warn(`Takeout sync failed for ${user.id}: ${error.message}`),
       );
     }
+  }
+
+  /**
+   * Staging sweep (single-pass design 5.3), per user under the sync lock: trash is deleted; run directories are kept
+   * while their run runs, while a failed or cancelled run holds them within the TTL, and while the run that adopts
+   * them runs; anything else goes. An expired run is claimed with a check-and-set first, so a run resumed between the
+   * listing and the claim keeps its directory.
+   */
+  async sweepStaging(now = Date.now()) {
+    for (const folder of await this.takeoutRepository.getAllFolders()) {
+      const userFolder = this.userFolderPath(folder.folderName);
+      await this.takeoutRepository.withUserSyncLock(folder.userId, async () => {
+        for (const entry of await listStaging(userFolder)) {
+          if (isTrashName(entry.name)) {
+            await trashStagingDir(userFolder, entry.name, undefined, this.logger);
+            continue;
+          }
+          if (now - entry.mtimeMs < SWEEP_MIN_AGE_MS) {
+            continue;
+          }
+          if (isUuid(entry.name) && !(await this.stagingRemovable(entry.name, now))) {
+            continue;
+          }
+          // anything that is not a run directory (a stray file or folder) goes too
+          await trashStagingDir(userFolder, entry.name, undefined, this.logger, { anyChild: true });
+        }
+      });
+    }
+  }
+
+  private async stagingRemovable(runId: string, now: number): Promise<boolean> {
+    const run = await this.takeoutRepository.getRun(runId);
+    if (!run) {
+      return true;
+    }
+    if (TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status) || run.status === TakeoutRunStatus.Cancelling) {
+      return false;
+    }
+    if (run.supersededBy) {
+      const successor = await this.takeoutRepository.getRun(run.supersededBy);
+      return !(successor && TAKEOUT_RUNNING_RUN_STATUSES.includes(successor.status));
+    }
+    const stopped = run.status === TakeoutRunStatus.Failed || run.status === TakeoutRunStatus.Cancelled;
+    if (stopped && run.hasStaging) {
+      const finishedAt = run.finishedAt ? new Date(run.finishedAt).getTime() : now;
+      if (now - finishedAt < STAGING_TTL_MS) {
+        return false;
+      }
+      // TTL: the staging goes, the run keeps its status and stays resumable (fetching reads again what it needs)
+      return this.takeoutRepository.claimExpiredStaging(runId, STAGING_TTL_MS);
+    }
+    return true;
   }
 
   // ---------- folder provisioning ----------
@@ -352,6 +439,7 @@ export class TakeoutService extends BaseService {
   }
 
   /** The cheap folder sync of 2.2: list, stat, group, upsert, queue */
+  /** The cheap folder sync of 2.2: list, stat, group, upsert, analyse. It never reads an archive. */
   async syncUserFolder(userId: string): Promise<void> {
     const user = await this.userRepository.getList({ id: userId, withDeleted: true });
     if (user[0]?.deletedAt) {
@@ -368,6 +456,7 @@ export class TakeoutService extends BaseService {
     const files: FolderFile[] = [];
     try {
       for (const entry of await readdir(folderPath, { withFileTypes: true })) {
+        // regular, non-dot files only: .staging and uploads in progress are never parts
         if (!entry.isFile() || entry.name.startsWith('.') || entry.name.endsWith('.part')) {
           continue;
         }
@@ -407,7 +496,7 @@ export class TakeoutService extends BaseService {
         detected.parts.some((p) => partByName.get(p.fileName)?.exportId === e.id),
       );
       if (exportRow && activeByExport.get(exportRow.id)) {
-        // an export with an active run is not mutated at all
+        // parts of an export with a running run are never touched: the run detects changes itself
         for (const p of detected.parts) {
           seenNames.add(p.fileName);
         }
@@ -454,52 +543,44 @@ export class TakeoutService extends BaseService {
           continue;
         }
 
-        // change detection and stability
         await this.reconcilePart(prior, part, exportRow.id, changedExports);
       }
     }
 
-    // parts that disappeared
+    // parts that disappeared: their rows go, the part is marked missing
     for (const part of existingParts) {
-      if (seenNames.has(part.fileName)) {
+      if (seenNames.has(part.fileName) || activeByExport.get(part.exportId)) {
         continue;
       }
-      if (activeByExport.get(part.exportId)) {
-        continue;
-      }
-      if (part.scanStatus !== TakeoutScanStatus.Missing) {
-        await this.takeoutRepository.updatePart(part.id, { scanStatus: TakeoutScanStatus.Missing });
-        await this.takeoutRepository.deleteEntriesOfPart(part.id);
+      if (!part.isMissing) {
+        await this.takeoutRepository.markPartMissing(part.id);
         changedExports.add(part.exportId);
       }
     }
 
-    // queue one scan per export and the analysis
     for (const exp of existingExports) {
-      if (activeByExport.get(exp.id)) {
+      if (activeByExport.get(exp.id) || !changedExports.has(exp.id)) {
         continue;
       }
-      const next = await this.takeoutRepository.getNextPendingPart(exp.id);
-      if (next && this.isStable(next)) {
-        await this.queueUnique(
-          { name: JobName.TakeoutScanPart, data: { partId: next.id, attempt: next.attempt } },
-          `${next.id}/${next.attempt}`,
+      await this.takeoutRepository.updateExport(exp.id, { analysisInputsAt: new Date() });
+      await this.queueUnique({ name: JobName.TakeoutAnalyzeExport, data: { exportId: exp.id } }, exp.id);
+      const partsNow = await this.takeoutRepository.getPartsByExport(exp.id);
+      const fresh = await this.takeoutRepository.getExport(exp.id);
+      const runsForExport = await this.takeoutRepository.getRunsByExport(exp.id);
+      if (fresh) {
+        this.websocketRepository.clientSend(
+          'on_takeout_export',
+          userId,
+          mapExport(fresh, partsNow, runsForExport[0] ?? null),
         );
-      }
-      if (changedExports.has(exp.id)) {
-        await this.takeoutRepository.updateExport(exp.id, { analysisInputsAt: new Date() });
-        await this.queueUnique({ name: JobName.TakeoutAnalyzeExport, data: { exportId: exp.id } }, exp.id);
-        const partsNow = await this.takeoutRepository.getPartsByExport(exp.id);
-        const fresh = await this.takeoutRepository.getExport(exp.id);
-        const runsForExport = await this.takeoutRepository.getRunsByExport(exp.id);
-        const lastRun = runsForExport[0] ?? null;
-        if (fresh) {
-          this.websocketRepository.clientSend('on_takeout_export', userId, mapExport(fresh, partsNow, lastRun));
-        }
       }
     }
   }
 
+  /**
+   * Change detection of one part. A part whose file size or mtime no longer matches the key its rows were written
+   * for is not catalogued any more (single-pass design D-7): its rows go and it is read again at the next run.
+   */
   private async reconcilePart(
     prior: Awaited<ReturnType<TakeoutService['takeoutRepository']['getPart']>> & object,
     detected: FolderFile & { size: number; mtime: Date; ctime: Date },
@@ -509,79 +590,39 @@ export class TakeoutService extends BaseService {
     const sizeChanged = Number(prior.size) !== detected.size;
     const mtimeChanged = prior.mtime.getTime() !== detected.mtime.getTime();
     const ctimeChanged = prior.ctime.getTime() !== detected.ctime.getTime();
-
-    if (prior.scanStatus === TakeoutScanStatus.Scanned) {
-      if (
-        Number(prior.scannedSize ?? prior.size) !== detected.size ||
-        prior.scannedMtime?.getTime() !== detected.mtime.getTime()
-      ) {
-        await this.takeoutRepository.deleteEntriesOfPart(prior.id);
-        await this.takeoutRepository.updatePart(prior.id, {
-          size: detected.size,
-          mtime: detected.mtime,
-          ctime: detected.ctime,
-          scanStatus: TakeoutScanStatus.Pending,
-          attempt: prior.attempt + 1,
-          prevSyncSize: detected.size,
-        });
-        changed.add(exportId);
-      }
+    const baselineChanged = Number(prior.prevSyncSize ?? -1) !== detected.size;
+    if (!prior.isMissing && !sizeChanged && !mtimeChanged && !ctimeChanged && !baselineChanged) {
       return;
     }
 
-    if (prior.scanStatus === TakeoutScanStatus.Scanning) {
-      // the scanner notices at its next heartbeat; sync just records the new stats
-      if (sizeChanged || mtimeChanged || ctimeChanged) {
-        const stale = !prior.heartbeatAt || Date.now() - prior.heartbeatAt.getTime() > 120_000;
-        await this.takeoutRepository.updatePart(prior.id, {
-          size: detected.size,
-          mtime: detected.mtime,
-          ctime: detected.ctime,
-          ...(stale && { scanStatus: TakeoutScanStatus.Pending, scanOwner: null, attempt: prior.attempt + 1 }),
-        });
-        changed.add(exportId);
-      } else if (!prior.heartbeatAt || Date.now() - prior.heartbeatAt.getTime() > 120_000) {
-        await this.takeoutRepository.updatePart(prior.id, {
-          scanStatus: TakeoutScanStatus.Pending,
-          scanOwner: null,
-          attempt: prior.attempt + 1,
-        });
-        changed.add(exportId);
-      }
-      return;
-    }
-
-    if (prior.scanStatus === TakeoutScanStatus.Error || prior.scanStatus === TakeoutScanStatus.Missing) {
-      if (sizeChanged || mtimeChanged || ctimeChanged) {
-        await this.takeoutRepository.updatePart(prior.id, {
-          size: detected.size,
-          mtime: detected.mtime,
-          ctime: detected.ctime,
-          scanStatus: TakeoutScanStatus.Pending,
-          attempt: prior.attempt + 1,
-          prevSyncSize: detected.size,
-        });
-        changed.add(exportId);
-      }
-      return;
-    }
-
-    // pending: update stats and the stable-file baseline
-    if (sizeChanged || mtimeChanged || ctimeChanged || Number(prior.prevSyncSize ?? -1) !== detected.size) {
-      await this.takeoutRepository.updatePart(prior.id, {
-        size: detected.size,
-        mtime: detected.mtime,
-        ctime: detected.ctime,
-        prevSyncSize: detected.size,
+    const patch: Parameters<TakeoutService['takeoutRepository']['updatePart']>[1] = {
+      size: detected.size,
+      mtime: detected.mtime,
+      ctime: detected.ctime,
+      prevSyncSize: detected.size,
+      isMissing: false,
+    };
+    const keyStale =
+      prior.catalogStatus !== TakeoutCatalogStatus.None &&
+      (Number(prior.catalogSize ?? -1) !== detected.size ||
+        !prior.catalogMtime ||
+        prior.catalogMtime.getTime() !== detected.mtime.getTime());
+    if (keyStale) {
+      await this.takeoutRepository.deleteEntriesOfPart(prior.id);
+      Object.assign(patch, {
+        catalogStatus: TakeoutCatalogStatus.None,
+        catalogVersion: null,
+        catalogSize: null,
+        catalogMtime: null,
+        catalogError: null,
+        catalogErrorOffset: null,
+        entryCount: null,
       });
+    }
+    await this.takeoutRepository.updatePart(prior.id, patch);
+    if (prior.isMissing || sizeChanged || mtimeChanged || ctimeChanged || keyStale) {
       changed.add(exportId);
     }
-  }
-
-  /** Stable-part rule (2.2 step 7): ctime older than 30 s and size unchanged since the previous sync */
-  private isStable(part: { ctime: Date; size: any; prevSyncSize: any }) {
-    const ctimeOldEnough = Date.now() - part.ctime.getTime() > 30_000;
-    return ctimeOldEnough && Number(part.size) === Number(part.prevSyncSize ?? -1);
   }
 
   // ---------- exports ----------
@@ -598,6 +639,7 @@ export class TakeoutService extends BaseService {
     };
   }
 
+  /** "Read failed parts again": parts in error go back to not read (their rows deleted); the next run reads them */
   async rescanExport(auth: AuthDto, id: string): Promise<TakeoutExportDetailDto> {
     await this.findExport(auth.user.id, id);
     if (await this.takeoutRepository.getActiveRunForExport(id)) {
@@ -605,28 +647,33 @@ export class TakeoutService extends BaseService {
     }
     const parts = await this.takeoutRepository.getPartsByExport(id);
     for (const part of parts) {
-      if (part.scanStatus === TakeoutScanStatus.Error) {
-        await this.takeoutRepository.updatePart(part.id, {
-          scanStatus: TakeoutScanStatus.Pending,
-          scanError: null,
-          attempt: part.attempt + 1,
-        });
+      if (part.catalogStatus !== TakeoutCatalogStatus.Error) {
+        continue;
       }
+      await this.takeoutRepository.deleteEntriesOfPart(part.id);
+      await this.takeoutRepository.updatePart(part.id, {
+        catalogStatus: TakeoutCatalogStatus.None,
+        catalogVersion: null,
+        catalogError: null,
+        catalogErrorOffset: null,
+        entryCount: null,
+      });
     }
-    const next = await this.takeoutRepository.getNextPendingPart(id);
-    if (next) {
-      await this.queueUnique(
-        { name: JobName.TakeoutScanPart, data: { partId: next.id, attempt: next.attempt } },
-        `${next.id}/${next.attempt}`,
-      );
-    }
+    await this.takeoutRepository.updateExport(id, { analysisInputsAt: new Date() });
+    await this.queueUnique({ name: JobName.TakeoutAnalyzeExport, data: { exportId: id } }, id);
     return this.getExport(auth, id);
   }
 
   async deleteExportArchives(auth: AuthDto, id: string): Promise<void> {
     await this.findExport(auth.user.id, id);
-    if ((await this.takeoutRepository.getActiveRunForExport(id)) || (await this.anyScanActive(id))) {
-      throw new ConflictException('An import or scan of this export is running');
+    if (await this.takeoutRepository.getActiveRunForExport(id)) {
+      throw new ConflictException('An import of this export is running');
+    }
+    // the staged files of stopped runs of this export are useless without the archives
+    for (const run of await this.takeoutRepository.getRunsByExport(id)) {
+      if (run.status === TakeoutRunStatus.Failed || (run.status === TakeoutRunStatus.Cancelled && run.hasStaging)) {
+        await discardRunStaging(this.lifecycle, run.id);
+      }
     }
     const folder = await this.takeoutRepository.getFolder(auth.user.id);
     const parts = await this.takeoutRepository.getPartsByExport(id);
@@ -634,7 +681,7 @@ export class TakeoutService extends BaseService {
       if (folder) {
         await unlink(this.userFolderPath(join(folder.folderName, part.fileName))).catch(() => {});
       }
-      await this.takeoutRepository.updatePart(part.id, { scanStatus: TakeoutScanStatus.Missing });
+      await this.takeoutRepository.markPartMissing(part.id);
     }
     await this.takeoutRepository.deleteEntriesOfExport(id);
     await this.takeoutRepository.updateExport(id, { archivesDeletedAt: new Date() });
@@ -646,34 +693,25 @@ export class TakeoutService extends BaseService {
       throw new ConflictException('An import of this export is running');
     }
     const parts = await this.takeoutRepository.getPartsByExport(id);
-    const allMissing = parts.every((p) => p.scanStatus === TakeoutScanStatus.Missing);
+    const allMissing = parts.every((p) => p.isMissing);
     if (!exp.archivesDeletedAt && !allMissing) {
       throw new BadRequestException('Delete the archives before dismissing the export');
     }
-    const runs = await this.takeoutRepository.getRunsByExport(id);
-    for (const run of runs) {
-      const rows = await this.takeoutRepository.getRunFilesWithTargetPath(run.id);
-      for (const row of rows) {
-        if (row.targetPath && (row.status === 'planned' || row.status === 'written')) {
-          await unlink(row.targetPath).catch(() => {});
-        }
+    const folder = await this.takeoutRepository.getFolder(auth.user.id);
+    for (const run of await this.takeoutRepository.getRunsByExport(id)) {
+      // never a file whose asset exists; the staging of every run goes
+      await reclaimRunTargets(this.lifecycle, run.id, null, 'unlink');
+      if (folder) {
+        await trashStagingDir(takeoutFolderPath(folder.folderName), run.id, undefined, this.logger);
       }
     }
     await this.takeoutRepository.deleteExport(id);
-  }
-
-  private async anyScanActive(exportId: string) {
-    const parts = await this.takeoutRepository.getPartsByExport(exportId);
-    return parts.some((p) => p.scanStatus === TakeoutScanStatus.Scanning);
   }
 
   // ---------- runs ----------
 
   async createRun(auth: AuthDto, exportId: string, dto: TakeoutRunCreateDto): Promise<TakeoutRunDto> {
     const exp = await this.findExport(auth.user.id, exportId);
-    if (await this.takeoutRepository.getActiveRun(auth.user.id)) {
-      throw new ConflictException('An import is already running');
-    }
     if (exp.archivesDeletedAt) {
       throw new ConflictException('The archives of this export were deleted');
     }
@@ -683,9 +721,6 @@ export class TakeoutService extends BaseService {
 
     const settingsRow = await this.takeoutRepository.getSettings(auth.user.id);
     const settings = mergeSettings(settingsRow?.settings ?? null);
-
-    await this.preflightFreeSpace(auth.user.id, exportId, dto.importAnyway);
-
     const templateVars = {
       date: exp.exportedAt.toISOString().slice(0, 10),
       user: exp.accountEmail?.split('@', 1)[0] ?? auth.user.name,
@@ -693,35 +728,54 @@ export class TakeoutService extends BaseService {
       start: DateTime.now().setZone(settings.homeTimeZone).toFormat('yyyy-MM-dd HH:mm:ss'),
     };
 
-    const run = await this.takeoutRepository.createRun({
-      userId: auth.user.id,
-      exportId,
-      status: TakeoutRunStatus.Queued,
-      importAnyway: dto.importAnyway,
-      settings: settings as unknown as object,
-      templateVars,
+    // under the user lock: two requests can never both create a running run (F19)
+    const run = await this.takeoutRepository.withUserSyncLock(auth.user.id, async () => {
+      if (await this.takeoutRepository.getActiveRun(auth.user.id)) {
+        throw new ConflictException('An import is already running');
+      }
+      const parts = await this.takeoutRepository.getPartsByExport(exportId);
+      if (parts.some((p) => !p.isIndex && !p.isMissing && !isStablePart(p))) {
+        throw new ConflictException('A part is still being copied');
+      }
+      // adoption (single-pass design 10.4): the previous failed or cancelled run hands over its staged files
+      const previous = await this.takeoutRepository.getAdoptableRun(exportId);
+      if (previous) {
+        const halfImported = await this.takeoutRepository.countRunFilesByStatus(
+          previous.id,
+          TakeoutRunFileStatus.Created,
+        );
+        if (halfImported > 0) {
+          throw new ConflictException(
+            `Resume or discard the previous import first: ${halfImported} files of it are half imported`,
+          );
+        }
+      }
+      await this.checkFreeSpaceReserve(auth.user.id);
+      const { run: created } = await this.takeoutRepository.createRunWithAdoption(
+        {
+          userId: auth.user.id,
+          exportId,
+          status: TakeoutRunStatus.Queued,
+          importAnyway: dto.importAnyway,
+          settings: settings as unknown as object,
+          templateVars,
+        },
+        previous?.id ?? null,
+      );
+      return created;
     });
 
     await this.queueUnique({ name: JobName.TakeoutRun, data: { runId: run.id, attempt: 0 } }, `${run.id}/0`);
     return mapRun(run);
   }
 
-  private async preflightFreeSpace(userId: string, exportId: string, importAnyway: boolean) {
-    if (importAnyway) {
-      return;
-    }
+  /** Run and Resume only need the reserve: the exact need is known after planning (single-pass design 6.8) */
+  private async checkFreeSpaceReserve(userId: string) {
     const folder = await this.takeoutRepository.getFolder(userId);
-    const media = await this.takeoutRepository.getMediaBytes(exportId);
-    let need = media;
-    if (media === 0) {
-      const parts = await this.takeoutRepository.getPartsByExport(exportId);
-      need = parts.reduce((sum, p) => sum + Number(p.size), 0);
-    }
-    need = need * 1.15 + 5 * 2 ** 30;
-    const usage = await this.storageRepository.checkDiskUsage(
-      folder ? this.userFolderPath(folder.folderName) : this.rootFolder(),
-    );
-    if (usage.available < need) {
+    const usage = await this.storageRepository
+      .checkDiskUsage(folder ? this.userFolderPath(folder.folderName) : this.rootFolder())
+      .catch(() => null);
+    if (usage && usage.available < DEFAULT_READ_LIMITS.freeSpaceReserve) {
       throw new BadRequestException('Not enough free space');
     }
   }
@@ -732,47 +786,38 @@ export class TakeoutService extends BaseService {
     return mapRun(run, rotationCounts);
   }
 
+  /**
+   * Cancel (single-pass design 10.1): a live running run is asked to stop and keeps its staging; a queued or stale
+   * one is cleaned up here; on a failed run, or a cancelled one that still holds staging, cancel means Discard.
+   */
   async cancelRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
     const run = await this.findRun(auth.user.id, id);
     if (run.status === TakeoutRunStatus.Completed) {
       throw new BadRequestException('A completed run cannot be cancelled');
     }
-    if (run.status === TakeoutRunStatus.Cancelled) {
-      return mapRun(run);
+    const stale = !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > STALE_RUN_MS;
+    if (run.status === TakeoutRunStatus.Failed || (run.status === TakeoutRunStatus.Cancelled && run.hasStaging)) {
+      await discardRunStaging(this.lifecycle, id);
+    } else if (run.status === TakeoutRunStatus.Cancelled) {
+      // nothing held: nothing to do
+    } else if (run.status === TakeoutRunStatus.Queued || stale) {
+      const cleaned = await this.takeoutRepository.withUserSyncLock(run.userId, () =>
+        cleanupCancelledRun(this.lifecycle, id, { token: null, from: [run.status] }),
+      );
+      if (!cleaned && (await this.takeoutRepository.requestCancel(id))) {
+        // the job took the run meanwhile: let it stop
+        this.websocketRepository.serverSend('TakeoutRunCancel', { runId: id });
+      }
+    } else if (TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status) && (await this.takeoutRepository.requestCancel(id))) {
+      this.websocketRepository.serverSend('TakeoutRunCancel', { runId: id });
     }
-    const stale = !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > 60_000;
-    if (run.status === TakeoutRunStatus.Queued || run.status === TakeoutRunStatus.Failed || stale) {
-      await this.cleanupCancelledRun(id);
-      const fresh = await this.takeoutRepository.getRun(id);
-      return mapRun(fresh!);
-    }
-    await this.takeoutRepository.updateRun(id, { status: TakeoutRunStatus.Cancelling });
-    this.websocketRepository.serverSend('TakeoutRunCancel', { runId: id });
     const fresh = await this.takeoutRepository.getRun(id);
-    return mapRun(fresh!);
+    return mapRun(fresh ?? run);
   }
 
-  /** Shared cancel cleanup (2.6): unlink partial and written files, mark rows skipped, set cancelled */
-  async cleanupCancelledRun(runId: string) {
-    const rows = await this.takeoutRepository.getRunFilesWithTargetPath(runId);
-    for (const row of rows) {
-      if (!(row.targetPath && (row.status === 'planned' || row.status === 'written'))) {
-        continue;
-      }
-
-      await unlink(row.targetPath).catch(() => {});
-      await this.takeoutRepository.updateRunFile(row.id, { status: TakeoutRunFileStatus.Skipped, reason: 'cancelled' });
-    }
-    await this.takeoutRepository.updateRun(runId, {
-      status: TakeoutRunStatus.Cancelled,
-      finishedAt: new Date(),
-      leaseToken: null,
-    });
-    const run = await this.takeoutRepository.getRun(runId);
-    await this.jobRepository.removeJob(JobName.TakeoutRun, `${runId}/${run?.attempt ?? 0}`).catch(() => {});
-    if (run) {
-      this.websocketRepository.clientSend('on_takeout_run', run.userId, mapRun(run));
-    }
+  /** Shared cancel cleanup (single-pass design 10.1) for callers outside the job */
+  async cleanupCancelledRun(runId: string, from: TakeoutRunStatus[] = [TakeoutRunStatus.Queued]) {
+    return cleanupCancelledRun(this.lifecycle, runId, { token: null, from });
   }
 
   async resumeRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
@@ -780,25 +825,24 @@ export class TakeoutService extends BaseService {
     if (run.status !== TakeoutRunStatus.Failed && run.status !== TakeoutRunStatus.Cancelled) {
       throw new BadRequestException('Only a failed or cancelled run can be resumed');
     }
-    const active = await this.takeoutRepository.getActiveRun(auth.user.id);
-    if (active && active.id !== id) {
-      throw new ConflictException('An import is already running');
+    if (run.supersededBy) {
+      throw new ConflictException('A newer import took over this one');
     }
-    await this.preflightFreeSpace(auth.user.id, run.exportId, run.importAnyway);
-    await this.takeoutRepository.updateRun(id, {
-      status: TakeoutRunStatus.Queued,
-      error: null,
-      heartbeatAt: null,
-      leaseToken: null,
-      finishedAt: null,
-      attempt: run.attempt + 1,
+    const attempt = run.attempt + 1;
+    await this.takeoutRepository.withUserSyncLock(auth.user.id, async () => {
+      const active = await this.takeoutRepository.getActiveRun(auth.user.id);
+      if (active && active.id !== id) {
+        throw new ConflictException('An import is already running');
+      }
+      await this.checkFreeSpaceReserve(auth.user.id);
+      // check-and-set failed|cancelled -> queued; rows a cancel skipped are planned again (F19)
+      if (!(await this.takeoutRepository.requeueRun(id, attempt))) {
+        throw new ConflictException('The run changed meanwhile, try again');
+      }
     });
-    await this.queueUnique(
-      { name: JobName.TakeoutRun, data: { runId: id, attempt: run.attempt + 1 } },
-      `${id}/${run.attempt + 1}`,
-    );
+    await this.queueUnique({ name: JobName.TakeoutRun, data: { runId: id, attempt } }, `${id}/${attempt}`);
     const fresh = await this.takeoutRepository.getRun(id);
-    return mapRun(fresh!);
+    return mapRun(fresh ?? run);
   }
 
   async getRunFiles(auth: AuthDto, id: string, dto: TakeoutRunFileQueryDto): Promise<TakeoutRunFilePageDto> {
@@ -1193,185 +1237,6 @@ export class TakeoutService extends BaseService {
       .then(() => true)
       .catch(() => false);
   }
-}
-
-// ---------- DTO mappers ----------
-
-function mapExport(exp: any, parts: any[], lastRun: any): TakeoutExportDto {
-  const mediaParts = parts.filter((p) => !p.isIndex);
-  const bytesScanned = parts.reduce((sum, p) => sum + Number(p.bytesScanned ?? 0), 0);
-  return {
-    id: exp.id,
-    exportKey: exp.exportKey,
-    exportedAt: exp.exportedAt.toISOString(),
-    completeness: exp.completeness,
-    scanStatus: exp.scanStatus,
-    partCount: mediaParts.length,
-    totalSize: parts.reduce((sum, p) => sum + Number(p.size), 0),
-    bytesScanned,
-    accountEmail: exp.accountEmail,
-    indexFileCount: exp.indexFileCount,
-    indexTotalSize: exp.indexTotalSize,
-    archivesDeletedAt: exp.archivesDeletedAt ? exp.archivesDeletedAt.toISOString() : null,
-    lastRun: lastRun ? mapRun(lastRun) : null,
-  };
-}
-
-function mapPart(part: any): TakeoutPartDto {
-  return {
-    id: part.id,
-    fileName: part.fileName,
-    segment: part.segment,
-    partNumber: part.partNumber,
-    kind: part.kind as TakeoutArchiveKind,
-    isIndex: part.isIndex,
-    size: Number(part.size),
-    mtime: part.mtime.toISOString(),
-    scanStatus: part.scanStatus,
-    bytesScanned: Number(part.bytesScanned ?? 0),
-    scanError: part.scanError,
-  };
-}
-
-function mapRun(run: any, rotationCounts?: Record<string, number>): TakeoutRunDto {
-  const counters = (run.counters ?? {}) as any;
-  if (rotationCounts && counters.result) {
-    counters.result = {
-      ...counters.result,
-      rotationsApplied: rotationCounts['applied'] ?? counters.result.rotationsApplied ?? 0,
-      rotationsQueued: rotationCounts['pending'] ?? counters.result.rotationsQueued ?? 0,
-    };
-  }
-  return {
-    id: run.id,
-    exportId: run.exportId,
-    status: run.status,
-    importAnyway: run.importAnyway,
-    settings: mergeSettings(run.settings) as TakeoutSettingsDto,
-    counters: normalizeCounters(counters),
-    bytesTotal: Number(run.bytesTotal ?? 0),
-    bytesDone: Number(run.bytesDone ?? 0),
-    archiveBytesTotal: Number(run.archiveBytesTotal ?? 0),
-    archiveBytesRead: Number(run.archiveBytesRead ?? 0),
-    currentFile: run.currentFile,
-    error: run.error,
-    startedAt: run.startedAt ? run.startedAt.toISOString() : null,
-    finishedAt: run.finishedAt ? run.finishedAt.toISOString() : null,
-    createdAt: run.createdAt.toISOString(),
-  };
-}
-
-function normalizeCounters(c: any) {
-  const empty = {
-    scanned: {
-      files: 0,
-      images: 0,
-      videos: 0,
-      assetJsons: 0,
-      albumJsons: 0,
-      unknownJsons: 0,
-      useless: 0,
-      unsupported: 0,
-      banned: 0,
-      sidecars: 0,
-    },
-    matched: { fastTrack: 0, normal: 0, forgottenDuplicates: 0, edited: 0, missingMetadata: 0 },
-    discarded: {
-      localDuplicates: 0,
-      duplicatedInDirectory: 0,
-      filteredPartner: 0,
-      filteredTrashed: 0,
-      filteredArchived: 0,
-      filteredDateRange: 0,
-      notSelected: 0,
-      rotateOnlyDropped: 0,
-      failedVideos: 0,
-      previouslyDeleted: 0,
-    },
-    result: {
-      toUpload: 0,
-      uploaded: 0,
-      serverDuplicates: 0,
-      betterOnServer: 0,
-      alreadyProcessed: 0,
-      largerUploaded: 0,
-      stacked: 0,
-      albumsCreated: 0,
-      albumAdds: 0,
-      tagged: 0,
-      metadataSaved: 0,
-      rotationsQueued: 0,
-      rotationsApplied: 0,
-      zoneAssumed: 0,
-      errors: 0,
-    },
-    bytes: { total: 0, done: 0 },
-  };
-  return {
-    scanned: { ...empty.scanned, ...c.scanned },
-    matched: { ...empty.matched, ...c.matched },
-    discarded: { ...empty.discarded, ...c.discarded },
-    result: { ...empty.result, ...c.result },
-    bytes: { ...empty.bytes, ...c.bytes },
-  };
-}
-
-function mapAnalysis(analysis: any) {
-  const a = analysis ?? {};
-  return {
-    splitSize: a.splitSize ?? null,
-    missingParts: a.missingParts ?? [],
-    smallParts: a.smallParts ?? [],
-    corruptParts: a.corruptParts ?? [],
-    lastPartMayBeMissing: a.lastPartMayBeMissing ?? false,
-    indexMissingFiles: a.indexMissingFiles ?? { count: 0, sample: [] },
-    notInIndex: a.notInIndex ?? 0,
-    jsonWithoutMedia: a.jsonWithoutMedia ?? { count: 0, sample: [] },
-    mediaWithoutJson: a.mediaWithoutJson ?? { count: 0, sample: [] },
-    reasons: a.reasons ?? [],
-  };
-}
-
-function mapUpload(upload: any, offset = 0): TakeoutUploadDto {
-  const stale = upload.updatedAt ? Date.now() - new Date(upload.updatedAt).getTime() > STALE_UPLOAD_MS : false;
-  return {
-    id: upload.id,
-    fileName: upload.fileName,
-    size: Number(upload.size),
-    offset,
-    chunkSize: UPLOAD_CHUNK_SIZE,
-    stale,
-  };
-}
-
-function mapRunFile(row: any) {
-  const plan = (row.plan ?? {}) as { albums?: { title: string }[]; tags?: string[] };
-  return {
-    id: Number(row.id),
-    takeoutPath: row.takeoutPath,
-    partName: row.partName,
-    size: Number(row.size),
-    fileKind: row.fileKind,
-    jsonPath: row.jsonPath,
-    matcher: row.matcher,
-    originalFileName: row.originalFileName,
-    groupIndex: row.groupIndex,
-    groupKind: row.groupKind,
-    isCover: row.isCover,
-    action: row.action,
-    status: row.status,
-    reason: row.reason,
-    assetId: row.assetId,
-    captureDate: row.captureDate ? row.captureDate.toISOString() : null,
-    zone: row.zone,
-    zoneSource: row.zoneSource,
-    fallbacks: reportFallbacks(row.fallbacks),
-    albums: (plan.albums ?? []).map((a) => a.title),
-    tags: plan.tags ?? [],
-    rotation: row.rotation ?? 0,
-    rotationState: row.rotationState,
-    error: row.error,
-  };
 }
 
 function csvCell(value: string): string {

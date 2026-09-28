@@ -1,3 +1,6 @@
+import type { ByteSemaphore } from 'src/takeout/byte-semaphore';
+import type { FileSourceClock, FileSourceFs } from 'src/takeout/file-source';
+
 // ---------- part names and exports ----------
 export type ArchiveKind = 'zip' | 'tgz';
 
@@ -43,7 +46,9 @@ export interface ArchiveBrowserIndex {
 
 // ---------- analysis ----------
 export type Completeness = 'unknown' | 'complete' | 'uncertain' | 'incomplete';
-export type PartScanStatus = 'pending' | 'scanning' | 'scanned' | 'error' | 'missing';
+/** state of a part's rows in takeout_entry */
+export type CatalogStatus = 'none' | 'reading' | 'partial' | 'complete' | 'error';
+export type SizeCheck = 'ok' | 'low' | 'short' | 'unknown';
 
 export interface ExportAnalysisPart {
   fileName: string;
@@ -53,16 +58,43 @@ export interface ExportAnalysisPart {
   size: number;
   kind: ArchiveKind;
   isIndex: boolean;
-  scanStatus: PartScanStatus;
-  scanError: string | null;
+  /** stable-file rule: not being copied any more */
+  stable: boolean;
+  /** the file is not in the folder any more */
+  isMissing: boolean;
+  catalogStatus: CatalogStatus;
+  catalogError: string | null;
+}
+
+export interface UnreadablePart {
+  fileName: string;
+  error: string;
+  /** compressed byte offset of the failure, null when unknown */
+  offset: number | null;
+  size: number;
+}
+
+/** Post-read checks, written by the planning step of a run (single-pass design 7.1) */
+export interface LastReadAnalysis {
+  at: string;
+  runId: string;
+  catalogSummary: CatalogSummary | null;
+  indexMissingFiles: PathSample | null;
+  notInIndex: number;
+  unreadableParts: UnreadablePart[];
+  unreadableEntries: number;
 }
 
 export interface ExportAnalysisInput {
   parts: ExportAnalysisPart[];
   index: ArchiveBrowserIndex | null;
-  catalogPaths: Set<string> | null;
-  catalogSummary: CatalogSummary | null;
-  previous: ExportAnalysis | null;
+  /** the index's total size in bytes (parseSizeText of its header), null without an index */
+  indexTotalBytes: number | null;
+  /** zip central-directory names of every present media part (pathKey values); null unless every part is zip */
+  listingPaths: Set<string> | null;
+  /** zip parts whose central directory could not be read before the run */
+  corruptListings: Array<{ fileName: string; error: string }>;
+  lastRead: LastReadAnalysis | null;
 }
 
 export type AnalysisReason =
@@ -71,8 +103,22 @@ export type AnalysisReason =
   | 'last_part_may_be_missing'
   | 'index_missing_files'
   | 'orphan_json'
-  | 'not_scanned'
-  | 'part_missing_on_disk';
+  | 'part_missing_on_disk'
+  | 'size_shortfall'
+  | 'part_unreadable'
+  | 'part_unstable';
+
+export const ANALYSIS_REASONS: AnalysisReason[] = [
+  'missing_part',
+  'corrupt_part',
+  'last_part_may_be_missing',
+  'index_missing_files',
+  'orphan_json',
+  'part_missing_on_disk',
+  'size_shortfall',
+  'part_unreadable',
+  'part_unstable',
+];
 
 export interface PathSample {
   count: number;
@@ -88,31 +134,100 @@ export interface ExportAnalysis {
   lastPartMayBeMissing: boolean;
   indexMissingFiles: PathSample;
   notInIndex: number;
-  // true once the index cross-check ran against scanned catalogs (now or in `previous`)
+  // true when the index file list was cross-checked (zip listings before the run, or the catalog of the last run)
   indexChecked: boolean;
   jsonWithoutMedia: PathSample;
   mediaWithoutJson: PathSample;
   catalogSummary: CatalogSummary | null;
+  indexTotalBytes: number | null;
+  partsTotalBytes: number;
+  sizeCheck: SizeCheck;
+  /** zip listings were cross-checked against the index before any read */
+  listingChecked: boolean;
+  lastReadAt: string | null;
+  lastReadRunId: string | null;
+  unreadableParts: UnreadablePart[];
+  unreadableEntries: number;
   reasons: AnalysisReason[];
 }
 
 // ---------- archive reading ----------
+export interface FileFingerprint {
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  ino: number;
+}
+
+/** Live counters of one read of a part (single-pass design 6.7, 13.2) */
+export interface ReadMeter {
+  /** covered file offset (tgz: compressed bytes passed to gunzip; zip: end of the last entry visited) */
+  position: number;
+  /** bytes returned by read(2) */
+  bytesRead: number;
+  /** bytes jumped over by seeks (zip gaps) */
+  bytesSkipped: number;
+  /** reads retried in place after a transport error */
+  transportRetries: number;
+  /** start time (ms) of the oldest read in flight, null when none */
+  pendingSince: number | null;
+}
+
 export interface ArchiveEntryInfo {
   path: string;
   size: number;
   mtime: Date | null;
+  /** position in the part: tgz counts regular files, zip is the index in local-offset order (directories included) */
   seq: number;
+  /** encrypted, unsupported method, or a local header that does not match the central directory (zip) */
   error: string | null;
+  /** compressed position after the entry; zip: known up front, tgz: known after the entry (afterEntry) */
+  endOffset: number | null;
 }
 
-export type EntryHandler = (entry: ArchiveEntryInfo, open: () => Promise<NodeJS.ReadableStream>) => Promise<void>;
+export type EntryOpener = () => Promise<NodeJS.ReadableStream>;
+export type EntryHandler = (entry: ArchiveEntryInfo, open: EntryOpener) => Promise<void>;
+
+export interface WalkSourceOptions {
+  chunk?: number;
+  depth?: number;
+  retryBudgetMs?: number;
+  backoffMs?: number[];
+  memory?: ByteSemaphore | null;
+  fs?: FileSourceFs;
+  clock?: FileSourceClock;
+}
 
 export interface WalkOptions {
   signal?: AbortSignal;
-  // cumulative compressed bytes read from disk by this walk (monotonic)
-  onBytes?: (bytesRead: number) => void;
+  /** visit only these paths (seq numbering is not affected) */
   only?: Set<string>;
+  /** zip: visit only these seqs (random access, gaps skipped) */
+  seqs?: Set<number>;
+  /** zip: resume at this seq */
   startSeq?: number;
+  /** stop after this seq (fetch); no trailer check then */
+  untilSeq?: number;
+  /** checked after every entry; true stops the walk (fetch: every request found) */
+  shouldStop?: () => boolean;
+  /** called after each visited entry once its data passed, with the compressed end offset */
+  afterEntry?: (entry: ArchiveEntryInfo, endOffset: number) => Promise<void> | void;
+  /** expected in-run fingerprint of the file */
+  fingerprint?: FileFingerprint | null;
+  source?: WalkSourceOptions;
+  /** live counters of this walk */
+  meter?: ReadMeter;
+  /** zip: gaps between visited entries larger than this are skipped with a seek */
+  zipSeekGap?: number;
+  /** test only: limit the read rate */
+  throttleMBps?: number | null;
+}
+
+export interface WalkResult {
+  /** visited entries */
+  entries: number;
+  /** tgz: the gzip trailer (CRC-32, ISIZE) of every member was checked */
+  trailerVerified: boolean;
 }
 
 // ---------- classification and samples ----------
@@ -391,7 +506,8 @@ export interface PlanContext {
 //   derivedOffset rule 2: PHONE clock minus Google is a whole 15-min offset within 2s
 //   screenshot    rule 3: Screenshot_YYYYMMDD-HHMMSS name minus Google is a whole 15-min offset within 2s
 //   google        Google's photoTakenTime kept with NO zone (camera, or no zone evidence; flagged zoneAssumed)
-export type ZoneSource = 'fileOffset' | 'device' | 'derivedOffset' | 'google' | 'screenshot' | 'gps' | 'home' | 'exif' | 'filename';
+export type ZoneSource =
+  'fileOffset' | 'device' | 'derivedOffset' | 'google' | 'screenshot' | 'gps' | 'home' | 'exif' | 'filename';
 
 // The device class the EXIF Make/Model classify into (section 12).
 export type DeviceClass = 'phone' | 'camera' | 'unknown';
@@ -474,6 +590,10 @@ export interface TakeoutCounters {
     rotateOnlyDropped: number;
     failedVideos: number;
     previouslyDeleted: number;
+    /** partUnreadable rows: parts and zip entries that could not be read */
+    unreadable: number;
+    /** missingFromArchive rows: index paths found in no readable part */
+    missingFromArchive: number;
   };
   result: {
     toUpload: number;
@@ -506,4 +626,65 @@ export interface CounterRow {
   groupKind: string | null;
   reason: string | null;
   count: number;
+}
+
+// ---------- read statistics (single-pass design 13.2) ----------
+export type RunPartStatus = 'pending' | 'cached' | 'reading' | 'read' | 'error' | 'missing';
+
+export interface TakeoutRunPartStats {
+  partId: string;
+  fileName: string;
+  size: number;
+  segment: number | null;
+  partNumber: number;
+  status: RunPartStatus;
+  passes: number;
+  /** covered bytes of earlier passes of this run (a tgz part restarted from byte 0) */
+  passBase: number;
+  bytesRead: number;
+  bytesSkipped: number;
+  position: number;
+  fetchBytesRead: number;
+  entries: number;
+  media: number;
+  entryErrors: number;
+  staged: number;
+  stagedBytes: number;
+  duplicates: number;
+  deferred: number;
+  transportRetries: number;
+  error: string | null;
+  errorOffset: number | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface TakeoutReadStats {
+  version: 1;
+  readers: number;
+  readahead: number;
+  crossDevice: boolean;
+  filesFound: number;
+  mediaFound: number;
+  jsonFound: number;
+  serverDuplicatesSkipped: number;
+  localDuplicatesSkipped: number;
+  stagedFiles: number;
+  stagedBytes: number;
+  deferredFiles: number;
+  deferredBytes: number;
+  wastedWriteFiles: number;
+  wastedWriteBytes: number;
+  fetchFiles: number;
+  fetchBytesTotal: number;
+  fetchBytesRead: number;
+  sampleBackfillFiles: number;
+  directoryBytesRead: number;
+  transportRetries: number;
+  etaSeconds: number | null;
+  discardedStagedFiles: number;
+  discardedStagedBytes: number;
+  stagingBytes: number;
+  stagingExpiresAt: string | null;
+  parts: Record<string, TakeoutRunPartStats>;
 }

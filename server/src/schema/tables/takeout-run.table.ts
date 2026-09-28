@@ -50,7 +50,7 @@ export class TakeoutRunTable {
   @Column({ type: 'bigint', default: 0 })
   bytesDone!: Generated<Int8>;
 
-  /** Sum of the sizes of the parts pass 2 reads */
+  /** Bytes of archive to read: set at the first attempt, grows only when a tgz part restarts from byte 0 */
   @Column({ type: 'bigint', default: 0 })
   archiveBytesTotal!: Generated<Int8>;
 
@@ -73,6 +73,18 @@ export class TakeoutRunTable {
   /** Part of the job id, incremented on every re-queue so a failed job never blocks a new one */
   @Column({ type: 'integer', default: 0 })
   attempt!: Generated<number>;
+
+  /** TakeoutReadStats, written by the run job every 2 s */
+  @Column({ type: 'jsonb', default: '{}' })
+  readStats!: Generated<object>;
+
+  /** The run owns <folder>/.staging/<id> (the path is always derived from the id, never stored) */
+  @Column({ type: 'boolean', default: false })
+  hasStaging!: Generated<boolean>;
+
+  /** Set on a failed or cancelled run whose staging a newer run adopted; such a run cannot be resumed */
+  @Column({ type: 'uuid', nullable: true })
+  supersededBy!: string | null;
 
   @Column({ type: 'timestamp with time zone', nullable: true })
   startedAt!: Timestamp | null;

@@ -1463,6 +1463,7 @@ export const TakeoutCompletenessSchema = z
   .describe('Whether every part of a Google Takeout export is present and readable')
   .meta({ id: 'TakeoutCompleteness' });
 
+/** Deprecated: only derived for the old scan fields of the part and export DTOs; not stored anywhere */
 export enum TakeoutScanStatus {
   Pending = 'pending',
   Scanning = 'scanning',
@@ -1473,13 +1474,75 @@ export enum TakeoutScanStatus {
 
 export const TakeoutScanStatusSchema = z
   .enum(TakeoutScanStatus)
-  .describe('Scan state of a takeout part or export')
+  .describe('Deprecated: scan state of a takeout part or export, derived from the read state')
   .meta({ id: 'TakeoutScanStatus' });
+
+/** State of a part's rows in takeout_entry (internal, not in any DTO) */
+export enum TakeoutCatalogStatus {
+  None = 'none',
+  Reading = 'reading',
+  Partial = 'partial',
+  Complete = 'complete',
+  Error = 'error',
+}
+
+export enum TakeoutPartReadStatus {
+  NotRead = 'notRead',
+  Reading = 'reading',
+  Partial = 'partial',
+  Read = 'read',
+  Error = 'error',
+  Missing = 'missing',
+}
+
+export const TakeoutPartReadStatusSchema = z
+  .enum(TakeoutPartReadStatus)
+  .describe('Read state of a takeout part')
+  .meta({ id: 'TakeoutPartReadStatus' });
+
+export enum TakeoutExportReadStatus {
+  NotRead = 'notRead',
+  Partial = 'partial',
+  Read = 'read',
+  Error = 'error',
+}
+
+export const TakeoutExportReadStatusSchema = z
+  .enum(TakeoutExportReadStatus)
+  .describe('Read state of all parts of an export')
+  .meta({ id: 'TakeoutExportReadStatus' });
+
+export enum TakeoutSizeCheck {
+  Ok = 'ok',
+  Low = 'low',
+  Short = 'short',
+  Unknown = 'unknown',
+}
+
+export const TakeoutSizeCheckSchema = z
+  .enum(TakeoutSizeCheck)
+  .describe('Size of the parts compared with the total the index announces')
+  .meta({ id: 'TakeoutSizeCheck' });
+
+export enum TakeoutRunPartStatus {
+  Pending = 'pending',
+  Cached = 'cached',
+  Reading = 'reading',
+  Read = 'read',
+  Error = 'error',
+  Missing = 'missing',
+}
+
+export const TakeoutRunPartStatusSchema = z
+  .enum(TakeoutRunPartStatus)
+  .describe('What a run did with a part: read it, found it in the cache, or could not read it')
+  .meta({ id: 'TakeoutRunPartStatus' });
 
 export enum TakeoutRunStatus {
   Queued = 'queued',
-  Scanning = 'scanning',
+  Reading = 'reading',
   Planning = 'planning',
+  Fetching = 'fetching',
   Importing = 'importing',
   Finishing = 'finishing',
   Completed = 'completed',
@@ -1518,6 +1581,7 @@ export enum TakeoutRunFileAction {
   AlreadyProcessed = 'alreadyProcessed',
   PreviouslyDeletedSkipped = 'previouslyDeletedSkipped',
   PartUnreadable = 'partUnreadable',
+  MissingFromArchive = 'missingFromArchive',
 }
 
 export const TakeoutRunFileActionSchema = z

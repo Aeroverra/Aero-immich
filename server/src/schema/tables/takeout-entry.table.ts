@@ -1,11 +1,11 @@
-import { Column, ForeignKeyColumn, Generated, Index, Int8, PrimaryColumn, Table, Timestamp } from '@immich/sql-tools';
+import { Column, ForeignKeyColumn, Generated, Int8, PrimaryColumn, Table, Timestamp, Unique } from '@immich/sql-tools';
 import { TakeoutEntryKind, TakeoutSampleSkipped } from 'src/enum';
 import { TakeoutExportTable } from 'src/schema/tables/takeout-export.table';
 import { TakeoutPartTable } from 'src/schema/tables/takeout-part.table';
 
-/** The pass 1 catalog: one row per file entry of a scanned part */
+/** The catalog cache: one row per file entry of a read part */
 @Table('takeout_entry')
-@Index({ columns: ['partId', 'seq'] })
+@Unique({ columns: ['partId', 'seq'] })
 export class TakeoutEntryTable {
   @PrimaryColumn({ type: 'bigint', identity: true })
   id!: Generated<Int8>;
@@ -16,7 +16,7 @@ export class TakeoutEntryTable {
   @ForeignKeyColumn(() => TakeoutPartTable, { onUpdate: 'CASCADE', onDelete: 'CASCADE', index: false })
   partId!: string;
 
-  /** Order inside the part (zip: central directory index) */
+  /** Order inside the part (tgz: regular files in stream order; zip: local-offset order, directories included) */
   @Column({ type: 'integer' })
   seq!: number;
 
@@ -56,4 +56,12 @@ export class TakeoutEntryTable {
 
   @Column({ type: 'character varying', nullable: true })
   sampleSkipped!: TakeoutSampleSkipped | null;
+
+  /** An entry that could not be read: bad or mismatching local header, unsupported method, encrypted, length or CRC-32 mismatch */
+  @Column({ type: 'text', nullable: true })
+  readError!: string | null;
+
+  /** Compressed position after the entry (zip: exact; tgz: gunzip input consumed), to rank fetch sources */
+  @Column({ type: 'bigint', nullable: true })
+  endOffset!: Int8 | null;
 }

@@ -84,9 +84,9 @@ export class TakeoutController {
   @Authenticated({ permission: Permission.TakeoutRun })
   @HttpCode(HttpStatus.OK)
   @Endpoint({
-    summary: 'Rescan failed parts',
+    summary: 'Read failed parts again',
     description:
-      'Scan the parts of an export whose scan failed again. Not possible while a run of the export is active.',
+      'Forget what the last run found in the parts that could not be read, so the next run reads them again. Nothing is read now. Not possible while a run of the export is active.',
     history: history(),
   })
   rescanTakeoutExport(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<TakeoutExportDetailDto> {
@@ -99,7 +99,7 @@ export class TakeoutController {
   @Endpoint({
     summary: 'Delete the archives of a takeout export',
     description:
-      'Delete the archive files of an export from the takeout folder. Runs and their reports are kept. Not possible while a run or scan of the export is active.',
+      'Delete the archive files of an export from the takeout folder, and the staged files of its stopped runs. Runs and their reports are kept. Not possible while a run of the export is active.',
     history: history(),
   })
   deleteTakeoutExportArchives(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
@@ -112,7 +112,7 @@ export class TakeoutController {
   @Endpoint({
     summary: 'Dismiss a takeout export',
     description:
-      'Remove an export whose archives are gone, together with its runs and reports. Imported assets are kept.',
+      'Remove an export whose archives are gone, together with its runs, their reports and their staged files. Imported assets are kept.',
     history: history(),
   })
   deleteTakeoutExport(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
@@ -124,7 +124,7 @@ export class TakeoutController {
   @Endpoint({
     summary: 'Start a takeout import',
     description:
-      'Start importing an export. An export that is not complete needs importAnyway. A user can have one unfinished run at a time.',
+      'Start importing an export. An export that is not complete needs importAnyway. A user can have one unfinished run at a time. The files staged by the previous failed or cancelled run of the export are reused; that run cannot be resumed afterwards.',
     history: history(),
   })
   createTakeoutRun(
@@ -151,7 +151,8 @@ export class TakeoutController {
   @HttpCode(HttpStatus.OK)
   @Endpoint({
     summary: 'Cancel a takeout run',
-    description: 'Cancel a run. Files written for assets that were not created yet are removed.',
+    description:
+      'Cancel a running run: it stops and keeps its staged files for 7 days, so a new run does not read the archives again. On a failed run, or a cancelled run that still holds staged files, the staged files are discarded now.',
     history: history(),
   })
   cancelTakeoutRun(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<TakeoutRunDto> {
@@ -163,7 +164,8 @@ export class TakeoutController {
   @HttpCode(HttpStatus.OK)
   @Endpoint({
     summary: 'Resume a takeout run',
-    description: 'Resume a failed or cancelled run from where it stopped, with its original plan.',
+    description:
+      'Resume a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.',
     history: history(),
   })
   resumeTakeoutRun(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<TakeoutRunDto> {
