@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import DetailPanelTags from '$lib/components/asset-viewer/DetailPanelTags.svelte';
-import { tagPicker } from '$lib/components/tags/tag-picker.svelte';
+import { tagPicker, tagPickerSearch } from '$lib/components/tags/tag-picker.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { renderWithTooltips } from '$tests/helpers';
 import { assetFactory } from '@test-data/factories/asset-factory';
@@ -31,7 +31,12 @@ describe('DetailPanelTags', () => {
     stack: { id: 'stack-1', primaryAssetId: 'video', assetCount: 2 },
   });
   const boosted = assetFactory.build({ id: 'boosted', ownerId: user.id });
-  const stack: StackResponseDto = { id: 'stack-1', primaryAssetId: 'video', source: StackSource.Manual, assets: [video, boosted] };
+  const stack: StackResponseDto = {
+    id: 'stack-1',
+    primaryAssetId: 'video',
+    source: StackSource.Manual,
+    assets: [video, boosted],
+  };
 
   beforeAll(async () => {
     await init({ fallbackLocale: 'en-US' });
@@ -45,6 +50,7 @@ describe('DetailPanelTags', () => {
     tagPicker.isOpen.current = false;
     tagPicker.expanded.current = [];
     tagPicker.recent.current = [];
+    tagPickerSearch.query = '';
     sdkMock.getStack.mockResolvedValue(stack);
     sdkMock.getAllTags.mockResolvedValue(allTags);
     sdkMock.getAssetInfo.mockResolvedValue(video);
@@ -94,6 +100,18 @@ describe('DetailPanelTags', () => {
     expect(screen.getByTestId('tag-tree-picker')).toBeInTheDocument();
     expect(screen.getByRole('treeitem', { name: /Drinks/ })).toBeInTheDocument();
     expect(tagPicker.expanded.current).toEqual(['Food']);
+  });
+
+  it('keeps the search when the viewer closes and opens another asset', async () => {
+    tagPicker.isOpen.current = true;
+    const { unmount } = renderWithTooltips(DetailPanelTags, { asset: video, isOwner: true });
+    await userEvent.type(await screen.findByLabelText('Search or create tags'), 'dri');
+    unmount();
+
+    renderWithTooltips(DetailPanelTags, { asset: boosted, isOwner: true });
+
+    expect(await screen.findByLabelText('Search or create tags')).toHaveValue('dri');
+    expect(screen.getByRole('treeitem', { name: /Drinks/ })).toBeInTheDocument();
   });
 
   it('applies the best match on Enter and creates a missing path', async () => {
