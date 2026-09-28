@@ -2500,6 +2500,8 @@ export type MetadataSearchDto = {
     description?: string;
     /** Filter by encoded video file path */
     encodedVideoPath?: string;
+    /** Leave out assets with any of these tags or their child tags */
+    excludeTagIds?: string[];
     filter?: SearchFilter;
     /** Filter by asset ID */
     id?: string;
@@ -2629,6 +2631,8 @@ export type RandomSearchDto = {
     createdAfter?: string;
     /** Filter by creation date (before) */
     createdBefore?: string;
+    /** Leave out assets with any of these tags or their child tags */
+    excludeTagIds?: string[];
     filter?: SearchFilter;
     /** Filter by encoded status */
     isEncoded?: boolean;
@@ -2696,6 +2700,8 @@ export type SmartSearchDto = {
     createdAfter?: string;
     /** Filter by creation date (before) */
     createdBefore?: string;
+    /** Leave out assets with any of these tags or their child tags */
+    excludeTagIds?: string[];
     filter?: SearchFilter;
     /** Filter by encoded status */
     isEncoded?: boolean;
@@ -2769,6 +2775,8 @@ export type StatisticsSearchDto = {
     createdBefore?: string;
     /** Filter by description text */
     description?: string;
+    /** Leave out assets with any of these tags or their child tags */
+    excludeTagIds?: string[];
     filter?: SearchFilter;
     /** Filter by encoded status */
     isEncoded?: boolean;
@@ -7144,12 +7152,13 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
     createdAfter?: string;
     createdBefore?: string;
+    excludeTagIds?: string[];
     isEncoded?: boolean;
     isFavorite?: boolean;
     isMotion?: boolean;
@@ -7187,6 +7196,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         country,
         createdAfter,
         createdBefore,
+        excludeTagIds,
         isEncoded,
         isFavorite,
         isMotion,
