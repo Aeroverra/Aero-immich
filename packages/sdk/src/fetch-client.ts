@@ -3245,6 +3245,8 @@ export type TagUpdateDto = {
     isHidden?: boolean;
     /** Tag name */
     name?: string;
+    /** Move the tag, with its children, under this parent tag, or to the top level with null */
+    parentId?: string | null;
 };
 export type TakeoutBytesCountersDto = {
     done: number;
