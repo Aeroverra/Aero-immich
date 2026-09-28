@@ -134,7 +134,7 @@
     {#if tagPicker.isOpen.current}
       <div class="mt-3 border-t pt-3 dark:border-gray-700">
         {#if allTags}
-          <TagTreePicker tags={allTags} checkedIds={tagIds} onToggle={setTag} onCreate={createTag} />
+          <TagTreePicker tags={allTags} checkedIds={tagIds} onToggle={setTag} onCreate={createTag} rememberSearch />
         {/if}
       </div>
     {/if}
