@@ -154,7 +154,7 @@
 
     {#if detail.analysis.reasons.length > 0 || detail.analysis.lastPartMayBeMissing}
       <Card>
-        <CardHeader><CardTitle>{$t('takeout_uncertain')}</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{completenessLabel($t, detail.completeness)}</CardTitle></CardHeader>
         <CardBody><TakeoutAnalysisPanel analysis={detail.analysis} /></CardBody>
       </Card>
     {/if}
@@ -164,7 +164,10 @@
         <HStack class="w-full justify-between">
           <CardTitle
             >{$t('takeout_parts_found', {
-              values: { found: detail.partCount, expected: detail.indexFileCount ?? detail.partCount },
+              values: {
+                found: detail.partCount,
+                expected: detail.indexFileCount ?? detail.partCount + detail.analysis.missingParts.length,
+              },
             })}</CardTitle
           >
           <Button size="tiny" variant="ghost" color="secondary" leadingIcon={mdiRefresh} onclick={rescan}
