@@ -3258,9 +3258,13 @@ export type TakeoutDiscardedCountersDto = {
     filteredPartner: number;
     filteredTrashed: number;
     localDuplicates: number;
+    /** Files the index lists but no readable part contains */
+    missingFromArchive: number;
     notSelected: number;
     previouslyDeleted: number;
     rotateOnlyDropped: number;
+    /** Parts and zip entries that could not be read */
+    unreadable: number;
 };
 export type TakeoutMatchedCountersDto = {
     edited: number;
@@ -3305,6 +3309,103 @@ export type TakeoutCountersDto = {
     result: TakeoutResultCountersDto;
     scanned: TakeoutScannedCountersDto;
 };
+export type TakeoutRunPartStatsDto = {
+    /** Bytes read from the file by this run, all passes included */
+    bytesRead: number;
+    /** Bytes jumped over (zip gaps) */
+    bytesSkipped: number;
+    /** Files hashed only, fetched later if the plan needs them */
+    deferred: number;
+    /** Files already on the server or already staged */
+    duplicates: number;
+    /** Files found in the part */
+    entries: number;
+    /** Zip entries that could not be read */
+    entryErrors: number;
+    /** Why the part could not be read */
+    error: string | null;
+    /** Compressed byte offset of the failure */
+    errorOffset: number | null;
+    /** Bytes read again to fetch entries the plan needed */
+    fetchBytesRead: number;
+    /** Archive file name */
+    fileName: string;
+    /** When this run finished the part */
+    finishedAt: string | null;
+    /** Photos and videos found in the part */
+    media: number;
+    /** Part ID */
+    partId: string;
+    /** How many times this run started reading the part (1 when nothing went wrong) */
+    passes: number;
+    /** Covered file offset of the current pass */
+    position: number;
+    /** File size in bytes */
+    size: number;
+    /** Files written to staging */
+    staged: number;
+    /** Bytes written to staging */
+    stagedBytes: number;
+    /** When this run started reading the part */
+    startedAt: string | null;
+    status: TakeoutRunPartStatus;
+    /** Reads retried in place after a transport error */
+    transportRetries: number;
+};
+export type TakeoutRunReadStatsDto = {
+    /** Staging is on another disk than the library, so finishing copies files */
+    crossDevice: boolean;
+    /** Bytes of the deferred files */
+    deferredBytes: number;
+    /** Files hashed only, fetched later if the plan needs them */
+    deferredFiles: number;
+    /** Zip central directory bytes read for the sampling set */
+    directoryBytesRead: number;
+    /** Bytes of the staged files the plan did not use */
+    discardedStagedBytes: number;
+    /** Staged files the plan did not use */
+    discardedStagedFiles: number;
+    /** Estimated seconds until reading or fetching is done */
+    etaSeconds: number | null;
+    /** Archive bytes the fetch step read */
+    fetchBytesRead: number;
+    /** Archive bytes the fetch step expects to read */
+    fetchBytesTotal: number;
+    /** Files read again because the plan needed them */
+    fetchFiles: number;
+    /** Files found in the parts read by this run */
+    filesFound: number;
+    /** Google JSON files found */
+    jsonFound: number;
+    /** Files whose content was already staged, not written again */
+    localDuplicatesSkipped: number;
+    /** Photos and videos found */
+    mediaFound: number;
+    /** Per part, in part order */
+    parts: TakeoutRunPartStatsDto[];
+    /** Reads in flight per part */
+    readahead: number;
+    /** Parts read in parallel */
+    readers: number;
+    /** Images sampled after the read for the rotation check */
+    sampleBackfillFiles: number;
+    /** Files already on the server, not written */
+    serverDuplicatesSkipped: number;
+    /** Bytes written to staging */
+    stagedBytes: number;
+    /** Files written to staging */
+    stagedFiles: number;
+    /** Bytes held in staging by a failed or cancelled run */
+    stagingBytes: number;
+    /** When the staging of a failed or cancelled run is removed */
+    stagingExpiresAt: string | null;
+    /** Reads retried in place after a transport error */
+    transportRetries: number;
+    /** Bytes written and then discarded */
+    wastedWriteBytes: number;
+    /** Files written and then discarded because their content was present */
+    wastedWriteFiles: number;
+};
 export type TakeoutSettingsDto = {
     /** Apply rotations from rotate-only edited copies */
     applyRotation: boolean;
@@ -3347,13 +3448,13 @@ export type TakeoutSettingsDto = {
     videoBoost: TakeoutVideoBoostMode;
 };
 export type TakeoutRunDto = {
-    /** Bytes of archives read */
+    /** Bytes of archives the reading phase covered so far (never goes back) */
     archiveBytesRead: number;
-    /** Bytes of archives to read */
+    /** Bytes of archives the reading phase covers */
     archiveBytesTotal: number;
-    /** Bytes of media written */
+    /** Bytes of media imported */
     bytesDone: number;
-    /** Bytes of media to write */
+    /** Bytes of media to import */
     bytesTotal: number;
     counters: TakeoutCountersDto;
     /** When the run was created */
@@ -3366,21 +3467,26 @@ export type TakeoutRunDto = {
     exportId: string;
     /** When the run finished */
     finishedAt: string | null;
+    /** Staged files are held for this run (a failed or cancelled run can be discarded) */
+    hasStaging: boolean;
     /** Run ID */
     id: string;
     /** Whether the run was started although the export is not complete */
     importAnyway: boolean;
+    readStats: TakeoutRunReadStatsDto;
     settings: TakeoutSettingsDto;
     /** When the run started */
     startedAt: string | null;
     status: TakeoutRunStatus;
+    /** The newer run that took over the staged files of this run */
+    supersededBy: string | null;
 };
 export type TakeoutExportDto = {
     /** Google account of the export, from the index */
     accountEmail: string | null;
     /** When the archives were deleted */
     archivesDeletedAt: string | null;
-    /** Bytes of the parts scanned so far */
+    /** Deprecated: bytes read from the parts by their last reads */
     bytesScanned: number;
     completeness: TakeoutCompleteness;
     /** Timestamp of the first part, plus "-<segment>" when segmented */
@@ -3397,6 +3503,9 @@ export type TakeoutExportDto = {
     lastRun: (TakeoutRunDto) | null;
     /** Number of parts found */
     partCount: number;
+    /** Media parts that were read completely */
+    partsRead: number;
+    readStatus: TakeoutExportReadStatus;
     scanStatus: TakeoutScanStatus;
     /** Total size of the parts in bytes */
     totalSize: number;
@@ -3456,31 +3565,60 @@ export type TakeoutMissingPartDto = {
     /** Segment number, null for exports without segments */
     segment: number | null;
 };
+export type TakeoutUnreadablePartDto = {
+    /** Why the part could not be read */
+    error: string;
+    /** Archive file name */
+    fileName: string;
+    /** Compressed byte offset of the failure */
+    offset: number | null;
+    /** File size in bytes */
+    size: number;
+};
 export type TakeoutAnalysisDto = {
     /** Parts that could not be read, with the error */
     corruptParts: string[];
     /** Files listed in the index but missing from the parts */
     indexMissingFiles: TakeoutPathSampleDto;
+    /** Total size the index announces, in bytes */
+    indexTotalBytes: number | null;
     /** Google JSON files that belong to no media file */
     jsonWithoutMedia: TakeoutPathSampleDto;
     /** Whether parts after the last one may exist (no index) */
     lastPartMayBeMissing: boolean;
+    /** When the checks that need a read ran (the last run) */
+    lastReadAt: string | null;
+    /** The run whose read produced those checks */
+    lastReadRunId: string | null;
+    /** Zip listings were cross-checked against the index before any read */
+    listingChecked: boolean;
     /** Media files without Google JSON */
     mediaWithoutJson: TakeoutPathSampleDto;
     /** Gaps in the part numbering */
     missingParts: TakeoutMissingPartDto[];
     /** Files in the parts that the index does not list (informational) */
     notInIndex: number;
+    /** Sum of the sizes of the media parts */
+    partsTotalBytes: number;
     /** Why the export is not complete, as stable keys */
     reasons: string[];
+    sizeCheck: TakeoutSizeCheck;
     /** Parts smaller than the split size (informational) */
     smallParts: string[];
     /** Detected archive split size in bytes */
     splitSize: number | null;
+    /** Zip entries the last run could not read */
+    unreadableEntries: number;
+    /** Parts the last run could not read */
+    unreadableParts: TakeoutUnreadablePartDto[];
 };
 export type TakeoutPartDto = {
-    /** Bytes read by the scan so far */
+    /** Bytes read from the file by the last run that read it, all passes included */
+    bytesRead: number;
+    /** Deprecated: same as bytesRead */
     bytesScanned: number;
+    /** Number of files in the part, once it was read completely */
+    entryCount: number | null;
     /** Archive file name */
     fileName: string;
     /** Part ID */
@@ -3488,11 +3626,18 @@ export type TakeoutPartDto = {
     /** Whether this is the index archive (archive_browser.html) */
     isIndex: boolean;
     kind: TakeoutArchiveKind;
+    /** The run that read the part last */
+    lastReadRunId: string | null;
     /** File modification time */
     mtime: string;
     /** Part number NNN */
     partNumber: number;
-    /** Why the scan failed */
+    /** Why the part could not be read */
+    readError: string | null;
+    /** Compressed byte offset where reading failed, comparable with the file size */
+    readErrorOffset: number | null;
+    readStatus: TakeoutPartReadStatus;
+    /** Deprecated: same as readError */
     scanError: string | null;
     scanStatus: TakeoutScanStatus;
     /** Segment number N of "-N-NNN" names, null for "-NNN" names */
@@ -3506,7 +3651,7 @@ export type TakeoutExportDetailDto = {
     analysis: TakeoutAnalysisDto;
     /** When the archives were deleted */
     archivesDeletedAt: string | null;
-    /** Bytes of the parts scanned so far */
+    /** Deprecated: bytes read from the parts by their last reads */
     bytesScanned: number;
     completeness: TakeoutCompleteness;
     /** Timestamp of the first part, plus "-<segment>" when segmented */
@@ -3525,6 +3670,9 @@ export type TakeoutExportDetailDto = {
     partCount: number;
     /** Parts of the export, the index part last */
     parts: TakeoutPartDto[];
+    /** Media parts that were read completely */
+    partsRead: number;
+    readStatus: TakeoutExportReadStatus;
     /** Runs of the export, newest first */
     runs: TakeoutRunDto[];
     scanStatus: TakeoutScanStatus;
@@ -8122,7 +8270,7 @@ export function deleteTakeoutExportArchives({ id }: {
     }));
 }
 /**
- * Rescan failed parts
+ * Read failed parts again
  */
 export function rescanTakeoutExport({ id }: {
     id: string;
@@ -9657,6 +9805,14 @@ export enum SyncRequestType {
     ViewsV1 = "ViewsV1",
     ViewTagsV1 = "ViewTagsV1"
 }
+export enum TakeoutRunPartStatus {
+    Pending = "pending",
+    Cached = "cached",
+    Reading = "reading",
+    Read = "read",
+    Error = "error",
+    Missing = "missing"
+}
 export enum TakeoutBurstMode {
     NoStack = "NoStack",
     Stack = "Stack",
@@ -9688,8 +9844,9 @@ export enum TakeoutVideoBoostMode {
 }
 export enum TakeoutRunStatus {
     Queued = "queued",
-    Scanning = "scanning",
+    Reading = "reading",
     Planning = "planning",
+    Fetching = "fetching",
     Importing = "importing",
     Finishing = "finishing",
     Completed = "completed",
@@ -9703,6 +9860,12 @@ export enum TakeoutCompleteness {
     Uncertain = "uncertain",
     Incomplete = "incomplete"
 }
+export enum TakeoutExportReadStatus {
+    NotRead = "notRead",
+    Partial = "partial",
+    Read = "read",
+    Error = "error"
+}
 export enum TakeoutScanStatus {
     Pending = "pending",
     Scanning = "scanning",
@@ -9710,9 +9873,23 @@ export enum TakeoutScanStatus {
     Error = "error",
     Missing = "missing"
 }
+export enum TakeoutSizeCheck {
+    Ok = "ok",
+    Low = "low",
+    Short = "short",
+    Unknown = "unknown"
+}
 export enum TakeoutArchiveKind {
     Zip = "zip",
     Tgz = "tgz"
+}
+export enum TakeoutPartReadStatus {
+    NotRead = "notRead",
+    Reading = "reading",
+    Partial = "partial",
+    Read = "read",
+    Error = "error",
+    Missing = "missing"
 }
 export enum TakeoutLargerVersionFilter {
     Pending = "pending",
@@ -9751,7 +9928,8 @@ export enum TakeoutRunFileAction {
     BetterOnServer = "betterOnServer",
     AlreadyProcessed = "alreadyProcessed",
     PreviouslyDeletedSkipped = "previouslyDeletedSkipped",
-    PartUnreadable = "partUnreadable"
+    PartUnreadable = "partUnreadable",
+    MissingFromArchive = "missingFromArchive"
 }
 export enum TakeoutRunFileStatus {
     Planned = "planned",

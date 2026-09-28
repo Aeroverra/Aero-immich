@@ -16091,7 +16091,7 @@
     },
     "/takeouts/exports/{id}": {
       "delete": {
-        "description": "Remove an export whose archives are gone, together with its runs and reports. Imported assets are kept.",
+        "description": "Remove an export whose archives are gone, together with its runs, their reports and their staged files. Imported assets are kept.",
         "operationId": "deleteTakeoutExport",
         "parameters": [
           {
@@ -16196,7 +16196,7 @@
     },
     "/takeouts/exports/{id}/archives": {
       "delete": {
-        "description": "Delete the archive files of an export from the takeout folder. Runs and their reports are kept. Not possible while a run or scan of the export is active.",
+        "description": "Delete the archive files of an export from the takeout folder, and the staged files of its stopped runs. Runs and their reports are kept. Not possible while a run of the export is active.",
         "operationId": "deleteTakeoutExportArchives",
         "parameters": [
           {
@@ -16246,7 +16246,7 @@
     },
     "/takeouts/exports/{id}/rescan": {
       "post": {
-        "description": "Scan the parts of an export whose scan failed again. Not possible while a run of the export is active.",
+        "description": "Forget what the last run found in the parts that could not be read, so the next run reads them again. Nothing is read now. Not possible while a run of the export is active.",
         "operationId": "rescanTakeoutExport",
         "parameters": [
           {
@@ -16283,7 +16283,7 @@
             "api_key": []
           }
         ],
-        "summary": "Rescan failed parts",
+        "summary": "Read failed parts again",
         "tags": [
           "Takeouts"
         ],
@@ -16303,7 +16303,7 @@
     },
     "/takeouts/exports/{id}/runs": {
       "post": {
-        "description": "Start importing an export. An export that is not complete needs importAnyway. A user can have one unfinished run at a time.",
+        "description": "Start importing an export. An export that is not complete needs importAnyway. A user can have one unfinished run at a time. The files staged by the previous failed or cancelled run of the export are reused; that run cannot be resumed afterwards.",
         "operationId": "createTakeoutRun",
         "parameters": [
           {
@@ -16552,7 +16552,7 @@
     },
     "/takeouts/runs/{id}/cancel": {
       "post": {
-        "description": "Cancel a run. Files written for assets that were not created yet are removed.",
+        "description": "Cancel a running run: it stops and keeps its staged files for 7 days, so a new run does not read the archives again. On a failed run, or a cancelled run that still holds staged files, the staged files are discarded now.",
         "operationId": "cancelTakeoutRun",
         "parameters": [
           {
@@ -16773,7 +16773,7 @@
     },
     "/takeouts/runs/{id}/resume": {
       "post": {
-        "description": "Resume a failed or cancelled run from where it stopped, with its original plan.",
+        "description": "Resume a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.",
         "operationId": "resumeTakeoutRun",
         "parameters": [
           {
@@ -34535,12 +34535,36 @@
             "$ref": "#/components/schemas/TakeoutPathSampleDto",
             "description": "Files listed in the index but missing from the parts"
           },
+          "indexTotalBytes": {
+            "description": "Total size the index announces, in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
           "jsonWithoutMedia": {
             "$ref": "#/components/schemas/TakeoutPathSampleDto",
             "description": "Google JSON files that belong to no media file"
           },
           "lastPartMayBeMissing": {
             "description": "Whether parts after the last one may exist (no index)",
+            "type": "boolean"
+          },
+          "lastReadAt": {
+            "description": "When the checks that need a read ran (the last run)",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "lastReadRunId": {
+            "description": "The run whose read produced those checks",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "listingChecked": {
+            "description": "Zip listings were cross-checked against the index before any read",
             "type": "boolean"
           },
           "mediaWithoutJson": {
@@ -34560,12 +34584,21 @@
             "minimum": 0,
             "type": "integer"
           },
+          "partsTotalBytes": {
+            "description": "Sum of the sizes of the media parts",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
           "reasons": {
             "description": "Why the export is not complete, as stable keys",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "sizeCheck": {
+            "$ref": "#/components/schemas/TakeoutSizeCheck"
           },
           "smallParts": {
             "description": "Parts smaller than the split size (informational)",
@@ -34580,19 +34613,40 @@
             "minimum": -9007199254740991,
             "nullable": true,
             "type": "integer"
+          },
+          "unreadableEntries": {
+            "description": "Zip entries the last run could not read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unreadableParts": {
+            "description": "Parts the last run could not read",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutUnreadablePartDto"
+            },
+            "type": "array"
           }
         },
         "required": [
           "corruptParts",
           "indexMissingFiles",
+          "indexTotalBytes",
           "jsonWithoutMedia",
           "lastPartMayBeMissing",
+          "lastReadAt",
+          "lastReadRunId",
+          "listingChecked",
           "mediaWithoutJson",
           "missingParts",
           "notInIndex",
+          "partsTotalBytes",
           "reasons",
+          "sizeCheck",
           "smallParts",
-          "splitSize"
+          "splitSize",
+          "unreadableEntries",
+          "unreadableParts"
         ],
         "type": "object"
       },
@@ -34707,6 +34761,12 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
+          "missingFromArchive": {
+            "description": "Files the index lists but no readable part contains",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "notSelected": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -34721,6 +34781,12 @@
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
             "type": "integer"
+          },
+          "unreadable": {
+            "description": "Parts and zip entries that could not be read",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
           }
         },
         "required": [
@@ -34731,9 +34797,11 @@
           "filteredPartner",
           "filteredTrashed",
           "localDuplicates",
+          "missingFromArchive",
           "notSelected",
           "previouslyDeleted",
-          "rotateOnlyDropped"
+          "rotateOnlyDropped",
+          "unreadable"
         ],
         "type": "object"
       },
@@ -34754,10 +34822,21 @@
             "type": "string"
           },
           "bytesScanned": {
-            "description": "Bytes of the parts scanned so far",
+            "description": "Deprecated: bytes read from the parts by their last reads",
             "maximum": 9007199254740991,
             "minimum": 0,
-            "type": "integer"
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
           },
           "completeness": {
             "$ref": "#/components/schemas/TakeoutCompleteness"
@@ -34811,6 +34890,15 @@
             },
             "type": "array"
           },
+          "partsRead": {
+            "description": "Media parts that were read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutExportReadStatus"
+          },
           "runs": {
             "description": "Runs of the export, newest first",
             "items": {
@@ -34819,7 +34907,18 @@
             "type": "array"
           },
           "scanStatus": {
-            "$ref": "#/components/schemas/TakeoutScanStatus"
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
           },
           "totalSize": {
             "description": "Total size of the parts in bytes",
@@ -34842,6 +34941,8 @@
           "lastRun",
           "partCount",
           "parts",
+          "partsRead",
+          "readStatus",
           "runs",
           "scanStatus",
           "totalSize"
@@ -34862,10 +34963,21 @@
             "type": "string"
           },
           "bytesScanned": {
-            "description": "Bytes of the parts scanned so far",
+            "description": "Deprecated: bytes read from the parts by their last reads",
             "maximum": 9007199254740991,
             "minimum": 0,
-            "type": "integer"
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
           },
           "completeness": {
             "$ref": "#/components/schemas/TakeoutCompleteness"
@@ -34912,8 +35024,28 @@
             "minimum": 0,
             "type": "integer"
           },
+          "partsRead": {
+            "description": "Media parts that were read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutExportReadStatus"
+          },
           "scanStatus": {
-            "$ref": "#/components/schemas/TakeoutScanStatus"
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
           },
           "totalSize": {
             "description": "Total size of the parts in bytes",
@@ -34934,10 +35066,22 @@
           "indexTotalSize",
           "lastRun",
           "partCount",
+          "partsRead",
+          "readStatus",
           "scanStatus",
           "totalSize"
         ],
         "type": "object"
+      },
+      "TakeoutExportReadStatus": {
+        "description": "Read state of all parts of an export",
+        "enum": [
+          "notRead",
+          "partial",
+          "read",
+          "error"
+        ],
+        "type": "string"
       },
       "TakeoutFileKind": {
         "description": "Kind of a file in a takeout run",
@@ -35246,10 +35390,34 @@
       },
       "TakeoutPartDto": {
         "properties": {
-          "bytesScanned": {
-            "description": "Bytes read by the scan so far",
+          "bytesRead": {
+            "description": "Bytes read from the file by the last run that read it, all passes included",
             "maximum": 9007199254740991,
             "minimum": 0,
+            "type": "integer"
+          },
+          "bytesScanned": {
+            "description": "Deprecated: same as bytesRead",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "entryCount": {
+            "description": "Number of files in the part, once it was read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
             "type": "integer"
           },
           "fileName": {
@@ -35269,6 +35437,13 @@
           "kind": {
             "$ref": "#/components/schemas/TakeoutArchiveKind"
           },
+          "lastReadRunId": {
+            "description": "The run that read the part last",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
           "mtime": {
             "description": "File modification time",
             "format": "date-time",
@@ -35280,13 +35455,50 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
-          "scanError": {
-            "description": "Why the scan failed",
+          "readError": {
+            "description": "Why the part could not be read",
             "nullable": true,
             "type": "string"
           },
+          "readErrorOffset": {
+            "description": "Compressed byte offset where reading failed, comparable with the file size",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutPartReadStatus"
+          },
+          "scanError": {
+            "description": "Deprecated: same as readError",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "scanStatus": {
-            "$ref": "#/components/schemas/TakeoutScanStatus"
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
           },
           "segment": {
             "description": "Segment number N of \"-N-NNN\" names, null for \"-NNN\" names",
@@ -35303,19 +35515,37 @@
           }
         },
         "required": [
+          "bytesRead",
           "bytesScanned",
+          "entryCount",
           "fileName",
           "id",
           "isIndex",
           "kind",
+          "lastReadRunId",
           "mtime",
           "partNumber",
+          "readError",
+          "readErrorOffset",
+          "readStatus",
           "scanError",
           "scanStatus",
           "segment",
           "size"
         ],
         "type": "object"
+      },
+      "TakeoutPartReadStatus": {
+        "description": "Read state of a takeout part",
+        "enum": [
+          "notRead",
+          "reading",
+          "partial",
+          "read",
+          "error",
+          "missing"
+        ],
+        "type": "string"
       },
       "TakeoutPathSampleDto": {
         "properties": {
@@ -35470,25 +35700,25 @@
       "TakeoutRunDto": {
         "properties": {
           "archiveBytesRead": {
-            "description": "Bytes of archives read",
+            "description": "Bytes of archives the reading phase covered so far (never goes back)",
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
           },
           "archiveBytesTotal": {
-            "description": "Bytes of archives to read",
+            "description": "Bytes of archives the reading phase covers",
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
           },
           "bytesDone": {
-            "description": "Bytes of media written",
+            "description": "Bytes of media imported",
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
           },
           "bytesTotal": {
-            "description": "Bytes of media to write",
+            "description": "Bytes of media to import",
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
@@ -35523,6 +35753,10 @@
             "nullable": true,
             "type": "string"
           },
+          "hasStaging": {
+            "description": "Staged files are held for this run (a failed or cancelled run can be discarded)",
+            "type": "boolean"
+          },
           "id": {
             "description": "Run ID",
             "format": "uuid",
@@ -35532,6 +35766,9 @@
           "importAnyway": {
             "description": "Whether the run was started although the export is not complete",
             "type": "boolean"
+          },
+          "readStats": {
+            "$ref": "#/components/schemas/TakeoutRunReadStatsDto"
           },
           "settings": {
             "$ref": "#/components/schemas/TakeoutSettingsDto"
@@ -35544,6 +35781,13 @@
           },
           "status": {
             "$ref": "#/components/schemas/TakeoutRunStatus"
+          },
+          "supersededBy": {
+            "description": "The newer run that took over the staged files of this run",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
           }
         },
         "required": [
@@ -35557,11 +35801,14 @@
           "error",
           "exportId",
           "finishedAt",
+          "hasStaging",
           "id",
           "importAnyway",
+          "readStats",
           "settings",
           "startedAt",
-          "status"
+          "status",
+          "supersededBy"
         ],
         "type": "object"
       },
@@ -35591,7 +35838,8 @@
           "betterOnServer",
           "alreadyProcessed",
           "previouslyDeletedSkipped",
-          "partUnreadable"
+          "partUnreadable",
+          "missingFromArchive"
         ],
         "type": "string"
       },
@@ -35803,12 +36051,363 @@
         ],
         "type": "string"
       },
+      "TakeoutRunPartStatsDto": {
+        "properties": {
+          "bytesRead": {
+            "description": "Bytes read from the file by this run, all passes included",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytesSkipped": {
+            "description": "Bytes jumped over (zip gaps)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "deferred": {
+            "description": "Files hashed only, fetched later if the plan needs them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "duplicates": {
+            "description": "Files already on the server or already staged",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entries": {
+            "description": "Files found in the part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entryErrors": {
+            "description": "Zip entries that could not be read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "description": "Why the part could not be read",
+            "nullable": true,
+            "type": "string"
+          },
+          "errorOffset": {
+            "description": "Compressed byte offset of the failure",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "fetchBytesRead": {
+            "description": "Bytes read again to fetch entries the plan needed",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "finishedAt": {
+            "description": "When this run finished the part",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "media": {
+            "description": "Photos and videos found in the part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partId": {
+            "description": "Part ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "passes": {
+            "description": "How many times this run started reading the part (1 when nothing went wrong)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "position": {
+            "description": "Covered file offset of the current pass",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "staged": {
+            "description": "Files written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedBytes": {
+            "description": "Bytes written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "startedAt": {
+            "description": "When this run started reading the part",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TakeoutRunPartStatus"
+          },
+          "transportRetries": {
+            "description": "Reads retried in place after a transport error",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytesRead",
+          "bytesSkipped",
+          "deferred",
+          "duplicates",
+          "entries",
+          "entryErrors",
+          "error",
+          "errorOffset",
+          "fetchBytesRead",
+          "fileName",
+          "finishedAt",
+          "media",
+          "partId",
+          "passes",
+          "position",
+          "size",
+          "staged",
+          "stagedBytes",
+          "startedAt",
+          "status",
+          "transportRetries"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunPartStatus": {
+        "description": "What a run did with a part: read it, found it in the cache, or could not read it",
+        "enum": [
+          "pending",
+          "cached",
+          "reading",
+          "read",
+          "error",
+          "missing"
+        ],
+        "type": "string"
+      },
+      "TakeoutRunReadStatsDto": {
+        "properties": {
+          "crossDevice": {
+            "description": "Staging is on another disk than the library, so finishing copies files",
+            "type": "boolean"
+          },
+          "deferredBytes": {
+            "description": "Bytes of the deferred files",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "deferredFiles": {
+            "description": "Files hashed only, fetched later if the plan needs them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "directoryBytesRead": {
+            "description": "Zip central directory bytes read for the sampling set",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "discardedStagedBytes": {
+            "description": "Bytes of the staged files the plan did not use",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "discardedStagedFiles": {
+            "description": "Staged files the plan did not use",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "etaSeconds": {
+            "description": "Estimated seconds until reading or fetching is done",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "fetchBytesRead": {
+            "description": "Archive bytes the fetch step read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fetchBytesTotal": {
+            "description": "Archive bytes the fetch step expects to read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fetchFiles": {
+            "description": "Files read again because the plan needed them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "filesFound": {
+            "description": "Files found in the parts read by this run",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "jsonFound": {
+            "description": "Google JSON files found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "localDuplicatesSkipped": {
+            "description": "Files whose content was already staged, not written again",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mediaFound": {
+            "description": "Photos and videos found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Per part, in part order",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutRunPartStatsDto"
+            },
+            "type": "array"
+          },
+          "readahead": {
+            "description": "Reads in flight per part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readers": {
+            "description": "Parts read in parallel",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampleBackfillFiles": {
+            "description": "Images sampled after the read for the rotation check",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "serverDuplicatesSkipped": {
+            "description": "Files already on the server, not written",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedBytes": {
+            "description": "Bytes written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedFiles": {
+            "description": "Files written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagingBytes": {
+            "description": "Bytes held in staging by a failed or cancelled run",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagingExpiresAt": {
+            "description": "When the staging of a failed or cancelled run is removed",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "transportRetries": {
+            "description": "Reads retried in place after a transport error",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wastedWriteBytes": {
+            "description": "Bytes written and then discarded",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wastedWriteFiles": {
+            "description": "Files written and then discarded because their content was present",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "crossDevice",
+          "deferredBytes",
+          "deferredFiles",
+          "directoryBytesRead",
+          "discardedStagedBytes",
+          "discardedStagedFiles",
+          "etaSeconds",
+          "fetchBytesRead",
+          "fetchBytesTotal",
+          "fetchFiles",
+          "filesFound",
+          "jsonFound",
+          "localDuplicatesSkipped",
+          "mediaFound",
+          "parts",
+          "readahead",
+          "readers",
+          "sampleBackfillFiles",
+          "serverDuplicatesSkipped",
+          "stagedBytes",
+          "stagedFiles",
+          "stagingBytes",
+          "stagingExpiresAt",
+          "transportRetries",
+          "wastedWriteBytes",
+          "wastedWriteFiles"
+        ],
+        "type": "object"
+      },
       "TakeoutRunStatus": {
         "description": "Takeout import run status",
         "enum": [
           "queued",
-          "scanning",
+          "reading",
           "planning",
+          "fetching",
           "importing",
           "finishing",
           "completed",
@@ -35819,7 +36418,7 @@
         "type": "string"
       },
       "TakeoutScanStatus": {
-        "description": "Scan state of a takeout part or export",
+        "description": "Deprecated: scan state of a takeout part or export, derived from the read state",
         "enum": [
           "pending",
           "scanning",
@@ -36106,6 +36705,48 @@
             "$ref": "#/components/schemas/TakeoutVideoBoostMode"
           }
         },
+        "type": "object"
+      },
+      "TakeoutSizeCheck": {
+        "description": "Size of the parts compared with the total the index announces",
+        "enum": [
+          "ok",
+          "low",
+          "short",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "TakeoutUnreadablePartDto": {
+        "properties": {
+          "error": {
+            "description": "Why the part could not be read",
+            "type": "string"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Compressed byte offset of the failure",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "error",
+          "fileName",
+          "offset",
+          "size"
+        ],
         "type": "object"
       },
       "TakeoutUploadCreateDto": {

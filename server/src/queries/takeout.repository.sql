@@ -208,51 +208,75 @@ delete from "takeout_part"
 where
   "id" = $1
 
--- TakeoutRepository.claimPart
+-- TakeoutRepository.markPartMissing
+begin
+delete from "takeout_entry"
+where
+  "partId" = $1
 update "takeout_part"
 set
-  "scanStatus" = $1,
-  "scanOwner" = $2,
-  "scanStartSize" = size,
-  "scanStartMtime" = mtime,
-  "scanStartCtime" = ctime,
-  "heartbeatAt" = now(),
-  "bytesScanned" = $3
+  "isMissing" = $1,
+  "catalogStatus" = $2,
+  "entryCount" = $3
 where
   "id" = $4
-  and "scanStatus" = $5
-returning
-  *
+commit
 
--- TakeoutRepository.getNextPendingPart
-select
-  *
-from
-  "takeout_part"
+-- TakeoutRepository.updatePartsOfRun
+update "takeout_part"
+set
+  "catalogStatus" = $1
 where
-  "exportId" = $1
-  and "scanStatus" = $2
-  and "isIndex" = $3
-order by
-  "segment" asc nulls first,
-  "partNumber" asc
-limit
-  $4
+  "lastReadRunId" = $2
+  and "catalogStatus" = $3
+
+-- TakeoutRepository.resetReadingParts
+update "takeout_part"
+set
+  "catalogStatus" = $1
+where
+  "catalogStatus" = $2
+  and (
+    "lastReadRunId" is null
+    or not exists (
+      select
+        "takeout_run"."id"
+      from
+        "takeout_run"
+      where
+        "takeout_run"."id" = "takeout_part"."lastReadRunId"
+        and "takeout_run"."status" in ($3, $4, $5, $6, $7, $8)
+    )
+  )
 
 -- TakeoutRepository.deleteEntriesOfPart
 delete from "takeout_entry"
 where
   "partId" = $1
 
--- TakeoutRepository.deleteEntriesOfPartFromSeq
-delete from "takeout_entry"
-where
-  "partId" = $1
-  and "seq" >= $2
-
 -- TakeoutRepository.getMaxEntrySeq
 select
   max("seq") as "maxSeq"
+from
+  "takeout_entry"
+where
+  "partId" = $1
+
+-- TakeoutRepository.countEntries
+select
+  count(*) as "count"
+from
+  "takeout_entry"
+where
+  "partId" = $1
+
+-- TakeoutRepository.getEntriesForSkip
+select
+  "seq",
+  "path",
+  "size",
+  "kind",
+  "checksum"
 from
   "takeout_entry"
 where
@@ -272,14 +296,87 @@ where
   "exportId" = $1
   and "kind" = $2
 
--- TakeoutRepository.getMediaBytes
+-- TakeoutRepository.getEntriesWithoutSample
 select
-  sum("size") as "bytes"
+  "takeout_entry"."id" as "id",
+  "takeout_entry"."partId" as "partId",
+  "takeout_entry"."seq" as "seq",
+  "takeout_entry"."path" as "path",
+  "takeout_entry"."size" as "size",
+  "takeout_entry"."checksum" as "checksum",
+  "takeout_part"."fileName" as "partName"
 from
   "takeout_entry"
+  inner join "takeout_part" on "takeout_part"."id" = "takeout_entry"."partId"
 where
-  "exportId" = $1
-  and "kind" = $2
+  "takeout_entry"."exportId" = $1
+  and "takeout_entry"."kind" = $2
+  and "takeout_entry"."sample" is null
+  and "takeout_entry"."sampleSkipped" is null
+  and "takeout_entry"."checksum" is not null
+
+-- TakeoutRepository.updateEntry
+update "takeout_entry"
+set
+where
+  "id" = $1
+
+-- TakeoutRepository.getCataloguedMediaPaths
+select
+  "takeout_entry"."path" as "path"
+from
+  "takeout_entry"
+  inner join "takeout_part" on "takeout_part"."id" = "takeout_entry"."partId"
+where
+  "takeout_entry"."exportId" = $1
+  and "takeout_entry"."kind" = $2
+  and "takeout_part"."catalogVersion" = $3
+  and "takeout_part"."catalogStatus" = $4
+
+-- TakeoutRepository.getEntryOccurrences
+select
+  "takeout_entry"."checksum" as "checksum",
+  "takeout_entry"."partId" as "partId",
+  "takeout_entry"."seq" as "seq",
+  "takeout_entry"."path" as "path",
+  "takeout_entry"."size" as "size",
+  "takeout_entry"."endOffset" as "endOffset",
+  "takeout_part"."fileName" as "partName",
+  "takeout_part"."kind" as "kind"
+from
+  "takeout_entry"
+  inner join "takeout_part" on "takeout_part"."id" = "takeout_entry"."partId"
+where
+  "takeout_entry"."exportId" = $1
+  and "takeout_entry"."checksum" in ($2)
+  and "takeout_part"."catalogVersion" = $3
+  and "takeout_part"."catalogStatus" != $4
+  and "takeout_part"."isMissing" = $5
+
+-- TakeoutRepository.getUploadAssetSizesOver
+select distinct
+  "asset_exif"."fileSizeInByte" as "size"
+from
+  "asset"
+  inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+where
+  "asset"."ownerId" = $1
+  and "asset"."libraryId" is null
+  and "asset_exif"."fileSizeInByte" > $2
+
+-- TakeoutRepository.getUploadAssetsBySize
+select
+  "asset"."id" as "id",
+  "asset"."originalPath" as "originalPath"
+from
+  "asset"
+  inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+where
+  "asset"."ownerId" = $1
+  and "asset"."libraryId" is null
+  and "asset_exif"."fileSizeInByte" = $2
+limit
+  $3
 
 -- TakeoutRepository.createRun
 insert into
@@ -314,7 +411,7 @@ from
   "takeout_run"
 where
   "userId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8)
 order by
   "createdAt" desc
 
@@ -325,7 +422,30 @@ from
   "takeout_run"
 where
   "exportId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8)
+
+-- TakeoutRepository.getAdoptableRun
+select
+  *
+from
+  "takeout_run"
+where
+  "exportId" = $1
+  and "status" in ($2, $3)
+  and "hasStaging" = $4
+  and "supersededBy" is null
+order by
+  "createdAt" desc
+limit
+  $5
+
+-- TakeoutRepository.getRunsSupersededBy
+select
+  *
+from
+  "takeout_run"
+where
+  "supersededBy" = $1
 
 -- TakeoutRepository.updateRun
 update "takeout_run"
@@ -334,13 +454,59 @@ set
 where
   "id" = $1
 
+-- TakeoutRepository.updateRunIfLeased
+update "takeout_run"
+set
+  "updatedAt" = now()
+where
+  "id" = $1
+  and "leaseToken" = $2
+  and "status" in ($3, $4, $5, $6, $7, $8)
+returning
+  "id"
+
+-- TakeoutRepository.setRunStatusCas
+update "takeout_run"
+set
+  "status" = $1,
+  "updatedAt" = now()
+where
+  "id" = $2
+  and "leaseToken" = $3
+  and "status" in ($4, $5, $6, $7, $8, $9)
+returning
+  "id"
+
+-- TakeoutRepository.finishRunCas
+update "takeout_run"
+set
+  "status" = $1,
+  "leaseToken" = $2,
+  "updatedAt" = now()
+where
+  "id" = $3
+  and "status" in ($4)
+returning
+  "id"
+
+-- TakeoutRepository.requestCancel
+update "takeout_run"
+set
+  "status" = $1,
+  "updatedAt" = now()
+where
+  "id" = $2
+  and "status" in ($3, $4, $5, $6, $7, $8)
+returning
+  "id"
+
 -- TakeoutRepository.getInterruptedRuns
 select
   *
 from
   "takeout_run"
 where
-  "status" in ($1, $2, $3, $4, $5, $6)
+  "status" in ($1, $2, $3, $4, $5, $6, $7)
 
 -- TakeoutRepository.getActiveRunsByUser
 select
@@ -349,7 +515,7 @@ from
   "takeout_run"
 where
   "userId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8)
 
 -- TakeoutRepository.takeLease
 update "takeout_run"
@@ -358,13 +524,63 @@ set
   "leaseToken" = $1
 where
   "id" = $2
+  and "status" in ($3, $4, $5, $6, $7, $8)
   and (
     "leaseToken" is null
-    or "leaseToken" = $3
+    or "leaseToken" = $9
     or "heartbeatAt" < now() - interval '60 seconds'
   )
 returning
   "id"
+
+-- TakeoutRepository.requeueRun
+begin
+update "takeout_run"
+set
+  "status" = $1,
+  "error" = $2,
+  "heartbeatAt" = $3,
+  "leaseToken" = $4,
+  "finishedAt" = $5,
+  "attempt" = $6,
+  "updatedAt" = now()
+where
+  "id" = $7
+  and "status" in ($8, $9)
+  and "supersededBy" is null
+returning
+  "id"
+commit
+
+-- TakeoutRepository.claimExpiredStaging
+update "takeout_run"
+set
+  "hasStaging" = $1,
+  "updatedAt" = now()
+where
+  "id" = $2
+  and "status" in ($3, $4)
+  and "finishedAt" < now() - $5::interval
+returning
+  "id"
+
+-- TakeoutRepository.getStoppedRunsWithTargets
+select
+  *
+from
+  "takeout_run"
+where
+  "status" in ($1, $2)
+  and exists (
+    select
+      "takeout_run_file"."id"
+    from
+      "takeout_run_file"
+    where
+      "takeout_run_file"."runId" = "takeout_run"."id"
+      and "takeout_run_file"."targetPath" is not null
+      and "takeout_run_file"."status" in ($3, $4, $5)
+  )
 
 -- TakeoutRepository.updateRunFile
 update "takeout_run_file"
@@ -372,6 +588,15 @@ set
   "updatedAt" = now()
 where
   "id" = $1
+
+-- TakeoutRepository.updateRunFilesByStatus
+update "takeout_run_file"
+set
+  "status" = $1,
+  "updatedAt" = now()
+where
+  "runId" = $2
+  and "status" in ($3)
 
 -- TakeoutRepository.getRunFilesForImport
 select
@@ -390,6 +615,15 @@ from
   "takeout_run_file"
 where
   "runId" = $1
+
+-- TakeoutRepository.countRunFilesByStatus
+select
+  count(*) as "count"
+from
+  "takeout_run_file"
+where
+  "runId" = $1
+  and "status" = $2
 
 -- TakeoutRepository.getCounterRows
 select
@@ -430,11 +664,17 @@ where
 group by
   "rotationState"
 
--- TakeoutRepository.getRunFilesWithTargetPath
+-- TakeoutRepository.getRunFilesWithTarget
 select
   "id",
+  "seq",
+  "action",
+  "status",
   "targetPath",
-  "status"
+  "newAssetId",
+  "size",
+  "checksum",
+  "entrySeq"
 from
   "takeout_run_file"
 where
@@ -495,7 +735,8 @@ where
 select
   "id",
   "checksum",
-  "deletedAt"
+  "deletedAt",
+  "originalPath"
 from
   "asset"
 where
