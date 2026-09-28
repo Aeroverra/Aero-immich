@@ -1,14 +1,14 @@
+import { compareBytes } from 'src/takeout/byte-order';
 import { CatalogAsset, TakeoutCatalog } from 'src/takeout/catalog';
 import { countersFromRows } from 'src/takeout/counters';
 import { parseDateRange } from 'src/takeout/date-range';
 import { isMotionName, originalNameOfEdited } from 'src/takeout/edited';
 import { applyFilters } from 'src/takeout/filters';
-import { detectRotationFromSamples } from 'src/takeout/image-sample';
 import { Group, GroupItem } from 'src/takeout/groups/group';
 import { runGroupers } from 'src/takeout/groups/pipeline';
+import { detectRotationFromSamples } from 'src/takeout/image-sample';
 import { isDecodable } from 'src/takeout/media-types';
 import { takeoutTagName } from 'src/takeout/part-names';
-import { compareBytes } from 'src/takeout/byte-order';
 import {
   CounterRow,
   DateRange,
@@ -18,8 +18,8 @@ import {
   PlannedAssetData,
   PlannedFile,
   PlannedGroup,
-  Rotation,
   RotatePair,
+  Rotation,
   TakeoutSettings,
 } from 'src/takeout/types';
 
@@ -147,9 +147,7 @@ export async function planImport(
           continue;
         }
         const originalHere = byName.get(originalName);
-        const original = originalHere
-          ? (emittedWinner.get(originalHere.trackerKey) ?? originalHere)
-          : undefined;
+        const original = originalHere ? (emittedWinner.get(originalHere.trackerKey) ?? originalHere) : undefined;
         if (
           original === undefined ||
           files[original.catalogIndex].rotation !== 0 ||
@@ -191,7 +189,12 @@ export async function planImport(
     // Albums, tags and PlannedAssetData for each active file.
     for (const asset of active) {
       files[asset.catalogIndex].action = 'upload';
-      files[asset.catalogIndex].data = buildAssetData(asset, catalog, settings, extraAlbumDirs.get(asset.catalogIndex) ?? []);
+      files[asset.catalogIndex].data = buildAssetData(
+        asset,
+        catalog,
+        settings,
+        extraAlbumDirs.get(asset.catalogIndex) ?? [],
+      );
     }
 
     // Groupers over the active files.
@@ -503,4 +506,3 @@ function planBytes(files: PlannedFile[]): { total: number; done: number } {
   }
   return { total, done: 0 };
 }
-

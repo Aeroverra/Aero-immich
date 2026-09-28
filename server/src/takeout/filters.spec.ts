@@ -6,11 +6,23 @@ import { describe, expect, it } from 'vitest';
 
 function item(name: string): GroupItem {
   const info = getInfo(name, 'UTC');
-  return { radical: info.radical, type: info.type, kind: info.kind, isCover: info.isCover, ext: info.ext, captureDate: 0, fileDate: 0 };
+  return {
+    radical: info.radical,
+    type: info.type,
+    kind: info.kind,
+    isCover: info.isCover,
+    ext: info.ext,
+    captureDate: 0,
+    fileDate: 0,
+  };
 }
 
 function group(kind: GroupKind, names: string[], coverIndex = 0): Group<GroupItem> {
-  return newGroup(kind, names.map((n) => item(n)), coverIndex);
+  return newGroup(
+    kind,
+    names.map((n) => item(n)),
+    coverIndex,
+  );
 }
 
 describe('burst filter', () => {
@@ -63,7 +75,8 @@ describe('heicJpg filter', () => {
   });
 });
 
-const vb = () => group('videoBoost', ['PXL_20250705_134305548.VB-01.COVER.mp4', 'PXL_20250705_134305548.VB-02.MAIN.mp4']);
+const vb = () =>
+  group('videoBoost', ['PXL_20250705_134305548.VB-01.COVER.mp4', 'PXL_20250705_134305548.VB-02.MAIN.mp4']);
 
 describe('videoBoost filter', () => {
   it('NoStack ungroups but keeps both', () => {

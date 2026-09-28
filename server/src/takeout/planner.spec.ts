@@ -7,16 +7,47 @@ import { describe, expect, it } from 'vitest';
 const PART = 'takeout-20260914T211500Z-1-001.tgz';
 
 function media(path: string, size = 100): CatalogInput {
-  return { partName: PART, path, size, mtime: new Date(1_700_000_000_000), kind: 'media', json: null, checksum: Buffer.from(path), sample: null };
+  return {
+    partName: PART,
+    path,
+    size,
+    mtime: new Date(1_700_000_000_000),
+    kind: 'media',
+    json: null,
+    checksum: Buffer.from(path),
+    sample: null,
+  };
 }
 function assetJson(path: string, title: string, ts = '1700000000'): CatalogInput {
-  return { partName: PART, path, size: 500, mtime: new Date(0), kind: 'json', json: { title, photoTakenTime: { timestamp: ts } }, checksum: null, sample: null };
+  return {
+    partName: PART,
+    path,
+    size: 500,
+    mtime: new Date(0),
+    kind: 'json',
+    json: { title, photoTakenTime: { timestamp: ts } },
+    checksum: null,
+    sample: null,
+  };
 }
 function albumJson(path: string, title: string): CatalogInput {
-  return { partName: PART, path, size: 500, mtime: new Date(0), kind: 'json', json: { title }, checksum: null, sample: null };
+  return {
+    partName: PART,
+    path,
+    size: 500,
+    mtime: new Date(0),
+    kind: 'json',
+    json: { title },
+    checksum: null,
+    sample: null,
+  };
 }
 
-async function plan(inputs: CatalogInput[], probeAngle: Rotation, settings: TakeoutSettings = DEFAULT_TAKEOUT_SETTINGS): Promise<ImportPlan> {
+async function plan(
+  inputs: CatalogInput[],
+  probeAngle: Rotation,
+  settings: TakeoutSettings = DEFAULT_TAKEOUT_SETTINGS,
+): Promise<ImportPlan> {
   const catalog = await buildCatalog(inputs);
   const context: PlanContext = { rotationProbe: () => Promise.resolve(probeAngle) };
   return planImport(catalog, settings, context);

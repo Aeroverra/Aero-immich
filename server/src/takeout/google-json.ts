@@ -1,10 +1,4 @@
-import {
-  AlbumFromJson,
-  AssetMetadataFromJson,
-  CompactGoogleJson,
-  GoogleMetadata,
-  GoogleTime,
-} from 'src/takeout/types';
+import { AlbumFromJson, AssetMetadataFromJson, CompactGoogleJson, GoogleMetadata, GoogleTime } from 'src/takeout/types';
 
 // Shape of Go's GoogleMetadata (adapters/googlePhotos/json.go). A value of the wrong JSON type makes Go's
 // json.Unmarshal fail for the whole file, which turns it into an "unknown JSONfile"; the checks below mirror that.

@@ -1,5 +1,5 @@
-import { isRawExt } from 'src/takeout/media-types';
 import { EditedPairTest, Emission, GroupItem, newGroup } from 'src/takeout/groups/group';
+import { isRawExt } from 'src/takeout/media-types';
 import { GroupKind } from 'src/takeout/types';
 
 const THRESHOLD_MS = 1000;
@@ -77,7 +77,10 @@ function sendGroup<T extends GroupItem>(members: T[], out: Array<Emission<T>>, i
 }
 
 // Go series.Group: the input is sorted by radical, then capture date.
-export function groupSeries<T extends GroupItem>(items: Iterable<T>, isEditedPair?: EditedPairTest<T>): Array<Emission<T>> {
+export function groupSeries<T extends GroupItem>(
+  items: Iterable<T>,
+  isEditedPair?: EditedPairTest<T>,
+): Array<Emission<T>> {
   const out: Array<Emission<T>> = [];
   let currentRadical = '';
   let currentCaptureDate: number | null = null;

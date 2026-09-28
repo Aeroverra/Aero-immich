@@ -16,7 +16,11 @@ describe('parsePartName', () => {
     });
   });
   it('parses a non-segmented zip part and tar.gz', () => {
-    expect(parsePartName('takeout-20260915T001353Z-001.zip')).toMatchObject({ segment: null, partNumber: 1, kind: 'zip' });
+    expect(parsePartName('takeout-20260915T001353Z-001.zip')).toMatchObject({
+      segment: null,
+      partNumber: 1,
+      kind: 'zip',
+    });
     expect(parsePartName('takeout-20260915T001353Z-001.tar.gz')?.kind).toBe('tgz');
   });
   it('rejects non-part names', () => {
@@ -42,7 +46,11 @@ describe('groupExports', () => {
       'takeout-20260915T050420Z-1-005.tgz',
       'takeout-20260915T001353Z-001.tgz',
     ];
-    const { exports, orphanIndexes, otherFiles } = groupExports(names.map((n) => file(n)), new Set(), new Set());
+    const { exports, orphanIndexes, otherFiles } = groupExports(
+      names.map((n) => file(n)),
+      new Set(),
+      new Set(),
+    );
     expect(otherFiles).toEqual([]);
     expect(orphanIndexes).toEqual([]);
     expect(exports).toHaveLength(1);
@@ -61,7 +69,11 @@ describe('groupExports', () => {
       'takeout-20260201T000000Z-1-001.tgz',
       'takeout-20260201T000000Z-1-002.tgz',
     ];
-    const { exports } = groupExports(names.map((n) => file(n)), new Set(), new Set());
+    const { exports } = groupExports(
+      names.map((n) => file(n)),
+      new Set(),
+      new Set(),
+    );
     expect(exports).toHaveLength(2);
   });
 
@@ -75,11 +87,12 @@ describe('groupExports', () => {
   });
 
   it('assigns a late-arriving earlier part to the same chain', () => {
-    const names = [
-      'takeout-20260101T000000Z-1-002.tgz',
-      'takeout-20260101T000000Z-1-001.tgz',
-    ];
-    const { exports } = groupExports(names.map((n) => file(n)), new Set(), new Set());
+    const names = ['takeout-20260101T000000Z-1-002.tgz', 'takeout-20260101T000000Z-1-001.tgz'];
+    const { exports } = groupExports(
+      names.map((n) => file(n)),
+      new Set(),
+      new Set(),
+    );
     expect(exports).toHaveLength(1);
     expect(exports[0].parts.map((p) => p.partNumber)).toEqual([1, 2]);
   });

@@ -63,7 +63,14 @@ export function groupExports(
       otherFiles.push(file);
       continue;
     }
-    parsed.push({ ...name, size: file.size, mtime: file.mtime, ctime: file.ctime, isIndex: false, indexConfirmed: false });
+    parsed.push({
+      ...name,
+      size: file.size,
+      mtime: file.mtime,
+      ctime: file.ctime,
+      isIndex: false,
+      indexConfirmed: false,
+    });
   }
 
   const isIndex = (part: DetectedPart): boolean => {
@@ -143,9 +150,13 @@ export function groupExports(
       if (chainIndex.has(chain)) {
         continue;
       }
-      if (time >= chain.firstTimestamp - FIVE_SECONDS_MS && time <= chain.lastTimestamp + SEVEN_DAYS_MS && (target === null || Math.abs(time - chain.firstTimestamp) < Math.abs(time - target.firstTimestamp))) {
-          target = chain;
-        }
+      if (
+        time >= chain.firstTimestamp - FIVE_SECONDS_MS &&
+        time <= chain.lastTimestamp + SEVEN_DAYS_MS &&
+        (target === null || Math.abs(time - chain.firstTimestamp) < Math.abs(time - target.firstTimestamp))
+      ) {
+        target = chain;
+      }
     }
     if (target) {
       chainIndex.set(target, index);

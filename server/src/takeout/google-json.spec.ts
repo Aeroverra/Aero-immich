@@ -33,7 +33,12 @@ describe('TestPresentFields', () => {
     title?: string;
     persons?: string[];
   }> = [
-    { name: 'new_takeout_album_2025', json: `{"title": "basement finishing"}`, isAlbum: true, title: 'basement finishing' },
+    {
+      name: 'new_takeout_album_2025',
+      json: `{"title": "basement finishing"}`,
+      isAlbum: true,
+      title: 'basement finishing',
+    },
     {
       name: 'regularJSON',
       json: `{"title":"title","description":"","imageViews":"0","creationTime":{"timestamp":"1695397525"},"photoTakenTime":{"timestamp":"1695394176"},"geoData":{"latitude":48.7981917,"longitude":2.4866833,"altitude":90.25},"geoDataExif":{"latitude":48.7981917,"longitude":2.4866833,"altitude":90.25},"favorited":true,"url":"https://x","googlePhotosOrigin":{"mobileUpload":{"deviceFolder":{"localFolderName":""},"deviceType":"ANDROID_PHONE"}}}`,

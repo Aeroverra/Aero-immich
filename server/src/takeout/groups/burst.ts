@@ -14,7 +14,10 @@ function sendBurstGroup<T extends GroupItem>(members: T[], out: Array<Emission<T
 }
 
 // Go burst.Group: frames less than 500 ms apart, used only when burstByTime is on and burst mode is not NoStack.
-export function groupBursts<T extends GroupItem>(items: Iterable<T>, isEditedPair?: EditedPairTest<T>): Array<Emission<T>> {
+export function groupBursts<T extends GroupItem>(
+  items: Iterable<T>,
+  isEditedPair?: EditedPairTest<T>,
+): Array<Emission<T>> {
   const out: Array<Emission<T>> = [];
   let current: T[] = [];
   let lastTaken: number | null = null;

@@ -49,7 +49,11 @@ export function parseDateRange(text: string, zone: string): DateRange {
   if (before < after) {
     fail();
   }
-  return { after: after.toJSDate(), before: before.toJSDate(), text: dateRangeToString(after.toJSDate(), before.toJSDate(), zone) };
+  return {
+    after: after.toJSDate(),
+    before: before.toJSDate(),
+    text: dateRangeToString(after.toJSDate(), before.toJSDate(), zone),
+  };
 }
 
 // Go DateRange.String(): reconstructs the shortest form from the bounds.

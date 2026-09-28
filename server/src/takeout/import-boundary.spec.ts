@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
 import { glob } from 'node:fs/promises';
+import { relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(process.cwd(), 'src/takeout');

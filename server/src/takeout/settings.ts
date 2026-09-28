@@ -59,7 +59,10 @@ export function validateSettings(value: Partial<TakeoutSettings>): string[] {
   checkEnum('videoBoost', VIDEO_BOOST_MODES);
   checkEnum('onErrors', ['continue', 'stop']);
 
-  if (value.stopAfterErrors !== undefined && (!Number.isSafeInteger(value.stopAfterErrors) || value.stopAfterErrors < 0)) {
+  if (
+    value.stopAfterErrors !== undefined &&
+    (!Number.isSafeInteger(value.stopAfterErrors) || value.stopAfterErrors < 0)
+  ) {
     errors.push('stopAfterErrors must be a non-negative integer');
   }
   if (value.homeTimeZone !== undefined && !IANAZone.isValidZone(value.homeTimeZone)) {

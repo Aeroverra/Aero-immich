@@ -14,7 +14,7 @@ import {
 } from 'src/takeout/google-json';
 import { getFileIndex, MATCHERS } from 'src/takeout/matchers';
 import { mediaTypeOf } from 'src/takeout/media-types';
-import { base as pathBase, dir as pathDir, ext, nfc, trimExt } from 'src/takeout/paths';
+import { ext, nfc, base as pathBase, dir as pathDir, trimExt } from 'src/takeout/paths';
 import {
   AlbumFromJson,
   AssetMetadataFromJson,

@@ -1,15 +1,7 @@
 import { mediaTypeOfExt } from 'src/takeout/media-types';
 
 export type NameKind =
-  | 'none'
-  | 'burst'
-  | 'edited'
-  | 'portrait'
-  | 'night'
-  | 'motion'
-  | 'longExposure'
-  | 'videoBoost'
-  | 'nightSightVideo';
+  'none' | 'burst' | 'edited' | 'portrait' | 'night' | 'motion' | 'longExposure' | 'videoBoost' | 'nightSightVideo';
 
 export interface NameInfo {
   base: string;

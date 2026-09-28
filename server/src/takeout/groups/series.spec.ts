@@ -25,11 +25,15 @@ function item(name: string, captureMs: number): Named {
 }
 
 function sortedByRadicalThenDate(items: Named[]): Named[] {
-  return [...items].sort((a, b) => (a.radical === b.radical ? a.captureDate! - b.captureDate! : a.radical < b.radical ? -1 : 1));
+  return [...items].sort((a, b) =>
+    a.radical === b.radical ? a.captureDate! - b.captureDate! : a.radical < b.radical ? -1 : 1,
+  );
 }
 
 function collect(emissions: Array<Emission<Named>>) {
-  const groups = emissions.filter((e): e is { group: import('src/takeout/groups/group').Group<Named> } => 'group' in e).map((e) => e.group);
+  const groups = emissions
+    .filter((e): e is { group: import('src/takeout/groups/group').Group<Named> } => 'group' in e)
+    .map((e) => e.group);
   const singles = emissions.filter((e): e is { single: Named } => 'single' in e).map((e) => e.single.name);
   return { groups, singles };
 }
@@ -59,11 +63,27 @@ describe('groupSeries TestGroup', () => {
 
     const byKind = new Map(groups.map((g) => [g.kind, new Set(g.members.map((m) => m.name))]));
     expect(groups).toHaveLength(3);
-    expect(byKind.get('burst')).toEqual(new Set(['IMG_20231014_183246_BURST001_COVER.jpg', 'IMG_20231014_183246_BURST002.jpg', 'IMG_20231014_183246_BURST003.jpg']));
+    expect(byKind.get('burst')).toEqual(
+      new Set([
+        'IMG_20231014_183246_BURST001_COVER.jpg',
+        'IMG_20231014_183246_BURST002.jpg',
+        'IMG_20231014_183246_BURST003.jpg',
+      ]),
+    );
     expect(byKind.get('rawJpg')).toEqual(new Set(['IMG_0003.jpg', 'IMG_0003.raw']));
     expect(byKind.get('heicJpg')).toEqual(new Set(['IMG_0004.heic', 'IMG_0004.jpg']));
     expect(new Set(singles)).toEqual(
-      new Set(['IMG_0001.jpg', 'IMG_0005.raw', 'IMG_0006.heic', 'IMG_0007.raw', 'IMG_0007.jpg', 'IMG_030.mp4', 'IMG_030.mov', 'IMG_030.jpg', 'IMG_030.heic']),
+      new Set([
+        'IMG_0001.jpg',
+        'IMG_0005.raw',
+        'IMG_0006.heic',
+        'IMG_0007.raw',
+        'IMG_0007.jpg',
+        'IMG_030.mp4',
+        'IMG_030.mov',
+        'IMG_030.jpg',
+        'IMG_030.heic',
+      ]),
     );
   });
 });

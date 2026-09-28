@@ -1,5 +1,11 @@
 import { buildCatalog, CatalogAsset } from 'src/takeout/catalog';
-import { albumFromJson, asMetadata, compactGoogleJson, googlePhotosExtra, parseGoogleJson } from 'src/takeout/google-json';
+import {
+  albumFromJson,
+  asMetadata,
+  compactGoogleJson,
+  googlePhotosExtra,
+  parseGoogleJson,
+} from 'src/takeout/google-json';
 import { matchEdited } from 'src/takeout/matchers';
 import { planImport } from 'src/takeout/planner';
 import { DEFAULT_TAKEOUT_SETTINGS } from 'src/takeout/settings';
@@ -7,8 +13,26 @@ import { CatalogInput, GoogleMetadata } from 'src/takeout/types';
 import { describe, expect, it } from 'vitest';
 
 const PART = 'takeout-20260914T211500Z-1-001.tgz';
-const media = (path: string): CatalogInput => ({ partName: PART, path, size: 10, mtime: null, kind: 'media', json: null, checksum: Buffer.from(path), sample: null });
-const json = (path: string, title: string): CatalogInput => ({ partName: PART, path, size: 20, mtime: null, kind: 'json', json: { title, photoTakenTime: { timestamp: '1700000000' } }, checksum: null, sample: null });
+const media = (path: string): CatalogInput => ({
+  partName: PART,
+  path,
+  size: 10,
+  mtime: null,
+  kind: 'media',
+  json: null,
+  checksum: Buffer.from(path),
+  sample: null,
+});
+const json = (path: string, title: string): CatalogInput => ({
+  partName: PART,
+  path,
+  size: 20,
+  mtime: null,
+  kind: 'json',
+  json: { title, photoTakenTime: { timestamp: '1700000000' } },
+  checksum: null,
+  sample: null,
+});
 
 async function matchedIn(inputs: CatalogInput[]): Promise<Map<string, CatalogAsset>> {
   const catalog = await buildCatalog(inputs);
@@ -34,14 +58,20 @@ describe('[DEV 1] matcher engine', () => {
     ]);
     expect(matched.get('Screenshot_2.png')?.jsonPath).toBe(`${dir}/Screenshot_2.png.supplemental-metadata.json`);
     expect(matched.get('Screenshot_22.png')?.jsonPath).toBe(`${dir}/Screenshot_22.png.supplemental-metadata.json`);
-    expect(matched.get('Screenshot_22-edited.png')?.jsonPath).toBe(`${dir}/Screenshot_22.png.supplemental-metadata.json`);
+    expect(matched.get('Screenshot_22-edited.png')?.jsonPath).toBe(
+      `${dir}/Screenshot_22.png.supplemental-metadata.json`,
+    );
     expect(matched.get('Screenshot_22-edited.png')?.matcher).toBe('edited');
   });
 
   it('rejects the known Go-wrong edited claims', () => {
     expect(matchEdited('Screenshot_2.png.supplemental-metadata.json', 'Screenshot_22-edited.png')).toBe(false);
-    expect(matchEdited('Screenshot_2.png.supplemental-metadata.json', 'Screenshot_20210528-084739-edited.png')).toBe(false);
-    expect(matchEdited('Screenshot_2.png.supplemental-metadata.json', 'Screenshot_20220514-092533-edited.png')).toBe(false);
+    expect(matchEdited('Screenshot_2.png.supplemental-metadata.json', 'Screenshot_20210528-084739-edited.png')).toBe(
+      false,
+    );
+    expect(matchEdited('Screenshot_2.png.supplemental-metadata.json', 'Screenshot_20220514-092533-edited.png')).toBe(
+      false,
+    );
     expect(matchEdited('20250411_183451.jpg.supplemental-metadata.json', '20250411_183451~2-edited.jpg')).toBe(false);
   });
 

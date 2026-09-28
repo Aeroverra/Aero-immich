@@ -102,7 +102,12 @@ function plainMatch(jsonName: string, fileName: string): boolean {
   if (fs === stem) {
     return true;
   }
-  if (cutShort(jsonName) && fileName.startsWith(b) && fileName.length > b.length && fe.endsWith(fileName.slice(b.length))) {
+  if (
+    cutShort(jsonName) &&
+    fileName.startsWith(b) &&
+    fileName.length > b.length &&
+    fe.endsWith(fileName.slice(b.length))
+  ) {
     return true;
   }
   return false;
