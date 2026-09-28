@@ -1,6 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/data/server/api_repository.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
+import 'package:immich_mobile/utils/option.dart';
 import 'package:openapi/api.dart';
 
 final tagsApiRepositoryProvider = Provider<TagsApiRepository>(
@@ -37,7 +38,14 @@ class TagsApiRepository extends ApiRepository {
     );
   }
 
-  Future<TagResponseDto> updateTag(String id, {bool? isHidden, String? color, String? name}) {
+  /// Updates the tag; a [parentId] moves it with its children under that tag, or to the top level with some(null)
+  Future<TagResponseDto> updateTag(
+    String id, {
+    bool? isHidden,
+    String? color,
+    String? name,
+    Option<String?> parentId = const Option.none(),
+  }) {
     return checkNull(
       _api.updateTag(
         id,
@@ -45,6 +53,7 @@ class TagsApiRepository extends ApiRepository {
           name: name == null ? const Optional.absent() : Optional.present(name),
           isHidden: isHidden == null ? const Optional.absent() : Optional.present(isHidden),
           color: color == null ? const Optional.absent() : Optional.present(color),
+          parentId: parentId.toOptional(),
         ),
       ),
     );
