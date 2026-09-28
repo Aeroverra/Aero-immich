@@ -308,12 +308,18 @@ export class TakeoutService extends BaseService {
     }
 
     const otherFiles = await this.listOtherFiles(folderName, uploads);
+    // offset = bytes already in the .part file, so paused uploads show their real progress
+    const uploadDtos: TakeoutUploadDto[] = [];
+    for (const upload of uploads) {
+      const partPath = `${this.userFolderPath(join(folderName, upload.fileName))}.part`;
+      uploadDtos.push(mapUpload(upload, await this.partSize(partPath)));
+    }
 
     return {
       folder: { name: folderName, hostPath: `${TAKEOUT_ROOT_FOLDER}/${folderName}` },
       exports: exportDtos,
       orphanIndexFiles: [],
-      uploads: uploads.map((upload) => mapUpload(upload)),
+      uploads: uploadDtos,
       otherFiles,
       activeRun: activeRun ? mapRun(activeRun) : null,
       pendingLargerVersions: pending,
