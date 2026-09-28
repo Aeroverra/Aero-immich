@@ -3262,6 +3262,16 @@ export type TagBulkAssetsResponseDto = {
     /** Number of assets tagged */
     count: number;
 };
+export type TagAssetCountsDto = {
+    /** Asset IDs */
+    assetIds: string[];
+};
+export type TagAssetCountResponseDto = {
+    /** How many of the assets carry the tag itself (a child tag does not count) */
+    count: number;
+    /** Tag ID */
+    tagId: string;
+};
 export type TagUpdateDto = {
     /** Tag color (hex) */
     color?: string | null;
@@ -8181,6 +8191,21 @@ export function bulkTagAssets({ tagBulkAssetsDto }: {
         ...opts,
         method: "PUT",
         body: tagBulkAssetsDto
+    })));
+}
+/**
+ * Count the tags of assets
+ */
+export function getTagAssetCounts({ tagAssetCountsDto }: {
+    tagAssetCountsDto: TagAssetCountsDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TagAssetCountResponseDto[];
+    }>("/tags/assets/counts", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: tagAssetCountsDto
     })));
 }
 /**
