@@ -99,6 +99,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'faceAttributes': _emptyQueue,
     'autoStack': _emptyQueue,
     'videoFrameAnalysis': _emptyQueue,
+    'takeout': _emptyQueue,
   },
   'WorkflowResponseDto': {'logging': false},
 };
