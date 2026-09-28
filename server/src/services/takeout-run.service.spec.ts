@@ -194,6 +194,30 @@ describe(TakeoutRunService.name, () => {
     });
   });
 
+  describe('processUpload result counters', () => {
+    it('records album, tag and metadata flags on the row for the run counters', async () => {
+      mocks.metadata.readTags.mockResolvedValue({ Make: 'Apple', zone: 'UTC-5', zoneSource: 'offset' } as any);
+      mocks.album.getAll.mockResolvedValue([]);
+      mocks.album.create.mockResolvedValue({ id: 'album-1' } as any);
+      mocks.album.addAssetIds.mockResolvedValue(undefined as any);
+      mocks.tag.upsertValue.mockImplementation(
+        ({ value }: any) => Promise.resolve({ id: `tag-${value}`, value }) as any,
+      );
+      mocks.tag.upsertAssetIds.mockResolvedValue([] as any);
+      mocks.asset.upsertMetadata.mockResolvedValue(undefined as any);
+      const row = uploadRow({
+        plan: { latitude: 0, longitude: 0, tags: ['takeout-x'], albums: [{ title: 'Trip' }], extra: { views: 1 } },
+      });
+
+      await (sut as any).processUpload(run(), { ...settings(), syncAlbums: true, googlePhotosFields: true }, row);
+
+      const last = mocks.takeout.updateRunFile.mock.calls.findLast((c) => c[0] === 'rf-1' && (c[1] as any).fallbacks);
+      expect((last![1] as any).fallbacks).toEqual(
+        expect.arrayContaining(['tagged', 'albumCreated:Trip', 'albumAdded', 'metadataSaved']),
+      );
+    });
+  });
+
   describe('phaseRotateFaces: section 11 D1 rotate-only face reconciliation', () => {
     it('rotates the original, re-detects faces, reconciles the copy people, then drops the copy in that order', async () => {
       const original = {

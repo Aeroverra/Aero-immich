@@ -988,6 +988,7 @@ export class TakeoutRunService extends BaseService {
     // file that already carries the right offset (PHONE rule 1, putDate=false) is never clobbered. GPS is written
     // only when the file itself lacks GPS (writing GPS to XMP forces the zone).
     const assetTags = await this.tagNewAsset(run, settings, asset.id, plan);
+    const resultFlags: string[] = assetTags.length > 0 ? ['tagged'] : [];
     const locked: LockableProperty[] = assetTags.length > 0 ? ['tags'] : [];
     let sidecarDate: string | undefined;
     // The capture date is stored WITH an explicit offset as locked exif (the same values PUT dateTimeOriginal
@@ -1053,9 +1054,13 @@ export class TakeoutRunService extends BaseService {
       fallbacks.push('quotaCounted');
       await this.takeoutRepository.updateRunFile(row.id, { fallbacks });
     }
+    row.fallbacks = fallbacks;
 
-    await this.addAlbums(run, settings, row, asset.id, plan);
-    await this.saveGoogleMetadata(settings, asset.id, plan, false);
+    resultFlags.push(...(await this.addAlbums(run, settings, row, asset.id, plan)));
+    if (await this.saveGoogleMetadata(settings, asset.id, plan, false)) {
+      resultFlags.push('metadataSaved');
+    }
+    await this.addResultFlags(row, resultFlags);
 
     // rotation. A rotate-only-pair original (section 11 D1) is NOT queued for the async rotation hook here: the D1
     // pass (phaseRotateFaces) owns its rotation so it can order rotate -> re-detect faces -> reconcile people ->
@@ -1109,12 +1114,15 @@ export class TakeoutRunService extends BaseService {
       await unlink(row.targetPath).catch(() => {});
     }
 
-    await this.addAlbums(run, settings, row, assetId, plan);
-    if (settings.tagServerDuplicates) {
-      await this.addTags(run, settings, row, assetId, plan, true);
+    const resultFlags = await this.addAlbums(run, settings, row, assetId, plan);
+    if (settings.tagServerDuplicates && (await this.addTags(run, settings, row, assetId, plan, true))) {
+      resultFlags.push('tagged');
     }
     const alreadyHasMeta = row.action === TakeoutRunFileAction.AlreadyProcessed;
-    await this.saveGoogleMetadata(settings, assetId, plan, alreadyHasMeta);
+    if (await this.saveGoogleMetadata(settings, assetId, plan, alreadyHasMeta)) {
+      resultFlags.push('metadataSaved');
+    }
+    await this.addResultFlags(row, resultFlags);
 
     if (row.action !== TakeoutRunFileAction.BetterOnServer && (row.rotation ?? 0) !== 0 && settings.applyRotation) {
       const withEdits = await this.assetRepository
@@ -1153,26 +1161,52 @@ export class TakeoutRunService extends BaseService {
     row.plan = reduced;
   }
 
-  /**
-   * Section 13 mechanics: apply the capture date through the same locked-exif PUT the interactive API uses
-   * (`dateTimeOriginal` + its `timeZone`), then queue the sidecar write. With a zone, the date carries that explicit
-   * offset; without one (no zone evidence), the moment is stored with a null time zone (Immich's default display,
-   * no invented zone). The date is never written into the pre-extraction sidecar, so a file that already carries
-   * its own date+zone keeps them natively.
-   */
-  private async addAlbums(run: any, settings: any, row: any, assetId: string, plan: any) {
+  /** Record result counters on the row (counters.ts reads them from fallbacks: albumAdded, albumCreated:<title>, ...). */
+  private async addResultFlags(row: any, flags: string[]) {
+    const fallbacks: string[] = [...(row.fallbacks ?? [])];
+    let changed = false;
+    for (const flag of flags) {
+      if (fallbacks.includes(flag)) {
+        continue;
+      }
+
+      fallbacks.push(flag);
+      changed = true;
+    }
+    if (changed) {
+      row.fallbacks = fallbacks;
+      await this.takeoutRepository.updateRunFile(row.id, { fallbacks });
+    }
+  }
+
+  /** Returns the counter flags: albumAdded when added to any album, albumCreated:<title> per album it created. */
+  private async addAlbums(run: any, settings: any, row: any, assetId: string, plan: any): Promise<string[]> {
+    const flags: string[] = [];
     if (!settings.syncAlbums) {
-      return;
+      return flags;
     }
     for (const album of plan.albums ?? []) {
-      const albumId = await this.resolveAlbum(run, album);
-      await this.albumRepository.addAssetIds(albumId, [assetId]).catch(() => {});
+      const { albumId, created } = await this.resolveAlbum(run, album);
+      if (created) {
+        flags.push(`albumCreated:${album.title}`);
+      }
+      const added = await this.albumRepository
+        .addAssetIds(albumId, [assetId])
+        .then(() => true)
+        .catch(() => false);
+      if (added && !flags.includes('albumAdded')) {
+        flags.push('albumAdded');
+      }
     }
+    return flags;
   }
 
   private albumCache = new Map<string, Map<string, string>>();
 
-  private async resolveAlbum(run: any, album: { title: string; description?: string }): Promise<string> {
+  private async resolveAlbum(
+    run: any,
+    album: { title: string; description?: string },
+  ): Promise<{ albumId: string; created: boolean }> {
     let cache = this.albumCache.get(run.id);
     if (!cache) {
       cache = new Map();
@@ -1180,26 +1214,28 @@ export class TakeoutRunService extends BaseService {
     }
     const key = album.title;
     if (cache.has(key)) {
-      return cache.get(key)!;
+      return { albumId: cache.get(key)!, created: false };
     }
     const owned = await this.albumRepository.getAll(run.userId, { name: album.title }).catch(() => []);
     const existing = (owned as any[])
       .filter((a) => a.albumName === album.title)
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
     let albumId: string;
+    let created = false;
     if (existing) {
       albumId = existing.id;
     } else {
-      const created = await this.albumRepository.create(
+      const newAlbum = await this.albumRepository.create(
         { albumName: album.title, description: album.description ?? '' },
         [],
         [{ userId: run.userId, role: AlbumUserRole.Owner }],
         run.userId,
       );
-      albumId = created.id;
+      albumId = newAlbum.id;
+      created = true;
     }
     cache.set(key, albumId);
-    return albumId;
+    return { albumId, created };
   }
 
   /**
@@ -1220,33 +1256,47 @@ export class TakeoutRunService extends BaseService {
     return leaves.map((t) => t.value);
   }
 
-  private async addTags(run: any, settings: any, row: any, assetId: string, plan: any, _isUpload: boolean) {
+  private async addTags(
+    run: any,
+    settings: any,
+    row: any,
+    assetId: string,
+    plan: any,
+    _isUpload: boolean,
+  ): Promise<boolean> {
     const vars = run.templateVars as { date: string; user: string; start: string };
     const tags = dedupeTags([...(plan.tags ?? []), ...runTags(settings, vars)]);
     if (tags.length === 0) {
-      return;
+      return false;
     }
     const leaves = await upsertTags(this.tagRepository, { userId: run.userId, tags });
-    if (leaves.length > 0) {
-      await this.tagRepository.upsertAssetIds(leaves.map((t) => ({ tagId: t.id, assetId })));
-      await this.eventRepository.emit('AssetTag', { assetId } as any);
+    if (leaves.length === 0) {
+      return false;
     }
+    await this.tagRepository.upsertAssetIds(leaves.map((t) => ({ tagId: t.id, assetId })));
+    await this.eventRepository.emit('AssetTag', { assetId } as any);
+    return true;
   }
 
-  private async saveGoogleMetadata(settings: any, assetId: string, plan: any, alreadyProcessed: boolean) {
+  private async saveGoogleMetadata(
+    settings: any,
+    assetId: string,
+    plan: any,
+    alreadyProcessed: boolean,
+  ): Promise<boolean> {
     if (!settings.googlePhotosFields || !plan.extra || Object.keys(plan.extra).length === 0) {
-      return;
+      return false;
     }
     if (alreadyProcessed) {
       // the first file of a duplicate set already wrote its extras: never overwrite them
       const existing = await this.assetRepository.getMetadataByKey(assetId, 'google-photos').catch(() => null);
       if (existing) {
-        return;
+        return false;
       }
     }
-    await Promise.resolve(
-      this.assetRepository.upsertMetadata(assetId, [{ key: 'google-photos', value: plan.extra }]),
-    ).catch(() => {});
+    return Promise.resolve(this.assetRepository.upsertMetadata(assetId, [{ key: 'google-photos', value: plan.extra }]))
+      .then(() => true)
+      .catch(() => false);
   }
 
   private async stackGroup(run: any, members: any[], allRows: any[]) {
@@ -1267,6 +1317,11 @@ export class TakeoutRunService extends BaseService {
         userId: run.userId,
       } as any);
       await this.eventRepository.emit('StackCreate', { stackId: stack.id, userId: run.userId } as any);
+      for (const member of members) {
+        if (member.assetId && ids.includes(member.assetId)) {
+          await this.addResultFlags(member, ['stacked']);
+        }
+      }
       for (const previous of previousStacks) {
         const memberIds = previous.assets.map((a: any) => a.id);
         const assetIds = ids.includes(previous.primaryAssetId)
