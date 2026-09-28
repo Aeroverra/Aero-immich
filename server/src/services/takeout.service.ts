@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { DateTime } from 'luxon';
 import { constants } from 'node:fs';
 import { access, mkdir, open, readdir, rename, rm, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -6,8 +7,8 @@ import { Readable } from 'node:stream';
 import sanitize from 'sanitize-filename';
 import { StorageCore } from 'src/cores/storage.core';
 import { OnEvent } from 'src/decorators';
-import { AuthDto } from 'src/dtos/auth.dto';
 import { mapAsset } from 'src/dtos/asset-response.dto';
+import { AuthDto } from 'src/dtos/auth.dto';
 import {
   TakeoutExportDetailDto,
   TakeoutExportDto,
@@ -37,15 +38,9 @@ import {
   TakeoutRunStatus,
   TakeoutScanStatus,
 } from 'src/enum';
-import { JobItem } from 'src/types';
-import {
-  FolderFile,
-  TakeoutSettings,
-  groupExports,
-  mergeSettings,
-  validateSettings,
-} from 'src/takeout';
 import { BaseService } from 'src/services/base.service';
+import { FolderFile, TakeoutSettings, groupExports, mergeSettings, validateSettings } from 'src/takeout';
+import { JobItem } from 'src/types';
 
 export const TAKEOUT_ROOT_FOLDER = 'takeouts';
 
@@ -111,7 +106,7 @@ export class TakeoutService extends BaseService {
   @OnEvent({ name: 'AppShutdown' })
   onShutdown() {
     if (!this.syncTimer) {
-    	return;
+      return;
     }
 
     clearInterval(this.syncTimer);
@@ -136,7 +131,7 @@ export class TakeoutService extends BaseService {
         const parts = await this.takeoutRepository.getPartsByUser(user.id);
         for (const part of parts) {
           if (part.scanStatus !== TakeoutScanStatus.Scanning) {
-          	continue;
+            continue;
           }
 
           await this.takeoutRepository.updatePart(part.id, {
@@ -348,9 +343,9 @@ export class TakeoutService extends BaseService {
     if (user[0]?.deletedAt) {
       return;
     }
-    const folderName = await this.ensureUserFolder(
-      user[0] ?? { id: userId, name: '', storageLabel: null },
-    ).catch(() => null);
+    const folderName = await this.ensureUserFolder(user[0] ?? { id: userId, name: '', storageLabel: null }).catch(
+      () => null,
+    );
     if (!folderName) {
       return;
     }
@@ -502,7 +497,10 @@ export class TakeoutService extends BaseService {
     const ctimeChanged = prior.ctime.getTime() !== detected.ctime.getTime();
 
     if (prior.scanStatus === TakeoutScanStatus.Scanned) {
-      if (Number(prior.scannedSize ?? prior.size) !== detected.size || prior.scannedMtime?.getTime() !== detected.mtime.getTime()) {
+      if (
+        Number(prior.scannedSize ?? prior.size) !== detected.size ||
+        prior.scannedMtime?.getTime() !== detected.mtime.getTime()
+      ) {
         await this.takeoutRepository.deleteEntriesOfPart(prior.id);
         await this.takeoutRepository.updatePart(prior.id, {
           size: detected.size,
@@ -677,7 +675,8 @@ export class TakeoutService extends BaseService {
     const templateVars = {
       date: exp.exportedAt.toISOString().slice(0, 10),
       user: exp.accountEmail?.split('@', 1)[0] ?? auth.user.name,
-      start: new Date().toISOString(),
+      // spec 0.4: run start in the home zone, `YYYY-MM-DD HH:mm:ss` (the immich-go session tag format)
+      start: DateTime.now().setZone(settings.homeTimeZone).toFormat('yyyy-MM-dd HH:mm:ss'),
     };
 
     const run = await this.takeoutRepository.createRun({
@@ -744,7 +743,7 @@ export class TakeoutService extends BaseService {
     const rows = await this.takeoutRepository.getRunFilesWithTargetPath(runId);
     for (const row of rows) {
       if (!(row.targetPath && (row.status === 'planned' || row.status === 'written'))) {
-      	continue;
+        continue;
       }
 
       await unlink(row.targetPath).catch(() => {});
@@ -1009,7 +1008,14 @@ export class TakeoutService extends BaseService {
       await rename(partPath, finalPath);
       await this.takeoutRepository.deleteUpload(upload.id);
       void this.syncUserFolder(userId).catch(() => {});
-      return { id: upload.id, fileName: upload.fileName, size, offset: size, chunkSize: UPLOAD_CHUNK_SIZE, stale: false };
+      return {
+        id: upload.id,
+        fileName: upload.fileName,
+        size,
+        offset: size,
+        chunkSize: UPLOAD_CHUNK_SIZE,
+        stale: false,
+      };
     }
     const fresh = await this.takeoutRepository.getUpload(upload.id);
     return mapUpload(fresh ?? { ...upload, createdAt: new Date(), updatedAt: new Date() }, newOffset);
@@ -1101,9 +1107,15 @@ export class TakeoutService extends BaseService {
         status: AssetStatus.Trashed,
       });
       await this.eventRepository.emit('AssetTrashAll', { assetIds: [row.smallerAssetId], userId: auth.user.id });
-      await this.takeoutRepository.updateLargerVersion(id, { status: TakeoutLargerVersionStatus.DeletedSmaller, resolvedAt: new Date() });
+      await this.takeoutRepository.updateLargerVersion(id, {
+        status: TakeoutLargerVersionStatus.DeletedSmaller,
+        resolvedAt: new Date(),
+      });
     } else {
-      await this.takeoutRepository.updateLargerVersion(id, { status: TakeoutLargerVersionStatus.KeptBoth, resolvedAt: new Date() });
+      await this.takeoutRepository.updateLargerVersion(id, {
+        status: TakeoutLargerVersionStatus.KeptBoth,
+        resolvedAt: new Date(),
+      });
     }
     const fresh = await this.takeoutRepository.getLargerVersion(id);
     const mapped = await this.mapLargerVersion(auth, fresh!);
@@ -1237,10 +1249,48 @@ function mapRun(run: any, rotationCounts?: Record<string, number>): TakeoutRunDt
 
 function normalizeCounters(c: any) {
   const empty = {
-    scanned: { files: 0, images: 0, videos: 0, assetJsons: 0, albumJsons: 0, unknownJsons: 0, useless: 0, unsupported: 0, banned: 0, sidecars: 0 },
+    scanned: {
+      files: 0,
+      images: 0,
+      videos: 0,
+      assetJsons: 0,
+      albumJsons: 0,
+      unknownJsons: 0,
+      useless: 0,
+      unsupported: 0,
+      banned: 0,
+      sidecars: 0,
+    },
     matched: { fastTrack: 0, normal: 0, forgottenDuplicates: 0, edited: 0, missingMetadata: 0 },
-    discarded: { localDuplicates: 0, duplicatedInDirectory: 0, filteredPartner: 0, filteredTrashed: 0, filteredArchived: 0, filteredDateRange: 0, notSelected: 0, rotateOnlyDropped: 0, failedVideos: 0, previouslyDeleted: 0 },
-    result: { toUpload: 0, uploaded: 0, serverDuplicates: 0, betterOnServer: 0, alreadyProcessed: 0, largerUploaded: 0, stacked: 0, albumsCreated: 0, albumAdds: 0, tagged: 0, metadataSaved: 0, rotationsQueued: 0, rotationsApplied: 0, zoneAssumed: 0, errors: 0 },
+    discarded: {
+      localDuplicates: 0,
+      duplicatedInDirectory: 0,
+      filteredPartner: 0,
+      filteredTrashed: 0,
+      filteredArchived: 0,
+      filteredDateRange: 0,
+      notSelected: 0,
+      rotateOnlyDropped: 0,
+      failedVideos: 0,
+      previouslyDeleted: 0,
+    },
+    result: {
+      toUpload: 0,
+      uploaded: 0,
+      serverDuplicates: 0,
+      betterOnServer: 0,
+      alreadyProcessed: 0,
+      largerUploaded: 0,
+      stacked: 0,
+      albumsCreated: 0,
+      albumAdds: 0,
+      tagged: 0,
+      metadataSaved: 0,
+      rotationsQueued: 0,
+      rotationsApplied: 0,
+      zoneAssumed: 0,
+      errors: 0,
+    },
     bytes: { total: 0, done: 0 },
   };
   return {
@@ -1321,5 +1371,3 @@ function csvCell(value: string): string {
   }
   return value;
 }
-
-
