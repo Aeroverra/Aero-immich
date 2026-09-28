@@ -75,14 +75,10 @@
         void create();
       }
     } else if (event.key === 'Escape') {
-      // the first Escape clears the search, the next one leaves the field so the viewer keys work again
+      // Escape leaves the field, keeping the search, so the viewer keys (arrows, Escape to close) work again
       event.preventDefault();
       event.stopPropagation();
-      if (query) {
-        query = '';
-      } else {
-        input?.blur();
-      }
+      input?.blur();
     }
   };
 
