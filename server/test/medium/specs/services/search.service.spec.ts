@@ -64,6 +64,19 @@ const newLibrary = async () => {
   return { sut, ctx, user, auth, tagged, inAlbum, plain, plainFavorite, trashed };
 };
 
+/** Beach is a child of Holiday: leaving out Holiday leaves out Beach photos too */
+const newTaggedLibrary = async () => {
+  const library = await newLibrary();
+  const { ctx, user, plain, plainFavorite, inAlbum } = library;
+  const { tag: holiday } = await ctx.newTag({ userId: user.id, value: 'Holiday' });
+  const { tag: beach } = await ctx.newTag({ userId: user.id, value: 'Holiday/Beach', parentId: holiday.id });
+  const { tag: work } = await ctx.newTag({ userId: user.id, value: 'Work' });
+  await ctx.newTagAsset({ tagIds: [beach.id], assetIds: [plain.id] });
+  await ctx.newTagAsset({ tagIds: [work.id], assetIds: [plain.id, plainFavorite.id] });
+  await ctx.newTagAsset({ tagIds: [holiday.id], assetIds: [inAlbum.id] });
+  return { ...library, holiday, beach, work };
+};
+
 const ids = (items: { id: string }[]) => items.map(({ id }) => id).toSorted();
 
 beforeAll(async () => {
@@ -361,6 +374,48 @@ describe(SearchService.name, () => {
       );
 
       expect(ids(items)).toEqual(ids([plain, plainFavorite]));
+    });
+  });
+
+  describe('excluded tags', () => {
+    it('should leave out assets with an excluded tag or one of its child tags', async () => {
+      const { sut, auth, holiday, tagged, plainFavorite } = await newTaggedLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, excludeTagIds: [holiday.id] });
+
+      expect(ids(response.assets.items)).toEqual(ids([tagged, plainFavorite]));
+    });
+
+    it('should combine included and excluded tags', async () => {
+      const { sut, auth, work, beach, plainFavorite } = await newTaggedLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, tagIds: [work.id], excludeTagIds: [beach.id] });
+
+      expect(ids(response.assets.items)).toEqual(ids([plainFavorite]));
+    });
+
+    it('should apply excluded tags to smart search', async () => {
+      const { ctx, user, holiday, tagged, inAlbum, plain, plainFavorite } = await newTaggedLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      for (const [index, asset] of [tagged, inAlbum, plain, plainFavorite].entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), userIds: [user.id], excludeTagIds: [holiday.id] },
+      );
+
+      expect(ids(items)).toEqual(ids([tagged, plainFavorite]));
+    });
+
+    it('should refuse to exclude a hidden tag while private mode is locked', async () => {
+      const { sut, ctx, auth, user } = await newTaggedLibrary();
+      const { tag: secret } = await ctx.newTag({ userId: user.id, value: 'Secret', isHidden: true });
+
+      await expect(sut.searchMetadata(auth, { size: 250, excludeTagIds: [secret.id] })).rejects.toThrow(
+        'Not found or no tag.read access',
+      );
     });
   });
 
