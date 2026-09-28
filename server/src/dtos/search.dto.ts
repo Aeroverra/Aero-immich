@@ -52,6 +52,12 @@ const BaseSearchSchema = z.object({
   isNotInAlbum: z.boolean().optional().describe('Filter assets not in any album').meta(DEPRECATED_FLAT_FIELD),
   personIds: z.array(z.uuidv4()).optional().describe('Filter by person IDs').meta(DEPRECATED_FLAT_FIELD),
   tagIds: z.array(z.uuidv4()).nullish().describe('Filter by tag IDs').meta(DEPRECATED_FLAT_FIELD),
+  // the flat counterpart of filter.tagIds.none, for clients that still send the flat shape (smart search pages)
+  excludeTagIds: z
+    .array(z.uuidv4())
+    .optional()
+    .describe('Leave out assets with any of these tags or their child tags')
+    .meta(DEPRECATED_FLAT_FIELD),
   albumIds: z.array(z.uuidv4()).optional().describe('Filter by album IDs').meta(DEPRECATED_FLAT_FIELD),
   rating: z
     .int()
