@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
 import { StackRepository } from 'src/repositories/stack.repository';
 import { UserRepository } from 'src/repositories/user.repository';
@@ -243,5 +244,49 @@ describe(SyncRequestType.PartnerStacksV1, () => {
 
     await ctx.syncAckAll(auth, newResponse);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerStacksV1]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold a partner stack whose primary asset is private unless the client opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: user.id });
+      const { asset } = await ctx.newAsset({ ownerId: partner.id, isPrivate: true });
+      const { stack } = await ctx.newStack({ ownerId: partner.id }, [asset.id]);
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.PartnerStacksV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.PartnerStackV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerStacksV1]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.PartnerStacksV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.PartnerStackV1,
+          data: expect.objectContaining({ id: stack.id, primaryAssetId: asset.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerStacksV1]);
+    });
+
+    it('should carry a partner stack whose primary asset is private for a client that opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: user.id });
+      const { asset } = await ctx.newAsset({ ownerId: partner.id, isPrivate: true });
+      const { stack } = await ctx.newStack({ ownerId: partner.id }, [asset.id]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.PartnerStacksV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.PartnerStackV1,
+          data: expect.objectContaining({ id: stack.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
