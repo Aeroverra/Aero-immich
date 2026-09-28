@@ -170,8 +170,8 @@ export class TakeoutService extends BaseService {
 
     // exports needing analysis
     await this.wrapStep('queue analysis', async () => {
-      const exports = await this.takeoutRepository.getExportsNeedingAnalysis();
-      for (const exp of exports) {
+      const pendingExports = await this.takeoutRepository.getExportsNeedingAnalysis();
+      for (const exp of pendingExports) {
         await this.queueUnique({ name: JobName.TakeoutAnalyzeExport, data: { exportId: exp.id } }, exp.id);
       }
     });
@@ -285,7 +285,7 @@ export class TakeoutService extends BaseService {
   private async buildOverview(userId: string): Promise<TakeoutOverviewDto> {
     const folder = await this.takeoutRepository.getFolder(userId);
     const folderName = folder?.folderName ?? '';
-    const exports = await this.takeoutRepository.getExportsByUser(userId);
+    const exportRows = await this.takeoutRepository.getExportsByUser(userId);
     const parts = await this.takeoutRepository.getPartsByUser(userId);
     const uploads = await this.takeoutRepository.getUploads(userId);
     const activeRun = await this.takeoutRepository.getActiveRun(userId);
@@ -299,7 +299,7 @@ export class TakeoutService extends BaseService {
     }
 
     const exportDtos: TakeoutExportDto[] = [];
-    for (const exp of exports) {
+    for (const exp of exportRows) {
       const runs = await this.takeoutRepository.getRunsByExport(exp.id);
       exportDtos.push(mapExport(exp, partsByExport.get(exp.id) ?? [], runs[0] ?? null));
     }

@@ -154,14 +154,14 @@ export function groupExports(
     }
   }
 
-  const exports: DetectedExport[] = chains.map((chain) => {
+  const detected: DetectedExport[] = chains.map((chain) => {
     const sorted = [...chain.parts].sort(comparePartOrder);
     const first = sorted[0];
     const exportKey = first.segment === null ? first.timestamp : `${first.timestamp}-${first.segment}`;
     const index = chainIndex.get(chain);
     return { exportKey, exportedAt: first.exportedAt, parts: index ? [...sorted, index] : sorted };
   });
-  exports.sort((a, b) => a.exportedAt.getTime() - b.exportedAt.getTime() || compareBytes(a.exportKey, b.exportKey));
+  detected.sort((a, b) => a.exportedAt.getTime() - b.exportedAt.getTime() || compareBytes(a.exportKey, b.exportKey));
 
-  return { exports, orphanIndexes, otherFiles };
+  return { exports: detected, orphanIndexes, otherFiles };
 }
