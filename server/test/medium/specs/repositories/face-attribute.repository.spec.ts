@@ -108,6 +108,25 @@ describe(FaceAttributeRepository.name, () => {
     });
   });
 
+  describe('video frame faces', () => {
+    it('should leave out faces found in other frames of a video', async () => {
+      const { ctx, sut } = setup();
+      const { asset, faces } = await newAssetWithFaces(ctx, 2);
+      await ctx.database
+        .updateTable('asset_face')
+        .set({ frameTimestamp: 5000 })
+        .where('id', '=', faces[1].id)
+        .execute();
+      await sut.upsert(quality(asset.id), [attributes(faces[0].id)]);
+
+      const job = await sut.getForFaceAttributesJob(asset.id);
+      expect(job?.faces.map(({ id }) => id)).toEqual([faces[0].id]);
+
+      const missing = await collect(sut.streamForFaceAttributesJob({ force: false, facesDetected: true }));
+      expect(missing).not.toContain(asset.id);
+    });
+  });
+
   describe('upsert', () => {
     it('should store and replace the results', async () => {
       const { ctx, sut } = setup();
