@@ -113,7 +113,8 @@
   </div>
 
   <div class="w-full overflow-x-auto">
-    <table class="w-full text-left text-sm">
+    <!-- a minimum width keeps the path columns readable on phones; the wrapper scrolls horizontally -->
+    <table class="w-full min-w-3xl text-left text-sm">
       <thead>
         <tr class="border-b text-immich-fg/60 dark:text-immich-dark-fg/60">
           <th class="py-1 pr-2 font-medium">{$t('path')}</th>

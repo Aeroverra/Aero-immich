@@ -36,15 +36,17 @@
         {@const isSmall = smallSet.has(part.fileName)}
         {@const isCorrupt = corruptSet.has(part.fileName) || part.scanStatus === TakeoutScanStatus.Error}
         <tr class="border-b" class:text-danger={isCorrupt}>
-          <td class="py-1 pr-2">{part.segment === null ? part.partNumber : `${part.segment}-${part.partNumber}`}</td>
+          <td class="py-1 pr-2 whitespace-nowrap"
+            >{part.segment === null ? part.partNumber : `${part.segment}-${part.partNumber}`}</td
+          >
           <td class="py-1 pr-2 break-all">
             {part.fileName}
             {#if part.isIndex}<Text size="tiny" color="muted" class="ml-1">(index)</Text>{/if}
           </td>
-          <td class="py-1 pr-2 whitespace-nowrap">
-            {getByteUnitString(part.size, $locale)}
+          <td class="py-1 pr-2">
+            <span class="whitespace-nowrap">{getByteUnitString(part.size, $locale)}</span>
             {#if isSmall}
-              <Text size="tiny" color="muted" class="ml-1">{$t('takeout_small_part')}</Text>
+              <Text size="tiny" color="muted" class="block">{$t('takeout_small_part')}</Text>
             {/if}
           </td>
           <td class="py-1 pr-2 whitespace-nowrap">
