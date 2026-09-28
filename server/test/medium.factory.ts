@@ -28,6 +28,7 @@ import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
+import { AutoStackRepository } from 'src/repositories/auto-stack.repository';
 import { ClusterGroupRepository } from 'src/repositories/cluster-group.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
@@ -482,6 +483,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case AssetEditRepository:
     case AssetFileRepository:
     case AssetJobRepository:
+    case AutoStackRepository:
     case ClusterGroupRepository:
     case DuplicateRepository:
     case IntegrityRepository:
@@ -567,6 +569,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case AssetRepository:
     case AssetDeletedChecksumRepository:
     case AssetJobRepository:
+    case AutoStackRepository:
     case ConfigRepository:
     case CryptoRepository:
     case LibraryRepository:
