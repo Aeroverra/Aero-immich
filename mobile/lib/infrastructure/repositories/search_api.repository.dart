@@ -17,6 +17,11 @@ class SearchApiRepository extends ApiRepository {
       type = AssetTypeEnum.VIDEO;
     }
 
+    // Absent = every asset the session may see, an explicit value is only accepted while private mode is on
+    final Optional<bool?> isPrivate = filter.private.isPrivate == null
+        ? const Optional.absent()
+        : Optional.present(filter.private.isPrivate);
+
     if ((filter.context != null && filter.context!.isNotEmpty) ||
         (filter.assetId != null && filter.assetId!.isNotEmpty)) {
       return _api.searchSmart(
@@ -41,6 +46,7 @@ class SearchApiRepository extends ApiRepository {
           rating: filter.rating.rating.toOptional(),
           isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
           isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
+          isPrivate: isPrivate,
           personIds: Optional.present(filter.people.map((e) => e.id).toList()),
           tagIds: filter.tagIds == null ? const Optional.absent() : Optional.present(filter.tagIds),
           type: type == null ? const Optional.absent() : Optional.present(type),
@@ -72,6 +78,7 @@ class SearchApiRepository extends ApiRepository {
         rating: filter.rating.rating.toOptional(),
         isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
         isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
+        isPrivate: isPrivate,
         personIds: Optional.present(filter.people.map((e) => e.id).toList()),
         tagIds: filter.tagIds == null ? const Optional.absent() : Optional.present(filter.tagIds),
         type: type == null ? const Optional.absent() : Optional.present(type),

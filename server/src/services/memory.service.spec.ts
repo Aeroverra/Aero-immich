@@ -80,7 +80,7 @@ describe(MemoryService.name, () => {
         id: memory.id,
       });
 
-      expect(mocks.memory.get).toHaveBeenCalledWith(memory.id);
+      expect(mocks.memory.get).toHaveBeenCalledWith(memory.id, { privateMode: false, userId: expect.any(String) });
       expect(mocks.access.memory.checkOwnerAccess).toHaveBeenCalledWith(memory.ownerId, new Set([memory.id]));
     });
   });
@@ -169,7 +169,10 @@ describe(MemoryService.name, () => {
 
       await expect(sut.update(factory.auth(), memory.id, { isSaved: true })).resolves.toBeDefined();
 
-      expect(mocks.memory.update).toHaveBeenCalledWith(memory.id, expect.objectContaining({ isSaved: true }));
+      expect(mocks.memory.update).toHaveBeenCalledWith(memory.id, expect.objectContaining({ isSaved: true }), {
+        privateMode: false,
+        userId: expect.any(String),
+      });
     });
   });
 
