@@ -34,19 +34,19 @@ class PeopleService {
     return _repository.updateBirthday(personId, birthday);
   }
 
-  /// Tags each of [personIds] on the videos among [assetIds]. Returns the assets that got at least one of them and the
+  /// Adds each of [personIds] to the videos among [assetIds]. Returns the assets that got at least one of them and the
   /// photos that were skipped; the new faces reach the local database with the next sync.
-  Future<({Set<String> tagged, Set<String> photos})> tagOnVideos(
+  Future<({Set<String> added, Set<String> photos})> addToVideos(
     Iterable<String> personIds,
     List<String> assetIds,
   ) async {
-    final tagged = <String>{};
+    final added = <String>{};
     final photos = <String>{};
     for (final personId in personIds) {
       final result = await _personApiRepository.addToAssets(personId, assetIds);
-      tagged.addAll(result.tagged);
+      added.addAll(result.added);
       photos.addAll(result.photos);
     }
-    return (tagged: tagged, photos: photos);
+    return (added: added, photos: photos);
   }
 }
