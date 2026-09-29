@@ -18,6 +18,7 @@
   import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import SetVisibilityAction from '$lib/components/timeline/actions/SetVisibilityAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
+  import TagPeopleAction from '$lib/components/timeline/actions/TagPeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import { QueryParameter } from '$lib/constants';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
@@ -422,6 +423,7 @@
               {#if authManager.preferences.tags.enabled}
                 <TagAction menuItem />
               {/if}
+              <TagPeopleAction />
               <DeleteAssets menuItem {onAssetDelete} onUndoDelete={onSearchQueryUpdate} />
               <hr />
               <ActionMenuItem action={Actions.RegenerateThumbnailJob} />
