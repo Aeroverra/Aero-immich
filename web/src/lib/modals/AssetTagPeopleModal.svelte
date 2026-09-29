@@ -13,7 +13,7 @@
     type PersonResponseDto,
   } from '@immich/sdk';
   import { FormModal, Icon, IconButton, Input, LoadingSpinner, Text, toastManager } from '@immich/ui';
-  import { mdiAccountPlusOutline, mdiClose, mdiMagnify, mdiPlus } from '@mdi/js';
+  import { mdiAccount, mdiAccountPlusOutline, mdiClose, mdiMagnify, mdiPlus } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
 
@@ -63,6 +63,13 @@
     }
   });
 
+  // an exact name first, then a name starting with the search, then the first person that contains it
+  const bestMatch = $derived(
+    filteredPeople.find(({ name }) => normalizeSearchString(name) === search) ??
+      filteredPeople.find(({ name }) => normalizeSearchString(name).startsWith(search)) ??
+      filteredPeople[0],
+  );
+
   const toggle = (person: PersonResponseDto) => {
     selected = selectedIds.has(person.id) ? selected.filter(({ id }) => id !== person.id) : [...selected, person];
   };
@@ -77,7 +84,10 @@
       const person = await createPerson({ personCreateDto: { name } });
       people = [person, ...people];
       selected = [...selected, person];
-      searchName = '';
+      // keep whatever was typed while the person was being created
+      if (searchName.trim() === name) {
+        searchName = '';
+      }
     } catch (error) {
       handleError(error, $t('errors.something_went_wrong'));
     }
@@ -88,10 +98,15 @@
       return;
     }
 
-    // Enter picks the only match or creates the typed name instead of submitting the form
+    // Enter picks the best match, or creates the typed name when nobody matches, instead of submitting the form
     event.preventDefault();
-    if (filteredPeople.length === 1) {
-      toggle(filteredPeople[0]);
+    if (!search) {
+      return;
+    }
+    if (bestMatch) {
+      if (!selectedIds.has(bestMatch.id)) {
+        selected = [...selected, bestMatch];
+      }
       searchName = '';
     } else if (newName) {
       await onCreate();
@@ -134,6 +149,27 @@
   };
 </script>
 
+{#snippet avatar(person: PersonResponseDto, size: string)}
+  {#if person.thumbnailPath}
+    <ImageThumbnail
+      circle
+      shadow={size === '100%'}
+      url={getPeopleThumbnailUrl(person)}
+      altText={person.name}
+      widthStyle={size}
+      heightStyle={size === '100%' ? undefined : size}
+    />
+  {:else}
+    <!-- a person created here has no feature photo until a face is tagged -->
+    <span
+      class="flex aspect-square shrink-0 items-center justify-center rounded-full bg-subtle text-primary"
+      style:width={size}
+    >
+      <Icon icon={mdiAccount} size={size === '100%' ? '50%' : '75%'} />
+    </span>
+  {/if}
+{/snippet}
+
 <FormModal
   size="small"
   title={$t('tag_people_in_videos')}
@@ -162,13 +198,7 @@
       <div class="flex flex-wrap gap-2" data-testid="tag-people-selected">
         {#each selected as person (person.id)}
           <span class="flex items-center gap-1 rounded-full bg-primary/10 py-1 ps-1 pe-1 text-sm">
-            <ImageThumbnail
-              circle
-              url={getPeopleThumbnailUrl(person)}
-              altText={person.name}
-              widthStyle="1.5rem"
-              heightStyle="1.5rem"
-            />
+            {@render avatar(person, '1.5rem')}
             <span class="max-w-40 truncate">{person.name || $t('unknown')}</span>
             <IconButton
               icon={mdiClose}
@@ -216,13 +246,7 @@
                   ? 'bg-primary/10 ring-2 ring-primary'
                   : ''}"
               >
-                <ImageThumbnail
-                  circle
-                  shadow
-                  url={getPeopleThumbnailUrl(person)}
-                  altText={person.name}
-                  widthStyle="100%"
-                />
+                {@render avatar(person, '100%')}
                 <span class="line-clamp-2 text-center text-xs font-medium">{person.name}</span>
               </button>
             {/each}
