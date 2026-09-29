@@ -67,7 +67,7 @@ export { compareBytes, sortBytes } from 'src/takeout/byte-order';
 export { nfc } from 'src/takeout/paths';
 
 export { parseArchiveBrowser, parseSizeText } from 'src/takeout/archive-browser';
-export { SIZE_RATIO_LOW, SIZE_RATIO_SHORT, analyzeExport } from 'src/takeout/export-analysis';
+export { SIZE_RATIO_LOW, SIZE_RATIO_SHORT, analyzeExport, crossCheckIndex } from 'src/takeout/export-analysis';
 export { groupExports, parsePartName, takeoutTagName } from 'src/takeout/part-names';
 
 export { readArchiveEntry, readZipDirectory, readZipEntriesAt, walkArchive } from 'src/takeout/archive-reader';

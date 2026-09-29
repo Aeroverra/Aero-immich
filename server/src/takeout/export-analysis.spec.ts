@@ -1,4 +1,4 @@
-import { analyzeExport } from 'src/takeout/export-analysis';
+import { analyzeExport, crossCheckIndex } from 'src/takeout/export-analysis';
 import { pathKey } from 'src/takeout/path-key';
 import {
   ArchiveBrowserIndex,
@@ -72,6 +72,65 @@ function input(parts: ExportAnalysisPart[], extra: Partial<ExportAnalysisInput> 
   };
 }
 
+// Names from the family export: the index lists the full name, the archive holds the name Google shortened
+const DIR_2022 = 'Takeout/Google Photos/Photos from 2022';
+const SHORTENED = [
+  {
+    listed:
+      'Aeroverra_modern_e-commerce_logo_geared_towards_developers_db305a8a-a454-4d14-9a9c-011fa5fa3ac6.png.supplemental-metadata.json',
+    stored: 'Aeroverra_modern_e-commerce_logo_geared_towards_developers_db305a8a-a454-4d14-9a9c-011fa5fa3ac6.png..json',
+  },
+  {
+    listed:
+      'Aeroverra_a_lighthouse_on_a_cliff_crepus_2f1b61f9-68bb-4ec6-ada3-afbfba729402.png.supplemental-metadata.json',
+    stored: 'Aeroverra_a_lighthouse_on_a_cliff_crepus_2f1b61f9-68bb-4ec6-ada3-afbfba729402.json',
+  },
+  {
+    listed:
+      'Aeroverra_whitehat_hacker_with_lots_of_money_f594334f-b725-4807-b34a-991129463ed3.png.supplemental-metadata.json',
+    stored: 'Aeroverra_whitehat_hacker_with_lots_of_money_f594334f-b725-4807-b34a-991129463ed3.png.sup.json',
+  },
+  {
+    listed: 'Screenshot 2022-01-27 13_07_11.583191compressed-compressed-crop-2022-01-27 13_06_31.523562.jpeg',
+    stored: 'Screenshot 2022-01-27 13_07_11.58319.jpeg',
+  },
+].map(({ listed, stored }) => ({ listed: `${DIR_2022}/${listed}`, stored: `${DIR_2022}/${stored}` }));
+
+describe('crossCheckIndex', () => {
+  it('counts a name Google shortened in the archive as present, and still reports a missing file', () => {
+    const media = `${DIR_2022}/Aeroverra_modern_e-commerce_logo_geared_towards_developers_db305a8a-a454-4d14-9a9c-011fa5fa3ac6.png`;
+    const missing = `${DIR_2022}/IMG_20220101_101010.jpg`;
+    const indexFiles = [media, ...SHORTENED.map((s) => s.listed), missing, `${missing}.supplemental-metadata.json`];
+    const archiveKeys = new Set([media, ...SHORTENED.map((s) => s.stored)].map((path) => pathKey(path)));
+
+    expect(crossCheckIndex(indexFiles, archiveKeys)).toEqual({
+      missing: [missing, `${missing}.supplemental-metadata.json`],
+      notInIndex: 0,
+    });
+  });
+
+  it('lets one shortened name stand in for one index path of its own directory only', () => {
+    const indexFiles = [
+      'Takeout/Google Photos/Trip/holiday_by_the_sea_first_day.jpg',
+      'Takeout/Google Photos/Trip/holiday_by_the_sea_second_day.jpg',
+      'Takeout/Google Photos/Other/holiday_by_the_sea_third_day.jpg',
+    ];
+    const archiveKeys = new Set(['Takeout/Google Photos/Trip/holiday_by_the_sea.jpg']);
+
+    expect(crossCheckIndex(indexFiles, archiveKeys)).toEqual({ missing: indexFiles.slice(1), notInIndex: 0 });
+  });
+
+  it('never takes a longer name, another extension or a listed file for a shortened one', () => {
+    const indexFiles = ['a/photo_2022.jpg', 'a/clip_2022_long_name.mp4', 'a/clip_2022.mp4'];
+    const archiveKeys = new Set(['a/photo_2022_edited.jpg', 'a/clip_2022.mov', 'a/clip_2022.mp4']);
+
+    expect(crossCheckIndex(indexFiles, archiveKeys)).toEqual({
+      missing: ['a/photo_2022.jpg', 'a/clip_2022_long_name.mp4'],
+      notInIndex: 2,
+    });
+  });
+});
+
 describe('analyzeExport', () => {
   it('reports a clean export without an index and a small last part as complete', () => {
     const a = analyzeExport(input([part(1, 2 * GiB), part(2, 1 * GiB)]));
@@ -143,6 +202,15 @@ describe('analyzeExport', () => {
     expect(a.indexMissingFiles).toEqual({ count: 1, sample: ['Takeout/Google Photos/b.jpg'] });
     expect(a.notInIndex).toBe(1);
     expect(a.reasons).toContain('index_missing_files');
+  });
+
+  it('finds the names Google shortened in the zip listings before any read (family export)', () => {
+    const files = SHORTENED.map((s) => s.listed);
+    const listingPaths = new Set(SHORTENED.map((s) => pathKey(s.stored)));
+    const a = analyzeExport(input([zipPart(1, GiB)], { index: index(files), indexTotalBytes: GiB, listingPaths }));
+    expect(a.indexMissingFiles).toEqual({ count: 0, sample: [] });
+    expect(a.notInIndex).toBe(0);
+    expect(a.completeness).toBe('complete');
   });
 
   it('compares index and listing paths by pathKey (trailing spaces, NFD)', () => {

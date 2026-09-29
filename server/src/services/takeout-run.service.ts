@@ -89,6 +89,7 @@ import {
   analyzeExport,
   buildCatalog,
   countersFromRows,
+  crossCheckIndex,
   groupEdges,
   hex,
   messageOf,
@@ -1012,30 +1013,21 @@ export class TakeoutRunService extends BaseService {
       unreadableParts.push({ fileName: part.fileName, error, offset, size });
     }
 
-    // index cross-check against the catalog (by pathKey)
+    // index cross-check against the catalog (by pathKey; a name Google shortened in the archive counts as present)
     const indexFiles = await this.indexFiles(a);
     let indexMissing: string[] | null = null;
     let notInIndex = 0;
     if (indexFiles) {
-      indexMissing = [];
-      const indexKeys = new Set<string>();
-      for (const path of indexFiles) {
-        const key = pathKey(path);
-        indexKeys.add(key);
-        if (!catalogKeys.has(key)) {
-          indexMissing.push(path);
-          reportRow(
-            path,
-            null,
-            TakeoutRunFileAction.MissingFromArchive,
-            'listed in the Takeout index but not found in any readable part',
-          );
-        }
-      }
-      for (const key of catalogKeys) {
-        if (!indexKeys.has(key)) {
-          notInIndex++;
-        }
+      const check = crossCheckIndex(indexFiles, catalogKeys);
+      indexMissing = check.missing;
+      notInIndex = check.notInIndex;
+      for (const path of check.missing) {
+        reportRow(
+          path,
+          null,
+          TakeoutRunFileAction.MissingFromArchive,
+          'listed in the Takeout index but not found in any readable part',
+        );
       }
     }
 

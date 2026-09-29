@@ -1,4 +1,5 @@
 import { pathKey } from 'src/takeout/path-key';
+import { ext, splitPath } from 'src/takeout/paths';
 import {
   AnalysisReason,
   ExportAnalysis,
@@ -30,6 +31,78 @@ function expectedName(sibling: ExportAnalysisPart, partNumber: number): string {
 
 function sample(paths: string[]): PathSample {
   return { count: paths.length, sample: paths.slice(0, SAMPLE_LIMIT) };
+}
+
+// Google shortens long names inside the archives while the index lists them in full. A supplemental-metadata JSON
+// loses the end of its stem, like the 46-unit cut the normal matcher undoes ('x.png.supplemental-metadata.json' is
+// stored as 'x.png.sup.json', 'x.png..json' or 'x.json'); a media file loses the end of its stem too ('Screenshot
+// 13_07_11.583191compressed-crop-13_06_31.523562.jpeg' is stored as 'Screenshot 13_07_11.58319.jpeg'). The key of
+// such a stored name: its directory, extension and stem (a JSON stem without the trailing dots the cut can leave).
+function shortenedKey(dir: string, extension: string, stem: string): string {
+  return [dir, extension, extension === '.json' ? stem.replace(/\.+$/, '') : stem].join('\u{0}');
+}
+
+/**
+ * The index cross-check, by pathKey: the index paths no archive path matches, and the number of archive paths the
+ * index does not list. An index path also counts as present when an unlisted archive path of the same directory is
+ * a shortened copy of its name: same extension, a shorter name, and a stem that starts the stem of the index name.
+ * Each archive path stands in for one index path only, the longest candidate first.
+ */
+export function crossCheckIndex(
+  indexFiles: string[],
+  archiveKeys: Set<string>,
+): { missing: string[]; notInIndex: number } {
+  const indexKeys = new Set<string>();
+  const unmatched: Array<{ path: string; key: string }> = [];
+  for (const path of indexFiles) {
+    const key = pathKey(path);
+    indexKeys.add(key);
+    if (!archiveKeys.has(key)) {
+      unmatched.push({ path, key });
+    }
+  }
+
+  let notInIndex = 0;
+  const unlisted = new Map<string, string[]>();
+  const unlistedDirs = new Set<string>();
+  for (const key of archiveKeys) {
+    if (indexKeys.has(key)) {
+      continue;
+    }
+    notInIndex++;
+    const { dir, base } = splitPath(key);
+    const extension = ext(base);
+    if (extension === '' || extension === base) {
+      continue;
+    }
+    const candidate = shortenedKey(dir, extension, base.slice(0, -extension.length));
+    const names = unlisted.get(candidate) ?? [];
+    names.push(base);
+    unlisted.set(candidate, names);
+    unlistedDirs.add(shortenedKey(dir, extension, ''));
+  }
+
+  const missing: string[] = [];
+  for (const { path, key } of unmatched) {
+    const { dir, base } = splitPath(key);
+    const extension = ext(base);
+    const stem = base.slice(0, base.length - extension.length);
+    let found = false;
+    const candidates = extension !== '' && unlistedDirs.has(shortenedKey(dir, extension, ''));
+    for (let length = stem.length - 1; candidates && length > 0 && !found; length--) {
+      const names = unlisted.get(shortenedKey(dir, extension, stem.slice(0, length)));
+      const at = names?.findIndex((name) => name.length < base.length) ?? -1;
+      if (names && at !== -1) {
+        names.splice(at, 1);
+        notInIndex--;
+        found = true;
+      }
+    }
+    if (!found) {
+      missing.push(path);
+    }
+  }
+  return { missing, notInIndex };
 }
 
 // Pre-run detection (single-pass design 11): cheap inputs only (names, sizes, index, zip listings), plus the
@@ -165,21 +238,9 @@ export function analyzeExport(input: ExportAnalysisInput): ExportAnalysis {
   } else if (input.index && input.listingPaths) {
     indexChecked = true;
     listingChecked = true;
-    const missing: string[] = [];
-    const indexKeys = new Set<string>();
-    for (const path of input.index.files) {
-      const key = pathKey(path);
-      indexKeys.add(key);
-      if (!input.listingPaths.has(key)) {
-        missing.push(path);
-      }
-    }
-    indexMissingFiles = sample(missing);
-    for (const key of input.listingPaths) {
-      if (!indexKeys.has(key)) {
-        notInIndex++;
-      }
-    }
+    const check = crossCheckIndex(input.index.files, input.listingPaths);
+    indexMissingFiles = sample(check.missing);
+    notInIndex = check.notInIndex;
   }
   if (indexMissingFiles.count > 0) {
     reasons.add('index_missing_files');

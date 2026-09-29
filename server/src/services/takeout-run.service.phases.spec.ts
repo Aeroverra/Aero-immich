@@ -1098,6 +1098,48 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.exports[0].completeness).toBe('incomplete');
   });
 
+  it('reports no index path whose name Google shortened in the part, only the ones found nowhere', async () => {
+    // family export: the index lists the full names, the part holds the shortened ones (long names in pax records)
+    const h = await harness();
+    const dir = 'Photos from 2022';
+    const png = 'Aeroverra_whitehat_hacker_with_lots_of_money_f594334f-b725-4807-b34a-991129463ed3.png';
+    const logo = 'Aeroverra_modern_e-commerce_logo_geared_towards_developers_db305a8a-a454-4d14-9a9c-011fa5fa3ac6.png';
+    const screenshot =
+      'Screenshot 2022-01-27 13_07_11.583191compressed-compressed-crop-2022-01-27 13_06_31.523562.jpeg';
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media(`${dir}/${png}`), data: await greyJpeg(90), pax: true },
+        { name: media(`${dir}/${png}.sup.json`), data: Buffer.from(JSON.stringify({ title: png })), pax: true },
+        { name: media(`${dir}/${logo}`), data: await greyJpeg(100), pax: true },
+        { name: media(`${dir}/${logo}..json`), data: Buffer.from(JSON.stringify({ title: logo })), pax: true },
+        { name: media(`${dir}/Screenshot 2022-01-27 13_07_11.58319.jpeg`), data: await greyJpeg(110), pax: true },
+      ]),
+    );
+    await h.repo.updateExport(h.exportId, {
+      analysis: {
+        indexFiles: [
+          media(`${dir}/${png}`),
+          media(`${dir}/${png}.supplemental-metadata.json`),
+          media(`${dir}/${logo}`),
+          media(`${dir}/${logo}.supplemental-metadata.json`),
+          media(`${dir}/${screenshot}`),
+          media(`${dir}/never-exported.jpg`),
+        ],
+      },
+    });
+
+    const run = h.newRun({ importAnyway: true });
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const missing = h.files(run.id).filter((r) => r.action === TakeoutRunFileAction.MissingFromArchive);
+    expect(missing.map((r) => r.takeoutPath)).toEqual([media(`${dir}/never-exported.jpg`)]);
+    expect(h.run(run.id).counters.discarded.missingFromArchive).toBe(1);
+    expect(h.repo.exports[0].analysis.lastRead).toMatchObject({
+      indexMissingFiles: { count: 1, sample: [media(`${dir}/never-exported.jpg`)] },
+      notInIndex: 0,
+    });
+  });
+
   it('marks a part missing at reading start, deletes its entries and plans without it', async () => {
     const h = await harness();
     await h.addPart(
