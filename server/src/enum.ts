@@ -366,6 +366,11 @@ export enum Permission {
   ViewUpdate = 'view.update',
   ViewDelete = 'view.delete',
 
+  TakeoutRead = 'takeout.read',
+  TakeoutUpload = 'takeout.upload',
+  TakeoutRun = 'takeout.run',
+  TakeoutDelete = 'takeout.delete',
+
   QueueRead = 'queue.read',
   QueueUpdate = 'queue.update',
 
@@ -896,6 +901,7 @@ export enum QueueName {
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
   VideoFrameAnalysis = 'videoFrameAnalysis',
+  Takeout = 'takeout',
 }
 
 export const QueueNameSchema = z.enum(QueueName).describe('Queue name').meta({ id: 'QueueName' });
@@ -1012,6 +1018,11 @@ export enum JobName {
   IntegrityChecksumFilesRefresh = 'IntegrityChecksumFilesRefresh',
   IntegrityDeleteReportType = 'IntegrityDeleteReportType',
   IntegrityDeleteReports = 'IntegrityDeleteReports',
+
+  // Takeout
+  TakeoutScanPart = 'TakeoutScanPart',
+  TakeoutAnalyzeExport = 'TakeoutAnalyzeExport',
+  TakeoutRun = 'TakeoutRun',
 }
 
 export const JobNameSchema = z.enum(JobName).describe('Job name').meta({ id: 'JobName' });
@@ -1393,6 +1404,7 @@ export enum ApiTag {
   Sync = 'Sync',
   SystemConfig = 'System config',
   SystemMetadata = 'System metadata',
+  Takeouts = 'Takeouts',
   Tags = 'Tags',
   Timeline = 'Timeline',
   Trash = 'Trash',
@@ -1438,3 +1450,322 @@ export enum SearchOrderField {
 }
 
 export const SearchOrderFieldSchema = z.enum(SearchOrderField).meta({ id: 'SearchOrderField' });
+
+export enum TakeoutCompleteness {
+  Unknown = 'unknown',
+  Complete = 'complete',
+  Uncertain = 'uncertain',
+  Incomplete = 'incomplete',
+}
+
+export const TakeoutCompletenessSchema = z
+  .enum(TakeoutCompleteness)
+  .describe('Whether every part of a Google Takeout export is present and readable')
+  .meta({ id: 'TakeoutCompleteness' });
+
+/** Deprecated: only derived for the old scan fields of the part and export DTOs; not stored anywhere */
+export enum TakeoutScanStatus {
+  Pending = 'pending',
+  Scanning = 'scanning',
+  Scanned = 'scanned',
+  Error = 'error',
+  Missing = 'missing',
+}
+
+export const TakeoutScanStatusSchema = z
+  .enum(TakeoutScanStatus)
+  .describe('Deprecated: scan state of a takeout part or export, derived from the read state')
+  .meta({ id: 'TakeoutScanStatus' });
+
+/** State of a part's rows in takeout_entry (internal, not in any DTO) */
+export enum TakeoutCatalogStatus {
+  None = 'none',
+  Reading = 'reading',
+  Partial = 'partial',
+  Complete = 'complete',
+  Error = 'error',
+}
+
+export enum TakeoutPartReadStatus {
+  NotRead = 'notRead',
+  Reading = 'reading',
+  Partial = 'partial',
+  Read = 'read',
+  Error = 'error',
+  Missing = 'missing',
+}
+
+export const TakeoutPartReadStatusSchema = z
+  .enum(TakeoutPartReadStatus)
+  .describe('Read state of a takeout part')
+  .meta({ id: 'TakeoutPartReadStatus' });
+
+export enum TakeoutExportReadStatus {
+  NotRead = 'notRead',
+  Partial = 'partial',
+  Read = 'read',
+  Error = 'error',
+}
+
+export const TakeoutExportReadStatusSchema = z
+  .enum(TakeoutExportReadStatus)
+  .describe('Read state of all parts of an export')
+  .meta({ id: 'TakeoutExportReadStatus' });
+
+export enum TakeoutSizeCheck {
+  Ok = 'ok',
+  Low = 'low',
+  Short = 'short',
+  Unknown = 'unknown',
+}
+
+export const TakeoutSizeCheckSchema = z
+  .enum(TakeoutSizeCheck)
+  .describe('Size of the parts compared with the total the index announces')
+  .meta({ id: 'TakeoutSizeCheck' });
+
+export enum TakeoutRunPartStatus {
+  Pending = 'pending',
+  Cached = 'cached',
+  Reading = 'reading',
+  Read = 'read',
+  Error = 'error',
+  Missing = 'missing',
+}
+
+export const TakeoutRunPartStatusSchema = z
+  .enum(TakeoutRunPartStatus)
+  .describe('What a run did with a part: read it, found it in the cache, or could not read it')
+  .meta({ id: 'TakeoutRunPartStatus' });
+
+export enum TakeoutRunStatus {
+  Queued = 'queued',
+  Reading = 'reading',
+  Planning = 'planning',
+  Fetching = 'fetching',
+  Importing = 'importing',
+  Finishing = 'finishing',
+  Completed = 'completed',
+  Failed = 'failed',
+  Cancelling = 'cancelling',
+  Cancelled = 'cancelled',
+}
+
+export const TakeoutRunStatusSchema = z
+  .enum(TakeoutRunStatus)
+  .describe('Takeout import run status')
+  .meta({ id: 'TakeoutRunStatus' });
+
+export enum TakeoutRunFileAction {
+  Upload = 'upload',
+  LocalDuplicate = 'localDuplicate',
+  DuplicatedInDirectory = 'duplicatedInDirectory',
+  RotateOnlyDropped = 'rotateOnlyDropped',
+  NotSelected = 'notSelected',
+  FilteredPartner = 'filteredPartner',
+  FilteredTrashed = 'filteredTrashed',
+  FilteredArchived = 'filteredArchived',
+  FilteredDateRange = 'filteredDateRange',
+  MissingMetadata = 'missingMetadata',
+  FailedVideo = 'failedVideo',
+  Useless = 'useless',
+  Unsupported = 'unsupported',
+  Banned = 'banned',
+  SidecarXmp = 'sidecarXmp',
+  AlbumJson = 'albumJson',
+  AssetJsonUnused = 'assetJsonUnused',
+  UnknownJson = 'unknownJson',
+  ImmichGoJson = 'immichGoJson',
+  ServerDuplicate = 'serverDuplicate',
+  BetterOnServer = 'betterOnServer',
+  AlreadyProcessed = 'alreadyProcessed',
+  PreviouslyDeletedSkipped = 'previouslyDeletedSkipped',
+  PartUnreadable = 'partUnreadable',
+  MissingFromArchive = 'missingFromArchive',
+}
+
+export const TakeoutRunFileActionSchema = z
+  .enum(TakeoutRunFileAction)
+  .describe('What a takeout run does with a file')
+  .meta({ id: 'TakeoutRunFileAction' });
+
+export enum TakeoutRunFileStatus {
+  Planned = 'planned',
+  Written = 'written',
+  Created = 'created',
+  Done = 'done',
+  Skipped = 'skipped',
+  Error = 'error',
+}
+
+export const TakeoutRunFileStatusSchema = z
+  .enum(TakeoutRunFileStatus)
+  .describe('Progress of a file in a takeout run')
+  .meta({ id: 'TakeoutRunFileStatus' });
+
+export enum TakeoutRawJpgMode {
+  NoStack = 'NoStack',
+  KeepRaw = 'KeepRaw',
+  KeepJpg = 'KeepJPG',
+  StackCoverRaw = 'StackCoverRaw',
+  StackCoverJpg = 'StackCoverJPG',
+}
+
+export const TakeoutRawJpgModeSchema = z
+  .enum(TakeoutRawJpgMode)
+  .describe('Handling of RAW and JPEG pairs')
+  .meta({ id: 'TakeoutRawJpgMode' });
+
+export enum TakeoutBurstMode {
+  NoStack = 'NoStack',
+  Stack = 'Stack',
+  StackKeepRaw = 'StackKeepRaw',
+  StackKeepJpeg = 'StackKeepJPEG',
+}
+
+export const TakeoutBurstModeSchema = z
+  .enum(TakeoutBurstMode)
+  .describe('Handling of bursts')
+  .meta({ id: 'TakeoutBurstMode' });
+
+export enum TakeoutHeicJpgMode {
+  NoStack = 'NoStack',
+  KeepHeic = 'KeepHeic',
+  KeepJpg = 'KeepJPG',
+  StackCoverHeic = 'StackCoverHeic',
+  StackCoverJpg = 'StackCoverJPG',
+}
+
+export const TakeoutHeicJpgModeSchema = z
+  .enum(TakeoutHeicJpgMode)
+  .describe('Handling of HEIC and JPEG pairs')
+  .meta({ id: 'TakeoutHeicJpgMode' });
+
+export enum TakeoutVideoBoostMode {
+  NoStack = 'NoStack',
+  Stack = 'Stack',
+  KeepMain = 'KeepMain',
+}
+
+export const TakeoutVideoBoostModeSchema = z
+  .enum(TakeoutVideoBoostMode)
+  .describe('Handling of Pixel video boost pairs')
+  .meta({ id: 'TakeoutVideoBoostMode' });
+
+export enum TakeoutOnErrors {
+  Continue = 'continue',
+  Stop = 'stop',
+}
+
+export const TakeoutOnErrorsSchema = z
+  .enum(TakeoutOnErrors)
+  .describe('Whether a takeout run stops at the first error')
+  .meta({ id: 'TakeoutOnErrors' });
+
+export enum TakeoutArchiveKind {
+  Zip = 'zip',
+  Tgz = 'tgz',
+}
+
+export const TakeoutArchiveKindSchema = z
+  .enum(TakeoutArchiveKind)
+  .describe('Archive format of a takeout part')
+  .meta({ id: 'TakeoutArchiveKind' });
+
+export enum TakeoutEntryKind {
+  Media = 'media',
+  Json = 'json',
+  Sidecar = 'sidecar',
+  Useless = 'useless',
+  Unsupported = 'unsupported',
+  Other = 'other',
+}
+
+export enum TakeoutSampleSkipped {
+  TooLarge = 'tooLarge',
+  DecodeError = 'decodeError',
+}
+
+export enum TakeoutFileKind {
+  Image = 'image',
+  Video = 'video',
+  Json = 'json',
+  Sidecar = 'sidecar',
+  Useless = 'useless',
+  Unsupported = 'unsupported',
+  Banned = 'banned',
+  Other = 'other',
+}
+
+export const TakeoutFileKindSchema = z
+  .enum(TakeoutFileKind)
+  .describe('Kind of a file in a takeout run')
+  .meta({ id: 'TakeoutFileKind' });
+
+export enum TakeoutMatcher {
+  FastTrack = 'fastTrack',
+  Normal = 'normal',
+  ForgottenDuplicates = 'forgottenDuplicates',
+  Edited = 'edited',
+}
+
+export const TakeoutMatcherSchema = z
+  .enum(TakeoutMatcher)
+  .describe('Rule that paired a file with its Google JSON')
+  .meta({ id: 'TakeoutMatcher' });
+
+export enum TakeoutGroupKind {
+  None = 'none',
+  Burst = 'burst',
+  RawJpg = 'rawJpg',
+  HeicJpg = 'heicJpg',
+  Other = 'other',
+  VideoBoost = 'videoBoost',
+}
+
+export const TakeoutGroupKindSchema = z
+  .enum(TakeoutGroupKind)
+  .describe('Kind of the stack group of a file')
+  .meta({ id: 'TakeoutGroupKind' });
+
+export enum TakeoutZoneSource {
+  // section 12 capture-time sources
+  FileOffset = 'fileOffset',
+  Device = 'device',
+  DerivedOffset = 'derivedOffset',
+  Google = 'google',
+  Screenshot = 'screenshot',
+  Gps = 'gps',
+  Home = 'home',
+  // retained for older run rows
+  Exif = 'exif',
+  Filename = 'filename',
+}
+
+export const TakeoutZoneSourceSchema = z
+  .enum(TakeoutZoneSource)
+  .describe('Where the time zone of a file came from')
+  .meta({ id: 'TakeoutZoneSource' });
+
+export enum TakeoutRotationState {
+  Pending = 'pending',
+  Applied = 'applied',
+  SkippedHasEdits = 'skippedHasEdits',
+  SkippedNotEditable = 'skippedNotEditable',
+}
+
+export const TakeoutRotationStateSchema = z
+  .enum(TakeoutRotationState)
+  .describe('State of the rotation taken from a rotate-only edited copy')
+  .meta({ id: 'TakeoutRotationState' });
+
+export enum TakeoutLargerVersionStatus {
+  Pending = 'pending',
+  DeletedSmaller = 'deletedSmaller',
+  KeptBoth = 'keptBoth',
+}
+
+export const TakeoutLargerVersionStatusSchema = z
+  .enum(TakeoutLargerVersionStatus)
+  .describe('Review state of a larger version')
+  .meta({ id: 'TakeoutLargerVersionStatus' });

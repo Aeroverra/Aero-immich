@@ -621,6 +621,7 @@ describe(SearchService.name, () => {
   });
 
   describe('video frames', () => {
+    // eslint-disable-next-line unicorn/consistent-function-scoping
     const vector = (values: Record<number, number>) =>
       JSON.stringify(Array.from({ length: 512 }, (_, i) => values[i] ?? 0));
 
