@@ -17,6 +17,7 @@ import { JobName, UserMetadataKey, UserStatus } from 'src/enum';
 import { UserFindOptions } from 'src/repositories/user.repository';
 import { BaseService } from 'src/services/base.service';
 import { getCalendarHeatmap } from 'src/services/shared/user-methods';
+import { toPrivateScope } from 'src/utils/access';
 import { findOrFail } from 'src/utils/misc';
 import { getPreferences, getPreferencesPartial, mergePreferences } from 'src/utils/preferences';
 
@@ -127,7 +128,7 @@ export class UserAdminService extends BaseService {
 
   async getCalendarHeatmap(auth: AuthDto, id: string, dto: CalendarHeatmapDto): Promise<CalendarHeatmapResponseDto> {
     await this.findOrFail(id, { withDeleted: false });
-    return getCalendarHeatmap(id, dto, { asset: this.assetRepository });
+    return getCalendarHeatmap(id, dto, { asset: this.assetRepository }, toPrivateScope(auth));
   }
 
   async getSessions(auth: AuthDto, id: string): Promise<SessionResponseDto[]> {
@@ -136,7 +137,7 @@ export class UserAdminService extends BaseService {
   }
 
   async getStatistics(auth: AuthDto, id: string, dto: AssetStatsDto): Promise<AssetStatsResponseDto> {
-    const stats = await this.assetRepository.getStatistics(id, dto);
+    const stats = await this.assetRepository.getStatistics(id, dto, toPrivateScope(auth));
     return mapStats(stats);
   }
 

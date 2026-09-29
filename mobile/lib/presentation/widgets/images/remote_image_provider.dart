@@ -14,17 +14,21 @@ class RemoteImageProvider extends CancellableImageProvider<RemoteImageProvider>
   final String url;
   final bool edited;
 
+  /// Remote asset id when this provider serves an asset thumbnail (not part of the cache key)
+  final String? assetId;
+
   /// Physical size to decode, or null for the source size.
   final Size? decodeSize;
 
-  RemoteImageProvider({required this.url, this.edited = true, this.decodeSize});
+  RemoteImageProvider({required this.url, this.edited = true, this.decodeSize, this.assetId});
 
   RemoteImageProvider.thumbnail({
     required String assetId,
     required String thumbhash,
     this.edited = true,
     this.decodeSize,
-  }) : url = getThumbnailUrlForRemoteId(assetId, thumbhash: thumbhash, edited: edited);
+  }) : assetId = assetId,
+       url = getThumbnailUrlForRemoteId(assetId, thumbhash: thumbhash, edited: edited);
 
   @override
   Future<RemoteImageProvider> obtainKey(ImageConfiguration configuration) {

@@ -101,11 +101,11 @@ describe('/albums', () => {
 
     await Promise.all([
       addAssetsToAlbum(
-        { id: user2Albums[0].id, bulkIdsDto: { ids: [user1Asset1.id, user1Asset2.id] } },
+        { id: user2Albums[0].id, albumAddAssetsDto: { ids: [user1Asset1.id, user1Asset2.id] } },
         { headers: asBearerAuth(user1.accessToken) },
       ),
       addAssetsToAlbum(
-        { id: deletedAssetAlbum.id, bulkIdsDto: { ids: [user4Asset1.id] } },
+        { id: deletedAssetAlbum.id, albumAddAssetsDto: { ids: [user4Asset1.id] } },
         { headers: asBearerAuth(user4.accessToken) },
       ),
       // add shared link to user1SharedLink album
@@ -501,6 +501,7 @@ describe('/albums', () => {
         hasSharedLink: false,
         assetCount: 0,
         isActivityEnabled: true,
+        isPrivate: false,
         order: AssetOrder.Desc,
       });
     });
