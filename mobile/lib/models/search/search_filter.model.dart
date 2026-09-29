@@ -144,6 +144,8 @@ abstract class SearchFilter with _$SearchFilter {
     String? language,
     String? assetId,
     List<String>? tagIds,
+    // photos with any of these tags (or their child tags) are left out
+    List<String>? excludeTagIds,
     required Set<Person> people,
     required SearchLocationFilter location,
     required SearchCameraFilter camera,
@@ -161,6 +163,7 @@ abstract class SearchFilter with _$SearchFilter {
         (assetId == null || (assetId!.isEmpty)) &&
         (ocr == null || (ocr!.isEmpty)) &&
         (tagIds ?? []).isEmpty &&
+        (excludeTagIds ?? []).isEmpty &&
         people.isEmpty &&
         location.country == null &&
         location.state == null &&
