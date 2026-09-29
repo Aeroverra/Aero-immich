@@ -1,6 +1,8 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
-import { AssetVisibility, SharedLinkType, StackSource } from 'src/enum';
+import { AuthDto } from 'src/dtos/auth.dto';
+import { TimeBucketAssetDto } from 'src/dtos/time-bucket.dto';
+import { AssetType, AssetVisibility, SharedLinkType, StackSource } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -482,6 +484,99 @@ describe(TimelineService.name, () => {
       );
       expect(response.id).toEqual([single.id, autoChild.id, autoPrimary.id, manualPrimary.id]);
       expect(response.stack).toEqual([null, null, null, [manual.id, '2']]);
+    });
+
+    describe('in filtered views', () => {
+      /** a Pixel Video Boost style stack: the original video as primary and the enhanced copy as the second member */
+      const newVideoStack = async (
+        ctx: ReturnType<typeof setup>['ctx'],
+        ownerId: string,
+        options: { primaryFavorite?: boolean; visibility?: AssetVisibility } = {},
+      ) => {
+        const { primaryFavorite = true, visibility = AssetVisibility.Timeline } = options;
+        const { asset: primary } = await ctx.newAsset({
+          ownerId,
+          type: AssetType.Video,
+          isFavorite: primaryFavorite,
+          visibility,
+          localDateTime: new Date('1970-02-01'),
+          fileCreatedAt: new Date('1970-02-01'),
+        });
+        const { asset: enhanced } = await ctx.newAsset({
+          ownerId,
+          type: AssetType.Video,
+          isFavorite: true,
+          visibility,
+          localDateTime: new Date('1970-02-02'),
+          fileCreatedAt: new Date('1970-02-02'),
+        });
+        for (const asset of [primary, enhanced]) {
+          await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+        }
+        const { stack } = await ctx.newStack({ ownerId }, [primary.id, enhanced.id]);
+        return { stack, primary, enhanced };
+      };
+
+      const bucketIds = async (sut: TimelineService, auth: AuthDto, dto: Omit<TimeBucketAssetDto, 'timeBucket'>) => {
+        const buckets = await sut.getTimeBuckets(auth, dto);
+        const count = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+        const response = JSON.parse(await sut.getTimeBucket(auth, { ...dto, timeBucket: '1970-02-01' }));
+        expect(response.id).toHaveLength(count);
+        return { ids: response.id as string[], stack: response.stack as Array<[string, string] | null> };
+      };
+
+      it('should show a stack once in favorites and videos', async () => {
+        const { sut, ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { stack, primary } = await newVideoStack(ctx, user.id);
+        const auth = factory.auth({ user });
+
+        for (const dto of [{ isFavorite: true }, { assetType: AssetType.Video }]) {
+          await expect(bucketIds(sut, auth, { ...dto, withStacked: true })).resolves.toEqual({
+            ids: [primary.id],
+            stack: [[stack.id, '2']],
+          });
+        }
+      });
+
+      it('should show the stack through a favorited member when the primary is not a favorite', async () => {
+        const { sut, ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { enhanced } = await newVideoStack(ctx, user.id, { primaryFavorite: false });
+        const auth = factory.auth({ user });
+
+        const { ids } = await bucketIds(sut, auth, { isFavorite: true, withStacked: true });
+        expect(ids).toEqual([enhanced.id]);
+      });
+
+      it('should show an archived stack once with its full size', async () => {
+        const { sut, ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { stack, primary } = await newVideoStack(ctx, user.id, { visibility: AssetVisibility.Archive });
+        const auth = factory.auth({ user });
+
+        await expect(bucketIds(sut, auth, { visibility: AssetVisibility.Archive, withStacked: true })).resolves.toEqual(
+          { ids: [primary.id], stack: [[stack.id, '2']] },
+        );
+      });
+
+      it('should show the stack through the member a tag, a person or an album keeps', async () => {
+        const { sut, ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { enhanced } = await newVideoStack(ctx, user.id);
+        const auth = factory.auth({ user });
+
+        const { tag } = await ctx.newTag({ userId: user.id, value: 'Boost' });
+        await ctx.newTagAsset({ tagIds: [tag.id], assetIds: [enhanced.id] });
+        const { person } = await ctx.newPerson({ ownerId: user.id });
+        await ctx.newAssetFace({ assetId: enhanced.id, personGroupId: person.personGroupId });
+        const { album } = await ctx.newAlbum({ ownerId: user.id }, [enhanced.id]);
+
+        for (const dto of [{ tagId: tag.id }, { personId: person.personGroupId }, { albumId: album.id }]) {
+          const { ids } = await bucketIds(sut, auth, { ...dto, withStacked: true });
+          expect(ids).toEqual([enhanced.id]);
+        }
+      });
     });
 
     it('should ignore withAutoStacked without withStacked', async () => {
