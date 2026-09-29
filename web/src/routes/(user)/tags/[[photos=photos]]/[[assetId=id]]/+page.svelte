@@ -21,7 +21,7 @@
   import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import SetVisibilityAction from '$lib/components/timeline/actions/SetVisibilityAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
-  import TagPeopleAction from '$lib/components/timeline/actions/TagPeopleAction.svelte';
+  import AddPeopleAction from '$lib/components/timeline/actions/AddPeopleAction.svelte';
   import { AssetAction } from '$lib/constants';
   import SkipLink from '$lib/elements/SkipLink.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
@@ -158,7 +158,7 @@
           {#if authManager.preferences.tags.enabled}
             <TagAction menuItem />
           {/if}
-          <TagPeopleAction />
+          <AddPeopleAction />
           <DeleteAssets
             menuItem
             onAssetDelete={(assetIds) => timelineManager.removeAssets(assetIds)}

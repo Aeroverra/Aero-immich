@@ -124,23 +124,23 @@
       for (const person of selected) {
         results.push(...(await addPersonToAssets({ id: person.id, bulkIdsDto: { ids: assetIds } })));
       }
-      const taggedIds = new Set(results.filter(({ success }) => success).map(({ id }) => id));
+      const addedIds = new Set(results.filter(({ success }) => success).map(({ id }) => id));
       const photoIds = new Set(
         results.filter(({ error }) => error === BulkIdErrorReason.Validation).map(({ id }) => id),
       );
 
-      if (taggedIds.size > 0) {
-        eventManager.emit('PersonAssetsAdd', [...taggedIds]);
+      if (addedIds.size > 0) {
+        eventManager.emit('PersonAssetsAdd', [...addedIds]);
         const names = selected.map(({ name }) => name || $t('unknown')).join(', ');
-        toastManager.primary($t('tagged_people_in_videos', { values: { people: names, count: taggedIds.size } }));
+        toastManager.primary($t('added_people_to_videos', { values: { people: names, count: addedIds.size } }));
       } else {
-        toastManager.warning($t('tag_people_nothing_to_tag'));
+        toastManager.warning($t('add_people_to_videos_none_added'));
       }
       if (photoIds.size > 0) {
-        toastManager.info($t('tag_people_photos_skipped', { values: { count: photoIds.size } }));
+        toastManager.info($t('add_people_to_videos_photos_skipped', { values: { count: photoIds.size } }));
       }
 
-      onClose(taggedIds.size > 0);
+      onClose(addedIds.size > 0);
     } catch (error) {
       handleError(error, $t('errors.something_went_wrong'));
     } finally {
@@ -160,7 +160,7 @@
       heightStyle={size === '100%' ? undefined : size}
     />
   {:else}
-    <!-- a person created here has no feature photo until a face is tagged -->
+    <!-- a person created here has no feature photo until it is on a video or face -->
     <span
       class="flex aspect-square shrink-0 items-center justify-center rounded-full bg-subtle text-primary"
       style:width={size}
@@ -172,16 +172,16 @@
 
 <FormModal
   size="small"
-  title={$t('tag_people_in_videos')}
+  title={$t('add_people_to_videos')}
   icon={mdiAccountPlusOutline}
   {onClose}
   {onSubmit}
-  submitText={$t('tag')}
+  submitText={$t('add')}
   disabled={selected.length === 0 || isSubmitting}
 >
   <div class="my-4 flex flex-col gap-4">
     <Text size="small" color="muted">
-      {$t('tag_people_in_videos_description', { values: { count: assetIds.length } })}
+      {$t('add_people_to_videos_description', { values: { count: assetIds.length } })}
     </Text>
 
     <Input
@@ -191,11 +191,11 @@
       autofocus
       onkeydown={onSearchKeydown}
       aria-label={$t('search_people')}
-      data-testid="tag-people-search"
+      data-testid="add-people-search"
     />
 
     {#if selected.length > 0}
-      <div class="flex flex-wrap gap-2" data-testid="tag-people-selected">
+      <div class="flex flex-wrap gap-2" data-testid="add-people-selected">
         {#each selected as person (person.id)}
           <span class="flex items-center gap-1 rounded-full bg-primary/10 py-1 ps-1 pe-1 text-sm">
             {@render avatar(person, '1.5rem')}
@@ -225,7 +225,7 @@
             type="button"
             class="mb-2 flex w-full items-center gap-2 rounded-xl p-2 text-start text-sm hover:bg-subtle"
             onclick={onCreate}
-            data-testid="tag-people-create"
+            data-testid="add-people-create"
           >
             <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
               <Icon icon={mdiPlus} size="20" />
