@@ -17,6 +17,7 @@
   import SetVisibilityAction from '$lib/components/timeline/actions/SetVisibilityAction.svelte';
   import StackAction from '$lib/components/timeline/actions/StackAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
+  import TagPeopleAction from '$lib/components/timeline/actions/TagPeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import GroupAutoStacksButton from '$lib/components/timeline/GroupAutoStacksButton.svelte';
   import ViewSwitcherButton from '$lib/components/timeline/ViewSwitcherButton.svelte';
@@ -168,6 +169,7 @@
         {#if authManager.preferences.tags.enabled}
           <TagAction menuItem />
         {/if}
+        <TagPeopleAction />
         <DeleteAssets
           menuItem
           onAssetDelete={(assetIds) => timelineManager.removeAssets(assetIds)}
