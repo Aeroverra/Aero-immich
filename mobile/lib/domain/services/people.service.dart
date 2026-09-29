@@ -33,4 +33,20 @@ class PeopleService {
     await _personApiRepository.update(personId, birthday: birthday);
     return _repository.updateBirthday(personId, birthday);
   }
+
+  /// Tags each of [personIds] on the videos among [assetIds]. Returns the assets that got at least one of them and the
+  /// photos that were skipped; the new faces reach the local database with the next sync.
+  Future<({Set<String> tagged, Set<String> photos})> tagOnVideos(
+    Iterable<String> personIds,
+    List<String> assetIds,
+  ) async {
+    final tagged = <String>{};
+    final photos = <String>{};
+    for (final personId in personIds) {
+      final result = await _personApiRepository.addToAssets(personId, assetIds);
+      tagged.addAll(result.tagged);
+      photos.addAll(result.photos);
+    }
+    return (tagged: tagged, photos: photos);
+  }
 }
