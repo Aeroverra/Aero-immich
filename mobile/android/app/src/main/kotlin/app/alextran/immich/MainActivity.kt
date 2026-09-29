@@ -20,6 +20,7 @@ import app.alextran.immich.images.RemoteImageApi
 import app.alextran.immich.images.RemoteImagesImpl
 import app.alextran.immich.permission.PermissionApi
 import app.alextran.immich.permission.PermissionApiImpl
+import app.alextran.immich.screen.ScreenStatePlugin
 import app.alextran.immich.sync.NativeSyncApi
 import app.alextran.immich.sync.NativeSyncApiImpl26
 import app.alextran.immich.sync.NativeSyncApiImpl30
@@ -31,6 +32,8 @@ class MainActivity : FlutterFragmentActivity() {
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
     registerPlugins(this, flutterEngine)
+    // only the UI engine relocks private mode and views, the background worker has no session to lock
+    flutterEngine.plugins.add(ScreenStatePlugin())
   }
 
   override fun onNewIntent(intent: Intent) {

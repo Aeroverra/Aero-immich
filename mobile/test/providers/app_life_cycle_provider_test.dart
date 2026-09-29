@@ -10,9 +10,11 @@ import 'package:immich_mobile/domain/services/log.service.dart';
 import 'package:immich_mobile/models/auth/auth_state.model.dart';
 import 'package:immich_mobile/models/server_info/server_version.model.dart';
 import 'package:immich_mobile/providers/app_life_cycle.provider.dart';
+import 'package:immich_mobile/providers/app_lock.provider.dart';
 import 'package:immich_mobile/providers/auth.provider.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/gallery_permission.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
@@ -21,6 +23,7 @@ import 'package:immich_mobile/providers/permission.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/websocket.provider.dart';
+import 'package:immich_mobile/services/screen_state.service.dart';
 import 'package:immich_mobile/utils/upload_speed_calculator.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -30,6 +33,21 @@ import '../repository.mocks.dart';
 import '../service.mocks.dart';
 
 class FakeLogMessage extends Fake implements LogMessage {}
+
+/// Reports the screen turning off without touching the platform, so the lock triggers behave as on a phone
+class TestScreenStateService extends ScreenStateService {
+  @override
+  Stream<void> get screenOff => const Stream<void>.empty();
+
+  @override
+  void listen() {}
+
+  @override
+  Future<bool> isReported() async => true;
+
+  @override
+  void dispose() {}
+}
 
 class TestAuthNotifier extends AuthNotifier {
   TestAuthNotifier(Ref ref)
@@ -91,6 +109,21 @@ class TestPrivateModeNotifier extends PrivateModeNotifier {
   Future<void> disable() async {
     disableCount++;
     state = false;
+  }
+}
+
+class TestActiveViewNotifier extends ActiveViewNotifier {
+  TestActiveViewNotifier(super.ref);
+
+  int resetCount = 0;
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  void resetToDefault() {
+    resetCount++;
+    state = null;
   }
 }
 
@@ -165,6 +198,8 @@ void main() {
         }),
         backupProvider.overrideWith((_) => TestDriftBackupNotifier()),
         privateModeProvider.overrideWith(TestPrivateModeNotifier.new),
+        activeViewProvider.overrideWith(TestActiveViewNotifier.new),
+        screenStateServiceProvider.overrideWithValue(TestScreenStateService()),
         backgroundWorkerLockServiceProvider.overrideWithValue(lockService),
         backgroundSyncProvider.overrideWithValue(backgroundSync),
         appConfigProvider.overrideWithValue(defaultConfig),
@@ -178,6 +213,8 @@ void main() {
     );
     lifeCycle = container.read(appStateProvider.notifier);
   });
+
+  setUp(() => container.read(appLockServiceProvider).start());
 
   tearDown(() => container.dispose());
 
@@ -242,6 +279,16 @@ void main() {
 
     expect(notifier.disableCount, 1);
     expect(notifier.state, isFalse);
+  });
+
+  test('pause keeps the switched view, views lock when the screen turns off by default', () async {
+    final notifier = container.read(activeViewProvider.notifier) as TestActiveViewNotifier;
+    notifier.state = 'view-1';
+
+    await lifeCycle.handleAppPause();
+
+    expect(notifier.resetCount, 0);
+    expect(notifier.state, 'view-1');
   });
 
   test('resume re-queries the memory lane', () async {
