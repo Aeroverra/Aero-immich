@@ -46,9 +46,7 @@ describe(VideoBookmarkService.name, () => {
     expect(new Date(updated.updatedAt).getTime()).toBeGreaterThanOrEqual(new Date(early.updatedAt).getTime());
 
     await sut.delete(auth, late.id);
-    await expect(sut.getAll(auth, { assetId: asset.id })).resolves.toEqual([
-      expect.objectContaining({ id: early.id }),
-    ]);
+    await expect(sut.getAll(auth, { assetId: asset.id })).resolves.toEqual([expect.objectContaining({ id: early.id })]);
   });
 
   it('should keep bookmarks personal on a video shared with a partner', async () => {
