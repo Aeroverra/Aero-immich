@@ -428,6 +428,14 @@ export type AdminConfigStorageTemplateDto = {
     /** Template */
     template: string;
 };
+export type AdminConfigTakeoutDto = {
+    /** Reads in flight per part (application readahead) */
+    readaheadDepth: number;
+    /** Parts of one Google Takeout import read in parallel */
+    readers: number;
+    /** Read limit in MB/s for all Google Takeout imports together; 0 or null means unlimited */
+    throttleMBps: number | null;
+};
 export type AdminConfigTemplateEmailsDto = {
     /** Album invite template */
     albumInviteTemplate: string;
@@ -472,6 +480,7 @@ export type AdminConfigDto = {
     reverseGeocoding: AdminConfigReverseGeocodingDto;
     server: AdminConfigServerDto;
     storageTemplate: AdminConfigStorageTemplateDto;
+    takeout: AdminConfigTakeoutDto;
     templates: AdminConfigTemplatesDto;
     theme: AdminConfigThemeDto;
     trash: AdminConfigTrashDto;
@@ -1917,6 +1926,7 @@ export type QueuesResponseLegacyDto = {
     sidecar: QueueResponseLegacyDto;
     smartSearch: QueueResponseLegacyDto;
     storageTemplateMigration: QueueResponseLegacyDto;
+    takeout: QueueResponseLegacyDto;
     thumbnailGeneration: QueueResponseLegacyDto;
     videoConversion: QueueResponseLegacyDto;
     videoFrameAnalysis: QueueResponseLegacyDto;
@@ -3244,6 +3254,567 @@ export type TagUpdateDto = {
     isHidden?: boolean;
     /** Tag name */
     name?: string;
+};
+export type TakeoutBytesCountersDto = {
+    done: number;
+    total: number;
+};
+export type TakeoutDiscardedCountersDto = {
+    duplicatedInDirectory: number;
+    failedVideos: number;
+    filteredArchived: number;
+    filteredDateRange: number;
+    filteredPartner: number;
+    filteredTrashed: number;
+    localDuplicates: number;
+    /** Files the index lists but no readable part contains */
+    missingFromArchive: number;
+    notSelected: number;
+    previouslyDeleted: number;
+    rotateOnlyDropped: number;
+    /** Parts and zip entries that could not be read */
+    unreadable: number;
+};
+export type TakeoutMatchedCountersDto = {
+    edited: number;
+    fastTrack: number;
+    forgottenDuplicates: number;
+    missingMetadata: number;
+    normal: number;
+};
+export type TakeoutResultCountersDto = {
+    albumAdds: number;
+    albumsCreated: number;
+    alreadyProcessed: number;
+    betterOnServer: number;
+    errors: number;
+    largerUploaded: number;
+    metadataSaved: number;
+    rotationsApplied: number;
+    rotationsQueued: number;
+    serverDuplicates: number;
+    stacked: number;
+    tagged: number;
+    toUpload: number;
+    uploaded: number;
+    zoneAssumed: number;
+};
+export type TakeoutScannedCountersDto = {
+    albumJsons: number;
+    assetJsons: number;
+    banned: number;
+    files: number;
+    images: number;
+    sidecars: number;
+    unknownJsons: number;
+    unsupported: number;
+    useless: number;
+    videos: number;
+};
+export type TakeoutCountersDto = {
+    bytes: TakeoutBytesCountersDto;
+    discarded: TakeoutDiscardedCountersDto;
+    matched: TakeoutMatchedCountersDto;
+    result: TakeoutResultCountersDto;
+    scanned: TakeoutScannedCountersDto;
+};
+export type TakeoutRunPartStatsDto = {
+    /** Bytes read from the file by this run, all passes included */
+    bytesRead: number;
+    /** Bytes jumped over (zip gaps) */
+    bytesSkipped: number;
+    /** Files hashed only, fetched later if the plan needs them */
+    deferred: number;
+    /** Files already on the server or already staged */
+    duplicates: number;
+    /** Files found in the part */
+    entries: number;
+    /** Zip entries that could not be read */
+    entryErrors: number;
+    /** Why the part could not be read */
+    error: string | null;
+    /** Compressed byte offset of the failure */
+    errorOffset: number | null;
+    /** Bytes read again to fetch entries the plan needed */
+    fetchBytesRead: number;
+    /** Archive file name */
+    fileName: string;
+    /** When this run finished the part */
+    finishedAt: string | null;
+    /** Photos and videos found in the part */
+    media: number;
+    /** Part ID */
+    partId: string;
+    /** How many times this run started reading the part (1 when nothing went wrong) */
+    passes: number;
+    /** Milliseconds the part spent paused (a paused run, or fewer readers); not counted in its read speed */
+    pausedMs: number;
+    /** Covered file offset of the current pass */
+    position: number;
+    /** File size in bytes */
+    size: number;
+    /** Files written to staging */
+    staged: number;
+    /** Bytes written to staging */
+    stagedBytes: number;
+    /** When this run started reading the part */
+    startedAt: string | null;
+    status: TakeoutRunPartStatus;
+    /** Reads retried in place after a transport error */
+    transportRetries: number;
+};
+export type TakeoutRunReadStatsDto = {
+    /** Staging is on another disk than the library, so finishing copies files */
+    crossDevice: boolean;
+    /** Bytes of the deferred files */
+    deferredBytes: number;
+    /** Files hashed only, fetched later if the plan needs them */
+    deferredFiles: number;
+    /** Zip central directory bytes read for the sampling set */
+    directoryBytesRead: number;
+    /** Bytes of the staged files the plan did not use */
+    discardedStagedBytes: number;
+    /** Staged files the plan did not use */
+    discardedStagedFiles: number;
+    /** Estimated seconds until reading or fetching is done */
+    etaSeconds: number | null;
+    /** Archive bytes the fetch step read */
+    fetchBytesRead: number;
+    /** Archive bytes the fetch step expects to read */
+    fetchBytesTotal: number;
+    /** Files read again because the plan needed them */
+    fetchFiles: number;
+    /** Files found in the parts read by this run */
+    filesFound: number;
+    /** Google JSON files found */
+    jsonFound: number;
+    /** Files whose content was already staged, not written again */
+    localDuplicatesSkipped: number;
+    /** Photos and videos found */
+    mediaFound: number;
+    /** Per part, in part order */
+    parts: TakeoutRunPartStatsDto[];
+    /** Milliseconds the run spent in pauses that ended (a current pause counts from pausedAt) */
+    pausedMs: number;
+    /** Reads in flight per part */
+    readahead: number;
+    /** Parts read in parallel */
+    readers: number;
+    /** Images sampled after the read for the rotation check */
+    sampleBackfillFiles: number;
+    /** Files already on the server, not written */
+    serverDuplicatesSkipped: number;
+    /** Bytes written to staging */
+    stagedBytes: number;
+    /** Files written to staging */
+    stagedFiles: number;
+    /** Bytes held in staging by a failed or cancelled run */
+    stagingBytes: number;
+    /** When the staging of a failed or cancelled run is removed */
+    stagingExpiresAt: string | null;
+    /** Reads retried in place after a transport error */
+    transportRetries: number;
+    /** Bytes written and then discarded */
+    wastedWriteBytes: number;
+    /** Files written and then discarded because their content was present */
+    wastedWriteFiles: number;
+};
+export type TakeoutSettingsDto = {
+    /** Apply rotations from rotate-only edited copies */
+    applyRotation: boolean;
+    burst: TakeoutBurstMode;
+    /** Stack bursts by time (500 ms grouper) */
+    burstByTime: boolean;
+    /** Tags added to every imported asset; {date}, {user} and {start} are replaced */
+    customTags: string[];
+    /** Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD */
+    dateRange: string | null;
+    /** Save Google Photos fields as asset metadata */
+    googlePhotosFields: boolean;
+    heicJpg: TakeoutHeicJpgMode;
+    /** IANA time zone used when a file has no time zone of its own */
+    homeTimeZone: string;
+    /** Import archived photos */
+    includeArchived: boolean;
+    /** Import photos shared by a partner */
+    includePartner: boolean;
+    /** Import photos that were in the Google Photos trash */
+    includeTrashed: boolean;
+    /** Import files without Google metadata */
+    includeUnmatched: boolean;
+    onErrors: TakeoutOnErrors;
+    /** Tag people named by Google as People/<name> */
+    peopleTags: boolean;
+    rawJpg: TakeoutRawJpgMode;
+    /** Add a tag for the run */
+    sessionTag: boolean;
+    /** Template of the run tag */
+    sessionTagTemplate: string;
+    /** With onErrors continue: stop after this many errors, 0 never stops */
+    stopAfterErrors: number;
+    /** Add assets to the albums of the export */
+    syncAlbums: boolean;
+    /** Tag photos that are already on the server */
+    tagServerDuplicates: boolean;
+    /** Tag each asset with the name of its archive */
+    takeoutTag: boolean;
+    videoBoost: TakeoutVideoBoostMode;
+};
+export type TakeoutRunDto = {
+    /** Bytes of archives the reading phase covered so far (never goes back) */
+    archiveBytesRead: number;
+    /** Bytes of archives the reading phase covers */
+    archiveBytesTotal: number;
+    /** Bytes of media imported */
+    bytesDone: number;
+    /** Bytes of media to import */
+    bytesTotal: number;
+    counters: TakeoutCountersDto;
+    /** When the run was created */
+    createdAt: string;
+    /** Archive path of the file being processed */
+    currentFile: string | null;
+    /** Why the run failed */
+    error: string | null;
+    /** Export ID */
+    exportId: string;
+    /** When the run finished */
+    finishedAt: string | null;
+    /** Staged files are held for this run (a failed or cancelled run can be discarded) */
+    hasStaging: boolean;
+    /** Run ID */
+    id: string;
+    /** Whether the run was started although the export is not complete */
+    importAnyway: boolean;
+    /** When the run was paused (null unless it is paused) */
+    pausedAt: string | null;
+    /** The status the run was paused in; Resume continues there (null unless it is paused) */
+    pausedFrom: (TakeoutRunStatus) | null;
+    readStats: TakeoutRunReadStatsDto;
+    settings: TakeoutSettingsDto;
+    /** When the run started */
+    startedAt: string | null;
+    status: TakeoutRunStatus;
+    /** The newer run that took over the staged files of this run */
+    supersededBy: string | null;
+};
+export type TakeoutExportDto = {
+    /** Google account of the export, from the index */
+    accountEmail: string | null;
+    /** When the archives were deleted */
+    archivesDeletedAt: string | null;
+    /** Deprecated: bytes read from the parts by their last reads */
+    bytesScanned: number;
+    completeness: TakeoutCompleteness;
+    /** Timestamp of the first part, plus "-<segment>" when segmented */
+    exportKey: string;
+    /** Timestamp of the first part */
+    exportedAt: string;
+    /** Export ID */
+    id: string;
+    /** Number of files the index lists */
+    indexFileCount: number | null;
+    /** Total size as the index prints it */
+    indexTotalSize: string | null;
+    /** The most recent run of the export */
+    lastRun: (TakeoutRunDto) | null;
+    /** Number of parts found */
+    partCount: number;
+    /** Media parts that were read completely */
+    partsRead: number;
+    readStatus: TakeoutExportReadStatus;
+    scanStatus: TakeoutScanStatus;
+    /** Total size of the parts in bytes */
+    totalSize: number;
+};
+export type TakeoutFolderDto = {
+    /** Folder path relative to UPLOAD_LOCATION, for example "takeouts/<name>" */
+    hostPath: string;
+    /** Folder name, chosen once when the folder was created */
+    name: string;
+};
+export type TakeoutOtherFileDto = {
+    /** File name */
+    name: string;
+    /** File size in bytes */
+    size: number;
+};
+export type TakeoutUploadDto = {
+    /** Preferred chunk size in bytes */
+    chunkSize: number;
+    /** Archive file name */
+    fileName: string;
+    /** Upload ID */
+    id: string;
+    /** Bytes received so far; the next chunk starts here */
+    offset: number;
+    /** Total size in bytes */
+    size: number;
+    /** Whether no chunk arrived for 7 days */
+    stale: boolean;
+};
+export type TakeoutOverviewDto = {
+    /** The run that is not finished yet */
+    activeRun: (TakeoutRunDto) | null;
+    /** Exports found in the folder, newest first */
+    exports: TakeoutExportDto[];
+    folder: TakeoutFolderDto;
+    /** Index archives that belong to no export */
+    orphanIndexFiles: TakeoutOtherFileDto[];
+    /** Files in the folder that are not takeout archives */
+    otherFiles: TakeoutOtherFileDto[];
+    /** Number of larger versions waiting for review */
+    pendingLargerVersions: number;
+    /** Uploads in progress */
+    uploads: TakeoutUploadDto[];
+};
+export type TakeoutPathSampleDto = {
+    /** Number of paths */
+    count: number;
+    /** The first paths (at most 200) */
+    sample: string[];
+};
+export type TakeoutMissingPartDto = {
+    /** Expected file name; the real file may carry a different timestamp than its neighbours */
+    expectedName: string;
+    /** Missing part number */
+    partNumber: number;
+    /** Segment number, null for exports without segments */
+    segment: number | null;
+};
+export type TakeoutUnreadablePartDto = {
+    /** Why the part could not be read */
+    error: string;
+    /** Archive file name */
+    fileName: string;
+    /** Compressed byte offset of the failure */
+    offset: number | null;
+    /** File size in bytes */
+    size: number;
+};
+export type TakeoutAnalysisDto = {
+    /** Parts that could not be read, with the error */
+    corruptParts: string[];
+    /** Files listed in the index but missing from the parts */
+    indexMissingFiles: TakeoutPathSampleDto;
+    /** Total size the index announces, in bytes */
+    indexTotalBytes: number | null;
+    /** Google JSON files that belong to no media file */
+    jsonWithoutMedia: TakeoutPathSampleDto;
+    /** Whether parts after the last one may exist (no index) */
+    lastPartMayBeMissing: boolean;
+    /** When the checks that need a read ran (the last run) */
+    lastReadAt: string | null;
+    /** The run whose read produced those checks */
+    lastReadRunId: string | null;
+    /** Zip listings were cross-checked against the index before any read */
+    listingChecked: boolean;
+    /** Media files without Google JSON */
+    mediaWithoutJson: TakeoutPathSampleDto;
+    /** Gaps in the part numbering */
+    missingParts: TakeoutMissingPartDto[];
+    /** Files in the parts that the index does not list (informational) */
+    notInIndex: number;
+    /** Sum of the sizes of the media parts */
+    partsTotalBytes: number;
+    /** Why the export is not complete, as stable keys */
+    reasons: string[];
+    sizeCheck: TakeoutSizeCheck;
+    /** Parts smaller than the split size (informational) */
+    smallParts: string[];
+    /** Detected archive split size in bytes */
+    splitSize: number | null;
+    /** Zip entries the last run could not read */
+    unreadableEntries: number;
+    /** Parts the last run could not read */
+    unreadableParts: TakeoutUnreadablePartDto[];
+};
+export type TakeoutPartDto = {
+    /** Bytes read from the file by the last run that read it, all passes included */
+    bytesRead: number;
+    /** Deprecated: same as bytesRead */
+    bytesScanned: number;
+    /** Number of files in the part, once it was read completely */
+    entryCount: number | null;
+    /** Archive file name */
+    fileName: string;
+    /** Part ID */
+    id: string;
+    /** Whether this is the index archive (archive_browser.html) */
+    isIndex: boolean;
+    kind: TakeoutArchiveKind;
+    /** The run that read the part last */
+    lastReadRunId: string | null;
+    /** File modification time */
+    mtime: string;
+    /** Part number NNN */
+    partNumber: number;
+    /** Why the part could not be read */
+    readError: string | null;
+    /** Compressed byte offset where reading failed, comparable with the file size */
+    readErrorOffset: number | null;
+    readStatus: TakeoutPartReadStatus;
+    /** Deprecated: same as readError */
+    scanError: string | null;
+    scanStatus: TakeoutScanStatus;
+    /** Segment number N of "-N-NNN" names, null for "-NNN" names */
+    segment: number | null;
+    /** File size in bytes */
+    size: number;
+};
+export type TakeoutExportDetailDto = {
+    /** Google account of the export, from the index */
+    accountEmail: string | null;
+    analysis: TakeoutAnalysisDto;
+    /** When the archives were deleted */
+    archivesDeletedAt: string | null;
+    /** Deprecated: bytes read from the parts by their last reads */
+    bytesScanned: number;
+    completeness: TakeoutCompleteness;
+    /** Timestamp of the first part, plus "-<segment>" when segmented */
+    exportKey: string;
+    /** Timestamp of the first part */
+    exportedAt: string;
+    /** Export ID */
+    id: string;
+    /** Number of files the index lists */
+    indexFileCount: number | null;
+    /** Total size as the index prints it */
+    indexTotalSize: string | null;
+    /** The most recent run of the export */
+    lastRun: (TakeoutRunDto) | null;
+    /** Number of parts found */
+    partCount: number;
+    /** Parts of the export, the index part last */
+    parts: TakeoutPartDto[];
+    /** Media parts that were read completely */
+    partsRead: number;
+    readStatus: TakeoutExportReadStatus;
+    /** Runs of the export, newest first */
+    runs: TakeoutRunDto[];
+    scanStatus: TakeoutScanStatus;
+    /** Total size of the parts in bytes */
+    totalSize: number;
+};
+export type TakeoutRunCreateDto = {
+    /** Start although the export is not complete */
+    importAnyway?: boolean;
+};
+export type TakeoutLargerVersionDto = {
+    /** When the larger version was imported */
+    createdAt: string;
+    /** Larger version ID */
+    id: string;
+    /** The imported larger version, on top of the stack */
+    larger: AssetResponseDto;
+    /** When the review was resolved */
+    resolvedAt: string | null;
+    /** Run that imported the larger version */
+    runId: string | null;
+    /** The version that was already on the server; null once deleted */
+    smaller: (AssetResponseDto) | null;
+    status: TakeoutLargerVersionStatus;
+};
+export type TakeoutLargerVersionResolveDto = {
+    action: TakeoutLargerVersionAction;
+};
+export type TakeoutRunFileDto = {
+    action: TakeoutRunFileAction;
+    /** Albums the asset was added to */
+    albums: string[];
+    /** Asset created for the file or found on the server */
+    assetId: string | null;
+    /** Capture time from Google */
+    captureDate: string | null;
+    /** Error message */
+    error: string | null;
+    /** Fallbacks applied to the file, such as zoneAssumed */
+    fallbacks: string[];
+    fileKind: TakeoutFileKind;
+    /** Stack group of the file */
+    groupIndex: number | null;
+    groupKind: (TakeoutGroupKind) | null;
+    /** File ID */
+    id: number;
+    /** Whether the file is the cover of its stack */
+    isCover: boolean;
+    /** Archive path of the matched Google JSON */
+    jsonPath: string | null;
+    matcher: (TakeoutMatcher) | null;
+    /** File name used for the asset */
+    originalFileName: string | null;
+    /** Archive file name */
+    partName: string | null;
+    /** Why the file got its action */
+    reason: string | null;
+    /** Rotation in degrees taken from a rotate-only edited copy */
+    rotation: number;
+    rotationState: (TakeoutRotationState) | null;
+    /** File size in bytes */
+    size: number;
+    status: TakeoutRunFileStatus;
+    /** Tags of the asset */
+    tags: string[];
+    /** Full archive path */
+    takeoutPath: string;
+    /** Time zone of the capture time */
+    zone: string | null;
+    zoneSource: (TakeoutZoneSource) | null;
+};
+export type TakeoutRunFilePageDto = {
+    /** Whether there are more pages */
+    hasNextPage: boolean;
+    /** Files of this page */
+    items: TakeoutRunFileDto[];
+    /** Number of files matching the query */
+    total: number;
+};
+export type TakeoutSettingsUpdateDto = {
+    /** Apply rotations from rotate-only edited copies */
+    applyRotation?: boolean;
+    burst?: TakeoutBurstMode;
+    /** Stack bursts by time (500 ms grouper) */
+    burstByTime?: boolean;
+    /** Tags added to every imported asset; {date}, {user} and {start} are replaced */
+    customTags?: string[];
+    /** Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD */
+    dateRange?: string | null;
+    /** Save Google Photos fields as asset metadata */
+    googlePhotosFields?: boolean;
+    heicJpg?: TakeoutHeicJpgMode;
+    /** IANA time zone used when a file has no time zone of its own */
+    homeTimeZone?: string;
+    /** Import archived photos */
+    includeArchived?: boolean;
+    /** Import photos shared by a partner */
+    includePartner?: boolean;
+    /** Import photos that were in the Google Photos trash */
+    includeTrashed?: boolean;
+    /** Import files without Google metadata */
+    includeUnmatched?: boolean;
+    onErrors?: TakeoutOnErrors;
+    /** Tag people named by Google as People/<name> */
+    peopleTags?: boolean;
+    rawJpg?: TakeoutRawJpgMode;
+    /** Add a tag for the run */
+    sessionTag?: boolean;
+    /** Template of the run tag */
+    sessionTagTemplate?: string;
+    /** With onErrors continue: stop after this many errors, 0 never stops */
+    stopAfterErrors?: number;
+    /** Add assets to the albums of the export */
+    syncAlbums?: boolean;
+    /** Tag photos that are already on the server */
+    tagServerDuplicates?: boolean;
+    /** Tag each asset with the name of its archive */
+    takeoutTag?: boolean;
+    videoBoost?: TakeoutVideoBoostMode;
+};
+export type TakeoutUploadCreateDto = {
+    /** Archive file name, for example takeout-20260914T211500Z-1-001.tgz */
+    fileName: string;
+    /** Total size in bytes */
+    size: number;
 };
 export type TimeBucketAssetResponseDto = {
     /** Array of city names extracted from EXIF GPS data */
@@ -7670,6 +8241,302 @@ export function tagAssets({ id, bulkIdsDto }: {
     })));
 }
 /**
+ * Retrieve takeouts
+ */
+export function getTakeoutOverview(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutOverviewDto;
+    }>("/takeouts", {
+        ...opts
+    }));
+}
+/**
+ * Dismiss a takeout export
+ */
+export function deleteTakeoutExport({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/takeouts/exports/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Retrieve a takeout export
+ */
+export function getTakeoutExport({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutExportDetailDto;
+    }>(`/takeouts/exports/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Delete the archives of a takeout export
+ */
+export function deleteTakeoutExportArchives({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/takeouts/exports/${encodeURIComponent(id)}/archives`, {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Read failed parts again
+ */
+export function rescanTakeoutExport({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutExportDetailDto;
+    }>(`/takeouts/exports/${encodeURIComponent(id)}/rescan`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Start a takeout import
+ */
+export function createTakeoutRun({ id, takeoutRunCreateDto }: {
+    id: string;
+    takeoutRunCreateDto: TakeoutRunCreateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: TakeoutRunDto;
+    }>(`/takeouts/exports/${encodeURIComponent(id)}/runs`, oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: takeoutRunCreateDto
+    })));
+}
+/**
+ * Retrieve larger versions
+ */
+export function getTakeoutLargerVersions({ status }: {
+    status?: TakeoutLargerVersionFilter;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutLargerVersionDto[];
+    }>(`/takeouts/larger-versions${QS.query(QS.explode({
+        status
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Resolve a larger version
+ */
+export function resolveTakeoutLargerVersion({ id, takeoutLargerVersionResolveDto }: {
+    id: string;
+    takeoutLargerVersionResolveDto: TakeoutLargerVersionResolveDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutLargerVersionDto;
+    }>(`/takeouts/larger-versions/${encodeURIComponent(id)}/resolve`, oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: takeoutLargerVersionResolveDto
+    })));
+}
+/**
+ * Retrieve a takeout run
+ */
+export function getTakeoutRun({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Cancel a takeout run
+ */
+export function cancelTakeoutRun({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/cancel`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Retrieve the files of a takeout run
+ */
+export function getTakeoutRunFiles({ action, id, page, search, size, status }: {
+    action?: TakeoutRunFileAction;
+    id: string;
+    page?: number;
+    search?: string;
+    size?: number;
+    status?: TakeoutRunFileStatus;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunFilePageDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/files${QS.query(QS.explode({
+        action,
+        page,
+        search,
+        size,
+        status
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Pause a takeout run
+ */
+export function pauseTakeoutRun({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/pause`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Download the report of a takeout run
+ */
+export function getTakeoutRunReport({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchBlob<{
+        status: 200;
+        data: Blob;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/report.csv`, {
+        ...opts
+    }));
+}
+/**
+ * Resume a takeout run
+ */
+export function resumeTakeoutRun({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/resume`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Retrieve takeout settings
+ */
+export function getTakeoutSettings(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutSettingsDto;
+    }>("/takeouts/settings", {
+        ...opts
+    }));
+}
+/**
+ * Update takeout settings
+ */
+export function updateTakeoutSettings({ takeoutSettingsUpdateDto }: {
+    takeoutSettingsUpdateDto: TakeoutSettingsUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutSettingsDto;
+    }>("/takeouts/settings", oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: takeoutSettingsUpdateDto
+    })));
+}
+/**
+ * Synchronize the takeout folder
+ */
+export function syncTakeouts(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutOverviewDto;
+    }>("/takeouts/sync", {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Start a takeout upload
+ */
+export function createTakeoutUpload({ takeoutUploadCreateDto }: {
+    takeoutUploadCreateDto: TakeoutUploadCreateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: TakeoutUploadDto;
+    }>("/takeouts/uploads", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: takeoutUploadCreateDto
+    })));
+}
+/**
+ * Cancel a takeout upload
+ */
+export function deleteTakeoutUpload({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/takeouts/uploads/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Retrieve a takeout upload
+ */
+export function getTakeoutUpload({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutUploadDto;
+    }>(`/takeouts/uploads/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Upload a takeout chunk
+ */
+export function uploadTakeoutChunk({ uploadOffset, id, body }: {
+    uploadOffset: number;
+    id: string;
+    body: Blob;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutUploadDto;
+    }>(`/takeouts/uploads/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "PUT",
+        body,
+        headers: oazapfts.mergeHeaders(opts?.headers, {
+            "Upload-Offset": uploadOffset
+        })
+    }));
+}
+/**
  * Get time bucket
  */
 export function getTimeBucket({ albumId, bbox, isFavorite, isPrivate, isTrashed, key, order, orderBy, personId, slug, tagId, timeBucket, userId, visibility, withAutoStacked, withCoordinates, withPartners, withStacked }: {
@@ -8607,6 +9474,10 @@ export enum Permission {
     ViewRead = "view.read",
     ViewUpdate = "view.update",
     ViewDelete = "view.delete",
+    TakeoutRead = "takeout.read",
+    TakeoutUpload = "takeout.upload",
+    TakeoutRun = "takeout.run",
+    TakeoutDelete = "takeout.delete",
     QueueRead = "queue.read",
     QueueUpdate = "queue.update",
     QueueJobCreate = "queueJob.create",
@@ -8719,7 +9590,8 @@ export enum QueueName {
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
     Editor = "editor",
-    VideoFrameAnalysis = "videoFrameAnalysis"
+    VideoFrameAnalysis = "videoFrameAnalysis",
+    Takeout = "takeout"
 }
 export enum QueueCommand {
     Start = "start",
@@ -8829,7 +9701,10 @@ export enum JobName {
     IntegrityChecksumFiles = "IntegrityChecksumFiles",
     IntegrityChecksumFilesRefresh = "IntegrityChecksumFilesRefresh",
     IntegrityDeleteReportType = "IntegrityDeleteReportType",
-    IntegrityDeleteReports = "IntegrityDeleteReports"
+    IntegrityDeleteReports = "IntegrityDeleteReports",
+    TakeoutScanPart = "TakeoutScanPart",
+    TakeoutAnalyzeExport = "TakeoutAnalyzeExport",
+    TakeoutRun = "TakeoutRun"
 }
 export enum SearchOrderField {
     FileCreatedAt = "fileCreatedAt",
@@ -8960,6 +9835,183 @@ export enum SyncRequestType {
     TagAssetsV1 = "TagAssetsV1",
     ViewsV1 = "ViewsV1",
     ViewTagsV1 = "ViewTagsV1"
+}
+export enum TakeoutRunStatus {
+    Queued = "queued",
+    Reading = "reading",
+    Planning = "planning",
+    Fetching = "fetching",
+    Importing = "importing",
+    Finishing = "finishing",
+    Paused = "paused",
+    Completed = "completed",
+    Failed = "failed",
+    Cancelling = "cancelling",
+    Cancelled = "cancelled"
+}
+export enum TakeoutRunPartStatus {
+    Pending = "pending",
+    Cached = "cached",
+    Reading = "reading",
+    Paused = "paused",
+    Read = "read",
+    Error = "error",
+    Missing = "missing"
+}
+export enum TakeoutBurstMode {
+    NoStack = "NoStack",
+    Stack = "Stack",
+    StackKeepRaw = "StackKeepRaw",
+    StackKeepJpeg = "StackKeepJPEG"
+}
+export enum TakeoutHeicJpgMode {
+    NoStack = "NoStack",
+    KeepHeic = "KeepHeic",
+    KeepJpg = "KeepJPG",
+    StackCoverHeic = "StackCoverHeic",
+    StackCoverJpg = "StackCoverJPG"
+}
+export enum TakeoutOnErrors {
+    Continue = "continue",
+    Stop = "stop"
+}
+export enum TakeoutRawJpgMode {
+    NoStack = "NoStack",
+    KeepRaw = "KeepRaw",
+    KeepJpg = "KeepJPG",
+    StackCoverRaw = "StackCoverRaw",
+    StackCoverJpg = "StackCoverJPG"
+}
+export enum TakeoutVideoBoostMode {
+    NoStack = "NoStack",
+    Stack = "Stack",
+    KeepMain = "KeepMain"
+}
+export enum TakeoutCompleteness {
+    Unknown = "unknown",
+    Complete = "complete",
+    Uncertain = "uncertain",
+    Incomplete = "incomplete"
+}
+export enum TakeoutExportReadStatus {
+    NotRead = "notRead",
+    Partial = "partial",
+    Read = "read",
+    Error = "error"
+}
+export enum TakeoutScanStatus {
+    Pending = "pending",
+    Scanning = "scanning",
+    Scanned = "scanned",
+    Error = "error",
+    Missing = "missing"
+}
+export enum TakeoutSizeCheck {
+    Ok = "ok",
+    Low = "low",
+    Short = "short",
+    Unknown = "unknown"
+}
+export enum TakeoutArchiveKind {
+    Zip = "zip",
+    Tgz = "tgz"
+}
+export enum TakeoutPartReadStatus {
+    NotRead = "notRead",
+    Reading = "reading",
+    Partial = "partial",
+    Read = "read",
+    Error = "error",
+    Missing = "missing"
+}
+export enum TakeoutLargerVersionFilter {
+    Pending = "pending",
+    Resolved = "resolved"
+}
+export enum TakeoutLargerVersionStatus {
+    Pending = "pending",
+    DeletedSmaller = "deletedSmaller",
+    KeptBoth = "keptBoth"
+}
+export enum TakeoutLargerVersionAction {
+    DeleteSmaller = "deleteSmaller",
+    KeepBoth = "keepBoth"
+}
+export enum TakeoutRunFileAction {
+    Upload = "upload",
+    LocalDuplicate = "localDuplicate",
+    DuplicatedInDirectory = "duplicatedInDirectory",
+    RotateOnlyDropped = "rotateOnlyDropped",
+    NotSelected = "notSelected",
+    FilteredPartner = "filteredPartner",
+    FilteredTrashed = "filteredTrashed",
+    FilteredArchived = "filteredArchived",
+    FilteredDateRange = "filteredDateRange",
+    MissingMetadata = "missingMetadata",
+    FailedVideo = "failedVideo",
+    Useless = "useless",
+    Unsupported = "unsupported",
+    Banned = "banned",
+    SidecarXmp = "sidecarXmp",
+    AlbumJson = "albumJson",
+    AssetJsonUnused = "assetJsonUnused",
+    UnknownJson = "unknownJson",
+    ImmichGoJson = "immichGoJson",
+    ServerDuplicate = "serverDuplicate",
+    BetterOnServer = "betterOnServer",
+    AlreadyProcessed = "alreadyProcessed",
+    PreviouslyDeletedSkipped = "previouslyDeletedSkipped",
+    PartUnreadable = "partUnreadable",
+    MissingFromArchive = "missingFromArchive"
+}
+export enum TakeoutRunFileStatus {
+    Planned = "planned",
+    Written = "written",
+    Created = "created",
+    Done = "done",
+    Skipped = "skipped",
+    Error = "error"
+}
+export enum TakeoutFileKind {
+    Image = "image",
+    Video = "video",
+    Json = "json",
+    Sidecar = "sidecar",
+    Useless = "useless",
+    Unsupported = "unsupported",
+    Banned = "banned",
+    Other = "other"
+}
+export enum TakeoutGroupKind {
+    None = "none",
+    Burst = "burst",
+    RawJpg = "rawJpg",
+    HeicJpg = "heicJpg",
+    Other = "other",
+    VideoBoost = "videoBoost"
+}
+export enum TakeoutMatcher {
+    FastTrack = "fastTrack",
+    Normal = "normal",
+    ForgottenDuplicates = "forgottenDuplicates",
+    Edited = "edited"
+}
+export enum TakeoutRotationState {
+    Pending = "pending",
+    Applied = "applied",
+    SkippedHasEdits = "skippedHasEdits",
+    SkippedNotEditable = "skippedNotEditable"
+}
+export enum TakeoutZoneSource {
+    FileOffset = "fileOffset",
+    Device = "device",
+    DerivedOffset = "derivedOffset",
+    Google = "google",
+    Screenshot = "screenshot",
+    Gps = "gps",
+    Home = "home",
+    Exif = "exif",
+    Filename = "filename"
 }
 export enum AssetOrderBy {
     TakenAt = "takenAt",
