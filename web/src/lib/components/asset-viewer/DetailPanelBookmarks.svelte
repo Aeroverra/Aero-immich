@@ -2,6 +2,7 @@
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { videoBookmarkManager } from '$lib/managers/video-bookmark-manager.svelte';
+  import { mediaQueryManager } from '$lib/stores/media-query-manager.svelte';
   import { formatVideoPosition } from '$lib/utils/people-utils';
   import { AssetTypeEnum, type AssetResponseDto } from '@immich/sdk';
   import { IconButton, Text } from '@immich/ui';
@@ -38,6 +39,14 @@
     }
     editingId = undefined;
     await videoBookmarkManager.rename(id, draft);
+  };
+
+  const playFrom = (time: number) => {
+    assetViewerManager.emit('VideoSeek', time, true);
+    // on a phone the panel covers the video, so get out of the way to watch
+    if (mediaQueryManager.maxMd) {
+      assetViewerManager.closeDetailPanel();
+    }
   };
 
   const add = async () => {
@@ -88,7 +97,7 @@
               class="shrink-0 rounded-full bg-immich-primary/15 px-2 py-0.5 text-xs font-medium text-immich-primary tabular-nums hover:bg-immich-primary/25 dark:bg-immich-dark-primary/15 dark:text-immich-dark-primary"
               title={$t('jump_to_time', { values: { time } })}
               aria-label={$t('jump_to_time', { values: { time } })}
-              onclick={() => assetViewerManager.emit('VideoSeek', bookmark.time, true)}
+              onclick={() => playFrom(bookmark.time)}
             >
               {time}
             </button>
@@ -111,7 +120,7 @@
                   ? ''
                   : 'text-gray-500 dark:text-gray-400'}"
                 title={bookmark.label || $t('jump_to_time', { values: { time } })}
-                onclick={() => assetViewerManager.emit('VideoSeek', bookmark.time, true)}
+                onclick={() => playFrom(bookmark.time)}
               >
                 {bookmark.label || $t('video_bookmark_untitled')}
               </button>
