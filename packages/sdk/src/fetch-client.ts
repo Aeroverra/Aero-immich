@@ -2532,6 +2532,10 @@ export type MetadataSearchDto = {
     libraryId?: string | null;
     /** Filter by camera make */
     make?: string | null;
+    /** Only videos at most this long, in milliseconds */
+    maxDuration?: number;
+    /** Only videos at least this long, in milliseconds */
+    minDuration?: number;
     /** Filter by camera model */
     model?: string | null;
     /** Filter by OCR text content */
@@ -2661,6 +2665,10 @@ export type RandomSearchDto = {
     libraryId?: string | null;
     /** Filter by camera make */
     make?: string | null;
+    /** Only videos at most this long, in milliseconds */
+    maxDuration?: number;
+    /** Only videos at least this long, in milliseconds */
+    minDuration?: number;
     /** Filter by camera model */
     model?: string | null;
     /** Filter by OCR text content */
@@ -2732,6 +2740,10 @@ export type SmartSearchDto = {
     libraryId?: string | null;
     /** Filter by camera make */
     make?: string | null;
+    /** Only videos at most this long, in milliseconds */
+    maxDuration?: number;
+    /** Only videos at least this long, in milliseconds */
+    minDuration?: number;
     /** Filter by camera model */
     model?: string | null;
     /** Filter by OCR text content */
@@ -2805,6 +2817,10 @@ export type StatisticsSearchDto = {
     libraryId?: string | null;
     /** Filter by camera make */
     make?: string | null;
+    /** Only videos at most this long, in milliseconds */
+    maxDuration?: number;
+    /** Only videos at least this long, in milliseconds */
+    minDuration?: number;
     /** Filter by camera model */
     model?: string | null;
     /** Filter by OCR text content */
@@ -7317,7 +7333,7 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
@@ -7333,6 +7349,8 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     lensModel?: string | null;
     libraryId?: string | null;
     make?: string | null;
+    maxDuration?: number;
+    minDuration?: number;
     minFileSize?: number;
     model?: string | null;
     ocr?: string;
@@ -7371,6 +7389,8 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         lensModel,
         libraryId,
         make,
+        maxDuration,
+        minDuration,
         minFileSize,
         model,
         ocr,
