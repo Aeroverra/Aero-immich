@@ -21,6 +21,7 @@ import { ClusterGroupRepository } from 'src/repositories/cluster-group.repositor
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { CustomViewRepository } from 'src/repositories/custom-view.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
 import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
@@ -86,6 +87,7 @@ export const BASE_SERVICE_DEPENDENCIES = [
   ConfigRepository,
   CronRepository,
   CryptoRepository,
+  CustomViewRepository,
   DatabaseRepository,
   DownloadRepository,
   DuplicateRepository,
@@ -151,6 +153,7 @@ export class BaseService {
     protected configRepository: ConfigRepository,
     protected cronRepository: CronRepository,
     protected cryptoRepository: CryptoRepository,
+    protected customViewRepository: CustomViewRepository,
     protected databaseRepository: DatabaseRepository,
     protected downloadRepository: DownloadRepository,
     protected duplicateRepository: DuplicateRepository,
@@ -225,6 +228,7 @@ export class BaseService {
       ctx.configRepository,
       ctx.cronRepository,
       ctx.cryptoRepository,
+      ctx.customViewRepository,
       ctx.databaseRepository,
       ctx.downloadRepository,
       ctx.duplicateRepository,
