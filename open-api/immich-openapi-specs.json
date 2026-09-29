@@ -19029,6 +19029,236 @@
         "x-immich-state": "Stable"
       }
     },
+    "/video-bookmarks": {
+      "get": {
+        "description": "Retrieve the bookmarks the current user set on a video, ordered by position.",
+        "operationId": "getVideoBookmarks",
+        "parameters": [
+          {
+            "name": "assetId",
+            "required": true,
+            "in": "query",
+            "description": "Video asset ID",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/VideoBookmarkResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve video bookmarks",
+        "tags": [
+          "Video bookmarks"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "videoBookmark.read",
+        "x-immich-state": "Beta"
+      },
+      "post": {
+        "description": "Bookmark a moment in a video the current user can view. Only that user sees the bookmark.",
+        "operationId": "createVideoBookmark",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoBookmarkCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoBookmarkResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Create a video bookmark",
+        "tags": [
+          "Video bookmarks"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "videoBookmark.create",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/video-bookmarks/{id}": {
+      "delete": {
+        "description": "Delete a bookmark.",
+        "operationId": "deleteVideoBookmark",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Delete a video bookmark",
+        "tags": [
+          "Video bookmarks"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "videoBookmark.delete",
+        "x-immich-state": "Beta"
+      },
+      "put": {
+        "description": "Change the position or the label of a bookmark.",
+        "operationId": "updateVideoBookmark",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VideoBookmarkUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoBookmarkResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update a video bookmark",
+        "tags": [
+          "Video bookmarks"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "videoBookmark.update",
+        "x-immich-state": "Beta"
+      }
+    },
     "/view/folder": {
       "get": {
         "description": "Retrieve assets that are children of a specific folder.",
@@ -20214,6 +20444,10 @@
     {
       "name": "Users",
       "description": "Endpoints for viewing and updating the current users, including product key information, profile picture data, onboarding progress, and more."
+    },
+    {
+      "name": "Video bookmarks",
+      "description": "A video bookmark marks a moment in a video to jump back to, with an optional label. Bookmarks are personal: every user only sees their own, on any video they can view."
     },
     {
       "name": "Views",
@@ -27729,6 +27963,10 @@
           "userProfileImage.read",
           "userProfileImage.update",
           "userProfileImage.delete",
+          "videoBookmark.create",
+          "videoBookmark.read",
+          "videoBookmark.update",
+          "videoBookmark.delete",
           "view.create",
           "view.read",
           "view.update",
@@ -39004,6 +39242,94 @@
           "checkedAt",
           "releaseVersion"
         ],
+        "type": "object"
+      },
+      "VideoBookmarkCreateDto": {
+        "properties": {
+          "assetId": {
+            "description": "Video asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "label": {
+            "description": "Label, empty for none",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "time": {
+            "description": "Position in the video in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assetId",
+          "time"
+        ],
+        "type": "object"
+      },
+      "VideoBookmarkResponseDto": {
+        "description": "A moment in a video that the current user bookmarked",
+        "properties": {
+          "assetId": {
+            "description": "Video asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Creation date",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Bookmark ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "label": {
+            "description": "Label, empty for none",
+            "type": "string"
+          },
+          "time": {
+            "description": "Position in the video in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updatedAt": {
+            "description": "Last update date",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "createdAt",
+          "id",
+          "label",
+          "time",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "VideoBookmarkUpdateDto": {
+        "properties": {
+          "label": {
+            "description": "Label, empty for none",
+            "maxLength": 200,
+            "type": "string"
+          },
+          "time": {
+            "description": "Position in the video in milliseconds",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "VideoCodec": {
