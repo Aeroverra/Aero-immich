@@ -1,0 +1,1433 @@
+name: Aero release
+
+# Fork-only workflow. It lives ONLY on the `main` branch (see docs-aero/README.md).
+#
+# Release-driven integration: nothing is built from upstream `main` any more.
+#
+#   detect     every 6 hours / manual: find the latest upstream release tag
+#              (immich-app/immich, prereleases excluded) and stop unless it is
+#              new for this fork.
+#   integrate  rebase every branch in .github/aero-branches.txt onto the tag
+#              and rebuild `main` = tag + merges + fork glue, locally. Pushes
+#              nothing: the rebuilt refs go to the later jobs as a git bundle
+#              in the run artifact `aero-integrated`, together with the state
+#              files and the glue scripts of this run.
+#   then, in parallel, each on the rebuilt `main`:
+#     checks     server and web checks
+#     mobile     mobile codegen and Dart analysis
+#     e2e        private mode API e2e suite against the e2e docker stack
+#     candidate  build the server image, push only `<tag>-aero-rc-<sha>`
+#     ml         when the fork changes machine-learning/: the ML image
+#                `<tag>-aero-rc-<sha>`, retagged from an earlier fork release
+#                with the same machine-learning/ tree, built otherwise
+#   push       once checks, mobile and e2e passed: push upstream-main, the
+#              rebased branches (--force-with-lease) and main. On a conflict or
+#              a failed check, `report-failure` opens/updates the issue
+#              "Upstream <tag>: integration failed" and nothing is pushed.
+#   rc-tags    once every check passed and both images exist: move the
+#              `<tag>-aero-rc` tags to this candidate.
+#   revert-validation
+#              aero-revert-validation.yml: migrate a fresh database with the rc
+#              image, run scripts/aero/revert-to-immich.sql, boot upstream
+#              `<tag>` on it. A broken revert blocks the release.
+#   ready      needs every job above. Opens/updates the issue "Upstream <tag>:
+#              ready for release" (or "Upstream <tag>: revert validation
+#              failed"); it says which fork revision the approval will create.
+#   publish    needs every job above and waits for approval in the `release`
+#              environment. Computes the fork revision N (1 + the highest
+#              published revision of <tag>, see .github/scripts/aero-revision.sh),
+#              retags the rc image as the immutable `<tag>-aero.N`, creates the
+#              GitHub release / git tag `<tag>-aero.N` on the fork with
+#              revert-to-immich.sql attached, moves the pointer image tags
+#              `<tag>-aero` and `aero` to it, and closes the "ready for release"
+#              issue. An existing `<tag>-aero.N` is never edited or moved;
+#              re-running the release for the same upstream tag produces N+1.
+#
+# State, all visible on GitHub:
+#   - processed:  a fork release `<tag>-aero.N` (or the historical bare
+#                 `<tag>-aero` = revision 1) exists
+#   - in flight:  an open issue titled "Upstream <tag>: ready for release"
+#                 (close it, or dispatch with `tag`, to rebuild the candidate)
+#
+# Never use GitHub's "Sync fork" button on this repository: it would merge
+# upstream into the integration `main`. This workflow replaces it.
+#
+# The machine-learning image is published only when the fork changes
+# machine-learning/ compared with the upstream tag (for example the face
+# attributes models). Otherwise the family instance keeps upstream's ML image
+# and the release notes say so.
+
+on:
+  schedule:
+    # every 6 hours, at :23
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Force a specific upstream release tag (for example v3.3.0). Empty = latest upstream release.'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Dry run: rebase, rebuild main and run the checks, but push nothing, build no image, open no issue.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: aero-release
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  UPSTREAM_REPO: https://github.com/immich-app/immich.git
+  UPSTREAM_SLUG: immich-app/immich
+  SERVER_IMAGE: ghcr.io/aeroverra/immich-server
+  ML_IMAGE: ghcr.io/aeroverra/immich-machine-learning
+  # sibling dirs of the checkout (upload-artifact rejects ".." in patterns, so no relative segments)
+  AERO_OUT: /home/runner/work/${{ github.event.repository.name }}/aero-out
+  AERO_STATE: /home/runner/work/${{ github.event.repository.name }}/aero-out/state
+  AERO_LOGS: /home/runner/work/${{ github.event.repository.name }}/aero-logs
+
+jobs:
+  detect:
+    name: Detect upstream release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      proceed: ${{ steps.detect.outputs.proceed }}
+      tag: ${{ steps.detect.outputs.tag }}
+      release_url: ${{ steps.detect.outputs.release_url }}
+      release_name: ${{ steps.detect.outputs.release_name }}
+    steps:
+      - name: Checkout fork scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Compare latest upstream release with fork state
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCED_TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$FORCED_TAG" ]]; then
+            release=$(gh api "repos/$UPSTREAM_SLUG/releases/tags/$FORCED_TAG") \
+              || { echo "::error::upstream has no release for tag $FORCED_TAG"; exit 1; }
+            forced=true
+          else
+            release=$(gh api "repos/$UPSTREAM_SLUG/releases/latest")
+            forced=false
+          fi
+          tag=$(jq -r .tag_name <<<"$release")
+          url=$(jq -r .html_url <<<"$release")
+          name=$(jq -r '.name // .tag_name' <<<"$release")
+          prerelease=$(jq -r .prerelease <<<"$release")
+          echo "latest upstream release: $tag ($url), prerelease=$prerelease, forced=$forced"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected tag format: $tag"; exit 1; }
+          if [[ "$prerelease" == true && "$forced" != true ]]; then
+            echo "$tag is a prerelease; nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "release_url=$url"
+            echo "release_name=$name"
+          } >> "$GITHUB_OUTPUT"
+
+          # already published by this fork? (every publish creates a release
+          # <tag>-aero.N; the bare <tag>-aero from the first publish is revision 1)
+          latest=$(bash .github/scripts/aero-revision.sh latest "$tag")
+          if [[ "$latest" -gt 0 ]]; then
+            if [[ "$forced" == true ]]; then
+              echo "::warning::$tag is already published as $tag-aero.$latest; forced re-run will rebuild the candidate and, on approval, publish it as $tag-aero.$((latest + 1))."
+            else
+              echo "$tag is already published as $tag-aero.$latest; nothing to do."
+              echo "proceed=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # candidate already built and waiting for approval?
+          ready=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --limit 100 --search "\"Upstream $tag: ready for release\" in:title" --json number,title \
+            | jq -r --arg t "Upstream $tag: ready for release" '.[] | select(.title == $t) | .number' | head -n1)
+          if [[ -n "$ready" && "$forced" != true && "$DRY_RUN" != true ]]; then
+            echo "candidate for $tag is already built and waiting for approval (issue #$ready). Approve the pending deployment, or close the issue / dispatch with tag=$tag to rebuild it."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+          echo "new upstream release $tag: integrating."
+
+  # Rebase and rebuild only. Everything slow runs in the parallel jobs below on
+  # the refs this job hands over in the `aero-integrated` artifact:
+  #   integrated.bundle  git bundle of the rebuilt main and the rebased
+  #                      branches, prerequisite: the previous main tip
+  #   state/             result.env, branches.tsv, conflict-files.txt of
+  #                      aero-integrate.sh
+  #   scripts/           .github/scripts of the main tip that started the run
+  integrate:
+    name: Integrate ${{ needs.detect.outputs.tag }}
+    needs: detect
+    if: needs.detect.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      GIT_AUTHOR_NAME: aero-sync
+      GIT_AUTHOR_EMAIL: aero-sync@users.noreply.github.com
+      GIT_COMMITTER_NAME: aero-sync
+      GIT_COMMITTER_EMAIL: aero-sync@users.noreply.github.com
+    outputs:
+      main_sha: ${{ steps.integrate.outputs.main_sha }}
+      target_sha: ${{ steps.integrate.outputs.target_sha }}
+      branch_table: ${{ steps.integrate.outputs.branch_table }}
+      short_sha: ${{ steps.handover.outputs.short_sha }}
+      rc_tag: ${{ steps.handover.outputs.rc_tag }}
+      rc_sha_tag: ${{ steps.handover.outputs.rc_sha_tag }}
+      ml_changed: ${{ steps.handover.outputs.ml_changed }}
+      ml_reuse_from: ${{ steps.handover.outputs.ml_reuse_from }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Rebase branches and rebuild main
+        id: integrate
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch --no-tags upstream "+refs/tags/$TAG:refs/tags/$TAG"
+          target=$(git rev-parse "$TAG^{commit}")
+          echo "target_sha=$target" >> "$GITHUB_OUTPUT"
+
+          # keep the glue scripts from the main tip that triggered this run, the
+          # rebuilt main re-applies them anyway; the later jobs use this copy
+          mkdir -p "$AERO_OUT"
+          cp -r .github/scripts "$AERO_OUT/scripts"
+          rc=0
+          bash "$AERO_OUT/scripts/aero-integrate.sh" integrate "$target" "$AERO_STATE" || rc=$?
+
+          # shellcheck disable=SC1091
+          source "$AERO_STATE/result.env"
+          if [[ $rc -ne 0 ]]; then
+            {
+              echo "## Integration of $TAG FAILED"
+              echo
+              echo "$message"
+              if [[ -f "$AERO_STATE/conflict-files.txt" ]]; then
+                echo
+                echo '```'
+                cat "$AERO_STATE/conflict-files.txt"
+                echo '```'
+              fi
+              echo
+              echo "Nothing was pushed."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+          fi
+
+          {
+            echo "branch_table<<AERO_EOF"
+            echo "| branch | parent | before | after |"
+            echo "|---|---|---|---|"
+            while IFS=$'\t' read -r name old new parent; do
+              echo "| \`$name\` | ${parent:+\`$parent\`} | $old | $new |"
+            done < "$AERO_STATE/branches.tsv"
+            echo "AERO_EOF"
+            # when the rebuilt main has the same tree, push() keeps the existing
+            # branch tip, so downstream jobs must check out that commit
+            if [[ "$main_changed" == true ]]; then
+              echo "main_sha=$new_main"
+            else
+              echo "main_sha=$old_main"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Integration of $TAG"
+            echo
+            echo "| ref | before | after |"
+            echo "|---|---|---|"
+            echo "| upstream-main | $old_mirror | $target |"
+            while IFS=$'\t' read -r name old new parent; do
+              echo "| $name | $old | $new |"
+            done < "$AERO_STATE/branches.tsv"
+            echo "| main | $old_main | $new_main |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bundle the rebuilt refs, candidate tags, machine-learning changes
+        id: handover
+        env:
+          MAIN_SHA: ${{ steps.integrate.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "$AERO_STATE/result.env"
+          # everything the rebuilt refs need beyond the previous main tip (which
+          # every later job has from its full checkout of main): the upstream
+          # commits since the last integration, the rebased branches, the merges
+          refs=(refs/heads/main)
+          while IFS=$'\t' read -r name _ _ _; do refs+=("refs/heads/$name"); done < "$AERO_STATE/branches.tsv"
+          git bundle create "$AERO_OUT/integrated.bundle" "${refs[@]}" "^$old_main"
+          git bundle list-heads "$AERO_OUT/integrated.bundle"
+          ls -l "$AERO_OUT/integrated.bundle"
+
+          short=${MAIN_SHA:0:7}
+          {
+            echo "short_sha=$short"
+            echo "rc_tag=$TAG-aero-rc"
+            echo "rc_sha_tag=$TAG-aero-rc-$short"
+          } >> "$GITHUB_OUTPUT"
+
+          # the ML image is published only when machine-learning/ differs from
+          # the upstream tag; it is rebuilt only when no earlier fork release
+          # (<tag>-aero.N, newest first) has exactly the same machine-learning/
+          # tree (the ml job then retags that release's image, when it exists)
+          if git diff --quiet "$target" "$MAIN_SHA" -- machine-learning; then
+            echo "ml_changed=false" >> "$GITHUB_OUTPUT"
+            echo "machine-learning/ is identical to upstream $TAG; the family instance keeps upstream's ML image."
+          else
+            echo "ml_changed=true" >> "$GITHUB_OUTPUT"
+            echo "machine-learning/ differs from upstream $TAG:"
+            git diff --stat "$target" "$MAIN_SHA" -- machine-learning
+            reuse=""
+            while read -r t; do
+              [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-aero\.[0-9]+$ ]] || continue
+              if git diff --quiet "$t" "$MAIN_SHA" -- machine-learning 2>/dev/null; then
+                reuse="${reuse:+$reuse }$t"
+              fi
+            done < <(git for-each-ref --sort=-v:refname --format='%(refname:short)' 'refs/tags/v*-aero.*' | head -n 10)
+            echo "ml_reuse_from=$reuse" >> "$GITHUB_OUTPUT"
+            echo "fork releases with the same machine-learning/ tree: ${reuse:-none}"
+          fi
+
+      # always: report-failure reads state/ after a conflict
+      - name: Hand the rebuilt refs to the later jobs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  checks:
+    name: Server and web checks
+    needs: [detect, integrate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+      failed_check: ${{ steps.checks.outputs.failed_check }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the rebuilt refs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Check out the rebuilt main
+        env:
+          MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$MAIN_SHA^{commit}" 2>/dev/null; then
+            git bundle verify -q "$AERO_OUT/integrated.bundle"
+            git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          fi
+          git checkout -q --detach "$MAIN_SHA"
+          git log -1 --format='rebuilt main: %H %s'
+
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@06a9ef925332c91be647d6256642b86b398592c8 # use-mise-action-v3.2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      # a cache, never a check: without a store path the installs just download
+      - name: Locate the pnpm store
+        id: pnpm-store
+        run: |
+          path=$(pnpm store path 2>/dev/null | tail -n 1) || path=""
+          echo "pnpm store: ${path:-unknown}"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pnpm store
+        if: ${{ steps.pnpm-store.outputs.path != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: aero-pnpm-checks-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: aero-pnpm-checks-${{ runner.os }}-
+
+      - name: Server and web checks
+        id: checks
+        run: |
+          set -uo pipefail
+          mkdir -p "$AERO_LOGS"
+          summary="$AERO_LOGS/summary-1-checks.txt"
+          : > "$summary"
+          run_check() {
+            local name=$1; shift
+            echo "::group::$name: $*"
+            if "$@" 2>&1 | tee "$AERO_LOGS/$name.log"; then
+              echo "::endgroup::"
+              echo "- \`$name\`: ok" >> "$summary"
+            else
+              echo "::endgroup::"
+              echo "- \`$name\`: FAILED" >> "$summary"
+              echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+              echo "::error::$name failed ($*)"
+              return 1
+            fi
+          }
+          set -e
+          run_check server-install mise run //server:install
+          run_check plugins mise run //:plugins
+          run_check server-check mise run //server:check
+          run_check server-test mise run //server:test --run
+          run_check sdk-install mise run //:sdk:install
+          run_check sdk-build mise run //:sdk:build
+          run_check web-install mise run //web:install
+          run_check web-check-typescript mise run //web:check-typescript
+
+      - name: Collect the check summary
+        id: summary
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$AERO_LOGS"
+          touch "$AERO_LOGS/summary-1-checks.txt"
+          {
+            echo "summary<<AERO_EOF"
+            cat "$AERO_LOGS/summary-1-checks.txt"
+            echo "AERO_EOF"
+          } >> "$GITHUB_OUTPUT"
+          { echo "### Server and web checks"; echo; cat "$AERO_LOGS/summary-1-checks.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive the check logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aero-check-logs-checks
+          path: ${{ env.AERO_LOGS }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Nothing else analyses the mobile app in this fork: upstream's
+  # static_analysis.yml is disabled here on purpose (its pre-job and token
+  # steps need upstream's PUSH_O_MATIC app secrets, so it failed on every
+  # push), and so are build-mobile.yml and test.yml. Two feature branches
+  # can then each add an argument to the same widget, merge into main with
+  # no conflict and leave a main that does not compile for mobile: on
+  # 2026-09-17 main carried two appBar arguments in
+  # mobile/lib/presentation/pages/dev/main_timeline.page.dart, and a second
+  # branch pair left a generated DTO field missing in a mobile test. Both
+  # are plain analyzer errors, so codegen plus `dart analyze` of the rebuilt
+  # main catches this class of silent merge before anything is pushed.
+  # Only the dart half of `mise //mobile:analyze` runs: dcm is a licensed
+  # third party tool and adds nothing for broken merges. The APK itself is
+  # not built here (it is built by hand when the app is shipped), so this
+  # is codegen plus one analyzer pass, not a full mobile build.
+  mobile:
+    name: Mobile codegen and Dart analysis
+    needs: [detect, integrate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+      failed_check: ${{ steps.mobile.outputs.failed_check }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the rebuilt refs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Check out the rebuilt main
+        env:
+          MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$MAIN_SHA^{commit}" 2>/dev/null; then
+            git bundle verify -q "$AERO_OUT/integrated.bundle"
+            git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          fi
+          git checkout -q --detach "$MAIN_SHA"
+          git log -1 --format='rebuilt main: %H %s'
+
+      # Flutter and the mobile toolchain, the way upstream's static_analysis.yml
+      # sets them up (use-mise with the mobile config root, which also installs
+      # the root tools the codegen needs; mise-action caches the installs)
+      - name: Setup Mise for mobile
+        uses: immich-app/devtools/actions/use-mise@06a9ef925332c91be647d6256642b86b398592c8 # use-mise-action-v3.2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          working_directory: ./mobile
+
+      # `flutter pub get --enforce-lockfile` still checks every package
+      # against the content hashes in pubspec.lock
+      - name: Cache the pub packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: aero-pub-${{ runner.os }}-${{ hashFiles('mobile/mise.toml', 'mobile/pubspec.lock', 'mobile/packages/ui/pubspec.lock') }}
+          restore-keys: aero-pub-${{ runner.os }}-
+
+      - name: Mobile checks (codegen and Dart analysis of the rebuilt main)
+        id: mobile
+        run: |
+          set -uo pipefail
+          mkdir -p "$AERO_LOGS"
+          summary="$AERO_LOGS/summary-2-mobile.txt"
+          : > "$summary"
+          cd mobile
+          run_check() {
+            local name=$1; shift
+            echo "::group::$name: $*"
+            if "$@" 2>&1 | tee "$AERO_LOGS/$name.log"; then
+              echo "::endgroup::"
+              echo "- \`$name\`: ok" >> "$summary"
+            else
+              echo "::endgroup::"
+              echo "- \`$name\`: FAILED" >> "$summary"
+              echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+              echo "::error::$name failed ($*)"
+              return 1
+            fi
+          }
+          # the ui package is analysed together with the app and resolves its
+          # own dependencies, like upstream's static_analysis.yml does
+          ui_install() ( cd packages/ui && mise exec -- flutter pub get --enforce-lockfile )
+          set -e
+          run_check mobile-install mise run //mobile:install:ci
+          run_check mobile-ui-install ui_install
+          run_check mobile-codegen mise run //mobile:codegen
+          run_check mobile-analyze mise run //mobile:analyze:dart
+
+      - name: Collect the check summary
+        id: summary
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$AERO_LOGS"
+          touch "$AERO_LOGS/summary-2-mobile.txt"
+          {
+            echo "summary<<AERO_EOF"
+            cat "$AERO_LOGS/summary-2-mobile.txt"
+            echo "AERO_EOF"
+          } >> "$GITHUB_OUTPUT"
+          { echo "### Mobile checks"; echo; cat "$AERO_LOGS/summary-2-mobile.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive the check logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aero-check-logs-mobile
+          path: ${{ env.AERO_LOGS }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Mirrors upstream's test.yml "End-to-End Tests (Server & CLI)" job: build
+  # the server image from the rebuilt main, start e2e/docker-compose.yml,
+  # run the API specs against it with VITEST_DISABLE_DOCKER_SETUP. Only the
+  # fork's private-mode suite runs here (the full API+CLI suite is
+  # upstream's job); AERO_E2E_SPECS widens it.
+  e2e:
+    name: E2E smoke (private mode API suite)
+    needs: [detect, integrate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+      failed_check: ${{ steps.e2e.outputs.failed_check }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the rebuilt refs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Check out the rebuilt main
+        env:
+          MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$MAIN_SHA^{commit}" 2>/dev/null; then
+            git bundle verify -q "$AERO_OUT/integrated.bundle"
+            git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          fi
+          git checkout -q --detach "$MAIN_SHA"
+          git log -1 --format='rebuilt main: %H %s'
+
+      - name: Setup Mise
+        uses: immich-app/devtools/actions/use-mise@06a9ef925332c91be647d6256642b86b398592c8 # use-mise-action-v3.2.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: E2E smoke (private mode API suite)
+        id: e2e
+        env:
+          AERO_E2E_SPECS: src/specs/server/api/private-mode.e2e-spec.ts
+          VITEST_DISABLE_DOCKER_SETUP: 'true'
+          COMPOSE_BAKE: 'true'
+        run: |
+          set -uo pipefail
+          mkdir -p "$AERO_LOGS"
+          summary="$AERO_LOGS/summary-3-e2e.txt"
+          : > "$summary"
+          name=e2e-private-mode
+          echo "::group::$name: prepare sdk, cli and e2e packages"
+          # the e2e suite uploads fixtures from the test-assets submodule, which the
+          # checkout does not fetch (upstream's test.yml checks out with submodules);
+          # the cli and the suite import the built sdk, like upstream's test.yml builds it
+          if ! { git submodule update --init --depth 1 e2e/test-assets && mise run //:sdk:install && mise run //:sdk:build && mise run //packages/cli:install && mise run //packages/cli:build && mise run //e2e:install; } 2>&1 | tee "$AERO_LOGS/$name.log"; then
+            echo "::endgroup::"
+            echo "- \`$name\`: FAILED (setup)" >> "$summary"
+            echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+            echo "::error::$name: preparing the sdk/cli/e2e packages failed"
+            exit 1
+          fi
+          echo "::endgroup::"
+          cd e2e
+          echo "::group::$name: docker compose up --build"
+          # registry pulls occasionally hit toomanyrequests; pull with retries before the build
+          for attempt in 1 2 3 4; do
+            if docker compose pull --ignore-buildable 2>&1 | tee -a "$AERO_LOGS/$name.log"; then break; fi
+            echo "pull attempt $attempt failed; retrying in $((attempt * 30))s" | tee -a "$AERO_LOGS/$name.log"
+            sleep $((attempt * 30))
+          done
+          if ! docker compose up -d --build --renew-anon-volumes --force-recreate --remove-orphans --wait --wait-timeout 300 2>&1 | tee -a "$AERO_LOGS/$name.log"; then
+            echo "::endgroup::"
+            docker compose logs --no-color > "$AERO_LOGS/$name-docker.log" 2>&1 || true
+            docker compose down --remove-orphans >/dev/null 2>&1 || true
+            echo "- \`$name\`: FAILED (stack did not start)" >> "$summary"
+            echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+            echo "::error::$name: the e2e docker stack did not start"
+            exit 1
+          fi
+          echo "::endgroup::"
+          echo "::group::$name: vitest $AERO_E2E_SPECS"
+          rc=0
+          # shellcheck disable=SC2086
+          mise exec -- pnpm exec vitest --run $AERO_E2E_SPECS 2>&1 | tee -a "$AERO_LOGS/$name.log" || rc=$?
+          echo "::endgroup::"
+          docker compose logs --no-color > "$AERO_LOGS/$name-docker.log" 2>&1 || true
+          docker compose down --remove-orphans >/dev/null 2>&1 || true
+          if [[ $rc -ne 0 ]]; then
+            echo "- \`$name\`: FAILED" >> "$summary"
+            echo "failed_check=$name" >> "$GITHUB_OUTPUT"
+            echo "::error::$name failed (vitest $AERO_E2E_SPECS)"
+            exit "$rc"
+          fi
+          echo "- \`$name\`: ok" >> "$summary"
+
+      - name: Archive e2e docker logs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ always() && steps.e2e.outcome != 'skipped' }}
+        with:
+          name: aero-e2e-private-mode-logs
+          path: ${{ env.AERO_LOGS }}/e2e-private-mode*.log
+          if-no-files-found: ignore
+
+      - name: Collect the check summary
+        id: summary
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "$AERO_LOGS"
+          touch "$AERO_LOGS/summary-3-e2e.txt"
+          {
+            echo "summary<<AERO_EOF"
+            cat "$AERO_LOGS/summary-3-e2e.txt"
+            echo "AERO_EOF"
+          } >> "$GITHUB_OUTPUT"
+          { echo "### E2E smoke"; echo; cat "$AERO_LOGS/summary-3-e2e.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive the check logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: aero-check-logs-e2e
+          path: ${{ env.AERO_LOGS }}
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Built in parallel with the checks, so it pushes only the per-commit tag
+  # `<tag>-aero-rc-<sha>`; the moving `<tag>-aero-rc` follows in rc-tags once
+  # every check passed.
+  candidate:
+    name: Build candidate ${{ needs.detect.outputs.tag }}-aero-rc
+    needs: [detect, integrate]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+    outputs:
+      rc_tag: ${{ needs.integrate.outputs.rc_tag }}
+      rc_sha_tag: ${{ needs.integrate.outputs.rc_sha_tag }}
+      short_sha: ${{ needs.integrate.outputs.short_sha }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the rebuilt refs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Check out the rebuilt main
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$MAIN_SHA^{commit}" 2>/dev/null; then
+            git bundle verify -q "$AERO_OUT/integrated.bundle"
+            git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          fi
+          git checkout -q --detach "$MAIN_SHA"
+          git log -1 --format='rebuilt main: %H %s'
+          version=$(jq -r '.version // empty' server/package.json)
+          [[ "v$version" == "$TAG" ]] || echo "::warning::server/package.json version ($version) does not match $TAG"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # the runner is thrown away anyway; removing the builder took almost a minute
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          cleanup: false
+
+      - name: Generate docker image tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.SERVER_IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ needs.integrate.outputs.rc_sha_tag }}
+
+      - name: Build and push release candidate
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          file: server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_ID=${{ github.run_id }}
+            BUILD_IMAGE=${{ env.SERVER_IMAGE }}:${{ needs.integrate.outputs.rc_sha_tag }}
+            BUILD_SOURCE_REF=main
+            BUILD_SOURCE_COMMIT=${{ needs.integrate.outputs.main_sha }}
+            DEVICE=cpu
+
+      - name: Candidate summary
+        env:
+          RC_SHA_TAG: ${{ needs.integrate.outputs.rc_sha_tag }}
+        run: |
+          {
+            echo "## Release candidate $TAG (server)"
+            echo
+            echo "- \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            echo
+            echo "\`$SERVER_IMAGE:$TAG-aero-rc\` moves to it once every check passed (job rc-tags)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Only when the fork changes machine-learning/ compared with the upstream
+  # tag. The build context is machine-learning/ alone, so an earlier fork
+  # release with exactly the same machine-learning/ tree has the image this
+  # build would produce: it is retagged as `<tag>-aero-rc-<sha>` instead of
+  # being rebuilt. Publish then retags `<tag>-aero-rc-<sha>` as before.
+  ml:
+    name: Machine-learning candidate ${{ needs.detect.outputs.tag }}-aero-rc
+    needs: [detect, integrate]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+      RC_SHA_TAG: ${{ needs.integrate.outputs.rc_sha_tag }}
+      ML_CHANGED: ${{ needs.integrate.outputs.ml_changed }}
+      ML_REUSE_FROM: ${{ needs.integrate.outputs.ml_reuse_from }}
+    outputs:
+      changed: ${{ needs.integrate.outputs.ml_changed }}
+      reused_from: ${{ steps.reuse.outputs.from }}
+    steps:
+      - name: Login to GitHub Container Registry
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Reuse the image of a release with the same machine-learning/ tree
+        id: reuse
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' }}
+        run: |
+          set -euo pipefail
+          for t in $ML_REUSE_FROM; do
+            if docker buildx imagetools inspect "$ML_IMAGE:$t" >/dev/null 2>&1; then
+              docker buildx imagetools create --tag "$ML_IMAGE:$RC_SHA_TAG" "$ML_IMAGE:$t"
+              docker buildx imagetools inspect "$ML_IMAGE:$RC_SHA_TAG"
+              echo "from=$t" >> "$GITHUB_OUTPUT"
+              echo "machine-learning/ is identical to fork release $t: retagged $ML_IMAGE:$t as $ML_IMAGE:$RC_SHA_TAG, no build."
+              exit 0
+            fi
+          done
+          echo "no earlier fork release has this machine-learning/ tree and an image; building."
+
+      - name: Checkout main
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the rebuilt refs
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Check out the rebuilt main
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "$MAIN_SHA^{commit}" 2>/dev/null; then
+            git bundle verify -q "$AERO_OUT/integrated.bundle"
+            git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          fi
+          git checkout -q --detach "$MAIN_SHA"
+          git log -1 --format='rebuilt main: %H %s'
+
+      - name: Set up Docker Buildx
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        with:
+          cleanup: false
+
+      - name: Generate machine-learning image tags
+        id: ml-meta
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.ML_IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=${{ needs.integrate.outputs.rc_sha_tag }}
+
+      - name: Build and push machine-learning release candidate
+        if: ${{ needs.integrate.outputs.ml_changed == 'true' && steps.reuse.outputs.from == '' }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: machine-learning
+          file: machine-learning/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ml-meta.outputs.tags }}
+          labels: ${{ steps.ml-meta.outputs.labels }}
+          cache-from: type=gha,scope=machine-learning
+          cache-to: type=gha,mode=max,scope=machine-learning
+          build-args: |
+            DEVICE=cpu
+
+      - name: Machine-learning summary
+        env:
+          REUSED_FROM: ${{ steps.reuse.outputs.from }}
+        run: |
+          {
+            echo "## Release candidate $TAG (machine learning)"
+            echo
+            if [[ "$ML_CHANGED" != "true" ]]; then
+              echo "- machine learning: unchanged, upstream's \`ghcr.io/immich-app/immich-machine-learning:$TAG\`"
+            elif [[ -n "$REUSED_FROM" ]]; then
+              echo "- \`$ML_IMAGE:$RC_SHA_TAG\`, retagged from \`$ML_IMAGE:$REUSED_FROM\` (same machine-learning/ tree, not rebuilt)"
+            else
+              echo "- \`$ML_IMAGE:$RC_SHA_TAG\` (built)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  push:
+    name: Push upstream-main, branches and main
+    needs: [detect, integrate, checks, mobile, e2e]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+    outputs:
+      checks_summary: ${{ steps.summary.outputs.summary }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.AERO_SYNC_TOKEN }}
+          persist-credentials: true
+
+      - name: Download the rebuilt refs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Push upstream-main, branches and main
+        run: |
+          set -euo pipefail
+          git bundle verify -q "$AERO_OUT/integrated.bundle"
+          git fetch -q --no-tags "$AERO_OUT/integrated.bundle" '+refs/heads/*:refs/aero-integrated/*'
+          bash "$AERO_OUT/scripts/aero-integrate.sh" push "$AERO_STATE"
+          echo "pushed upstream-main, the rebased branches and main for $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Close earlier integration-failed issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash "$AERO_OUT/scripts/aero-issue.sh" close "Upstream $TAG: integration failed" \
+            "Integration of $TAG succeeded in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Closing."
+
+      - name: Collect the check summary
+        id: summary
+        env:
+          CHECKS_SERVER_WEB: ${{ needs.checks.outputs.summary }}
+          CHECKS_MOBILE: ${{ needs.mobile.outputs.summary }}
+          CHECKS_E2E: ${{ needs.e2e.outputs.summary }}
+        run: |
+          set -euo pipefail
+          {
+            echo "summary<<AERO_EOF"
+            printf '%s\n' "$CHECKS_SERVER_WEB" "$CHECKS_MOBILE" "$CHECKS_E2E" | sed '/^$/d'
+            echo "AERO_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  report-failure:
+    name: Report integration failure
+    needs: [detect, integrate, checks, mobile, e2e, push]
+    if: ${{ !cancelled() && !inputs.dry_run && (needs.integrate.result == 'failure' || needs.checks.result == 'failure' || needs.mobile.result == 'failure' || needs.e2e.result == 'failure' || needs.push.result == 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      RELEASE_URL: ${{ needs.detect.outputs.release_url }}
+    steps:
+      - name: Checkout fork scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Download the integration state
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: aero-integrated
+          path: ${{ env.AERO_OUT }}
+
+      - name: Download the check logs
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: aero-check-logs-*
+          merge-multiple: true
+          path: ${{ env.AERO_LOGS }}
+
+      - name: Report failure as an issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FAILED_CHECK: ${{ needs.checks.outputs.failed_check || needs.mobile.outputs.failed_check || needs.e2e.outputs.failed_check }}
+          INTEGRATE_RESULT: ${{ needs.integrate.result }}
+          PUSH_RESULT: ${{ needs.push.result }}
+        run: |
+          set -euo pipefail
+          scripts="$AERO_OUT/scripts"
+          [[ -d "$scripts" ]] || scripts=.github/scripts
+          status=unknown message=""
+          # shellcheck disable=SC1091
+          [[ -f "$AERO_STATE/result.env" ]] && source "$AERO_STATE/result.env"
+          mkdir -p "$AERO_LOGS"
+          cat "$AERO_LOGS"/summary-*.txt > "$AERO_LOGS/summary.txt" 2>/dev/null || true
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body=$RUNNER_TEMP/issue-body.md
+          {
+            if [[ "$PUSH_RESULT" == failure ]]; then
+              echo "Integrating upstream release [$TAG]($RELEASE_URL) into this fork passed every check, but **pushing the rebuilt refs failed**: \`upstream-main\`, the feature branches and \`main\` may be partly updated. See the job **Push upstream-main, branches and main** of the run."
+            else
+              echo "Integrating upstream release [$TAG]($RELEASE_URL) into this fork failed. **Nothing was pushed**: \`upstream-main\`, the feature branches and \`main\` are unchanged."
+            fi
+            echo
+            echo "Workflow run: $run_url"
+            echo
+            if [[ "$status" == conflict ]]; then
+              echo "## Rebase/merge conflict"
+              echo
+              echo "$message"
+              echo
+              echo "- Branch: \`$conflict_branch\`"
+              echo "- ${conflict_kind}d onto: \`$conflict_onto\`"
+              echo "- Conflicting files:"
+              echo
+              echo '```'
+              cat "$AERO_STATE/conflict-files.txt" 2>/dev/null || echo "(not recorded)"
+              echo '```'
+              echo
+              echo "## How to fix locally"
+              echo
+              echo '```bash'
+              echo "git fetch upstream --no-tags \"+refs/tags/$TAG:refs/tags/$TAG\""
+              if [[ "$conflict_kind" == rebase && "$conflict_onto" == "$target" ]]; then
+                echo "git rebase $TAG $conflict_branch"
+              elif [[ "$conflict_kind" == rebase ]]; then
+                echo "# the parent branch is rebased first, then the child goes onto the parent's new tip"
+                echo "git rebase $TAG $conflict_onto"
+                echo "git rebase --onto $conflict_onto <old $conflict_onto tip> $conflict_branch"
+              else
+                echo "# the branches do not combine cleanly; rebase the later branch so it applies on top of the earlier ones"
+                echo "git rebase $TAG $conflict_branch"
+              fi
+              echo "# resolve the conflicts, continue the rebase, run the checks, then:"
+              echo "git push --force-with-lease origin $conflict_branch"
+              echo '```'
+            elif [[ "$INTEGRATE_RESULT" == failure ]]; then
+              echo "## Setup error"
+              echo
+              if [[ "$status" == ok ]]; then
+                echo "Rebase and merges were clean, but handing the rebuilt refs to the check jobs failed. See the job **Integrate $TAG** of the run."
+              else
+                echo "${message:-The integration script failed before rebasing. See the run log.}"
+              fi
+            elif [[ "$PUSH_RESULT" != failure ]]; then
+              echo "## Check failed: \`${FAILED_CHECK:-unknown}\`"
+              echo
+              echo "Rebase and merges were clean; the rebuilt \`main\` fails the checks."
+              if [[ "${FAILED_CHECK:-}" == e2e-private-mode ]]; then
+                echo
+                echo "The private-mode API e2e suite ran against the e2e docker stack built from the rebuilt \`main\` (\`e2e/docker-compose.yml\`). The docker logs are attached to the run as the artifact \`aero-e2e-private-mode-logs\`. Reproduce locally with \`cd e2e && docker compose up -d --build --wait && VITEST_DISABLE_DOCKER_SETUP=true pnpm exec vitest --run src/specs/server/api/private-mode.e2e-spec.ts\`."
+              fi
+              echo
+              echo "Checks:"
+              echo
+              cat "$AERO_LOGS/summary.txt" 2>/dev/null || true
+              echo
+              echo "Last 80 lines of the failing step:"
+              echo
+              echo '```'
+              tail -n 80 "$AERO_LOGS/${FAILED_CHECK:-none}.log" 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo
+              echo "## How to fix locally"
+              echo
+              echo '```bash'
+              echo "git fetch upstream --no-tags \"+refs/tags/$TAG:refs/tags/$TAG\""
+              echo "git rebase $TAG <branch>            # for every branch in .github/aero-branches.txt, stacked ones onto their parent"
+              echo "# fix the failing check on the branch that owns the change, then:"
+              echo "git push --force-with-lease origin <branch>"
+              echo '```'
+            fi
+            echo
+            echo "Then re-run **Aero release** (Actions, Run workflow) with \`tag\` = \`$TAG\`. The run rebases from the pushed branch tips, so nothing else is needed."
+          } > "$body"
+          n=$(bash "$scripts/aero-issue.sh" upsert "Upstream $TAG: integration failed" "$body")
+          echo "issue #$n: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n"
+          echo "Opened/updated issue #$n" >> "$GITHUB_STEP_SUMMARY"
+
+  # The moving rc tags only ever point at a candidate whose checks passed.
+  rc-tags:
+    name: Tag release candidate ${{ needs.detect.outputs.tag }}-aero-rc
+    needs: [detect, integrate, checks, mobile, e2e, push, candidate, ml]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    env:
+      RC_TAG: ${{ needs.candidate.outputs.rc_tag }}
+      RC_SHA_TAG: ${{ needs.candidate.outputs.rc_sha_tag }}
+      ML_CHANGED: ${{ needs.ml.outputs.changed }}
+    steps:
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Move the rc tags to the candidate
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "$SERVER_IMAGE:$RC_TAG" "$SERVER_IMAGE:$RC_SHA_TAG"
+          docker buildx imagetools inspect "$SERVER_IMAGE:$RC_TAG"
+          if [[ "$ML_CHANGED" == "true" ]]; then
+            docker buildx imagetools create --tag "$ML_IMAGE:$RC_TAG" "$ML_IMAGE:$RC_SHA_TAG"
+            docker buildx imagetools inspect "$ML_IMAGE:$RC_TAG"
+          fi
+          {
+            echo "## Release candidate"
+            echo
+            echo "- \`$SERVER_IMAGE:$RC_TAG\` = \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            if [[ "$ML_CHANGED" == "true" ]]; then
+              echo "- \`$ML_IMAGE:$RC_TAG\` = \`$ML_IMAGE:$RC_SHA_TAG\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A fork release must stay reversible: the rc image migrates a fresh
+  # database, scripts/aero/revert-to-immich.sql reverts it, upstream <tag>
+  # has to boot on the result with nothing to migrate and no drift. It checks
+  # the scripts out of the rebuilt main, so it waits for the push.
+  revert-validation:
+    name: Validate revert to upstream
+    needs: [detect, integrate, candidate, push]
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/aero-revert-validation.yml
+    with:
+      fork_image: ghcr.io/aeroverra/immich-server:${{ needs.candidate.outputs.rc_sha_tag }}
+      upstream_tag: ${{ needs.detect.outputs.tag }}
+      ref: ${{ needs.integrate.outputs.main_sha }}
+
+  ready:
+    name: Ready for release ${{ needs.detect.outputs.tag }}
+    needs: [detect, integrate, checks, mobile, e2e, push, candidate, ml, rc-tags, revert-validation]
+    # runs on a failed revert validation too, to report it; every other job must have passed
+    if: ${{ !cancelled() && !inputs.dry_run && needs.checks.result == 'success' && needs.mobile.result == 'success' && needs.e2e.result == 'success' && needs.push.result == 'success' && needs.candidate.result == 'success' && needs.ml.result == 'success' && needs.rc-tags.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+      RC_TAG: ${{ needs.candidate.outputs.rc_tag }}
+      RC_SHA_TAG: ${{ needs.candidate.outputs.rc_sha_tag }}
+      ML_CHANGED: ${{ needs.ml.outputs.changed }}
+      REVERT_RESULT: ${{ needs.revert-validation.result }}
+    steps:
+      - name: Checkout fork scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.integrate.outputs.main_sha }}
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Report a failed revert validation as an issue
+        if: ${{ env.REVERT_RESULT != 'success' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_URL: ${{ needs.detect.outputs.release_url }}
+        run: |
+          set -euo pipefail
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body=$RUNNER_TEMP/issue-body.md
+          {
+            echo "The release candidate for upstream [$TAG]($RELEASE_URL) is built (\`$SERVER_IMAGE:$RC_SHA_TAG\`), but \`scripts/aero/revert-to-immich.sql\` does not take a database migrated by it back to something upstream \`$TAG\` boots on (revert validation result: \`$REVERT_RESULT\`). **The release is blocked**: no \"ready for release\" issue is opened and the \`publish\` job is skipped."
+            echo
+            echo "Workflow run: $run_url (job **Validate revert to upstream**; the container logs are attached as the artifact \`aero-revert-validation-logs\`)."
+            echo
+            echo "## How to fix"
+            echo
+            echo "Update \`scripts/aero/revert-to-immich.sql\` on \`main\` (fork glue) so it drops everything the fork migrations in \`server/src/schema/migrations-aero\` create, and list every fork migration in its \`kysely_migrations\` DELETE. Reproduce locally:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream --no-tags \"+refs/tags/$TAG:refs/tags/$TAG\""
+            echo "bash scripts/aero/revert-coverage-check.sh $TAG"
+            echo "bash scripts/aero/revert-validate.sh $SERVER_IMAGE:$RC_SHA_TAG $TAG"
+            echo '```'
+            echo
+            echo "Then push \`main\` and re-run **Aero release** with \`tag\` = \`$TAG\`, or run **Aero revert validation** by hand with the same image and tag."
+          } > "$body"
+          n=$(bash .github/scripts/aero-issue.sh upsert "Upstream $TAG: revert validation failed" "$body")
+          echo "issue #$n: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n"
+          echo "Revert validation failed; opened/updated issue #$n. Release blocked." >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      - name: Open or update the "ready for release" issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_URL: ${{ needs.detect.outputs.release_url }}
+          RELEASE_NAME: ${{ needs.detect.outputs.release_name }}
+          BRANCH_TABLE: ${{ needs.integrate.outputs.branch_table }}
+          CHECKS: ${{ needs.push.outputs.checks_summary }}
+        run: |
+          set -euo pipefail
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # the same computation publish does; it is repeated there at approval time
+          revision=$(bash .github/scripts/aero-revision.sh next "$TAG")
+          release_tag="$TAG-aero.$revision"
+          body=$RUNNER_TEMP/issue-body.md
+          {
+            echo "Upstream release **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`) has been integrated into this fork and a release candidate image is built. Approving it will publish **fork revision $revision** of \`$TAG\` as \`$release_tag\`."
+            echo
+            echo "## Fork state"
+            echo
+            echo "- \`upstream-main\` and \`main\` are updated; \`main\` = \`$MAIN_SHA\`"
+            echo
+            echo "$BRANCH_TABLE"
+            echo
+            echo "## Checks"
+            echo
+            echo "$CHECKS"
+            echo "- \`revert-validation\`: ok (\`scripts/aero/revert-to-immich.sql\` takes a database migrated by the rc image back to one upstream \`$TAG\` boots on cleanly)"
+            echo
+            echo "## Release candidate image"
+            echo
+            echo "- \`$SERVER_IMAGE:$RC_TAG\`"
+            echo "- \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            if [[ "$ML_CHANGED" == "true" ]]; then
+              echo "- \`$ML_IMAGE:$RC_TAG\`"
+              echo "- \`$ML_IMAGE:$RC_SHA_TAG\`"
+              echo
+              echo "Try it on the family instance by pointing the server \`image:\` AND the machine-learning \`image:\` at the rc tags if you want to test before publishing: this release changes the machine-learning image, deploy both together."
+            else
+              echo
+              echo "Try it on the family instance by pointing the server \`image:\` at the rc tag if you want to test before publishing. The machine-learning image stays upstream's."
+            fi
+            echo
+            echo "## Publishing"
+            echo
+            echo "Workflow run: $run_url"
+            echo
+            echo "The \`publish\` job of that run is waiting for approval in the \`release\` environment (you also got a deployment review email). Approving it will publish as **\`$release_tag\`**: the rc image is retagged as the immutable \`$SERVER_IMAGE:$release_tag\`, the GitHub release \`$release_tag\` is created (with \`revert-to-immich.sql\` attached), the pointer tags \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\` move to it and this issue is closed. Rejecting it leaves the rc image as is; close this issue (or dispatch **Aero release** with \`tag\` = \`$TAG\`) to build a new candidate later."
+          } > "$body"
+          n=$(bash .github/scripts/aero-issue.sh upsert "Upstream $TAG: ready for release" "$body")
+          echo "number=$n" >> "$GITHUB_OUTPUT"
+          bash .github/scripts/aero-issue.sh close "Upstream $TAG: revert validation failed" \
+            "Revert validation passed in $run_url. Closing." || true
+          {
+            echo "## Release candidate $TAG"
+            echo
+            echo "- \`$SERVER_IMAGE:$RC_TAG\`"
+            echo "- \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            echo
+            echo "Issue: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$n. Approve the \`publish\` job to release it as \`$release_tag\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    name: Publish ${{ needs.detect.outputs.tag }}-aero
+    needs: [detect, integrate, checks, mobile, e2e, push, candidate, ml, rc-tags, revert-validation, ready]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: ${{ steps.release.outputs.url }}
+    permissions:
+      contents: write
+      packages: write
+      issues: write
+    env:
+      TAG: ${{ needs.detect.outputs.tag }}
+      MAIN_SHA: ${{ needs.integrate.outputs.main_sha }}
+      RC_SHA_TAG: ${{ needs.candidate.outputs.rc_sha_tag }}
+      ML_CHANGED: ${{ needs.ml.outputs.changed }}
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
+      release_tag: ${{ steps.revision.outputs.release_tag }}
+      release_url: ${{ steps.release.outputs.url }}
+    steps:
+      - name: Checkout fork scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.integrate.outputs.main_sha }}
+          sparse-checkout: |
+            .github/scripts
+            scripts/aero
+          persist-credentials: false
+
+      # Computed at approval time, not in `ready`: another publish of the same
+      # upstream tag may have happened while this run waited. The git tag is
+      # checked as well because the git tag of a deleted release lingers, and
+      # `gh release create` would silently reuse it.
+      - name: Compute the fork revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          revision=$(bash .github/scripts/aero-revision.sh next "$TAG")
+          release_tag="$TAG-aero.$revision"
+          if gh api --silent "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" 2>/dev/null; then
+            echo "::error::git tag $release_tag already exists on the fork without a release; delete the tag or the stale release state before publishing."
+            exit 1
+          fi
+          {
+            echo "revision=$revision"
+            echo "release_tag=$release_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "publishing $TAG as fork revision $revision: $release_tag"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # the immutable tag first, the pointers only once the release exists
+      - name: Tag the release candidate as the immutable revision
+        env:
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$SERVER_IMAGE:$RELEASE_TAG" \
+            "$SERVER_IMAGE:$RC_SHA_TAG"
+          docker buildx imagetools inspect "$SERVER_IMAGE:$RELEASE_TAG"
+          if [[ "$ML_CHANGED" == "true" ]]; then
+            docker buildx imagetools create \
+              --tag "$ML_IMAGE:$RELEASE_TAG" \
+              "$ML_IMAGE:$RC_SHA_TAG"
+            docker buildx imagetools inspect "$ML_IMAGE:$RELEASE_TAG"
+          fi
+
+      - name: Create the fork release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_URL: ${{ needs.detect.outputs.release_url }}
+          RELEASE_NAME: ${{ needs.detect.outputs.release_name }}
+          BRANCH_TABLE: ${{ needs.integrate.outputs.branch_table }}
+          CHECKS: ${{ needs.push.outputs.checks_summary }}
+          REVISION: ${{ steps.revision.outputs.revision }}
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          notes=$RUNNER_TEMP/notes.md
+          {
+            echo "Aero-immich build of upstream **[$RELEASE_NAME]($RELEASE_URL)** (\`$TAG\`), fork revision $REVISION. The server reports \`$TAG\` (the mobile apps require the upstream version); the fork revision is only visible in the tags below."
+            echo
+            echo "## Image"
+            echo
+            echo "- \`$SERVER_IMAGE:$RELEASE_TAG\`: this release, immutable, pin this at home; built as \`$SERVER_IMAGE:$RC_SHA_TAG\`"
+            echo "- \`$SERVER_IMAGE:$TAG-aero\`: moving pointer, the latest fork revision of \`$TAG\` (this one at publish time)"
+            echo "- \`$SERVER_IMAGE:aero\`: moving pointer, the latest fork release of any upstream version (this one at publish time)"
+            if [[ "$ML_CHANGED" == "true" ]]; then
+              echo "- \`$ML_IMAGE:$RELEASE_TAG\`: machine learning, immutable, this release changes the ML service: deploy it together with the server image (pointers \`$ML_IMAGE:$TAG-aero\` and \`$ML_IMAGE:aero\` move too)"
+            else
+              echo "- machine learning: unchanged, use upstream's \`ghcr.io/immich-app/immich-machine-learning:$TAG\`"
+            fi
+            echo
+            echo "## Fork branches on top of $TAG"
+            echo
+            echo "This revision is \`$TAG\` plus the branches below at the listed \`after\` commits, merged in this order (\`main\` = \`$MAIN_SHA\` at publish time, the release target)."
+            echo
+            echo "$BRANCH_TABLE"
+            echo
+            echo "## Checks"
+            echo
+            echo "$CHECKS"
+            echo
+            echo "## Reverting to upstream"
+            echo
+            echo "The attached \`revert-to-immich.sql\` turns a database migrated by this image back into a plain upstream \`$TAG\` database (validated in this run: the rc image migrated a fresh database, the script reverted it, upstream \`$TAG\` booted on it with nothing to migrate and no schema drift). It drops the private flags of assets and albums, the private-mode session state and the data of the other fork features (previously deleted checksums, stack source, face attributes, automatic stack bookkeeping; automatic stacks stay as ordinary stacks); photos, albums, people and faces stay. See docs-aero/README.md, \"Reverting to upstream Immich\"."
+          } > "$notes"
+          asset=scripts/aero/revert-to-immich.sql
+          # never edit an existing revision: a collision means the revision
+          # computation and the fork's releases disagree, stop
+          if gh release view -R "$GITHUB_REPOSITORY" "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::release $RELEASE_TAG already exists; revisions are immutable. Re-run the workflow to publish the next revision."
+            exit 1
+          fi
+          url=$(gh release create -R "$GITHUB_REPOSITORY" "$RELEASE_TAG" --target "$MAIN_SHA" --title "$RELEASE_TAG" --notes-file "$notes" "$asset")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "release: $url"
+
+      - name: Move the pointer tags
+        env:
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$SERVER_IMAGE:$TAG-aero" \
+            --tag "$SERVER_IMAGE:aero" \
+            "$SERVER_IMAGE:$RELEASE_TAG"
+          docker buildx imagetools inspect "$SERVER_IMAGE:$TAG-aero"
+          if [[ "$ML_CHANGED" == "true" ]]; then
+            docker buildx imagetools create \
+              --tag "$ML_IMAGE:$TAG-aero" \
+              --tag "$ML_IMAGE:aero" \
+              "$ML_IMAGE:$RELEASE_TAG"
+            docker buildx imagetools inspect "$ML_IMAGE:$TAG-aero"
+          fi
+
+      - name: Close the "ready for release" issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_HTML_URL: ${{ steps.release.outputs.url }}
+          RELEASE_TAG: ${{ steps.revision.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/aero-issue.sh close "Upstream $TAG: ready for release" \
+            "Published: $RELEASE_HTML_URL. Immutable image tag \`$SERVER_IMAGE:$RELEASE_TAG\`; the pointer tags \`$SERVER_IMAGE:$TAG-aero\` and \`$SERVER_IMAGE:aero\` now point at it. Deploy at home by pinning the server image tag to \`$RELEASE_TAG\` (and the machine-learning image tag too when the release notes list \`$ML_IMAGE:$RELEASE_TAG\`)."
+          {
+            echo "## Published $RELEASE_TAG"
+            echo
+            echo "- $RELEASE_HTML_URL"
+            echo "- \`$SERVER_IMAGE:$RELEASE_TAG\` (immutable); \`$SERVER_IMAGE:$TAG-aero\`, \`$SERVER_IMAGE:aero\` (moved)"
+          } >> "$GITHUB_STEP_SUMMARY"
