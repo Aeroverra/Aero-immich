@@ -34,6 +34,8 @@ export interface MemoryAsset {
   deletedAt: Date | null;
   createdAt: Date;
   type: AssetType;
+  /** dateTimeOriginal, else fileCreatedAt: the capture time the name + time match compares */
+  capturedAt?: Date | null;
 }
 
 const clone = <T>(row: T): T => ({ ...row });
@@ -565,7 +567,7 @@ export class TakeoutMemoryRepository {
         .map((a) => ({
           id: a.id,
           originalFileName: a.originalFileName,
-          at: null,
+          at: a.capturedAt ?? null,
           fileSizeInByte: a.fileSizeInByte,
           checksum: a.checksum,
         })),

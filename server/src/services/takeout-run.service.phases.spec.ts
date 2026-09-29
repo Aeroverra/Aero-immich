@@ -8,6 +8,7 @@ import { StorageCore } from 'src/cores/storage.core';
 import {
   AlbumUserRole,
   AssetStatus,
+  AssetType,
   DeletedReimportMode,
   JobName,
   JobStatus,
@@ -808,6 +809,54 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     await h.repo.requeueRun(run.id, 1);
     expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
     expect(h.repo.assets).toHaveLength(1);
+  });
+
+  it('does not upload an album copy that the year copy on the server beats, although the year copy is in the Takeout too', async () => {
+    // family 2026-09-29: Google exported album copies of motion photos without their motion clip. The year copy,
+    // already on the server, is an exact duplicate of a file of this Takeout; the smaller album copy must still
+    // match it by name and time (Go's ShouldUpload: BetterOnServer) and not be uploaded a second time.
+    const h = await harness({ settings: { syncAlbums: true } });
+    const full = randomBytesSeeded(900, 80);
+    const stripped = randomBytesSeeded(600, 81);
+    const taken = new Date('2025-04-30T21:17:48.000Z');
+    const json = Buffer.from(
+      JSON.stringify({ title: 'PXL_1.MP.mp4', photoTakenTime: { timestamp: String(taken.getTime() / 1000) } }),
+    );
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media('Photos from 2025/PXL_1.MP.mp4'), data: full },
+        { name: media('Photos from 2025/PXL_1.MP.mp4.supplemental-metadata.json'), data: json },
+        { name: media('Cruise/metadata.json'), data: Buffer.from('{"title":"Cruise"}') },
+        { name: media('Cruise/PXL_1.MP.mp4'), data: stripped },
+        { name: media('Cruise/PXL_1.MP.mp4.supplemental-metadata.json'), data: json },
+      ]),
+    );
+    const server = h.repo.addAsset({
+      ownerId: userId,
+      checksum: sha1(full),
+      originalPath: '/upload/PXL_1.MP.mp4',
+      originalFileName: 'PXL_1.MP.mp4',
+      fileSizeInByte: full.length,
+      capturedAt: taken,
+      type: AssetType.Video,
+    });
+    h.mocks.album.getAll.mockResolvedValue([]);
+    h.mocks.album.create.mockResolvedValue({ id: 'album-cruise' } as any);
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const rows = h.files(run.id);
+    expect(rows.find((f) => f.takeoutPath === media('Photos from 2025/PXL_1.MP.mp4'))).toMatchObject({
+      action: TakeoutRunFileAction.ServerDuplicate,
+      assetId: server.id,
+    });
+    expect(rows.find((f) => f.takeoutPath === media('Cruise/PXL_1.MP.mp4'))).toMatchObject({
+      action: TakeoutRunFileAction.BetterOnServer,
+      assetId: server.id,
+    });
+    expect(h.repo.assets).toHaveLength(1);
+    // the album gets the better server asset
+    expect(h.mocks.album.addAssetIds).toHaveBeenCalledWith('album-cruise', [server.id]);
   });
 
   it('turns a planned upload imported meanwhile by another client into a server duplicate', async () => {

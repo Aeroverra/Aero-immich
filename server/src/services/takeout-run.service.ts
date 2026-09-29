@@ -1773,7 +1773,9 @@ export class TakeoutRunService extends BaseService {
     // name + time pre-check (DEV 5): a non-edited upload whose on-disk name and capture time match a
     // pre-existing server asset is a server twin. same size -> serverDuplicate; local bigger -> upload
     // keeping the smaller server asset (larger version pair); local smaller -> betterOnServer.
-    const planChecksums = new Set(plan.files.map((f) => f.checksum?.toString('hex')).filter((h): h is string => !!h));
+    // Like Go's ShouldUpload, every server asset of the name is a candidate, also one that another file of this
+    // Takeout duplicates exactly: an album copy Google exported without the motion clip of its year copy is
+    // beaten by that year copy on the server, not uploaded a second time.
     const nameNeeded = new Set(
       plan.files.filter((f) => f.action === 'upload' && !f.isEditedCopy).map((f) => nfcBase(f.onDiskName)),
     );
@@ -1783,10 +1785,6 @@ export class TakeoutRunService extends BaseService {
         const key = nfcBase(cand.originalFileName ?? '');
         if (!nameNeeded.has(key)) {
           continue;
-        }
-        const hex = cand.checksum?.toString('hex');
-        if (hex && planChecksums.has(hex)) {
-          continue; // an exact twin is already handled by the checksum pre-check
         }
         if (cand.fileSizeInByte === null || cand.fileSizeInByte === undefined) {
           continue;
