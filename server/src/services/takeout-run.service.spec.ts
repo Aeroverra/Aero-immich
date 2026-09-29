@@ -24,6 +24,24 @@ const settings = () => ({
   customTags: [],
 });
 
+// a rotate-only-pair original of the shared asset 'asset-orig' (section 11 D1) and its dropped copy
+const sharedOriginal = (id: string, seq: number, copySeq: number) => ({
+  id,
+  seq,
+  assetId: 'asset-orig',
+  status: TakeoutRunFileStatus.Done,
+  action: seq === 0 ? TakeoutRunFileAction.Upload : TakeoutRunFileAction.AlreadyProcessed,
+  rotation: 90,
+  plan: { rotateOriginal: true, rotateAngle: 90, rotateCopySeqs: [copySeq], tags: [] },
+});
+
+const droppedCopy = (id: string, seq: number, of: number) => ({
+  id,
+  seq,
+  status: TakeoutRunFileStatus.Skipped,
+  plan: { rotateCopyOf: of, tags: [] },
+});
+
 const uploadRow = (over: Record<string, unknown> = {}) => ({
   id: 'rf-1',
   seq: 0,
@@ -271,6 +289,66 @@ describe(TakeoutRunService.name, () => {
       const dropOrder = mocks.takeout.updateRunFile.mock.invocationCallOrder.at(-1)!;
       expect(mocks.assetEdit.replaceAll.mock.invocationCallOrder[0]).toBeLessThan(dropOrder);
       expect(mocks.job.run.mock.invocationCallOrder.at(-1)!).toBeLessThan(dropOrder);
+    });
+
+    it('leaves the rotation of an existing-asset original to D1: never pending for the hook', async () => {
+      const row = {
+        id: 'rf-dup',
+        seq: 2,
+        assetId: null,
+        dependsOnSeq: 0,
+        status: TakeoutRunFileStatus.Planned,
+        action: TakeoutRunFileAction.AlreadyProcessed,
+        rotation: 90,
+        plan: { rotateOriginal: true, rotateAngle: 90, rotateCopySeqs: [3], tags: [] },
+      };
+      const source = { id: 'rf-orig', seq: 0, assetId: 'asset-orig', status: TakeoutRunFileStatus.Done };
+      mocks.asset.getByIds.mockResolvedValue([{ id: 'asset-orig' }] as any);
+      // extraction has not run yet: no EXIF dimensions
+      mocks.asset.getById.mockResolvedValue({ type: 'IMAGE', exifInfo: {}, edits: [] } as any);
+
+      await (sut as any).processExisting(run(), { ...settings(), applyRotation: true }, row, [source, row]);
+
+      const states = mocks.takeout.updateRunFile.mock.calls.map((call) => (call[1] as any).rotationState);
+      expect(states.filter((state) => state !== undefined)).toEqual([]);
+      expect(row.status).toBe(TakeoutRunFileStatus.Done);
+      expect(row.assetId).toBe('asset-orig');
+    });
+
+    it('rotates an asset once when two originals share it, and reports the same state on both', async () => {
+      const edits: unknown[] = [];
+      mocks.asset.getById.mockImplementation(
+        () =>
+          Promise.resolve({
+            type: 'IMAGE',
+            originalPath: '/x/asset-orig.jpg',
+            exifInfo: { exifImageWidth: 100, exifImageHeight: 200 },
+            edits: [...edits],
+          }) as any,
+      );
+      mocks.assetEdit.replaceAll.mockImplementation(((_id: string, list: unknown[]) => {
+        edits.push(...list);
+        return Promise.resolve();
+      }) as any);
+      mocks.job.run.mockResolvedValue(undefined as any);
+
+      await (sut as any).phaseRotateFaces(run(), settings(), [
+        sharedOriginal('rf-a', 0, 1),
+        droppedCopy('rf-a-copy', 1, 0),
+        sharedOriginal('rf-b', 2, 3),
+        droppedCopy('rf-b-copy', 3, 2),
+      ]);
+
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledTimes(1);
+      const states = mocks.takeout.updateRunFile.mock.calls
+        .filter((call) => (call[1] as any).rotationState !== undefined)
+        .map((call) => [call[0], (call[1] as any).rotationState]);
+      expect(states).toEqual([
+        ['rf-a', 'applied'],
+        ['rf-b', 'applied'],
+      ]);
+      const detections = mocks.job.run.mock.calls.filter((call) => (call[0] as any).name === JobName.AssetDetectFaces);
+      expect(detections).toHaveLength(1);
     });
 
     it('never drops the copy when the original was not created', async () => {

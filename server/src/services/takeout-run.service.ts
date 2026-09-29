@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { statfs, unlink, utimes } from 'node:fs/promises';
+import { statfs, utimes } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import { StorageCore } from 'src/cores/storage.core';
 import { LockableProperty } from 'src/database';
@@ -65,9 +65,11 @@ import {
   keyEqual,
   readPartWithRetry,
   readerPool,
+  settleWithin,
   statFingerprint,
+  withDeadline,
 } from 'src/services/takeout-read';
-import { STAGING_TTL_MS, StagingFs, StagingStore } from 'src/services/takeout-staging';
+import { STAGING_TTL_MS, StagingFs, StagingStore, unlinkTarget } from 'src/services/takeout-staging';
 import {
   CaptureExifInput,
   CatalogInput,
@@ -82,6 +84,7 @@ import {
   groupEdges,
   hex,
   messageOf,
+  newReadMeter,
   orderGroups,
   parseArchiveBrowser,
   pathKey,
@@ -108,6 +111,10 @@ const LEASE_RENEW_MS = 10_000;
 // progress persisted and on_takeout_run emitted every 2 s while the run is live (all phases)
 const PROGRESS_MS = 2000;
 const STATFS_REFRESH_MS = 10_000;
+// the last progress tick gets this long to settle before the final writes; a tick stuck on the database is left
+const TICK_SETTLE_CAP_MS = 2000;
+// a cancel whose run is held by another live worker is looked at again once that lease could have expired
+const LEASE_RETRY_DELAY_MS = 70_000;
 const TERMINAL_ROW_STATUSES = new Set<string>([
   TakeoutRunFileStatus.Done,
   TakeoutRunFileStatus.Skipped,
@@ -147,6 +154,8 @@ interface Attempt {
   status: TakeoutRunStatus;
   lastStatfs: number;
   lastExportEmit: number;
+  /** the index file list, read at most once per attempt (sampling set and planning) */
+  indexFiles: Promise<string[] | null> | null;
 }
 
 @Injectable()
@@ -184,8 +193,20 @@ export class TakeoutRunService extends BaseService {
       return JobStatus.Skipped;
     }
     if (run.status === TakeoutRunStatus.Cancelling) {
-      // re-queued at boot while cancelling: finish as cancelled
-      await cleanupCancelledRun(this.lifecycle, runId, { token: null, from: [TakeoutRunStatus.Cancelling] });
+      // re-queued at boot, or queued before the cancel: finish as cancelled, unless a live worker holds the run and
+      // cleans up itself (the claim refuses a live lease)
+      const done = await cleanupCancelledRun(this.lifecycle, runId, {
+        token: null,
+        from: [TakeoutRunStatus.Cancelling],
+      });
+      const current = done ? null : await this.takeoutRepository.getRun(runId);
+      if (current?.status === TakeoutRunStatus.Cancelling) {
+        // if that worker dies, its lease expires and this job finishes the cancel
+        await this.jobRepository.queue({
+          name: JobName.TakeoutRun,
+          data: { runId, attempt: attempt + 1, delay: LEASE_RETRY_DELAY_MS },
+        });
+      }
       return JobStatus.Skipped;
     }
     if (!TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
@@ -200,7 +221,7 @@ export class TakeoutRunService extends BaseService {
         // another live worker holds the lease: look again later, the lease expires if that worker died
         await this.jobRepository.queue({
           name: JobName.TakeoutRun,
-          data: { runId, attempt: attempt + 1, delay: 70_000 },
+          data: { runId, attempt: attempt + 1, delay: LEASE_RETRY_DELAY_MS },
         });
       }
       return JobStatus.Skipped;
@@ -224,6 +245,7 @@ export class TakeoutRunService extends BaseService {
       status: run.status,
       lastStatfs: 0,
       lastExportEmit: 0,
+      indexFiles: null,
     };
 
     const lease = setInterval(() => {
@@ -241,6 +263,8 @@ export class TakeoutRunService extends BaseService {
     }, LEASE_RENEW_MS);
     let inflight: Promise<void> | null = null;
     const progress = setInterval(() => {
+      // the stall watchdog (I9) runs on every tick, even while an earlier tick still waits for the database
+      a.ctx?.checkStall();
       if (inflight) {
         return;
       }
@@ -250,11 +274,12 @@ export class TakeoutRunService extends BaseService {
           inflight = null;
         });
     }, PROGRESS_MS);
-    // stop the ticker before the final writes, so a late tick cannot overwrite them
+    // stop the ticker before the final writes, so a late tick cannot overwrite them; a tick that does not settle
+    // within the cap cannot either: its writes need a running status and the lease. The lease keeps its heartbeat
+    // until the job ends (finally), so a slow finish or failure path is never taken over as a dead worker's run.
     const stopTimers = async () => {
-      clearInterval(lease);
       clearInterval(progress);
-      await inflight;
+      await settleWithin(inflight, TICK_SETTLE_CAP_MS);
     };
 
     try {
@@ -271,7 +296,7 @@ export class TakeoutRunService extends BaseService {
       a.stats.stats.crossDevice ||= a.staging.crossDevice;
       // adoption (10.4): a target the previous run left behind (normally none) moves into this run's staging
       for (const old of await this.takeoutRepository.getRunsSupersededBy(runId)) {
-        await reclaimRunTargets(this.lifecycle, old.id, a.staging, 'stage', { includeSkipped: true });
+        await reclaimRunTargets(this.lifecycle, old.id, a.staging, 'stage');
       }
       a.ctx = new ReadContext({
         run,
@@ -308,8 +333,9 @@ export class TakeoutRunService extends BaseService {
         return JobStatus.Skipped;
       }
       if (reason instanceof CancelReason || current?.status === TakeoutRunStatus.Cancelling) {
+        // with the lease this job holds; refused (and left to that worker) when another one took the run meanwhile
         await cleanupCancelledRun(this.lifecycle, runId, {
-          token: null,
+          token: a.token,
           from: [TakeoutRunStatus.Cancelling, ...TAKEOUT_RUNNING_RUN_STATUSES],
           readStats: this.snapshotStats(a),
         });
@@ -450,6 +476,16 @@ export class TakeoutRunService extends BaseService {
     return Number(stats.bavail) * Number(stats.bsize);
   }
 
+  /** statfs awaited by a phase: a share that does not answer fails the run like a stalled read (I9) */
+  private availableBytesWithin(a: Attempt): Promise<number> {
+    const minutes = Math.round(this.readLimits.readStallMs / 60_000);
+    return withDeadline(
+      this.availableBytes(a),
+      this.readLimits.readStallMs,
+      () => new RunFailure(`The staging folder did not answer for ${minutes} min (the share does not answer)`),
+    );
+  }
+
   /**
    * The sampling set (single-pass design 6.6, fix F4): export-wide. All zip: the central-directory names of the
    * parts to read plus the catalogued paths; else the index file list; else every decodable image.
@@ -463,10 +499,13 @@ export class TakeoutRunService extends BaseService {
         if (part.catalogStatus === TakeoutCatalogStatus.Complete && part.catalogVersion === CATALOG_VERSION) {
           continue;
         }
+        const meter = newReadMeter();
+        const unwatch = ctx.watch(part.fileName, meter);
         try {
           const directory = await readZipDirectory(ctx.partPath(part.fileName), {
             signal: ctx.readAbort.signal,
             source: { ...ctx.sourceOptions(), memory: null },
+            meter,
           });
           a.stats.stats.directoryBytesRead += directory.bytesRead;
           for (const entry of directory.entries) {
@@ -474,8 +513,13 @@ export class TakeoutRunService extends BaseService {
               names.push(entry.name);
             }
           }
-        } catch {
+        } catch (error) {
+          if (ctx.readAbort.signal.aborted) {
+            throw ctx.readAbort.signal.reason ?? error;
+          }
           // the reader reports an unreadable central directory
+        } finally {
+          unwatch();
         }
       }
       return new Set([...samplePairsToKeep(names)].map((path) => pathKey(path)));
@@ -487,7 +531,13 @@ export class TakeoutRunService extends BaseService {
     return 'all';
   }
 
-  private async indexFiles(a: Attempt): Promise<string[] | null> {
+  /** The index file list: the analysis keeps it; else the index archive is read, once per attempt */
+  private indexFiles(a: Attempt): Promise<string[] | null> {
+    a.indexFiles ??= this.loadIndexFiles(a);
+    return a.indexFiles;
+  }
+
+  private async loadIndexFiles(a: Attempt): Promise<string[] | null> {
     const exp = await this.takeoutRepository.getExport(a.run.exportId);
     const stored = (exp?.analysis ?? {}) as { indexFiles?: unknown };
     if (Array.isArray(stored.indexFiles)) {
@@ -496,13 +546,26 @@ export class TakeoutRunService extends BaseService {
     if (!exp?.indexFileName) {
       return null;
     }
-    const html = await readArchiveEntry(
-      `${a.userFolder}/${exp.indexFileName}`,
-      'tgz',
-      'Takeout/archive_browser.html',
-      64 * 1024 * 1024,
-    ).catch(() => null);
-    return html ? parseArchiveBrowser(html.toString('utf8')).files : null;
+    const ctx = a.ctx!;
+    const meter = newReadMeter();
+    const unwatch = ctx.watch(exp.indexFileName, meter);
+    try {
+      const html = await readArchiveEntry(
+        `${a.userFolder}/${exp.indexFileName}`,
+        'tgz',
+        'Takeout/archive_browser.html',
+        64 * 1024 * 1024,
+        { signal: ctx.readAbort.signal, source: ctx.sourceOptions(), meter },
+      );
+      return html ? parseArchiveBrowser(html.toString('utf8')).files : null;
+    } catch (error) {
+      if (ctx.readAbort.signal.aborted) {
+        throw ctx.readAbort.signal.reason ?? error;
+      }
+      return null;
+    } finally {
+      unwatch();
+    }
   }
 
   // ---------- phase: planning (single-pass design 7) ----------
@@ -735,6 +798,10 @@ export class TakeoutRunService extends BaseService {
       entryId: row.id,
     }));
     const unserved = await fetchEntries(a.ctx!, parts, requests);
+    if (a.ctx!.readAbort.signal.aborted) {
+      // a sample that was not computed stays a backfill candidate; it is never recorded as a decode error
+      throw a.ctx!.readAbort.signal.reason;
+    }
     for (const request of unserved) {
       await this.takeoutRepository.updateEntry(request.entryId!, { sampleSkipped: 'decodeError' as any });
     }
@@ -801,7 +868,12 @@ export class TakeoutRunService extends BaseService {
         .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
         .reduce((sum, r) => sum + Number(r.size), 0);
     }
-    const available = await this.availableBytes(a).catch(() => Infinity);
+    const available = await this.availableBytesWithin(a).catch((error: unknown) => {
+      if (error instanceof RunFailure) {
+        throw error;
+      }
+      return Infinity;
+    });
     const usable = available - this.readLimits.freeSpaceReserve;
     if (usable < need) {
       throw new RunFailure(`Not enough free space: ${formatBytes(need - usable)} more needed`);
@@ -905,6 +977,14 @@ export class TakeoutRunService extends BaseService {
       created: 0,
     };
     let bytesDone = Number(run.bytesDone ?? 0);
+    // bytesDone counts created assets only: the total is what is done plus the uploads still planned, so the rows
+    // the server re-check or fetching took out of the plan leave the bar at 100% when the last asset is created
+    const bytesTotal =
+      bytesDone +
+      rows
+        .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
+        .reduce((sum, r) => sum + Number(r.size), 0);
+    await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, { bytesTotal });
 
     const order = orderGroups(
       byGroup.keys(),
@@ -1042,9 +1122,10 @@ export class TakeoutRunService extends BaseService {
     a.stats.stats.stagingExpiresAt = null;
     a.stats.stats.etaSeconds = null;
     await a.staging!.discard();
+    // every file is imported: a cancel that arrived meanwhile (requestCancel keeps the lease) still ends completed
     const ok = await this.takeoutRepository.finishRunCas(
       runId,
-      [TakeoutRunStatus.Finishing],
+      [TakeoutRunStatus.Finishing, TakeoutRunStatus.Cancelling],
       a.token,
       TakeoutRunStatus.Completed,
       {
@@ -1112,6 +1193,15 @@ export class TakeoutRunService extends BaseService {
       })
       .catch(() => false);
     if (!ok) {
+      // cancelled while it failed: the cancel wins (it keeps the lease of this job), never a run left cancelling
+      const current = await this.takeoutRepository.getRun(runId);
+      if (current?.status === TakeoutRunStatus.Cancelling) {
+        await cleanupCancelledRun(this.lifecycle, runId, {
+          token: a.token,
+          from: [TakeoutRunStatus.Cancelling],
+          readStats: this.snapshotStats(a),
+        });
+      }
       return;
     }
     if (run) {
@@ -1131,6 +1221,7 @@ export class TakeoutRunService extends BaseService {
     for (const ps of Object.values(stats.parts)) {
       a.stats.sync(ps);
     }
+    a.stats.syncFetch();
     stats.transportRetries = a.stats.transportRetries();
     if (a.staging) {
       stats.crossDevice ||= a.staging.crossDevice;
@@ -1156,7 +1247,11 @@ export class TakeoutRunService extends BaseService {
     void emitExport(this.lifecycle, a.run.exportId).catch(() => {});
   }
 
-  /** The 2 s tick: cancel fallback, stall watchdog, budget refresh, persisted progress and the run event */
+  /**
+   * The 2 s tick: cancel fallback, budget refresh, persisted progress and the run event. It never waits for the
+   * file system: statfs runs in the background (the budget keeps its last value), so a share that stops answering
+   * cannot stop the ticks; the stall watchdog runs on every interval callback (handleRun).
+   */
   private async tickProgress(a: Attempt) {
     const run = await this.takeoutRepository.getRun(a.runId);
     if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
@@ -1164,11 +1259,10 @@ export class TakeoutRunService extends BaseService {
       a.controller.abort(run?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost());
       return;
     }
-    a.ctx?.checkStall();
     const now = Date.now();
     if (a.ctx && now - a.lastStatfs >= STATFS_REFRESH_MS) {
       a.lastStatfs = now;
-      await a.ctx.budget.refresh();
+      a.ctx.budget.refreshInBackground();
       // the bytes read so far of the parts being read, for the parts table
       for (const { partId } of a.stats.meters()) {
         const ps = a.stats.stats.parts[partId];
@@ -1177,11 +1271,10 @@ export class TakeoutRunService extends BaseService {
       }
     }
     const total = this.archiveTotal(a);
-    if (a.status === TakeoutRunStatus.Reading || a.status === TakeoutRunStatus.Fetching) {
-      a.stats.stats.etaSeconds =
-        a.status === TakeoutRunStatus.Reading
-          ? a.stats.eta(total, Math.max(1, a.stats.stats.readers))
-          : a.stats.eta(a.stats.stats.fetchBytesTotal, Math.max(1, this.readLimits.readers));
+    if (a.status === TakeoutRunStatus.Reading) {
+      a.stats.stats.etaSeconds = a.stats.eta(total, Math.max(1, a.stats.stats.readers));
+    } else if (a.status === TakeoutRunStatus.Fetching) {
+      a.stats.stats.etaSeconds = a.stats.fetchEta();
     } else {
       a.stats.stats.etaSeconds = null;
     }
@@ -1400,6 +1493,10 @@ export class TakeoutRunService extends BaseService {
    */
   private async phaseRotateFaces(run: any, settings: any, rows: any[]) {
     const bySeq = new Map<number, any>(rows.map((r) => [r.seq, r]));
+    // two originals can share one asset (an upload and an alreadyProcessed copy of it): the rotation and the face
+    // detection run once per asset, and every original of that asset reports the state of that one rotation
+    const rotated = new Map<string, TakeoutRotationState>();
+    const detected = new Set<string>();
     for (const original of rows) {
       const plan = (original.plan ?? {}) as any;
       if (!plan.rotateOriginal || !original.assetId) {
@@ -1415,21 +1512,28 @@ export class TakeoutRunService extends BaseService {
         // (1) rotate the original upright. Ensure its EXIF dimensions exist first (rotation needs them); a synchronous
         // metadata run is idempotent and lets the edit apply here rather than via the async hook.
         if (angle !== 0) {
-          await this.jobRepository.run({
-            name: JobName.AssetExtractMetadata,
-            data: { id: original.assetId, source: 'upload' },
-          });
-          const state = await this.applyRotationNow(original.assetId, angle);
+          let state = rotated.get(original.assetId);
+          if (state === undefined) {
+            await this.jobRepository.run({
+              name: JobName.AssetExtractMetadata,
+              data: { id: original.assetId, source: 'upload' },
+            });
+            state = await this.applyRotationNow(original.assetId, angle);
+            rotated.set(original.assetId, state);
+          }
           await this.takeoutRepository.updateRunFile(original.id, { rotationState: state });
           original.rotationState = state;
         }
 
         // (2) queue + await face detection on the now-upright original (the repo's detect path yields correct
         // face positions natively).
-        await this.jobRepository.run({
-          name: JobName.AssetDetectFaces,
-          data: { id: original.assetId, source: 'upload' },
-        });
+        if (!detected.has(original.assetId)) {
+          await this.jobRepository.run({
+            name: JobName.AssetDetectFaces,
+            data: { id: original.assetId, source: 'upload' },
+          });
+          detected.add(original.assetId);
+        }
 
         // (3) reconcile the named people from the dropped copy (and the original's own People/* tags) onto the
         // original, so people are not lost when the copy is discarded.
@@ -1555,7 +1659,7 @@ export class TakeoutRunService extends BaseService {
       if (staging) {
         await staging.reclaim(reclaimRow, 'stage');
       } else {
-        await unlink(row.targetPath).catch(() => {});
+        await unlinkTarget(row.targetPath, this.stagingFs).catch(() => {});
       }
       await this.takeoutRepository.updateRunFile(row.id, { targetPath: null });
       row.targetPath = null;
@@ -1647,7 +1751,7 @@ export class TakeoutRunService extends BaseService {
           const byIds = await this.assetRepository.getByIds([uuid]);
           asset = byIds[0];
         } else if (existingId) {
-          await unlink(targetPath).catch(() => {});
+          await unlinkTarget(targetPath, this.stagingFs).catch(() => {});
           await this.takeoutRepository.updateRunFile(row.id, {
             action: TakeoutRunFileAction.ServerDuplicate,
             assetId: existingId,
@@ -1816,7 +1920,7 @@ export class TakeoutRunService extends BaseService {
 
     // a file may have been written before the duplicate appeared: unlink it
     if (row.targetPath) {
-      await unlink(row.targetPath).catch(() => {});
+      await unlinkTarget(row.targetPath, this.stagingFs).catch(() => {});
     }
 
     const resultFlags = await this.addAlbums(run, settings, row, assetId, plan);
@@ -1829,7 +1933,14 @@ export class TakeoutRunService extends BaseService {
     }
     await this.addResultFlags(row, resultFlags);
 
-    if (row.action !== TakeoutRunFileAction.BetterOnServer && (row.rotation ?? 0) !== 0 && settings.applyRotation) {
+    // a rotate-only-pair original (section 11 D1) is rotated by phaseRotateFaces, never here or by the async hook:
+    // a pending row would let the hook apply the edit first, and D1 would then report it as skippedHasEdits
+    if (
+      row.action !== TakeoutRunFileAction.BetterOnServer &&
+      (row.rotation ?? 0) !== 0 &&
+      settings.applyRotation &&
+      !plan.rotateOriginal
+    ) {
       const withEdits = await this.assetRepository
         .getById(assetId, { exifInfo: true, edits: true } as any)
         .catch(() => null);

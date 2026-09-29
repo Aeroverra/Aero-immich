@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, unlink, writeFile } from '
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import sharp from 'sharp';
 import { TakeoutCatalogStatus, TakeoutRunStatus } from 'src/enum';
 import {
   CancelReason,
@@ -14,6 +15,8 @@ import {
   ReadPartRow,
   ReadStatsTracker,
   RunFailure,
+  SpaceBudget,
+  WriteQueue,
   createProcessResources,
   fetchEntries,
   readPartWithRetry,
@@ -21,7 +24,7 @@ import {
   sha1,
 } from 'src/services/takeout-read';
 import { StagingFs, StagingStore, nodeStagingFs } from 'src/services/takeout-staging';
-import { FileHandleLike, FileSourceFs, hex, nodeFileSourceFs } from 'src/takeout';
+import { FileHandleLike, FileSourceFs, hex, newReadMeter, nodeFileSourceFs } from 'src/takeout';
 import { buildTar, buildTarGz, buildZip, randomBytesSeeded } from 'src/takeout/test-fixtures';
 import { TakeoutMemoryRepository } from 'test/fixtures/takeout-memory.repository';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -625,6 +628,38 @@ describe('reading: entry rows', () => {
     expect(h.repo.entries.filter((e) => e.partId === 'p')).toHaveLength(1);
   });
 
+  it('commits a part whose walk ended although a stop kept a sample from being computed', async () => {
+    const h = await harness();
+    const batch = new EntryBatch(h.ctx, { detached: false });
+    await batch.push({
+      exportId: h.exportId,
+      partId: 'p',
+      seq: 0,
+      path: media('a.jpg'),
+      size: 1,
+      mtime: null,
+      kind: 'media',
+      checksum: Buffer.alloc(20, 1),
+      json: null,
+      jsonError: null,
+      readError: null,
+      width: null,
+      height: null,
+      sample: null,
+      sampleSkipped: null,
+      endOffset: 1,
+      pendingSample: Promise.resolve(null),
+    } as any);
+    h.controller.abort(new CancelReason());
+    const committed: any[] = [];
+    await batch.finish((rows) => {
+      committed.push(...rows);
+      return Promise.resolve();
+    });
+    // no sample and no sampleSkipped: sample backfill fetches it
+    expect(committed).toMatchObject([{ seq: 0, sample: null, sampleSkipped: null }]);
+  });
+
   it('keeps the entries before a cut, records the entry in flight and continues with the other part', async () => {
     const h = await harness();
     const entries = [
@@ -828,7 +863,8 @@ describe('reading: failures, cancel and budgets', () => {
   });
 
   it('never holds more memory than the budget with three readers', async () => {
-    const h = await harness({ limits: { memoryBudget: 24 * KiB, readChunk: 4 * KiB, readaheadDepth: 1 } });
+    // 3 readers x (1 + 1) x 4 KiB of readahead, plus room for the entry buffers
+    const h = await harness({ limits: { memoryBudget: 28 * KiB, readChunk: 4 * KiB, readaheadDepth: 1 } });
     const parts: ReadPartRow[] = [];
     for (let p = 0; p < 3; p++) {
       parts.push(
@@ -846,8 +882,178 @@ describe('reading: failures, cancel and budgets', () => {
       );
     }
     await readAll(h, parts, 3);
-    expect(h.resources.memory.peak).toBeLessThanOrEqual(24 * KiB);
+    expect(h.resources.memory.peak).toBeLessThanOrEqual(28 * KiB);
     expect(h.resources.memory.held).toBe(0);
     expect(h.resources.writes.peakInFlight).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('reading: samples of a stopped read', () => {
+  it('never records a sample the stop kept from being computed as a decode error', async () => {
+    let reads = 0;
+    const fs: FileSourceFs = {
+      open: async (path) => {
+        const real = await nodeFileSourceFs.open(path);
+        return {
+          read: async (buffer, offset, length, position) => {
+            reads++;
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return real.read(buffer, offset, length, position);
+          },
+          stat: () => real.stat(),
+          close: () => real.close(),
+        };
+      },
+    };
+    const h = await harness({
+      fs,
+      limits: { readers: 1, bufferLimit: 64 * KiB, sampleBufferLimit: 64 * KiB, readChunk: 1 * KiB, readaheadDepth: 1 },
+    });
+    h.ctx.sampleSet = 'all';
+    // both sampler slots busy: the samples of this read wait for one when the stop comes
+    const slots = (h.resources.sampler as any).slots;
+    await slots.acquire(1);
+    await slots.acquire(1);
+    const jpegs = await Promise.all(
+      [0, 1, 2, 3].map((i) =>
+        sharp({ create: { width: 32, height: 16, channels: 3, background: { r: 10 * i, g: 50, b: 90 } } })
+          .jpeg()
+          .toBuffer(),
+      ),
+    );
+    const part = await addPart(
+      h,
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz(jpegs.map((data, i) => ({ name: media(`A/p${i}.jpg`), data }))),
+    );
+    const reading = readAll(h, [part], 1);
+    for (let i = 0; i < 200 && h.ctx.stats.stats.mediaFound < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    h.controller.abort(new CancelReason());
+    await expect(reading).rejects.toBeInstanceOf(CancelReason);
+    expect(reads).toBeGreaterThan(0);
+
+    const rows = entriesOf(h, part.id);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((row) => row.sampleSkipped === 'decodeError')).toBe(false);
+    expect(rows.some((row) => !row.sample)).toBe(true);
+    // every stored image without a sample is still a sample backfill candidate
+    const candidates = await h.repo.getEntriesWithoutSample(h.exportId);
+    expect(candidates.length).toBe(rows.filter((row) => !row.sample).length);
+  });
+
+  it('decodes from its own budget, never behind the buffers and readahead that fill the memory budget', async () => {
+    const resources = createProcessResources({ ...limits(), memoryBudget: 64 * KiB, decodeBudget: 64 * KiB });
+    // the buffer budget is full (buffers of pending samples, the readahead of the readers)
+    const held = await resources.memory.acquire(64 * KiB);
+    const jpeg = await sharp({ create: { width: 400, height: 400, channels: 3, background: '#808080' } })
+      .jpeg()
+      .toBuffer();
+    // 400 x 400 x 4 bytes is larger than the decode budget: admitted when no other decode runs
+    const result = await resources.sampler.sample(jpeg, null);
+    expect(result).toMatchObject({ width: 400, height: 400 });
+    expect(resources.decode.held).toBe(0);
+    held.release();
+    expect(resources.memory.held).toBe(0);
+  });
+});
+
+describe('write slots (12)', () => {
+  it('counts streamed writes and the write-behind against one cap', async () => {
+    const queue = new WriteQueue(2, 0);
+    const first = await queue.acquireSlot();
+    const second = await queue.acquireSlot();
+    const s = await harness();
+    const content = Buffer.from('write-behind');
+    const reservation = s.staging.reserve(hex(sha1(content)))!;
+    queue.enqueue({
+      runId: s.run.id,
+      token: { detached: false },
+      store: s.staging,
+      reservation,
+      buf: content,
+      lease: null,
+      space: null,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // both slots are held by streams: the buffered write waits
+    expect(s.staging.hasBlob(hex(sha1(content)))).toBe(false);
+    expect(queue.pending(s.run.id)).toBe(1);
+    first.release();
+    await queue.drain(s.run.id, { dropQueued: false, capMs: Infinity });
+    expect(s.staging.hasBlob(hex(sha1(content)))).toBe(true);
+    expect(queue.peakInFlight).toBe(2);
+    second.release();
+  });
+});
+
+describe('ReadStatsTracker', () => {
+  const partRow = { id: 'p1', fileName: 'takeout-001.zip', size: 1000, segment: 1, partNumber: 1 };
+
+  it('never moves the covered position of a zip continuation back (it re-reads the directory first)', () => {
+    const stats = new ReadStatsTracker({});
+    const ps = stats.part(partRow);
+    const first = newReadMeter();
+    stats.beginPass(ps, first, true);
+    first.position = 600;
+    stats.endPass(ps);
+    expect(stats.covered()).toBe(600);
+
+    const next = newReadMeter();
+    stats.beginPass(ps, next, false);
+    // directory read at 0, then the walk starts at the resume entry, below the old position
+    expect(stats.covered()).toBe(600);
+    next.position = 450;
+    expect(stats.covered()).toBe(600);
+    next.position = 800;
+    expect(stats.covered()).toBe(800);
+  });
+
+  it('counts live fetch bytes up to the plan and takes the real bytes into the total when a fetch ends', () => {
+    const stats = new ReadStatsTracker({});
+    const ps = stats.part(partRow);
+    stats.stats.fetchBytesTotal = 500;
+    const meter = newReadMeter();
+    const pass = stats.beginFetch(ps, meter, 500);
+    meter.bytesRead = 200;
+    stats.syncFetch();
+    expect([stats.stats.fetchBytesRead, stats.stats.fetchBytesTotal, ps.fetchBytesRead]).toEqual([200, 500, 200]);
+    // the zip directory and readahead past the last entry: never more than the plan while live
+    meter.bytesRead = 650;
+    stats.syncFetch();
+    expect(stats.stats.fetchBytesRead).toBe(500);
+    stats.endFetch(pass);
+    expect([stats.stats.fetchBytesRead, stats.stats.fetchBytesTotal, ps.fetchBytesRead]).toEqual([650, 650, 650]);
+  });
+
+  it('estimates the fetch time from the fetch bytes of the last two minutes', () => {
+    const stats = new ReadStatsTracker({});
+    const ps = stats.part(partRow);
+    stats.stats.fetchBytesTotal = 10_000;
+    const meter = newReadMeter();
+    stats.beginFetch(ps, meter, 10_000);
+    expect(stats.fetchEta(0)).toBeNull();
+    meter.bytesRead = 1000;
+    expect(stats.fetchEta(10_000)).toBe(90);
+  });
+});
+
+describe('SpaceBudget', () => {
+  it('never waits for a statfs that does not answer, and never starts a second one behind it', async () => {
+    let calls = 0;
+    const budget = new SpaceBudget({
+      quotaLimit: null,
+      quotaUsage: 0,
+      reserve: 0,
+      statfs: () => (calls++ === 0 ? Promise.resolve(1000) : new Promise<number>(() => {})),
+    });
+    await budget.refresh(50);
+    expect(budget.available).toBe(1000);
+    budget.refreshInBackground();
+    budget.refreshInBackground();
+    await budget.refresh(20);
+    expect(calls).toBe(2);
+    expect(budget.available).toBe(1000);
   });
 });

@@ -1,6 +1,6 @@
 import { createPostgres, DatabaseConnectionParams, schemaDiff, schemaFromDatabase } from '@immich/sql-tools';
 import { Kysely, Migrator, sql } from 'kysely';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import {
   TakeoutArchiveKind,
   TakeoutCatalogStatus,
@@ -319,6 +319,72 @@ describe(TakeoutRepository.name, () => {
       await expect(sut.getRun(run.id)).resolves.toMatchObject({ status: 'cancelled', leaseToken: null });
     });
 
+    it('lets a cancel cleanup take a run only when no live worker holds it (I10)', async () => {
+      const { sut, newRun } = await seed();
+      const job = 'b0000000-0000-4000-8000-000000000010';
+      const cleanup = 'b0000000-0000-4000-8000-000000000011';
+      const held = await newRun(TakeoutRunStatus.Queued);
+      await expect(sut.takeLease(held.id, job)).resolves.toBe(true);
+      await expect(sut.claimRunForCancel(held.id, [TakeoutRunStatus.Queued], cleanup)).resolves.toBe(false);
+      await expect(sut.getRun(held.id)).resolves.toMatchObject({ status: TakeoutRunStatus.Queued, leaseToken: job });
+      // the holder itself may, and a stale lease is taken over
+      await expect(sut.claimRunForCancel(held.id, [TakeoutRunStatus.Queued], job)).resolves.toBe(true);
+      await expect(sut.getRun(held.id)).resolves.toMatchObject({
+        status: TakeoutRunStatus.Cancelling,
+        leaseToken: job,
+      });
+      await expect(sut.renewCancelLease(held.id, job)).resolves.toBe(true);
+      await expect(sut.renewCancelLease(held.id, cleanup)).resolves.toBe(false);
+
+      const stale = await newRun(TakeoutRunStatus.Importing, {
+        leaseToken: job,
+        heartbeatAt: new Date(Date.now() - 2 * 60_000),
+      });
+      await expect(sut.claimRunForCancel(stale.id, [TakeoutRunStatus.Importing], cleanup)).resolves.toBe(true);
+      await expect(sut.claimRunForCancel(stale.id, [TakeoutRunStatus.Cancelling], job)).resolves.toBe(false);
+      await expect(
+        sut.finishRunCas(stale.id, [TakeoutRunStatus.Cancelling], cleanup, TakeoutRunStatus.Cancelled),
+      ).resolves.toBe(true);
+    });
+
+    it('skips only the open rows without a file on cancel, and a Resume restores them with their reason', async () => {
+      const { sut, newRun } = await seed();
+      const run = await newRun(TakeoutRunStatus.Cancelled);
+      await sut.insertRunFiles([
+        { ...planRow(run.id, 0), reason: 'server had a smaller version', smallerAssetId: null },
+        { ...planRow(run.id, 1), status: TakeoutRunFileStatus.Written, targetPath: '/upload/kept.jpg' },
+        {
+          ...planRow(run.id, 2),
+          action: TakeoutRunFileAction.ServerDuplicate,
+          reason: 'already on the server (in trash)',
+        },
+        // skipped 'cancelled' by the importer before single-pass
+        {
+          ...planRow(run.id, 3),
+          action: TakeoutRunFileAction.BetterOnServer,
+          status: TakeoutRunFileStatus.Skipped,
+          reason: 'cancelled',
+        },
+      ]);
+      await sut.skipOpenRunFiles(run.id);
+      const skipped = await sut.getRunFilesForImport(run.id);
+      expect(skipped.map((f) => [f.status, f.reason, f.fallbacks, f.targetPath])).toEqual([
+        [TakeoutRunFileStatus.Skipped, 'server had a smaller version', ['cancelled'], null],
+        [TakeoutRunFileStatus.Written, null, [], '/upload/kept.jpg'],
+        [TakeoutRunFileStatus.Skipped, 'already on the server (in trash)', ['cancelled'], null],
+        [TakeoutRunFileStatus.Skipped, 'cancelled', [], null],
+      ]);
+      await sut.skipOpenRunFiles(run.id);
+      await expect(sut.requeueRun(run.id, 1)).resolves.toBe(true);
+      const resumed = await sut.getRunFilesForImport(run.id);
+      expect(resumed.map((f) => [f.status, f.reason, f.fallbacks, f.targetPath])).toEqual([
+        [TakeoutRunFileStatus.Planned, 'server had a smaller version', [], null],
+        [TakeoutRunFileStatus.Written, null, [], '/upload/kept.jpg'],
+        [TakeoutRunFileStatus.Planned, 'already on the server (in trash)', [], null],
+        [TakeoutRunFileStatus.Planned, 'the server already has a larger version', [], null],
+      ]);
+    });
+
     it('resumes a cancelled run with its skipped rows planned again, never a superseded one (F19)', async () => {
       const { sut, newRun } = await seed();
       const run = await newRun(TakeoutRunStatus.Cancelled);
@@ -462,16 +528,39 @@ describe(TakeoutRepository.name, () => {
       await expect(sut.getPart(part.id)).resolves.toMatchObject({ catalogStatus: TakeoutCatalogStatus.Reading });
     });
 
-    it('lists stopped runs that still hold files under upload/', async () => {
-      const { sut, newRun } = await seed();
+    it('lists final runs that still hold asset-less files under upload/, each once', async () => {
+      const { ctx, sut, user, newRun } = await seed();
+      const target = (runId: string, seq: number, extra: Record<string, unknown> = {}) =>
+        ({
+          ...planRow(runId, seq),
+          targetPath: `/upload/${runId}-${seq}.jpg`,
+          newAssetId: randomUUID(),
+          ...extra,
+        }) as any;
       const holding = await newRun(TakeoutRunStatus.Failed);
-      await sut.insertRunFiles([{ ...planRow(holding.id, 0), targetPath: '/upload/x.jpg' } as any]);
+      await sut.insertRunFiles([target(holding.id, 0)]);
+      const skippedTarget = await newRun(TakeoutRunStatus.Cancelled);
+      await sut.insertRunFiles([target(skippedTarget.id, 0, { status: TakeoutRunFileStatus.Skipped })]);
       const clean = await newRun(TakeoutRunStatus.Failed);
       await sut.insertRunFiles([planRow(clean.id, 0)]);
+      // an error row whose asset was created: the file is that asset's original
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const original = await newRun(TakeoutRunStatus.Cancelled);
+      await sut.insertRunFiles([target(original.id, 0, { status: TakeoutRunFileStatus.Error, newAssetId: asset.id })]);
+      const successor = await newRun(TakeoutRunStatus.Queued);
+      const superseded = await newRun(TakeoutRunStatus.Cancelled, { supersededBy: successor.id });
+      await sut.insertRunFiles([target(superseded.id, 0, { status: TakeoutRunFileStatus.Skipped })]);
+      const oldCompleted = await newRun(TakeoutRunStatus.Completed);
+      await sut.insertRunFiles([target(oldCompleted.id, 0, { status: TakeoutRunFileStatus.Error, entrySeq: null })]);
+      const doneCompleted = await newRun(TakeoutRunStatus.Completed);
+      await sut.insertRunFiles([target(doneCompleted.id, 0, { status: TakeoutRunFileStatus.Done })]);
+
       const stopped = await sut.getStoppedRunsWithTargets();
       const found = stopped.map((run) => run.id);
-      expect(found).toContain(holding.id);
-      expect(found).not.toContain(clean.id);
+      expect(found).toEqual(expect.arrayContaining([holding.id, skippedTarget.id, oldCompleted.id]));
+      for (const id of [clean.id, original.id, superseded.id, doneCompleted.id]) {
+        expect(found).not.toContain(id);
+      }
     });
   });
 });

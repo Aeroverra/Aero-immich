@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import sharp from 'sharp';
 import { StorageCore } from 'src/cores/storage.core';
 import {
   JobStatus,
@@ -19,7 +20,7 @@ import {
   sha1,
 } from 'src/services/takeout-read';
 import { TakeoutRunService } from 'src/services/takeout-run.service';
-import { runStagingDir } from 'src/services/takeout-staging';
+import { StagingFs, nodeStagingFs, runStagingDir } from 'src/services/takeout-staging';
 import { FileSourceFs, TakeoutSettings, hex, mergeSettings, nodeFileSourceFs } from 'src/takeout';
 import { buildTar, buildTarGz, buildZip, randomBytesSeeded } from 'src/takeout/test-fixtures';
 import { TakeoutMemoryRepository } from 'test/fixtures/takeout-memory.repository';
@@ -29,6 +30,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const KiB = 1024;
 const userId = 'user-1';
 const media = (name: string) => `Takeout/Google Photos/${name}`;
+const errno = (code: string) => Object.assign(new Error(code), { code });
+const greyJpeg = (shade: number) =>
+  sharp({ create: { width: 400, height: 400, channels: 3, background: { r: shade, g: shade, b: shade } } })
+    .jpeg()
+    .toBuffer();
 
 const testLimits = (over: Partial<ReadLimits> = {}): ReadLimits => ({
   ...DEFAULT_READ_LIMITS,
@@ -248,7 +254,12 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     ]);
     const created = h.repo.assets.find((asset) => asset.checksum.equals(sha1(content)))!;
     expect(await readFile(created.originalPath)).toEqual(content);
-    expect(h.run(run.id).readStats.fetchFiles).toBe(1);
+    const stats = h.run(run.id).readStats;
+    expect(stats.fetchFiles).toBe(1);
+    // the zip directory and the readahead are read too: the total takes what the fetch really read
+    expect(stats.fetchBytesRead).toBeGreaterThan(0);
+    expect(stats.fetchBytesRead).toBe(stats.fetchBytesTotal);
+    expect(Object.values(stats.parts).map((p: any) => p.fetchBytesRead)).toEqual([stats.fetchBytesRead]);
   });
 
   it('does nothing for a stale job of a final run, and the lease refuses final runs', async () => {
@@ -335,6 +346,133 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     release();
     expect(h.run(run.id).error).toMatch(/stalled/);
   }, 10_000);
+
+  it('fails a stalled run although statfs of the staging share hangs as well (I9)', async () => {
+    let release!: () => void;
+    const stuck = new Promise<void>((resolve) => (release = resolve));
+    const fs: FileSourceFs = {
+      open: async (path) => {
+        const real = await nodeFileSourceFs.open(path);
+        return {
+          read: async (buffer, offset, length, position) => {
+            await stuck;
+            return real.read(buffer, offset, length, position);
+          },
+          stat: () => real.stat(),
+          close: () => real.close(),
+        };
+      },
+    };
+    const h = await harness({ fs, limits: { readStallMs: 50 } });
+    // the staging folder sits on the same share: statfs answers once, then never again
+    let statfsCalls = 0;
+    h.sut.diskAvailable = () => (statfsCalls++ === 0 ? Promise.resolve(1e12) : new Promise(() => {}));
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([{ name: media('a.mp4'), data: randomBytesSeeded(100, 60) }]),
+    );
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Failed);
+    release();
+    expect(h.run(run.id).error).toMatch(/stalled/);
+    expect(h.run(run.id).leaseToken).toBeNull();
+  }, 10_000);
+
+  it('fails a run whose fetch read stalls (I9)', async () => {
+    let opens = 0;
+    let release!: () => void;
+    const stuck = new Promise<void>((resolve) => (release = resolve));
+    const fs: FileSourceFs = {
+      open: async (path) => {
+        const real = await nodeFileSourceFs.open(path);
+        // 1: central directory for the sampling set, 2: the read of the part, 3: the fetch
+        const hang = ++opens >= 3;
+        return {
+          read: async (buffer, offset, length, position) => {
+            if (hang) {
+              await stuck;
+            }
+            return real.read(buffer, offset, length, position);
+          },
+          stat: () => real.stat(),
+          close: () => real.close(),
+        };
+      },
+    };
+    const size = 3 * KiB;
+    const server = randomBytesSeeded(size, 61);
+    const content = Buffer.concat([server.subarray(0, 512), randomBytesSeeded(size - 512, 62)]);
+    const h = await harness({ fs, limits: { readStallMs: 50 } });
+    await writeFile(join(h.dir, 'server.mp4'), server);
+    h.repo.addAsset({
+      ownerId: userId,
+      checksum: sha1(server),
+      originalPath: join(h.dir, 'server.mp4'),
+      fileSizeInByte: size,
+    });
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.zip',
+      buildZip([{ nameBytes: Buffer.from(media('big.mp4')), data: content, method: 0 }]),
+    );
+    h.sut.diskAvailable = () => Promise.resolve(1e12);
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Failed);
+    release();
+    expect(h.repo.statusLog).toContain('fetching');
+    expect(h.run(run.id).error).toMatch(/stalled/);
+  }, 10_000);
+
+  it('never waits forever for decode memory while buffers and readahead hold the budget (6.5)', async () => {
+    // two paired images whose decode (400 x 400 x 4 bytes) is larger than the whole buffer budget
+    const h = await harness({ limits: { readers: 1, sampleBufferLimit: 64 * KiB, memoryBudget: 256 * KiB } });
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.zip',
+      buildZip([
+        { nameBytes: Buffer.from(media('big.jpg')), data: await greyJpeg(128), method: 0 },
+        { nameBytes: Buffer.from(media('big-edited.jpg')), data: await greyJpeg(112), method: 0 },
+        { nameBytes: Buffer.from(media('c.mp4')), data: randomBytesSeeded(500, 63), method: 0 },
+      ]),
+    );
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const sampled = h.repo.entries.filter((e) => e.path.endsWith('.jpg'));
+    expect(sampled.map((e) => [e.width, e.height, e.sampleSkipped])).toEqual([
+      [400, 400, null],
+      [400, 400, null],
+    ]);
+    expect(h.sut.processResources!.memory.held).toBe(0);
+  }, 10_000);
+
+  it('reads the index archive once per attempt (sampling set and planning)', async () => {
+    let indexOpens = 0;
+    const fs: FileSourceFs = {
+      open: (path) => {
+        if (path.endsWith('index.tgz')) {
+          indexOpens++;
+        }
+        return nodeFileSourceFs.open(path);
+      },
+    };
+    const h = await harness({ fs });
+    const html = [
+      '<div id="service-details-PHOTOS" class="service-detail"><h1>Google Photos</h1>',
+      '<div class="file-leaf"><div class="extracted-file-name">a.mp4</div></div>',
+      '</div>',
+    ].join('');
+    await writeFile(
+      join(h.folder, 'index.tgz'),
+      buildTarGz([{ name: 'Takeout/archive_browser.html', data: Buffer.from(html) }]),
+    );
+    h.repo.exports[0].indexFileName = 'index.tgz';
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([{ name: media('a.mp4'), data: randomBytesSeeded(300, 64) }]),
+    );
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    expect(indexOpens).toBe(1);
+    expect(h.repo.exports[0].analysis.lastRead.indexMissingFiles).toEqual({ count: 0, sample: [] });
+  });
 
   it('reads nothing on a second run of a catalogued export whose files are all on the server', async () => {
     const h = await harness();
@@ -581,7 +719,14 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
   it('turns a planned upload imported meanwhile by another client into a server duplicate', async () => {
     const h = await harness();
     const content = randomBytesSeeded(500, 18);
-    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz([{ name: media('a.mp4'), data: content }]));
+    const other = randomBytesSeeded(700, 65);
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media('a.mp4'), data: content },
+        { name: media('b.mp4'), data: other },
+      ]),
+    );
     const run = h.newRun();
     const original = h.repo.commitPlan.bind(h.repo);
     vi.spyOn(h.repo, 'commitPlan').mockImplementation(async (input) => {
@@ -592,7 +737,9 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(await h.execute(run)).toBe(JobStatus.Success);
     const row = h.files(run.id).find((f) => f.takeoutPath === media('a.mp4'));
     expect(row.action).toBe(TakeoutRunFileAction.ServerDuplicate);
-    expect(h.repo.assets).toHaveLength(1);
+    expect(h.repo.assets).toHaveLength(2);
+    // the planned bytes of the file that became a duplicate leave the total: the bar ends at 100%
+    expect(h.run(run.id)).toMatchObject({ bytesTotal: 700, bytesDone: 700 });
   });
 
   it('fails fetching with the exact missing byte count and keeps the plan for Resume', async () => {
@@ -791,7 +938,11 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
       expect(await h.execute(run)).toBe(JobStatus.Skipped);
       expect(h.run(run.id).status).toBe(TakeoutRunStatus.Cancelled);
       expect(h.run(run.id).hasStaging).toBe(true);
-      expect(h.files(run.id).find((f) => f.takeoutPath === media('a.mp4')).reason).toBe('cancelled');
+      expect(h.run(run.id).leaseToken).toBeNull();
+      expect(h.files(run.id).find((f) => f.takeoutPath === media('a.mp4'))).toMatchObject({
+        status: TakeoutRunFileStatus.Skipped,
+        fallbacks: ['cancelled'],
+      });
       const blob = join(runStagingDir(h.folder, run.id), hex(sha1(content)).slice(0, 2), hex(sha1(content)));
       expect(await exists(blob)).toBe(true);
       expect(h.run(run.id).readStats.stagingBytes).toBe(500);
@@ -803,6 +954,94 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       expect(await exists(runStagingDir(h.folder, run.id))).toBe(false);
+    });
+
+    it('lets no cleanup outside the job touch a run the job holds; the job finalizes its files (I10)', async () => {
+      const h = await harness();
+      const content = randomBytesSeeded(500, 70);
+      const { run, target } = await plannedUpload(h, content);
+      await writeFile(target, content);
+      h.repo.runFiles[0].targetPath = target;
+      await h.repo.requeueRun(run.id, 1);
+      // a Cancel arrives while the resumed run is still queued and its job repairs and re-checks, lease held
+      const results: boolean[] = [];
+      const recheck = h.repo.getUploadAssetsByChecksums.bind(h.repo);
+      vi.spyOn(h.repo, 'getUploadAssetsByChecksums').mockImplementation(async (id, checksums) => {
+        if (results.length === 0) {
+          expect(h.run(run.id).status).toBe(TakeoutRunStatus.Queued);
+          results.push(
+            await cleanupCancelledRun(lifecycleOf(h), run.id, { token: null, from: [TakeoutRunStatus.Queued] }),
+          );
+        }
+        return recheck(id, checksums);
+      });
+      expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
+      expect(results).toEqual([false]);
+      expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+      expect(h.repo.assets).toHaveLength(1);
+      expect(await readFile(h.repo.assets[0].originalPath)).toEqual(content);
+    });
+
+    it('keeps a target the cancel could not reclaim on an open row, for the boot step or Discard (I4)', async () => {
+      const h = await harness();
+      const content = randomBytesSeeded(500, 71);
+      const { run, target } = await plannedUpload(h, content);
+      await writeFile(target, content);
+      Object.assign(h.repo.runFiles[0], { targetPath: target, status: TakeoutRunFileStatus.Written });
+      Object.assign(h.repo.runs[0], { status: TakeoutRunStatus.Queued, hasStaging: true });
+      // the staging share does not answer: the store cannot be opened
+      const down: StagingFs = { ...nodeStagingFs, mkdir: (() => Promise.reject(errno('EIO'))) as any };
+      const lifecycle = { ...lifecycleOf(h), stagingFs: down };
+      expect(await cleanupCancelledRun(lifecycle, run.id, { token: null, from: [TakeoutRunStatus.Queued] })).toBe(true);
+      expect(h.run(run.id).status).toBe(TakeoutRunStatus.Cancelled);
+      expect(h.repo.runFiles[0]).toMatchObject({ status: TakeoutRunFileStatus.Written, targetPath: target });
+      expect(await exists(target)).toBe(true);
+      const stopped = await h.repo.getStoppedRunsWithTargets();
+      expect(stopped.map((r) => r.id)).toEqual([run.id]);
+
+      // Discard removes it
+      await discardRunStaging(lifecycleOf(h), run.id);
+      expect(await exists(target)).toBe(false);
+      expect(h.repo.runFiles[0]).toMatchObject({ status: TakeoutRunFileStatus.Skipped, targetPath: null });
+    });
+
+    it('ends a run that is cancelled while it finishes as completed, and releases the lease', async () => {
+      const h = await harness();
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([{ name: media('a.mp4'), data: randomBytesSeeded(500, 72) }]),
+      );
+      const run = h.newRun();
+      const cas = h.repo.setRunStatusCas.bind(h.repo);
+      vi.spyOn(h.repo, 'setRunStatusCas').mockImplementation(async (id, token, status, patch) => {
+        const ok = await cas(id, token, status, patch);
+        if (status === TakeoutRunStatus.Finishing) {
+          await h.repo.requestCancel(id);
+          h.sut.onCancel({ runId: id });
+        }
+        return ok;
+      });
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Completed, leaseToken: null });
+    });
+
+    it('ends a run that is cancelled while it fails as cancelled, never left cancelling', async () => {
+      const h = await harness();
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([{ name: media('a.mp4'), data: randomBytesSeeded(500, 73) }]),
+      );
+      h.mocks.user.get.mockResolvedValue({ quotaSizeInBytes: 1, quotaUsageInBytes: 0 } as any);
+      const run = h.newRun();
+      const finish = h.repo.finishRunCas.bind(h.repo);
+      vi.spyOn(h.repo, 'finishRunCas').mockImplementation(async (id, from, token, status, patch) => {
+        if (status === TakeoutRunStatus.Failed) {
+          await h.repo.requestCancel(id);
+        }
+        return finish(id, from, token, status, patch);
+      });
+      expect(await h.execute(run)).toBe(JobStatus.Failed);
+      expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Cancelled, leaseToken: null, hasStaging: true });
     });
 
     it('cleans up a queued run from the API path', async () => {

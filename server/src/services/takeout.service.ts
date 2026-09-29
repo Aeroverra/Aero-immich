@@ -188,14 +188,25 @@ export class TakeoutService extends BaseService {
       }
     });
 
-    // 5. failed or cancelled runs that still hold files under upload/ (runs of the old code after the upgrade, or a
-    // failure path that could not reach the share): complete files back to staging, partial ones unlinked
+    // 5. final runs that still hold asset-less files under upload/ (runs of the old code after the upgrade, or a
+    // failure or cancel path that could not reach the share). A run that keeps its staging (or a failed run within
+    // the staging TTL: the upgrade failed the old importing runs without one) gets complete files back into staging
+    // and partial ones unlinked; a run without staging (discarded, expired, completed) never gets a staging
+    // directory again: its files are unlinked.
     await this.wrapStep('reclaim targets', async () => {
-      for (const run of await this.takeoutRepository.getStoppedRunsWithTargets()) {
-        await this.takeoutRepository.withUserSyncLock(run.userId, async () => {
-          const folder = await this.takeoutRepository.getFolder(run.userId);
+      for (const listed of await this.takeoutRepository.getStoppedRunsWithTargets()) {
+        await this.takeoutRepository.withUserSyncLock(listed.userId, async () => {
+          // a Resume (under this lock) may have queued the run since the listing: its job reclaims it
+          const run = await this.takeoutRepository.getRun(listed.id);
+          if (!run || run.status !== listed.status) {
+            return;
+          }
+          const finishedAt = run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now();
+          const keepsStaging =
+            run.hasStaging || (run.status === TakeoutRunStatus.Failed && Date.now() - finishedAt < STAGING_TTL_MS);
+          const folder = keepsStaging ? await this.takeoutRepository.getFolder(run.userId) : undefined;
           const store = folder ? await openRunStaging(this.lifecycle, run, folder.folderName) : null;
-          await reclaimRunTargets(this.lifecycle, run.id, store, 'stage');
+          await reclaimRunTargets(this.lifecycle, run.id, store, store ? 'stage' : 'unlink');
         });
       }
     });

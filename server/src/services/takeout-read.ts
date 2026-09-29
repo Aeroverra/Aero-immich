@@ -73,6 +73,13 @@ export interface ReadLimits {
   probeBytes: number;
   jsonReadLimit: number;
   memoryBudget: number;
+  /**
+   * Image decode memory of the sampler: its own budget, held by decodes only, so a decode never waits for memory
+   * that buffers or readahead hold (they are freed only when their samples finish). A decode larger than the budget
+   * runs alone.
+   */
+  decodeBudget: number;
+  /** blob writes in flight per process: write-behind and streamed writes alike */
   maxWritesInFlight: number;
   zipSeekGap: number;
   flushRows: number;
@@ -104,6 +111,7 @@ export const DEFAULT_READ_LIMITS: ReadLimits = {
   probeBytes: 1 * MiB,
   jsonReadLimit: 4 * MiB,
   memoryBudget: 512 * MiB,
+  decodeBudget: 256 * MiB,
   maxWritesInFlight: 2,
   zipSeekGap: 8 * MiB,
   flushRows: 1000,
@@ -166,23 +174,36 @@ interface WriteJob {
 }
 
 /**
- * Write-behind of buffered entries (single-pass design 6.5): FIFO, at most `maxInFlight` writes in the process. A
- * write never rejects: ENOSPC or a failure after the transport budget sets `store.fatal` and releases everything, so
- * no write-behind promise can go unhandled.
+ * Blob writes of the process (single-pass design 6.5, 12): at most `maxInFlight` at a time, counted by one slot
+ * semaphore that the write-behind of buffered entries (FIFO) and the streamed writes (large entries, tgz re-stage,
+ * fetch; `acquireSlot`) share. A write-behind job never rejects: ENOSPC or a failure after the transport budget sets
+ * `store.fatal` and releases everything, so no write-behind promise can go unhandled.
  */
 export class WriteQueue {
   private queue: WriteJob[] = [];
-  private active = 0;
+  private waitingForSlot = false;
   private perRun = new Map<string, number>();
   private idleWaiters = new Map<string, Set<() => void>>();
-  peakInFlight = 0;
+  private readonly slots: ByteSemaphore;
   written = 0;
 
   constructor(
     readonly maxInFlight: number,
     private readonly retryBudgetMs: number,
     private readonly sleep?: (ms: number) => Promise<void>,
-  ) {}
+  ) {
+    this.slots = new ByteSemaphore(maxInFlight);
+  }
+
+  /** most writes ever in flight at once, write-behind and streamed */
+  get peakInFlight(): number {
+    return this.slots.peak;
+  }
+
+  /** A write slot for a streamed write; release it once the temp file is committed or discarded */
+  acquireSlot(signal?: AbortSignal): Promise<ByteLease> {
+    return this.slots.acquire(1, signal);
+  }
 
   enqueue(job: WriteJob): void {
     if (job.token.detached || job.store.fatal) {
@@ -198,17 +219,27 @@ export class WriteQueue {
     return this.perRun.get(runId) ?? 0;
   }
 
+  /** one slot request at a time for the head of the queue; each granted slot starts one job */
   private pump() {
-    while (this.active < this.maxInFlight && this.queue.length > 0) {
-      const job = this.queue.shift()!;
-      this.active++;
-      this.peakInFlight = Math.max(this.peakInFlight, this.active);
+    if (this.waitingForSlot || this.queue.length === 0) {
+      return;
+    }
+    this.waitingForSlot = true;
+    void this.slots.acquire(1).then((slot) => {
+      this.waitingForSlot = false;
+      const job = this.queue.shift();
+      if (!job) {
+        // the queued jobs were dropped meanwhile (drain)
+        slot.release();
+        return;
+      }
       void this.run(job).finally(() => {
-        this.active--;
+        slot.release();
         this.done(job.runId);
         this.pump();
       });
-    }
+      this.pump();
+    });
   }
 
   private async run(job: WriteJob): Promise<void> {
@@ -289,19 +320,27 @@ export class WriteQueue {
   }
 }
 
-/** Image samples (single-pass design 6.5): at most `concurrency` decodes, decode memory reserved before decoding */
+/**
+ * Image samples (single-pass design 6.5): at most `concurrency` decodes, decode memory reserved before decoding.
+ * Decode memory comes from its own budget (`decode`), never from the budget of buffers and readahead: a sample waits
+ * there while it holds its buffer's share, and the buffers of the other pending samples and the readers' readahead
+ * are freed only when samples finish, so waiting behind them could never end.
+ */
 export class Sampler {
   private slots: ByteSemaphore;
 
   constructor(
-    private readonly memory: ByteSemaphore,
+    private readonly decode: ByteSemaphore,
     concurrency = 2,
   ) {
     this.slots = new ByteSemaphore(concurrency);
   }
 
-  /** Never rejects; releases `share` (the buffer's memory) when done */
-  async sample(buf: Buffer, share: ByteLease | null, signal?: AbortSignal): Promise<ImageSampleResult> {
+  /**
+   * Never rejects; releases `share` (the buffer's memory) when done. Null when the read was stopped before the
+   * sample was computed: the entry stays a sample backfill candidate instead of a decode error.
+   */
+  async sample(buf: Buffer, share: ByteLease | null, signal?: AbortSignal): Promise<ImageSampleResult | null> {
     let slot: ByteLease | null = null;
     let decode: ByteLease | null = null;
     try {
@@ -311,13 +350,12 @@ export class Sampler {
         .catch(() => null);
       const pixels = (meta?.width ?? 0) * (meta?.height ?? 0);
       if (pixels > 0 && pixels <= 268_402_689) {
-        // w x h x 4, clamped so that together with its own buffer it fits (admitted when nothing else is held)
-        const want = Math.min(pixels * 4, Math.max(0, this.memory.capacity - (share?.bytes ?? 0)));
-        decode = await this.memory.acquire(want, signal);
+        // w x h x 4; a decode larger than the budget is admitted when no other decode runs
+        decode = await this.decode.acquire(Math.min(pixels * 4, this.decode.capacity), signal);
       }
       return await computeImageSample(buf);
     } catch {
-      return { skipped: 'decodeError' };
+      return signal?.aborted ? null : { skipped: 'decodeError' };
     } finally {
       decode?.release();
       share?.release();
@@ -328,6 +366,8 @@ export class Sampler {
 
 export interface ProcessResources {
   memory: ByteSemaphore;
+  /** image decode memory, held by the sampler's decodes only */
+  decode: ByteSemaphore;
   readers: ByteSemaphore;
   writes: WriteQueue;
   sampler: Sampler;
@@ -336,13 +376,40 @@ export interface ProcessResources {
 let processResources: ProcessResources | null = null;
 
 export function createProcessResources(limits: ReadLimits): ProcessResources {
-  const memory = new ByteSemaphore(limits.memoryBudget);
+  const decode = new ByteSemaphore(limits.decodeBudget);
   return {
-    memory,
+    memory: new ByteSemaphore(limits.memoryBudget),
+    decode,
     readers: new ByteSemaphore(limits.maxReaders),
     writes: new WriteQueue(limits.maxWritesInFlight, limits.transportRetryBudgetMs),
-    sampler: new Sampler(memory, 2),
+    sampler: new Sampler(decode, 2),
   };
+}
+
+/** Wait for `promise` (never rejects) at most `ms`; a promise that never settles is left behind */
+export async function settleWithin(promise: Promise<unknown> | null, ms: number): Promise<void> {
+  if (!promise) {
+    return;
+  }
+  let timer: NodeJS.Timeout | undefined;
+  const cap = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  await Promise.race([promise.then(noop).catch(noop), cap]);
+  clearTimeout(timer);
+}
+
+/** `promise`, or `onTimeout()` as the rejection after `ms` (the call that never answers is left behind) */
+export async function withDeadline<T>(promise: Promise<T>, ms: number, onTimeout: () => Error): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), ms);
+  });
+  try {
+    return await Promise.race([promise, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** One memory budget, reader cap, write queue and sampler for the whole process */
@@ -377,13 +444,29 @@ export class SpaceBudget {
     },
   ) {}
 
-  async refresh(): Promise<void> {
-    try {
-      this.available = await this.options.statfs();
-      this.writtenSinceRefresh = 0;
-    } catch {
-      // keep the last value
-    }
+  private refreshing: Promise<void> | null = null;
+
+  /**
+   * One statfs at a time; the budget keeps its last value until it answers. Resolves when it answered or after
+   * `waitMs`: a share that stops answering holds no caller (and no second statfs is started behind the stuck one).
+   */
+  async refresh(waitMs = Infinity): Promise<void> {
+    this.refreshing ??= this.options
+      .statfs()
+      .then((available) => {
+        this.available = available;
+        this.writtenSinceRefresh = 0;
+      })
+      .catch(noop)
+      .finally(() => {
+        this.refreshing = null;
+      });
+    await (waitMs === Infinity ? this.refreshing : settleWithin(this.refreshing, waitMs));
+  }
+
+  /** The progress tick: start a statfs and never wait for it */
+  refreshInBackground(): void {
+    void this.refresh(0);
   }
 
   allows(size: number): boolean {
@@ -622,15 +705,31 @@ export interface ReadPartRow {
   entryCount: number | null;
 }
 
+interface FetchPass {
+  ps: TakeoutRunPartStats;
+  meter: ReadMeter;
+  /** bytes this part's fetch was expected to read, already counted in fetchBytesTotal */
+  planned: number;
+  psBase: number;
+}
+
 /** Live statistics of one run attempt, seeded from the stored readStats so a restart keeps passes and start times */
 export class ReadStatsTracker {
   readonly stats: TakeoutReadStats;
-  /** live meters of the parts being read or fetched (bytesRead of earlier passes is in the part's base) */
-  private live = new Map<string, { meter: ReadMeter; bytesBase: number; skippedBase: number; retriesBase: number }>();
+  /** live meters of the parts being read (bytesRead of earlier passes is in the part's base) */
+  private live = new Map<
+    string,
+    { meter: ReadMeter; bytesBase: number; skippedBase: number; retriesBase: number; floor: number }
+  >();
   private samples: Array<{ t: number; covered: number; busy: number }> = [];
+  /** fetches in progress, and the bytes read by the fetches that ended */
+  private fetches = new Set<FetchPass>();
+  private fetchDone: number;
+  private fetchSamples: Array<{ t: number; done: number }> = [];
 
   constructor(stored: unknown) {
     this.stats = normalizeReadStats(stored);
+    this.fetchDone = this.stats.fetchBytesRead;
   }
 
   part(part: Pick<ReadPartRow, 'id' | 'fileName' | 'size' | 'segment' | 'partNumber'>): TakeoutRunPartStats {
@@ -646,7 +745,11 @@ export class ReadStatsTracker {
     return ps;
   }
 
-  /** A new pass over the part; tgz restarts count their covered prefix into passBase (monotonic progress) */
+  /**
+   * A new pass over the part. tgz restarts count their covered prefix into passBase; a zip continuation keeps the
+   * covered position as a floor until the reader passes it (it re-reads the directory and the last uncommitted
+   * entries first), so the progress of a part never goes back.
+   */
   beginPass(ps: TakeoutRunPartStats, meter: ReadMeter, restartFromZero: boolean): number {
     let grew = 0;
     if (restartFromZero && ps.position > 0) {
@@ -664,6 +767,7 @@ export class ReadStatsTracker {
       bytesBase: ps.bytesRead,
       skippedBase: ps.bytesSkipped,
       retriesBase: ps.transportRetries,
+      floor: restartFromZero ? 0 : ps.position,
     });
     return grew;
   }
@@ -677,7 +781,56 @@ export class ReadStatsTracker {
     ps.bytesRead = live.bytesBase + live.meter.bytesRead;
     ps.bytesSkipped = live.skippedBase + live.meter.bytesSkipped;
     ps.transportRetries = live.retriesBase + live.meter.transportRetries;
-    ps.position = Math.min(live.meter.position, ps.size);
+    ps.position = Math.min(Math.max(live.floor, live.meter.position), ps.size);
+  }
+
+  /** A fetch of the part starts; `planned` is already part of fetchBytesTotal */
+  beginFetch(ps: TakeoutRunPartStats, meter: ReadMeter, planned: number): FetchPass {
+    const pass: FetchPass = { ps, meter, planned, psBase: ps.fetchBytesRead };
+    this.fetches.add(pass);
+    return pass;
+  }
+
+  /** The fetch ended: its bytes count as read, and the total takes what it really read in place of the plan */
+  endFetch(pass: FetchPass): void {
+    if (!this.fetches.delete(pass)) {
+      return;
+    }
+    const actual = pass.meter.bytesRead;
+    pass.ps.fetchBytesRead = pass.psBase + actual;
+    this.fetchDone += actual;
+    this.stats.fetchBytesTotal = Math.max(0, this.stats.fetchBytesTotal + actual - pass.planned);
+    this.syncFetch();
+  }
+
+  /**
+   * The live fetch bytes: a fetch in progress counts at most what it planned (the zip directory and the readahead
+   * past the last entry would pass it), so fetchBytesRead never exceeds fetchBytesTotal and both meet at the end
+   */
+  syncFetch(): void {
+    let live = 0;
+    for (const pass of this.fetches) {
+      pass.ps.fetchBytesRead = pass.psBase + pass.meter.bytesRead;
+      live += Math.min(pass.meter.bytesRead, pass.planned);
+    }
+    this.stats.fetchBytesRead = this.fetchDone + live;
+  }
+
+  /** remaining fetch bytes / fetch rate of the last two minutes */
+  fetchEta(now = Date.now()): number | null {
+    this.syncFetch();
+    const done = this.stats.fetchBytesRead;
+    this.fetchSamples.push({ t: now, done });
+    while (this.fetchSamples.length > 0 && now - this.fetchSamples[0].t > 120_000) {
+      this.fetchSamples.shift();
+    }
+    const first = this.fetchSamples[0];
+    const seconds = (now - first.t) / 1000;
+    if (seconds < 5 || done <= first.done) {
+      return null;
+    }
+    const rate = (done - first.done) / seconds;
+    return Math.max(0, Math.round(Math.max(0, this.stats.fetchBytesTotal - done) / rate));
   }
 
   endPass(ps: TakeoutRunPartStats): void {
@@ -800,6 +953,8 @@ export class ReadContext {
   archiveTotalGrowth = 0;
   readonly view: StagingView;
   private readonly unlinkRunSignal: () => void;
+  /** meters of the reads outside the reading passes, by the name the stall message shows */
+  private readonly watched = new Map<ReadMeter, string>();
 
   constructor(init: ReadContextInit) {
     this.run = init.run;
@@ -865,7 +1020,7 @@ export class ReadContext {
       reserve: this.limits.freeSpaceReserve,
       statfs: options.statfs,
     });
-    await this.budget.refresh();
+    await this.budget.refresh(this.limits.readStallMs);
   }
 
   sourceOptions(): WalkSourceOptions {
@@ -878,14 +1033,27 @@ export class ReadContext {
     };
   }
 
-  /** The 2 s tick: a read pending longer than READ_STALL_MS fails the run (resumable) */
+  /**
+   * Put the meter of a read outside the reading passes (fetch, sample backfill, zip directories, the index) under
+   * the stall watchdog; call the returned function when the read ended
+   */
+  watch(name: string, meter: ReadMeter): () => void {
+    this.watched.set(meter, name);
+    return () => this.watched.delete(meter);
+  }
+
+  /** Every progress tick: a read pending longer than READ_STALL_MS fails the run (resumable) */
   checkStall(now = Date.now()): void {
-    for (const { partId, meter } of this.stats.meters()) {
+    const meters = [
+      ...this.stats
+        .meters()
+        .map(({ partId, meter }) => ({ name: this.stats.stats.parts[partId]?.fileName ?? partId, meter })),
+      ...[...this.watched].map(([meter, name]) => ({ name, meter })),
+    ];
+    for (const { name, meter } of meters) {
       if (meter.pendingSince === null || !(now - meter.pendingSince > this.limits.readStallMs)) {
         continue;
       }
-
-      const name = this.stats.stats.parts[partId]?.fileName ?? partId;
       const minutes = Math.round(this.limits.readStallMs / 60_000);
       this.readAbort.abort(
         new RunFailure(`Reading ${name} stalled for ${minutes} min (the archive share does not answer)`),
@@ -1038,8 +1206,8 @@ export interface EntryRow {
   sample: Buffer | null;
   sampleSkipped: string | null;
   endOffset: number | null;
-  /** sample being computed; applied before the row is flushed */
-  pendingSample?: Promise<ImageSampleResult> | null;
+  /** sample being computed (null result: not computed, the read was stopped); applied before the row is flushed */
+  pendingSample?: Promise<ImageSampleResult | null> | null;
 }
 
 function toInsertable(row: EntryRow) {
@@ -1053,6 +1221,10 @@ async function applyPendingSample(row: EntryRow): Promise<void> {
   }
   const result = await row.pendingSample;
   row.pendingSample = null;
+  if (!result) {
+    // not computed (the read was stopped): no sample and no sampleSkipped, so sample backfill tries it again
+    return;
+  }
   if ('skipped' in result) {
     row.sampleSkipped = result.skipped;
   } else {
@@ -1166,6 +1338,8 @@ export class EntryBatch {
     if (this.token.detached) {
       return;
     }
+    // every entry of the part was read: a stop that came meanwhile only left samples uncomputed, and those rows keep
+    // no sample and no sampleSkipped, so sample backfill fetches them; the part is a correct cache and commits
     try {
       await commit(rows.map((row) => toInsertable(row)));
     } catch (error) {
@@ -1363,7 +1537,9 @@ export async function handleNewEntry(
         if (streamMode === 'stream') {
           const present = ctx.prefixes.markStreaming(info.size, prefixHash);
           let tmp: string | null = null;
+          let slot: ByteLease | null = null;
           try {
+            slot = await ctx.resources.writes.acquireSlot(signal);
             const written = await ctx.staging.streamToTemp(rest, prefix);
             tmp = written.tmp;
             row.checksum = written.checksum;
@@ -1390,6 +1566,7 @@ export async function handleNewEntry(
             if (tmp) {
               await ctx.staging.discardTemp(tmp);
             }
+            slot?.release();
             present.dropIfNotKept();
           }
         } else {
@@ -1451,7 +1628,9 @@ export async function handleCachedEntry(
     space.release();
     return;
   }
+  let slot: ByteLease | null = null;
   try {
+    slot = await ctx.resources.writes.acquireSlot(ctx.readAbort.signal);
     const written = await ctx.staging.streamToTemp(await open());
     if (!written.checksum.equals(cached.checksum)) {
       await ctx.staging.discardTemp(written.tmp);
@@ -1460,6 +1639,7 @@ export async function handleCachedEntry(
     await ctx.staging.commitTemp(written.tmp, reservation, written.size);
     space.commit();
   } finally {
+    slot?.release();
     reservation.releaseIfPending();
     space.release();
   }
@@ -1823,7 +2003,9 @@ async function stageVerified(ctx: ReadContext, request: FetchRequest, open: Entr
     request.satisfied = true;
     return;
   }
+  let slot: ByteLease | null = null;
   try {
+    slot = await ctx.resources.writes.acquireSlot(ctx.readAbort.signal);
     const written = await ctx.staging.streamToTemp(await open());
     if (written.checksum.equals(request.checksum)) {
       await ctx.staging.commitTemp(written.tmp, reservation, written.size);
@@ -1834,11 +2016,20 @@ async function stageVerified(ctx: ReadContext, request: FetchRequest, open: Entr
       request.failure = 'the archive changed since it was read';
     }
   } finally {
+    slot?.release();
     reservation.releaseIfPending();
   }
 }
 
-export async function applySample(ctx: ReadContext, request: FetchRequest, result: ImageSampleResult): Promise<void> {
+/** A null result (the read was stopped before the sample was computed) leaves the entry as it is */
+export async function applySample(
+  ctx: ReadContext,
+  request: FetchRequest,
+  result: ImageSampleResult | null,
+): Promise<void> {
+  if (!result) {
+    return;
+  }
   if ('skipped' in result) {
     await ctx.deps.repo.updateEntry(request.entryId!, { sampleSkipped: result.skipped as TakeoutSampleSkipped });
   } else {
@@ -1856,6 +2047,28 @@ async function fetchPart(
   ctx: ReadContext,
   part: ReadPartRow,
   requests: FetchRequest[],
+  planned: number,
+  token: ReaderToken,
+): Promise<void> {
+  const ps = ctx.stats.part(part);
+  const meter = newReadMeter();
+  // live fetch progress (the tick reads it) and the stall watchdog; ended on every path, so the total takes what
+  // was really read
+  const pass = ctx.stats.beginFetch(ps, meter, planned);
+  const unwatch = ctx.watch(part.fileName, meter);
+  try {
+    await fetchPartWalk(ctx, part, requests, meter, token);
+  } finally {
+    unwatch();
+    ctx.stats.endFetch(pass);
+  }
+}
+
+async function fetchPartWalk(
+  ctx: ReadContext,
+  part: ReadPartRow,
+  requests: FetchRequest[],
+  meter: ReadMeter,
   token: ReaderToken,
 ): Promise<void> {
   const path = ctx.partPath(part.fileName);
@@ -1883,13 +2096,7 @@ async function fetchPart(
   }
   let remaining = requests.length;
   const kind = part.kind === 'zip' ? 'zip' : 'tgz';
-  const ps = ctx.stats.part(part);
-  const meter = newReadMeter();
-  const fetchBase = ps.fetchBytesRead;
   const seqs = allSeqs ? bySeq.keys().toArray() : [];
-  const tracker = setInterval(() => {
-    ps.fetchBytesRead = fetchBase + meter.bytesRead;
-  }, 1000);
   try {
     await walkArchive(
       path,
@@ -1954,10 +2161,6 @@ async function fetchPart(
     }
     // I/O after the transport budget: resumable, never a row error
     throw new RunFailure(`Could not read ${part.fileName}: ${messageOf(error)}`);
-  } finally {
-    clearInterval(tracker);
-    ps.fetchBytesRead = fetchBase + meter.bytesRead;
-    ctx.stats.stats.fetchBytesRead += meter.bytesRead;
   }
 }
 
@@ -1985,6 +2188,19 @@ async function sampleFromFile(ctx: ReadContext, request: FetchRequest, path: str
     lease.release();
     await handle.close().catch(noop);
   }
+}
+
+/** The bytes a fetch of `part` for these requests (at their current occurrence) is expected to read */
+function plannedFetchBytes(part: ReadPartRow, requests: FetchRequest[]): number {
+  let planned = 0;
+  for (const request of requests) {
+    const occurrence = request.occurrences[request.cursor];
+    planned =
+      occurrence.kind === 'zip'
+        ? planned + occurrence.size
+        : Math.max(planned, occurrence.endOffset ?? Number(part.size ?? occurrence.size));
+  }
+  return planned;
 }
 
 /**
@@ -2015,23 +2231,6 @@ export async function fetchEntries(
   for (const request of pending) {
     request.occurrences = rankOccurrences(request.occurrences);
   }
-  // fetch progress: tgz up to the last needed entry (the part size without offsets), zip the requested entries
-  const totals = new Map<string, number>();
-  for (const request of pending) {
-    const occurrence = request.occurrences[0];
-    if (!occurrence) {
-      continue;
-    }
-    const part = parts.get(occurrence.partName);
-    const current = totals.get(occurrence.partName) ?? 0;
-    totals.set(
-      occurrence.partName,
-      occurrence.kind === 'zip'
-        ? current + occurrence.size
-        : Math.max(current, occurrence.endOffset ?? Number(part?.size ?? occurrence.size)),
-    );
-  }
-  ctx.stats.stats.fetchBytesTotal += totals.values().reduce((sum, value) => sum + value, 0);
 
   while (pending.length > 0) {
     const byPart = new Map<string, FetchRequest[]>();
@@ -2052,14 +2251,33 @@ export async function fetchEntries(
       list.push(request);
       byPart.set(occurrence.partName, list);
     }
+    // fetch progress: each part of this round adds what it is expected to read to the total up front (tgz up to its
+    // last needed entry, the part size without offsets; zip the requested entries); a fallback round adds its own
+    // parts when they are tried. A part that ends takes its real bytes in place of the plan (endFetch).
     const work = byPart
       .entries()
-      .map(([partName, list]) => ({ part: parts.get(partName)!, requests: list }))
+      .map(([partName, list]) => ({
+        part: parts.get(partName)!,
+        requests: list,
+        planned: plannedFetchBytes(parts.get(partName)!, list),
+        started: false,
+      }))
       .toArray();
-    if (work.length > 0) {
-      await readerPool(ctx, work, Math.min(ctx.limits.readers, work.length), (item, token) =>
-        fetchPart(ctx, item.part, item.requests, token),
-      );
+    ctx.stats.stats.fetchBytesTotal += work.reduce((sum, item) => sum + item.planned, 0);
+    try {
+      if (work.length > 0) {
+        await readerPool(ctx, work, Math.min(ctx.limits.readers, work.length), (item, token) => {
+          item.started = true;
+          return fetchPart(ctx, item.part, item.requests, item.planned, token);
+        });
+      }
+    } finally {
+      // parts an abort kept from starting leave the total
+      for (const item of work) {
+        if (!item.started) {
+          ctx.stats.stats.fetchBytesTotal = Math.max(0, ctx.stats.stats.fetchBytesTotal - item.planned);
+        }
+      }
     }
     const next: FetchRequest[] = [];
     for (const request of attempted) {

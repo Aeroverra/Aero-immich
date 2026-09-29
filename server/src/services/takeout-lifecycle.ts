@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { StorageCore } from 'src/cores/storage.core';
 import {
@@ -49,11 +50,17 @@ export interface LifecycleDeps {
   stagingFs?: StagingFs;
 }
 
+// skipped rows too: a cancel before single-pass and the adoption of a superseded run left targets on skipped rows;
+// the asset check of reclaim still keeps every file that is an asset's original
 const RECLAIMABLE = new Set<string>([
   TakeoutRunFileStatus.Planned,
   TakeoutRunFileStatus.Written,
   TakeoutRunFileStatus.Error,
+  TakeoutRunFileStatus.Skipped,
 ]);
+
+/** heartbeat of a cancel cleanup that holds the run, well inside the 60 s after which a lease counts as dead */
+const CANCEL_LEASE_RENEW_MS = 10_000;
 
 /** The caller rule of reclaim (single-pass design 5.4), one statement per row */
 export async function applyReclaim(repo: TakeoutRepository, row: ReclaimRow, result: ReclaimResult): Promise<void> {
@@ -81,14 +88,11 @@ export async function reclaimRunTargets(
   runId: string,
   store: StagingStore | null,
   how: 'stage' | 'unlink',
-  options: { includeSkipped?: boolean } = {},
 ): Promise<{ staged: number; unlinked: number; assets: number }> {
   const counts = { staged: 0, unlinked: 0, assets: 0 };
   const rows = await deps.takeout.getRunFilesWithTarget(runId);
   for (const row of rows) {
-    const reclaimable =
-      RECLAIMABLE.has(row.status) || (options.includeSkipped === true && row.status === TakeoutRunFileStatus.Skipped);
-    if (row.action !== TakeoutRunFileAction.Upload || !reclaimable) {
+    if (row.action !== TakeoutRunFileAction.Upload || !RECLAIMABLE.has(row.status)) {
       continue;
     }
     const reclaimRow: ReclaimRow = {
@@ -202,9 +206,12 @@ export async function queueAnalysis(deps: LifecycleDeps, exportId: string): Prom
 }
 
 /**
- * Cancel cleanup, used by the job and by the API for queued or stale runs (single-pass design 10.1): targets are
- * reclaimed into staging, assets created before the cancel get their jobs, planned rows become skipped 'cancelled',
- * parts of the run in 'reading' become 'partial', staging is kept (7 days), then the status check-and-set.
+ * Cancel cleanup, used by the job and by the API for queued or stale runs (single-pass design 10.1). First the fence
+ * (I10): the caller takes the run as `cancelling` under its own lease (the job passes the lease it holds), and gives
+ * up when another live worker holds it, so no file of a run is moved while a job finalizes it. Then targets are
+ * reclaimed into staging, assets created before the cancel get their jobs, planned rows without a file become
+ * skipped with the cancelled flag (their reason stays), parts of the run in 'reading' become 'partial', staging is
+ * kept (7 days), and the check-and-set to `cancelled` releases the lease. Returns false when nothing was done.
  */
 export async function cleanupCancelledRun(
   deps: LifecycleDeps,
@@ -215,6 +222,35 @@ export async function cleanupCancelledRun(
   if (!run || !options.from.includes(run.status)) {
     return false;
   }
+  const token = options.token ?? randomUUID();
+  if (!(await deps.takeout.claimRunForCancel(runId, options.from, token))) {
+    return false;
+  }
+  const keepAlive = setInterval(() => {
+    void deps.takeout.renewCancelLease(runId, token).catch(() => {});
+  }, CANCEL_LEASE_RENEW_MS);
+  let ok: boolean;
+  try {
+    ok = await cancelClaimedRun(deps, run, token, options.readStats);
+  } finally {
+    clearInterval(keepAlive);
+  }
+  if (!ok) {
+    return false;
+  }
+  await deps.job.removeJob(JobName.TakeoutRun, `${runId}/${run.attempt}`).catch(() => {});
+  await queueAnalysis(deps, run.exportId).catch(() => {});
+  await emitRun(deps, runId);
+  return true;
+}
+
+async function cancelClaimedRun(
+  deps: LifecycleDeps,
+  run: NonNullable<Awaited<ReturnType<TakeoutRepository['getRun']>>>,
+  token: string,
+  statsOfJob: unknown,
+): Promise<boolean> {
+  const runId = run.id;
   const folder = await deps.takeout.getFolder(run.userId);
   const targets = await deps.takeout.getRunFilesWithTarget(runId);
   const superseded = await deps.takeout.getRunsSupersededBy(runId);
@@ -227,15 +263,17 @@ export async function cleanupCancelledRun(
       deps.logger.warn(`Takeout cancel of run ${runId}: staging unavailable: ${String(error)}`);
     }
   }
-  await reclaimRunTargets(deps, runId, store, 'stage');
+  try {
+    await reclaimRunTargets(deps, runId, store, 'stage');
+  } catch (error) {
+    // the share stopped answering: rows that still point at a file stay open for the boot step, Resume or Discard
+    deps.logger.warn(`Takeout cancel of run ${runId}: reclaim failed, it is retried later: ${String(error)}`);
+  }
   await verifyAndRequeue(deps, await deps.takeout.getRunFilesForImport(runId));
-  await deps.takeout.updateRunFilesByStatus(runId, [TakeoutRunFileStatus.Planned, TakeoutRunFileStatus.Written], {
-    status: TakeoutRunFileStatus.Skipped,
-    reason: 'cancelled',
-  });
+  await deps.takeout.skipOpenRunFiles(runId);
   await deps.takeout.updatePartsOfRun(runId);
 
-  const readStats = normalizeReadStats(options.readStats ?? run.readStats);
+  const readStats = normalizeReadStats(statsOfJob ?? run.readStats);
   if (store) {
     const held = await store.bytesHeld();
     readStats.stagingBytes = held.bytes;
@@ -246,26 +284,19 @@ export async function cleanupCancelledRun(
     total: Number(run.bytesTotal),
     done: Number(run.bytesDone),
   });
-  const ok = await deps.takeout.finishRunCas(runId, options.from, options.token, TakeoutRunStatus.Cancelled, {
+  return deps.takeout.finishRunCas(runId, [TakeoutRunStatus.Cancelling], token, TakeoutRunStatus.Cancelled, {
     finishedAt: new Date(),
     counters: counters as unknown as object,
     readStats: readStats as unknown as object,
     currentFile: null,
   });
-  if (!ok) {
-    return false;
-  }
-  await deps.job.removeJob(JobName.TakeoutRun, `${runId}/${run.attempt}`).catch(() => {});
-  await queueAnalysis(deps, run.exportId).catch(() => {});
-  await emitRun(deps, runId);
-  return true;
 }
 
 /**
  * Discard (single-pass design 5.3): the staged files of a failed or cancelled run are removed now. Targets are
- * unlinked (never a file whose asset exists), created assets get their jobs, planned rows become skipped
- * 'cancelled', a failed run becomes cancelled. The directory is renamed to trash and deleted in the background; a
- * failed delete is left to the sweep and never fails the request.
+ * unlinked (never a file whose asset exists), also those a run it superseded left, created assets get their jobs,
+ * planned rows become skipped with the cancelled flag, a failed run becomes cancelled. The directory is renamed to
+ * trash and deleted in the background; a failed delete is left to the sweep and never fails the request.
  */
 export async function discardRunStaging(deps: LifecycleDeps, runId: string): Promise<boolean> {
   const run = await deps.takeout.getRun(runId);
@@ -279,11 +310,11 @@ export async function discardRunStaging(deps: LifecycleDeps, runId: string): Pro
       return false;
     }
     await reclaimRunTargets(deps, runId, null, 'unlink');
+    for (const old of await deps.takeout.getRunsSupersededBy(runId)) {
+      await reclaimRunTargets(deps, old.id, null, 'unlink');
+    }
     await verifyAndRequeue(deps, await deps.takeout.getRunFilesForImport(runId));
-    await deps.takeout.updateRunFilesByStatus(runId, [TakeoutRunFileStatus.Planned, TakeoutRunFileStatus.Written], {
-      status: TakeoutRunFileStatus.Skipped,
-      reason: 'cancelled',
-    });
+    await deps.takeout.skipOpenRunFiles(runId);
     const readStats = normalizeReadStats(fresh.readStats);
     readStats.stagingBytes = 0;
     readStats.stagingExpiresAt = null;

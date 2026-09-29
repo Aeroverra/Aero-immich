@@ -271,7 +271,8 @@ describe(FileSource.name, () => {
     const fs = new FakeFs(data);
     const memory = new ByteSemaphore(1_000_000);
     const src = await FileSource.open('x', { fs, chunk: 1000, depth: 4, memory });
-    expect(memory.held).toBe(4000);
+    // 4 reads in flight or buffered, plus the chunk the consumer holds while the readahead refills
+    expect(memory.held).toBe(5000);
     src.setRange(0, data.length);
     await readAll(src);
     src.destroy();

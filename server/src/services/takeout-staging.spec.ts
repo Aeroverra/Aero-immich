@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import {
   assertStagingPath,
+  COPY_TMP_SUFFIX,
   nodeStagingFs,
+  reclaimFile,
   ReclaimRow,
   runStagingDir,
   StagingFs,
@@ -243,8 +245,61 @@ describe(StagingStore.name, () => {
     expect(await readFile(target)).toEqual(content);
     expect(await exists(store.blobPath(h))).toBe(false);
     const listed = await readdir(join(s.uploadDir, 'ab', 'cd'));
-    expect(listed.filter((name) => name.includes('.tmp-'))).toEqual([]);
+    expect(listed).toEqual(['asset.mp4']);
     expect(crossed).toBeGreaterThanOrEqual(2);
+  });
+
+  it('copies across devices under a name derived from the target, so a copy cut by a crash is found (I4)', async () => {
+    const s = await setup();
+    const fs: StagingFs = {
+      ...nodeStagingFs,
+      rename: (async (from: string, to: string) => {
+        if (from.includes('.staging') && to.startsWith(s.uploadDir)) {
+          throw errno('EXDEV');
+        }
+        return nodeStagingFs.rename(from, to);
+      }) as StagingFs['rename'],
+    };
+    const store = await open(s, fs);
+    const content = randomBytesSeeded(500, 40);
+    const h = hex(sha1(content));
+    await store.writeBuffer(store.reserve(h)!, content);
+    const target = join(s.uploadDir, 'ab', 'cd', 'asset.mp4');
+    // an earlier attempt died during the copy
+    await mkdir(join(s.uploadDir, 'ab', 'cd'), { recursive: true });
+    await writeFile(`${target}${COPY_TMP_SUFFIX}`, 'partial');
+    expect(await store.moveTo(h, target, content.length)).toBe('moved');
+    expect(await readdir(join(s.uploadDir, 'ab', 'cd'))).toEqual(['asset.mp4']);
+
+    // a crash between the copy and the rename: reclaim of that target removes the partial copy too
+    await writeFile(`${target}${COPY_TMP_SUFFIX}`, 'partial');
+    await rm(target);
+    expect(
+      await reclaimFile(
+        nodeStagingFs,
+        reclaimRow({ targetPath: target, size: 500, checksum: sha1(content) }),
+        'unlink',
+        null,
+      ),
+    ).toBe('absent');
+    expect(await readdir(join(s.uploadDir, 'ab', 'cd'))).toEqual([]);
+  });
+
+  it('probes the upload folder under one name per run and removes a probe a crash left', async () => {
+    const s = await setup();
+    await mkdir(s.uploadDir, { recursive: true });
+    await writeFile(join(s.uploadDir, `.takeout-probe-${s.runId}`), '');
+    const seen: string[] = [];
+    const fs: StagingFs = {
+      ...nodeStagingFs,
+      rename: (async (from: string, to: string) => {
+        seen.push(to);
+        return nodeStagingFs.rename(from, to);
+      }) as StagingFs['rename'],
+    };
+    await open(s, fs);
+    expect(seen).toContain(join(s.uploadDir, `.takeout-probe-${s.runId}`));
+    expect(await readdir(s.uploadDir)).toEqual([]);
   });
 
   it('reports a vanished blob as missing', async () => {
@@ -329,6 +384,27 @@ describe(StagingStore.name, () => {
           'stage',
         ),
       ).toBe('unlinked');
+    });
+
+    it('never drops the only copy when the committed set of the store is stale', async () => {
+      const s = await setup();
+      // the job's store stages a blob; a second store opened on the same directory sees it committed
+      const job = await open(s);
+      const content = randomBytesSeeded(1000, 41);
+      const h = hex(sha1(content));
+      await job.writeBuffer(job.reserve(h)!, content);
+      const other = await open(s);
+      expect(other.hasBlob(h)).toBe(true);
+      // the job moves the blob to its target; the other store reclaims that target
+      const target = join(s.uploadDir, 'aa', 'bb', 'asset-2.jpg');
+      expect(await job.moveTo(h, target, content.length)).toBe('moved');
+      expect(
+        await other.reclaim(
+          reclaimRow({ targetPath: target, newAssetId: 'asset-2', size: 1000, checksum: sha1(content) }),
+          'stage',
+        ),
+      ).toBe('staged');
+      expect(await readFile(other.blobPath(h))).toEqual(content);
     });
 
     it('unlinks when asked to, and reports an absent target', async () => {

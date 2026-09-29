@@ -8,6 +8,7 @@ import { TakeoutLargerVersionAction } from 'src/dtos/takeout.dto';
 import { JobName, TakeoutCatalogStatus, TakeoutRunFileAction, TakeoutRunFileStatus, TakeoutRunStatus } from 'src/enum';
 import { runStagingDir, STAGING_TTL_MS, stagingRoot } from 'src/services/takeout-staging';
 import { TakeoutService } from 'src/services/takeout.service';
+import { countersFromRows } from 'src/takeout';
 import { authStub } from 'test/fixtures/auth.stub';
 import { TakeoutMemoryRepository } from 'test/fixtures/takeout-memory.repository';
 import { newTestService, ServiceMocks } from 'test/utils';
@@ -16,6 +17,29 @@ import { afterEach, beforeEach, describe, expect, it, vitest } from 'vitest';
 const userId = authStub.admin.user.id;
 const auth = authStub.admin;
 const HOUR = 3_600_000;
+
+// a run file row that points at a file under upload/
+const targetRow = (runId: string, target: string, over: Record<string, unknown> = {}) => ({
+  runId,
+  seq: 0,
+  takeoutPath: 'a',
+  size: 7,
+  checksum: Buffer.alloc(20),
+  fileKind: 'image',
+  action: TakeoutRunFileAction.Upload,
+  status: TakeoutRunFileStatus.Error,
+  targetPath: target,
+  newAssetId: randomUUID(),
+  entrySeq: 0,
+  ...over,
+});
+
+async function writeUploadFile(mediaLocation: string, name: string) {
+  const target = join(mediaLocation, 'upload', userId, name);
+  await mkdir(join(mediaLocation, 'upload', userId), { recursive: true });
+  await writeFile(target, 'content');
+  return target;
+}
 
 describe(TakeoutService.name, () => {
   let sut: TakeoutService;
@@ -341,6 +365,46 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.TakeoutRun, data: { runId: run.id, attempt: 1 } });
     });
 
+    it("keeps the planner's reason of the rows a cancel skipped, and rebuilds the one an old cancel overwrote", async () => {
+      const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Cancelled });
+      const row = (seq: number, over: Record<string, unknown>) => ({
+        runId: run.id,
+        seq,
+        takeoutPath: `p${seq}`,
+        size: 1,
+        fileKind: 'image',
+        status: TakeoutRunFileStatus.Skipped,
+        ...over,
+      });
+      await repo.insertRunFiles([
+        row(0, {
+          action: TakeoutRunFileAction.Upload,
+          reason: 'server had a smaller version',
+          smallerAssetId: randomUUID(),
+          fallbacks: ['cancelled'],
+        }),
+        row(1, {
+          action: TakeoutRunFileAction.ServerDuplicate,
+          reason: 'already on the server (in trash)',
+          fallbacks: ['zoneAssumed', 'cancelled'],
+        }),
+        // skipped 'cancelled' by the importer before single-pass
+        row(2, { action: TakeoutRunFileAction.Upload, reason: 'cancelled', smallerAssetId: randomUUID() }),
+        row(3, { action: TakeoutRunFileAction.BetterOnServer, reason: 'cancelled' }),
+        row(4, { action: TakeoutRunFileAction.Upload, reason: 'cancelled' }),
+      ]);
+      await sut.resumeRun(auth, run.id);
+      expect(repo.runFiles.map((f) => [f.status, f.reason, f.fallbacks])).toEqual([
+        [TakeoutRunFileStatus.Planned, 'server had a smaller version', []],
+        [TakeoutRunFileStatus.Planned, 'already on the server (in trash)', ['zoneAssumed']],
+        [TakeoutRunFileStatus.Planned, 'server had a smaller version', []],
+        [TakeoutRunFileStatus.Planned, 'the server already has a larger version', []],
+        [TakeoutRunFileStatus.Planned, null, []],
+      ]);
+      const counters = countersFromRows(await repo.getCounterRows(run.id), { total: 0, done: 0 });
+      expect(counters.result.largerUploaded).toBe(2);
+    });
+
     it('refuses a superseded run', async () => {
       const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Cancelled, supersededBy: randomUUID() });
       await expect(sut.resumeRun(auth, run.id)).rejects.toThrow('A newer import took over this one');
@@ -375,6 +439,55 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(result.status).toBe(TakeoutRunStatus.Cancelling);
       expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunCancel', { runId: run.id });
       expect(await readdir(stagingRoot(folder))).toEqual([run.id]);
+    });
+
+    it('never cleans up a queued run whose live job holds it: it asks the job to stop (I10)', async () => {
+      // a resumed run stays queued while its job repairs and re-checks, with the lease held
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Queued,
+        leaseToken: 'job-token',
+        heartbeatAt: new Date(),
+        hasStaging: true,
+      });
+      const target = join(dir, 'upload', userId, 'moved.jpg');
+      await mkdir(join(dir, 'upload', userId), { recursive: true });
+      await writeFile(target, 'the only copy');
+      await repo.insertRunFiles([
+        {
+          runId: run.id,
+          seq: 0,
+          takeoutPath: 'a',
+          size: 13,
+          checksum: Buffer.alloc(20, 1),
+          fileKind: 'image',
+          action: TakeoutRunFileAction.Upload,
+          status: TakeoutRunFileStatus.Written,
+          targetPath: target,
+          newAssetId: randomUUID(),
+          entrySeq: 0,
+        },
+      ]);
+      const result = await sut.cancelRun(auth, run.id);
+      expect(result.status).toBe(TakeoutRunStatus.Cancelling);
+      expect(repo.runs[0].leaseToken).toBe('job-token');
+      expect(repo.runFiles[0]).toMatchObject({ status: TakeoutRunFileStatus.Written, targetPath: target });
+      expect(await stat(target)).toBeTruthy();
+      expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunCancel', { runId: run.id });
+    });
+
+    it('takes over the run of a dead job (heartbeat older than 60 s) and cleans it up', async () => {
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Importing,
+        leaseToken: 'dead-job',
+        heartbeatAt: new Date(Date.now() - 2 * 60_000),
+      });
+      const result = await sut.cancelRun(auth, run.id);
+      expect(result.status).toBe(TakeoutRunStatus.Cancelled);
+      expect(repo.runs[0].leaseToken).toBeNull();
     });
 
     it('rejects cancelling a completed run', async () => {
@@ -443,6 +556,67 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(repo.runFiles[0].targetPath).toBeNull();
       await expect(stat(target)).rejects.toThrow();
       expect(sweep).toHaveBeenCalled();
+    });
+
+    it('never picks up a run again whose target is the original of an asset, and never recreates its staging', async () => {
+      // a Discarded run: an error row whose asset was created before a later step failed keeps its file
+      const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Cancelled, hasStaging: false });
+      const target = await writeUploadFile(dir, 'original.jpg');
+      await repo.insertRunFiles([targetRow(run.id, target)]);
+      repo.addAsset({
+        id: repo.runFiles[0].newAssetId,
+        ownerId: userId,
+        checksum: Buffer.alloc(20),
+        originalPath: target,
+      });
+      vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
+      for (let boot = 0; boot < 2; boot++) {
+        await sut.recoverAtBoot();
+        expect(repo.runs[0].hasStaging).toBe(false);
+        await expect(stat(runStagingDir(folder, run.id))).rejects.toThrow();
+        expect(await stat(target)).toBeTruthy();
+      }
+      await expect(repo.getStoppedRunsWithTargets()).resolves.toEqual([]);
+    });
+
+    it('unlinks the stray targets of a run without staging instead of giving it a staging directory', async () => {
+      const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Cancelled, hasStaging: false });
+      const target = await writeUploadFile(dir, 'stray.jpg');
+      await repo.insertRunFiles([targetRow(run.id, target, { status: TakeoutRunFileStatus.Skipped })]);
+      vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
+      await sut.recoverAtBoot();
+      await expect(stat(target)).rejects.toThrow();
+      expect(repo.runFiles[0].targetPath).toBeNull();
+      expect(repo.runs[0].hasStaging).toBe(false);
+      await expect(stat(runStagingDir(folder, run.id))).rejects.toThrow();
+    });
+
+    it('unlinks the asset-less error targets an old completed run left under upload/ (I4)', async () => {
+      const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Completed });
+      const target = await writeUploadFile(dir, 'orphan.jpg');
+      await repo.insertRunFiles([targetRow(run.id, target, { entrySeq: null })]);
+      vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
+      await sut.recoverAtBoot();
+      await expect(stat(target)).rejects.toThrow();
+      expect(repo.runFiles[0].targetPath).toBeNull();
+      expect(repo.runs[0].hasStaging).toBe(false);
+      await expect(repo.getStoppedRunsWithTargets()).resolves.toEqual([]);
+    });
+
+    it('leaves the targets of a run resumed after the listing to its job', async () => {
+      const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Failed, hasStaging: true });
+      const target = await writeUploadFile(dir, 'resumed.jpg');
+      await repo.insertRunFiles([targetRow(run.id, target, { status: TakeoutRunFileStatus.Written })]);
+      const list = repo.getStoppedRunsWithTargets.bind(repo);
+      vitest.spyOn(repo, 'getStoppedRunsWithTargets').mockImplementation(async () => {
+        const listed = await list();
+        await repo.requeueRun(run.id, 1);
+        return listed;
+      });
+      vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
+      await sut.recoverAtBoot();
+      expect(await stat(target)).toBeTruthy();
+      expect(repo.runFiles[0].targetPath).toBe(target);
     });
 
     it('re-queues running runs', async () => {

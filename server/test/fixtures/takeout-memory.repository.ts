@@ -1,10 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { AssetType, TakeoutCatalogStatus, TakeoutEntryKind, TakeoutRunFileStatus, TakeoutRunStatus } from 'src/enum';
+import {
+  AssetType,
+  TakeoutCatalogStatus,
+  TakeoutEntryKind,
+  TakeoutRunFileAction,
+  TakeoutRunFileStatus,
+  TakeoutRunStatus,
+} from 'src/enum';
 import {
   CachedEntryRow,
   CounterRowResult,
   RUN_FILE_INSERT_CHUNK,
   TAKEOUT_ACTIVE_RUN_STATUSES,
+  TAKEOUT_CANCELLED_FLAG,
   TAKEOUT_RUNNING_RUN_STATUSES,
 } from 'src/repositories/takeout.repository';
 
@@ -692,6 +700,34 @@ export class TakeoutMemoryRepository {
     return Promise.resolve(true);
   }
 
+  private leaseStale(run: Row) {
+    return !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > 60_000;
+  }
+
+  claimRunForCancel(id: string, from: TakeoutRunStatus[], token: string) {
+    this.count('claimRunForCancel');
+    const run = this.runs.find((r) => r.id === id);
+    if (
+      !run ||
+      !from.includes(run.status) ||
+      !(run.leaseToken === null || run.leaseToken === token || this.leaseStale(run))
+    ) {
+      return Promise.resolve(false);
+    }
+    Object.assign(run, { status: TakeoutRunStatus.Cancelling, leaseToken: token, heartbeatAt: new Date() });
+    this.statusLog.push(TakeoutRunStatus.Cancelling);
+    return Promise.resolve(true);
+  }
+
+  renewCancelLease(id: string, token: string) {
+    const run = this.runs.find((r) => r.id === id);
+    if (!run || run.leaseToken !== token || run.status !== TakeoutRunStatus.Cancelling) {
+      return Promise.resolve(false);
+    }
+    run.heartbeatAt = new Date();
+    return Promise.resolve(true);
+  }
+
   requestCancel(id: string) {
     const run = this.runs.find((r) => r.id === id);
     if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
@@ -712,8 +748,7 @@ export class TakeoutMemoryRepository {
     if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
       return Promise.resolve(false);
     }
-    const stale = !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > 60_000;
-    if (run.leaseToken === null || run.leaseToken === token || stale) {
+    if (run.leaseToken === null || run.leaseToken === token || this.leaseStale(run)) {
       run.leaseToken = token;
       run.heartbeatAt = new Date();
       return Promise.resolve(true);
@@ -738,10 +773,38 @@ export class TakeoutMemoryRepository {
       finishedAt: null,
       attempt,
     });
+    const resumable = new Set<string>([
+      TakeoutRunFileAction.Upload,
+      TakeoutRunFileAction.ServerDuplicate,
+      TakeoutRunFileAction.BetterOnServer,
+      TakeoutRunFileAction.AlreadyProcessed,
+    ]);
     for (const file of this.runFiles) {
-      if (file.runId === id && file.status === TakeoutRunFileStatus.Skipped && file.reason === 'cancelled') {
-        Object.assign(file, { status: TakeoutRunFileStatus.Planned, reason: null, targetPath: null });
+      const flagged = (file.fallbacks ?? []).includes(TAKEOUT_CANCELLED_FLAG);
+      if (
+        file.runId !== id ||
+        file.status !== TakeoutRunFileStatus.Skipped ||
+        !resumable.has(file.action) ||
+        !(flagged || file.reason === 'cancelled')
+      ) {
+        continue;
       }
+      let reason = file.reason;
+      if (reason === 'cancelled') {
+        reason =
+          file.action === TakeoutRunFileAction.Upload && file.smallerAssetId
+            ? 'server had a smaller version'
+            : file.action === TakeoutRunFileAction.ServerDuplicate
+              ? 'already on the server'
+              : file.action === TakeoutRunFileAction.BetterOnServer
+                ? 'the server already has a larger version'
+                : null;
+      }
+      Object.assign(file, {
+        status: TakeoutRunFileStatus.Planned,
+        reason,
+        fallbacks: (file.fallbacks ?? []).filter((flag: string) => flag !== TAKEOUT_CANCELLED_FLAG),
+      });
     }
     return Promise.resolve(true);
   }
@@ -761,19 +824,28 @@ export class TakeoutMemoryRepository {
   }
 
   getStoppedRunsWithTargets() {
+    const strayTargets = (runId: string, statuses: string[]) =>
+      this.runFiles.some(
+        (f) =>
+          f.runId === runId &&
+          f.action === TakeoutRunFileAction.Upload &&
+          f.targetPath &&
+          statuses.includes(f.status) &&
+          this.assets.every((asset) => asset.id !== f.newAssetId),
+      );
     return Promise.resolve(
       this.runs
         .filter(
           (r) =>
-            [TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled].includes(r.status) &&
-            this.runFiles.some(
-              (f) =>
-                f.runId === r.id &&
-                f.targetPath &&
-                [TakeoutRunFileStatus.Planned, TakeoutRunFileStatus.Written, TakeoutRunFileStatus.Error].includes(
-                  f.status,
-                ),
-            ),
+            !r.supersededBy &&
+            (([TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled].includes(r.status) &&
+              strayTargets(r.id, [
+                TakeoutRunFileStatus.Planned,
+                TakeoutRunFileStatus.Written,
+                TakeoutRunFileStatus.Error,
+                TakeoutRunFileStatus.Skipped,
+              ])) ||
+              (r.status === TakeoutRunStatus.Completed && strayTargets(r.id, [TakeoutRunFileStatus.Error]))),
         )
         .map((r) => clone(r)),
     );
@@ -855,10 +927,20 @@ export class TakeoutMemoryRepository {
     return Promise.resolve();
   }
 
-  updateRunFilesByStatus(runId: string, statuses: string[], patch: Row) {
+  skipOpenRunFiles(runId: string) {
     for (const file of this.runFiles) {
-      if (file.runId === runId && statuses.includes(file.status)) {
-        Object.assign(file, patch);
+      if (
+        file.runId === runId &&
+        [TakeoutRunFileStatus.Planned, TakeoutRunFileStatus.Written].includes(file.status) &&
+        !file.targetPath
+      ) {
+        Object.assign(file, {
+          status: TakeoutRunFileStatus.Skipped,
+          fallbacks: [
+            ...(file.fallbacks ?? []).filter((flag: string) => flag !== TAKEOUT_CANCELLED_FLAG),
+            TAKEOUT_CANCELLED_FLAG,
+          ],
+        });
       }
     }
     return Promise.resolve();

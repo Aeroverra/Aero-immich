@@ -489,6 +489,36 @@ where
 returning
   "id"
 
+-- TakeoutRepository.claimRunForCancel
+update "takeout_run"
+set
+  "status" = $1,
+  "leaseToken" = $2,
+  "heartbeatAt" = now(),
+  "updatedAt" = now()
+where
+  "id" = $3
+  and "status" in ($4)
+  and (
+    "leaseToken" is null
+    or "leaseToken" = $5
+    or "heartbeatAt" is null
+    or "heartbeatAt" < now() - interval '60 seconds'
+  )
+returning
+  "id"
+
+-- TakeoutRepository.renewCancelLease
+update "takeout_run"
+set
+  "heartbeatAt" = now()
+where
+  "id" = $1
+  and "leaseToken" = $2
+  and "status" = $3
+returning
+  "id"
+
 -- TakeoutRepository.requestCancel
 update "takeout_run"
 set
@@ -570,16 +600,52 @@ select
 from
   "takeout_run"
 where
-  "status" in ($1, $2)
-  and exists (
-    select
-      "takeout_run_file"."id"
-    from
-      "takeout_run_file"
-    where
-      "takeout_run_file"."runId" = "takeout_run"."id"
-      and "takeout_run_file"."targetPath" is not null
-      and "takeout_run_file"."status" in ($3, $4, $5)
+  "supersededBy" is null
+  and (
+    (
+      "takeout_run"."status" in ($1, $2)
+      and exists (
+        select
+          "takeout_run_file"."id"
+        from
+          "takeout_run_file"
+        where
+          "takeout_run_file"."runId" = "takeout_run"."id"
+          and "takeout_run_file"."action" = $3
+          and "takeout_run_file"."targetPath" is not null
+          and "takeout_run_file"."status" in ($4, $5, $6, $7)
+          and not exists (
+            select
+              "asset"."id"
+            from
+              "asset"
+            where
+              "asset"."id" = "takeout_run_file"."newAssetId"
+          )
+      )
+    )
+    or (
+      "takeout_run"."status" = $8
+      and exists (
+        select
+          "takeout_run_file"."id"
+        from
+          "takeout_run_file"
+        where
+          "takeout_run_file"."runId" = "takeout_run"."id"
+          and "takeout_run_file"."action" = $9
+          and "takeout_run_file"."targetPath" is not null
+          and "takeout_run_file"."status" in ($10)
+          and not exists (
+            select
+              "asset"."id"
+            from
+              "asset"
+            where
+              "asset"."id" = "takeout_run_file"."newAssetId"
+          )
+      )
+    )
   )
 
 -- TakeoutRepository.updateRunFile
@@ -589,14 +655,16 @@ set
 where
   "id" = $1
 
--- TakeoutRepository.updateRunFilesByStatus
+-- TakeoutRepository.skipOpenRunFiles
 update "takeout_run_file"
 set
   "status" = $1,
+  "fallbacks" = array_append(array_remove("fallbacks", $2::text), $3::text),
   "updatedAt" = now()
 where
-  "runId" = $2
-  and "status" in ($3)
+  "runId" = $4
+  and "status" in ($5, $6)
+  and "targetPath" is null
 
 -- TakeoutRepository.getRunFilesForImport
 select

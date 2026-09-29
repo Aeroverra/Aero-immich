@@ -39,7 +39,7 @@ export interface FileSourceOptions {
   backoffMs?: number[];
   /** expected in-run fingerprint; a mismatch at open or after a reopen is ArchiveChangedError */
   fingerprint?: FileFingerprint | null;
-  /** readahead memory (depth x chunk) is taken from this budget for the life of the source */
+  /** readahead memory ((depth + 1) x chunk) is taken from this budget for the life of the source */
   memory?: ByteSemaphore | null;
   signal?: AbortSignal;
   fs?: FileSourceFs;
@@ -208,9 +208,11 @@ export class FileSource {
     }
     let lease: ByteLease | null = null;
     if (options.memory) {
+      // depth reads in flight or buffered, plus the chunk next() handed to the consumer, which it still holds while
+      // the readahead refills (the zip puller's current chunk, the chunk gunzip inflates)
       const depth = Math.max(1, options.depth ?? 4);
       try {
-        lease = await options.memory.acquire(depth * (options.chunk ?? 4 * MiB), options.signal);
+        lease = await options.memory.acquire((depth + 1) * (options.chunk ?? 4 * MiB), options.signal);
       } catch (error) {
         await fh.close().catch(() => {});
         throw error;

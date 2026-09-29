@@ -38,6 +38,15 @@ export const TAKEOUT_ACTIVE_RUN_STATUSES = [...TAKEOUT_RUNNING_RUN_STATUSES, Tak
 /** plan inserts per statement: 1000 rows x 25 columns stays far below the 65534 parameters postgres.js allows */
 export const RUN_FILE_INSERT_CHUNK = 1000;
 
+/**
+ * Row flag of a planned or written row that a cancel or Discard skipped. The row keeps the planner's reason, so a
+ * Resume (which plans the row again and drops the flag) keeps the report and the counters (largerUploaded) intact.
+ */
+export const TAKEOUT_CANCELLED_FLAG = 'cancelled';
+
+/** a lease whose heartbeat is older than this belongs to a dead worker (takeLease, claimRunForCancel) */
+const STALE_LEASE = sql.raw<Date>("now() - interval '60 seconds'");
+
 export interface CounterRowResult {
   action: string;
   status: string;
@@ -807,6 +816,45 @@ export class TakeoutRepository {
     return !!row;
   }
 
+  /**
+   * The fence of every cancel cleanup (I10): the caller takes the run, as `cancelling` with its own lease, before it
+   * touches a file or a row. Refused while another live worker (a job, or another cleanup) holds the lease; a lease
+   * whose heartbeat is older than 60 s is taken over.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [TakeoutRunStatus.Queued], DummyValue.UUID] })
+  async claimRunForCancel(id: string, from: TakeoutRunStatus[], token: string): Promise<boolean> {
+    const row = await this.db
+      .updateTable('takeout_run')
+      .set({ status: TakeoutRunStatus.Cancelling, leaseToken: token, heartbeatAt: sql`now()`, updatedAt: sql`now()` })
+      .where('id', '=', id)
+      .where('status', 'in', from)
+      .where((eb) =>
+        eb.or([
+          eb('leaseToken', 'is', null),
+          eb('leaseToken', '=', token),
+          eb('heartbeatAt', 'is', null),
+          eb('heartbeatAt', '<', STALE_LEASE),
+        ]),
+      )
+      .returning('id')
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /** Heartbeat of a cancel cleanup that holds the run (claimRunForCancel), so nobody takes it over meanwhile */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async renewCancelLease(id: string, token: string): Promise<boolean> {
+    const row = await this.db
+      .updateTable('takeout_run')
+      .set({ heartbeatAt: sql`now()` })
+      .where('id', '=', id)
+      .where('leaseToken', '=', token)
+      .where('status', '=', TakeoutRunStatus.Cancelling)
+      .returning('id')
+      .executeTakeFirst();
+    return !!row;
+  }
+
   /** Cancel request of the API: a running run becomes cancelling (the job holding the lease cleans up) */
   @GenerateSql({ params: [DummyValue.UUID] })
   async requestCancel(id: string): Promise<boolean> {
@@ -846,11 +894,7 @@ export class TakeoutRepository {
       .where('id', '=', runId)
       .where('status', 'in', TAKEOUT_RUNNING_RUN_STATUSES)
       .where((eb) =>
-        eb.or([
-          eb('leaseToken', 'is', null),
-          eb('leaseToken', '=', token),
-          eb('heartbeatAt', '<', sql.raw<Date>("now() - interval '60 seconds'")),
-        ]),
+        eb.or([eb('leaseToken', 'is', null), eb('leaseToken', '=', token), eb('heartbeatAt', '<', STALE_LEASE)]),
       )
       .returning('id')
       .executeTakeFirst();
@@ -880,13 +924,26 @@ export class TakeoutRepository {
       if (!row) {
         return false;
       }
-      // rows a cancel skipped are planned again (their files were reclaimed into staging)
+      // rows a cancel skipped are planned again with the planner's reason; a target left on a row stays, so the
+      // repair step of the job reclaims it. Rows skipped by the importer before single-pass lost their reason to
+      // 'cancelled': it is rebuilt from the row.
       await tx
         .updateTable('takeout_run_file')
-        .set({ status: TakeoutRunFileStatus.Planned, reason: null, targetPath: null, updatedAt: sql`now()` })
+        .set({
+          status: TakeoutRunFileStatus.Planned,
+          fallbacks: sql<string[]>`array_remove("fallbacks", ${TAKEOUT_CANCELLED_FLAG}::text)`,
+          reason: sql<string | null>`case when "reason" = 'cancelled' then (case
+            when "action" = ${TakeoutRunFileAction.Upload} and "smallerAssetId" is not null then 'server had a smaller version'
+            when "action" = ${TakeoutRunFileAction.ServerDuplicate} then 'already on the server'
+            when "action" = ${TakeoutRunFileAction.BetterOnServer} then 'the server already has a larger version'
+            end) else "reason" end`,
+          updatedAt: sql`now()`,
+        })
         .where('runId', '=', id)
         .where('status', '=', TakeoutRunFileStatus.Skipped)
-        .where('reason', '=', 'cancelled')
+        .where((eb) =>
+          eb.or([eb('reason', '=', 'cancelled'), sql<boolean>`${TAKEOUT_CANCELLED_FLAG}::text = any("fallbacks")`]),
+        )
         .where('action', 'in', [
           TakeoutRunFileAction.Upload,
           TakeoutRunFileAction.ServerDuplicate,
@@ -912,27 +969,55 @@ export class TakeoutRepository {
     return !!row;
   }
 
-  /** Failed or cancelled runs that still hold files under upload/ (boot reclaim) */
+  /**
+   * Final runs that still hold asset-less files under upload/ (boot reclaim): failed or cancelled runs with such a
+   * target on any open, error or skipped row, and completed runs with one on an error row (the importer before
+   * single-pass left them). A target whose asset exists is that asset's original and never selects a run, so a run
+   * is picked up once. Superseded runs are left to the run that adopted them.
+   */
   @GenerateSql()
   getStoppedRunsWithTargets() {
     return this.db
       .selectFrom('takeout_run')
       .selectAll()
-      .where('status', 'in', [TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled])
-      .where((eb) =>
-        eb.exists(
-          eb
-            .selectFrom('takeout_run_file')
-            .select('takeout_run_file.id')
-            .whereRef('takeout_run_file.runId', '=', 'takeout_run.id')
-            .where('takeout_run_file.targetPath', 'is not', null)
-            .where('takeout_run_file.status', 'in', [
+      .where('supersededBy', 'is', null)
+      .where((eb) => {
+        const strayTargets = (statuses: TakeoutRunFileStatus[]) =>
+          eb.exists(
+            eb
+              .selectFrom('takeout_run_file')
+              .select('takeout_run_file.id')
+              .whereRef('takeout_run_file.runId', '=', 'takeout_run.id')
+              .where('takeout_run_file.action', '=', TakeoutRunFileAction.Upload)
+              .where('takeout_run_file.targetPath', 'is not', null)
+              .where('takeout_run_file.status', 'in', statuses)
+              .where((inner) =>
+                inner.not(
+                  inner.exists(
+                    inner
+                      .selectFrom('asset')
+                      .select('asset.id')
+                      .whereRef('asset.id', '=', 'takeout_run_file.newAssetId'),
+                  ),
+                ),
+              ),
+          );
+        return eb.or([
+          eb.and([
+            eb('takeout_run.status', 'in', [TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled]),
+            strayTargets([
               TakeoutRunFileStatus.Planned,
               TakeoutRunFileStatus.Written,
               TakeoutRunFileStatus.Error,
+              TakeoutRunFileStatus.Skipped,
             ]),
-        ),
-      )
+          ]),
+          eb.and([
+            eb('takeout_run.status', '=', TakeoutRunStatus.Completed),
+            strayTargets([TakeoutRunFileStatus.Error]),
+          ]),
+        ]);
+      })
       .execute();
   }
 
@@ -1000,20 +1085,24 @@ export class TakeoutRepository {
       .execute();
   }
 
-  /** Rows of a run in a status move to another (cancel: planned -> skipped 'cancelled') */
-  @GenerateSql({
-    params: [DummyValue.UUID, [TakeoutRunFileStatus.Planned], { status: TakeoutRunFileStatus.Skipped }],
-  })
-  async updateRunFilesByStatus(
-    runId: string,
-    statuses: TakeoutRunFileStatus[],
-    patch: Updateable<TakeoutRunFileTable>,
-  ) {
+  /**
+   * Cancel and Discard: planned and written rows that hold no file become skipped with the cancelled flag and keep
+   * their reason. A row that still points at a file stays open, so the boot step, a Resume or a Discard reclaims it.
+   */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async skipOpenRunFiles(runId: string) {
     await this.db
       .updateTable('takeout_run_file')
-      .set({ ...patch, updatedAt: sql`now()` })
+      .set({
+        status: TakeoutRunFileStatus.Skipped,
+        fallbacks: sql<
+          string[]
+        >`array_append(array_remove("fallbacks", ${TAKEOUT_CANCELLED_FLAG}::text), ${TAKEOUT_CANCELLED_FLAG}::text)`,
+        updatedAt: sql`now()`,
+      })
       .where('runId', '=', runId)
-      .where('status', 'in', statuses)
+      .where('status', 'in', [TakeoutRunFileStatus.Planned, TakeoutRunFileStatus.Written])
+      .where('targetPath', 'is', null)
       .execute();
   }
 

@@ -14,6 +14,11 @@ export const STAGING_DIR = '.staging';
 export const STAGING_TTL_MS = 7 * 24 * 3_600_000;
 const TMP_DIR = '.tmp';
 const TRASH_PREFIX = '.trash-';
+/**
+ * The cross-device copy writes next to its destination under this suffix, a name derived from the target: a copy cut
+ * by a crash is found and removed by whoever reclaims that target (design I4), never left behind under a random name.
+ */
+export const COPY_TMP_SUFFIX = '.takeout-tmp';
 const UUID_RE = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const HEX40_RE = /^[\da-f]{40}$/;
 const MiB = 1024 * 1024;
@@ -214,6 +219,9 @@ export class StagingStore {
       for (const name of await fs.readdir(join(dir, shard))) {
         if (HEX40_RE.test(name) && name.startsWith(shard)) {
           store.committed.set(name, null);
+        } else if (name.endsWith(COPY_TMP_SUFFIX)) {
+          // a cross-device copy back into staging cut by a crash
+          await fs.unlink(join(dir, shard, name)).catch(noop);
         }
       }
     }
@@ -241,7 +249,9 @@ export class StagingStore {
     await handle.close();
     try {
       await this.fs.mkdir(this.uploadUserDir, { recursive: true });
-      const target = join(this.uploadUserDir, `.takeout-probe-${randomUUID()}`);
+      // one fixed name per run: a probe left by a crash between the rename and the unlink goes at the next open
+      const target = join(this.uploadUserDir, `.takeout-probe-${this.runId}`);
+      await this.fs.unlink(target).catch(noop);
       await this.fs.rename(probe, target);
       await this.fs.unlink(target).catch(noop);
     } catch (error) {
@@ -415,10 +425,12 @@ export class StagingStore {
     }
   }
 
-  /** A partial copy is never at the target path: copy to a temp name, fsync, rename */
+  /** A partial copy is never at the target path: copy to the target's temp name, fsync, rename */
   private async copyAcross(src: string, dst: string): Promise<void> {
-    const tmp = `${dst}.tmp-${randomUUID()}`;
+    const tmp = `${dst}${COPY_TMP_SUFFIX}`;
     try {
+      // a copy an earlier attempt left there when it was cut
+      await this.fs.unlink(tmp).catch(noop);
       await this.fs.copyFile(src, tmp, constants.COPYFILE_FICLONE);
       const handle = await this.fs.open(tmp, 'r+');
       try {
@@ -510,6 +522,20 @@ export class StagingStore {
   }
 }
 
+async function unlinkIfPresent(fs: StagingFs, path: string): Promise<void> {
+  await fs.unlink(path).catch((error: unknown) => {
+    if (codeOf(error) !== 'ENOENT') {
+      throw error;
+    }
+  });
+}
+
+/** Remove an asset-less target and the cross-device copy of it a crash may have left (design I4) */
+export async function unlinkTarget(path: string, fs: StagingFs = nodeStagingFs): Promise<void> {
+  await unlinkIfPresent(fs, `${path}${COPY_TMP_SUFFIX}`);
+  await unlinkIfPresent(fs, path);
+}
+
 /** reclaim without an open store: 'unlink' always, 'stage' when a store is given */
 export async function reclaimFile(
   fs: StagingFs,
@@ -521,6 +547,8 @@ export async function reclaimFile(
   if (!path) {
     return 'absent';
   }
+  // a cross-device copy to this target cut by a crash
+  await unlinkIfPresent(fs, `${path}${COPY_TMP_SUFFIX}`);
   const st = await fs.stat(path).catch(() => null);
   if (!st) {
     return 'absent';
@@ -534,16 +562,19 @@ export async function reclaimFile(
     complete = row.status === 'written' && actual?.equals(row.checksum!) === true;
   }
   const hex = row.checksum ? row.checksum.toString('hex') : null;
-  if (how === 'unlink' || !store || !complete || !hex || store.hasBlob(hex)) {
-    await fs.unlink(path).catch((error: unknown) => {
-      if (codeOf(error) !== 'ENOENT') {
-        throw error;
-      }
-    });
-    return 'unlinked';
+  // the committed set is a snapshot: the target is dropped as a second copy only when the blob is on disk now
+  if (
+    how === 'stage' &&
+    store &&
+    complete &&
+    hex &&
+    !(store.hasBlob(hex) && (await store.hasBlobWithSize(hex, size)))
+  ) {
+    await store.adoptTarget(path, hex, size);
+    return 'staged';
   }
-  await store.adoptTarget(path, hex, size);
-  return 'staged';
+  await unlinkIfPresent(fs, path);
+  return 'unlinked';
 }
 
 /** Rename <userFolder>/.staging/<name> to .trash-<name>-<n> and delete it in the background. Never throws. */
