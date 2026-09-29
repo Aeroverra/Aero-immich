@@ -125,7 +125,6 @@ async function harness(
     signal: controller.signal,
   });
   await ctx.prepareReading({
-    deletedSkip: false,
     quotaLimit: options.quotaLimit ?? null,
     quotaUsage: 0,
     statfs: options.statfs ?? (() => Promise.resolve(1e12)),
@@ -469,7 +468,6 @@ describe('reading: resume', () => {
       signal: new AbortController().signal,
     });
     await ctx.prepareReading({
-      deletedSkip: false,
       quotaLimit: null,
       quotaUsage: 0,
       statfs: () => Promise.resolve(1e12),

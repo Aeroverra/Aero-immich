@@ -5,11 +5,15 @@ import { gzipSync } from 'node:zlib';
 import sharp from 'sharp';
 import { StorageCore } from 'src/cores/storage.core';
 import {
+  AlbumUserRole,
+  AssetStatus,
+  DeletedReimportMode,
   JobStatus,
   TakeoutCatalogStatus,
   TakeoutRunFileAction,
   TakeoutRunFileStatus,
   TakeoutRunStatus,
+  UserMetadataKey,
 } from 'src/enum';
 import { LifecycleDeps, cleanupCancelledRun, discardRunStaging } from 'src/services/takeout-lifecycle';
 import {
@@ -196,6 +200,39 @@ async function plannedUpload(h: RunHarness, content: Buffer) {
   await mkdir(join(h.dir, 'upload', userId), { recursive: true });
   return { run, target };
 }
+
+/** A run of two files, the first of which the user permanently deleted before */
+async function importWithDeleted(mode: DeletedReimportMode) {
+  const h = await harness();
+  const deleted = randomBytesSeeded(500, 70);
+  const other = randomBytesSeeded(700, 71);
+  await h.addPart(
+    'takeout-20260914T211500Z-1-001.tgz',
+    buildTarGz([
+      { name: media('a.mp4'), data: deleted },
+      { name: media('b.mp4'), data: other },
+    ]),
+  );
+  h.mocks.user.getMetadata.mockResolvedValue([
+    { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode } } },
+  ]);
+  h.mocks.assetDeletedChecksum.get.mockImplementation((_userId, checksum) =>
+    Promise.resolve(
+      checksum.equals(sha1(deleted))
+        ? { assetId: 'deleted-asset', originalFileName: 'a.mp4', deletedAt: new Date() }
+        : undefined,
+    ),
+  );
+  h.mocks.album.create.mockResolvedValue({ id: 'album-prev' } as any);
+  const run = h.newRun();
+  expect(await h.execute(run)).toBe(JobStatus.Success);
+  const row = h.files(run.id).find((f) => f.takeoutPath === media('a.mp4'));
+  const asset = h.repo.assets.find((a) => a.checksum.equals(sha1(deleted)));
+  return { h, run: h.run(run.id), row, asset, checksum: sha1(deleted) };
+}
+
+const reimports = (h: RunHarness) =>
+  h.mocks.event.emit.mock.calls.filter(([name]) => name === 'AssetDeletedReimport').map(([, arg]) => arg);
 
 describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
   it('reads, plans, imports and finishes in order, and removes its staging', async () => {
@@ -791,6 +828,78 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.assets).toHaveLength(2);
     // the planned bytes of the file that became a duplicate leave the total: the bar ends at 100%
     expect(h.run(run.id)).toMatchObject({ bytesTotal: 700, bytesDone: 700 });
+  });
+
+  describe('a file the user permanently deleted before is handled like an upload of it', () => {
+    it('skip: not imported, reported as previouslyDeletedSkipped, the owner told', async () => {
+      const { h, run, row, asset, checksum } = await importWithDeleted(DeletedReimportMode.Skip);
+
+      expect(asset).toBeUndefined();
+      expect(h.repo.assets).toHaveLength(1);
+      expect(row).toMatchObject({
+        action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+        status: TakeoutRunFileStatus.Skipped,
+        reason: 'previously deleted (skipped)',
+        targetPath: null,
+      });
+      // no file of it is left under upload/, only the other one
+      const uploaded = await readdir(join(h.dir, 'upload', userId), { recursive: true, withFileTypes: true });
+      expect(uploaded.filter((entry) => entry.isFile())).toHaveLength(1);
+      expect(h.mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        checksum,
+        DeletedReimportMode.Skip,
+      );
+      expect(reimports(h)).toEqual([{ userId }]);
+      expect(run.counters.discarded.previouslyDeleted).toBe(1);
+      expect(run.counters.result.uploaded).toBe(1);
+      // the file left the plan while it was imported: the bar still ends at 100%
+      expect(run).toMatchObject({ bytesTotal: 700, bytesDone: 700 });
+    });
+
+    it('trash: imported and moved to the trash right away', async () => {
+      const { h, run, row, asset, checksum } = await importWithDeleted(DeletedReimportMode.Trash);
+
+      expect(h.repo.assets).toHaveLength(2);
+      expect(row).toMatchObject({ action: TakeoutRunFileAction.Upload, status: TakeoutRunFileStatus.Done });
+      expect(row.assetId).toBe(asset!.id);
+      expect(row.fallbacks).toContain('previouslyDeleted:trash');
+      expect(h.mocks.asset.updateAll).toHaveBeenCalledExactlyOnceWith([asset!.id], {
+        deletedAt: expect.any(Date),
+        status: AssetStatus.Trashed,
+      });
+      expect(h.mocks.album.addAssetIds).not.toHaveBeenCalled();
+      expect(h.mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        checksum,
+        DeletedReimportMode.Trash,
+      );
+      expect(reimports(h)).toEqual([{ userId }]);
+      expect(run.counters.discarded.previouslyDeleted).toBe(0);
+      expect(run.counters.result.uploaded).toBe(2);
+    });
+
+    it('album: imported and added to the "Previously deleted" album', async () => {
+      const { h, run, row, asset, checksum } = await importWithDeleted(DeletedReimportMode.Album);
+
+      expect(h.repo.assets).toHaveLength(2);
+      expect(row.fallbacks).toContain('previouslyDeleted:album');
+      expect(h.mocks.album.create).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ albumName: 'Previously deleted' }),
+        [],
+        [{ userId, role: AlbumUserRole.Owner }],
+        userId,
+      );
+      expect(h.mocks.album.addAssetIds).toHaveBeenCalledExactlyOnceWith('album-prev', [asset!.id]);
+      expect(h.mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(h.mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        checksum,
+        DeletedReimportMode.Album,
+      );
+      expect(reimports(h)).toEqual([{ userId }]);
+      expect(run.counters.result.uploaded).toBe(2);
+    });
   });
 
   it('fails fetching with the exact missing byte count and keeps the plan for Resume', async () => {

@@ -608,11 +608,6 @@ export class TakeoutRepository {
       .stream();
   }
 
-  /** Checksums of permanently deleted assets (deleted re-import mode skip) */
-  streamDeletedChecksums(userId: string) {
-    return this.db.selectFrom('asset_deleted_checksum').select('checksum').where('ownerId', '=', userId).stream();
-  }
-
   /** Distinct sizes of the user's upload assets above a limit (same predicate as the checksums) */
   @GenerateSql({ params: [DummyValue.UUID, 0] })
   async getUploadAssetSizesOver(userId: string, size: number): Promise<number[]> {

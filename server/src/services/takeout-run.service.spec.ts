@@ -1,4 +1,14 @@
-import { AssetType, JobName, TakeoutRunFileAction, TakeoutRunFileStatus } from 'src/enum';
+import {
+  AlbumUserRole,
+  AssetMetadataKey,
+  AssetStatus,
+  AssetType,
+  DeletedReimportMode,
+  JobName,
+  TakeoutRunFileAction,
+  TakeoutRunFileStatus,
+  UserMetadataKey,
+} from 'src/enum';
 import { TakeoutRunService } from 'src/services/takeout-run.service';
 import { authStub } from 'test/fixtures/auth.stub';
 import { newTestService, ServiceMocks } from 'test/utils';
@@ -59,6 +69,22 @@ const uploadRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+const preferences = (mode: DeletedReimportMode, albumId?: string) => [
+  { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode, albumId } } },
+];
+
+// another copy of the same file in the export (alreadyProcessed): it follows the copy that was imported or not
+const copyOf = (seq: number) => ({
+  id: 'rf-copy',
+  seq: seq + 1,
+  action: TakeoutRunFileAction.AlreadyProcessed as string,
+  status: TakeoutRunFileStatus.Planned as string,
+  dependsOnSeq: seq,
+  assetId: null,
+  fallbacks: [] as string[],
+  plan: {},
+});
+
 describe(TakeoutRunService.name, () => {
   let sut: TakeoutRunService;
   let mocks: ServiceMocks;
@@ -76,6 +102,10 @@ describe(TakeoutRunService.name, () => {
   // Every upsertExif call whose payload actually carries a capture date (the PUT path), ignoring the fileSize upsert.
   const dateUpserts = () =>
     mocks.asset.upsertExif.mock.calls.filter((call) => (call[0] as any)?.exif?.dateTimeOriginal !== undefined);
+
+  // the update that records the created asset on its row
+  const createdUpdate = () =>
+    mocks.takeout.updateRunFile.mock.calls.find((c) => (c[1] as any).status === TakeoutRunFileStatus.Created);
 
   const sidecarWriteQueued = () =>
     mocks.job.queue.mock.calls.some((call) => (call[0] as any)?.name === JobName.SidecarWrite);
@@ -233,6 +263,217 @@ describe(TakeoutRunService.name, () => {
       expect((last![1] as any).fallbacks).toEqual(
         expect.arrayContaining(['tagged', 'albumCreated:Trip', 'albumAdded', 'metadataSaved']),
       );
+    });
+  });
+
+  describe('a previously deleted file is handled like an upload of it (utils/deleted-reimport)', () => {
+    const remembered = { assetId: 'deleted-asset', originalFileName: 'photo.jpg', deletedAt: new Date() };
+
+    beforeEach(() => {
+      mocks.metadata.readTags.mockResolvedValue({} as any);
+      mocks.asset.create.mockResolvedValue({
+        id: 'asset-uuid',
+        checksum: Buffer.from('abcd'),
+        originalPath: '/tmp/does-not-exist/asset-uuid.jpg',
+      } as any);
+      mocks.assetDeletedChecksum.get.mockResolvedValue(remembered);
+    });
+
+    it('does not import it in skip mode: a previouslyDeletedSkipped report row, the owner is told', async () => {
+      mocks.user.getMetadata.mockResolvedValue(preferences(DeletedReimportMode.Skip));
+      const row = uploadRow();
+
+      await (sut as any).processUpload(run(), settings(), row);
+
+      expect(mocks.assetDeletedChecksum.get).toHaveBeenCalledWith(userId, row.checksum);
+      expect(mocks.asset.create).not.toHaveBeenCalled();
+      expect(mocks.takeout.updateRunFile).toHaveBeenCalledExactlyOnceWith('rf-1', {
+        action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+        status: TakeoutRunFileStatus.Skipped,
+        reason: 'previously deleted (skipped)',
+        targetPath: null,
+      });
+      expect(row).toMatchObject({
+        action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+        status: TakeoutRunFileStatus.Skipped,
+        targetPath: null,
+      });
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        row.checksum,
+        DeletedReimportMode.Skip,
+      );
+      expect(mocks.event.emit).toHaveBeenCalledExactlyOnceWith('AssetDeletedReimport', { userId });
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.album.addAssetIds).not.toHaveBeenCalled();
+    });
+
+    it('imports it and moves it to the trash right away in trash mode', async () => {
+      mocks.user.getMetadata.mockResolvedValue(preferences(DeletedReimportMode.Trash));
+
+      await (sut as any).processUpload(run(), settings(), uploadRow());
+
+      expect(mocks.asset.create).toHaveBeenCalledTimes(1);
+      expect(mocks.asset.upsertMetadata).toHaveBeenCalledWith('asset-uuid', [
+        {
+          key: AssetMetadataKey.DeletedReimport,
+          value: { mode: DeletedReimportMode.Trash, reimportedAt: expect.any(String) },
+        },
+      ]);
+      expect(mocks.asset.updateAll).toHaveBeenCalledExactlyOnceWith(['asset-uuid'], {
+        deletedAt: expect.any(Date),
+        status: AssetStatus.Trashed,
+      });
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetTrashAll', { assetIds: ['asset-uuid'], userId });
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        Buffer.from('abcd'),
+        DeletedReimportMode.Trash,
+      );
+      const reimports = mocks.event.emit.mock.calls.filter(([name]) => name === 'AssetDeletedReimport');
+      expect(reimports).toEqual([['AssetDeletedReimport', { userId }]]);
+      expect(mocks.album.addAssetIds).not.toHaveBeenCalled();
+      // recorded with the created state, so the report shows it and a resume does not handle it again
+      expect((createdUpdate()![1] as any).fallbacks).toContain('previouslyDeleted:trash');
+    });
+
+    it('imports it and adds it to the "Previously deleted" album in album mode', async () => {
+      const album = { id: 'album-prev', albumUsers: [{ user: { id: userId }, role: AlbumUserRole.Owner }] };
+      mocks.user.getMetadata.mockResolvedValue(preferences(DeletedReimportMode.Album, album.id));
+      mocks.album.getById.mockResolvedValue(album as any);
+
+      await (sut as any).processUpload(run(), settings(), uploadRow());
+
+      expect(mocks.asset.create).toHaveBeenCalledTimes(1);
+      expect(mocks.album.getById).toHaveBeenCalledWith(album.id, { withAssets: false });
+      expect(mocks.album.create).not.toHaveBeenCalled();
+      expect(mocks.album.addAssetIds).toHaveBeenCalledExactlyOnceWith(album.id, ['asset-uuid']);
+      expect(mocks.event.emit).toHaveBeenCalledWith('AlbumUpdate', {
+        id: album.id,
+        userIds: [userId],
+        recipientIds: [],
+      });
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).toHaveBeenCalledExactlyOnceWith(
+        userId,
+        Buffer.from('abcd'),
+        DeletedReimportMode.Album,
+      );
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetDeletedReimport', { userId });
+      expect((createdUpdate()![1] as any).fallbacks).toContain('previouslyDeleted:album');
+    });
+
+    it('creates the "Previously deleted" album when the user has none', async () => {
+      mocks.user.getMetadata.mockResolvedValue(preferences(DeletedReimportMode.Album));
+      mocks.album.create.mockResolvedValue({ id: 'album-new' } as any);
+
+      await (sut as any).processUpload(run(), settings(), uploadRow());
+
+      expect(mocks.album.create).toHaveBeenCalledWith(
+        expect.objectContaining({ albumName: 'Previously deleted' }),
+        [],
+        [{ userId, role: AlbumUserRole.Owner }],
+        userId,
+      );
+      expect(mocks.album.addAssetIds).toHaveBeenCalledWith('album-new', ['asset-uuid']);
+    });
+
+    it('imports a file that was never deleted like any other', async () => {
+      mocks.assetDeletedChecksum.get.mockResolvedValue(undefined);
+
+      await (sut as any).processUpload(run(), settings(), uploadRow());
+
+      expect(mocks.asset.create).toHaveBeenCalledTimes(1);
+      expect(mocks.user.getMetadata).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect((createdUpdate()![1] as any).fallbacks).not.toContain('previouslyDeleted:trash');
+    });
+
+    it('leaves a file that turned out to be on the server alone', async () => {
+      mocks.user.getMetadata.mockResolvedValue(preferences(DeletedReimportMode.Trash));
+      mocks.asset.create.mockRejectedValue(new Error('duplicate checksum'));
+      mocks.asset.getUploadAssetIdByChecksum.mockResolvedValue('server-asset');
+      const row = uploadRow();
+
+      await (sut as any).processUpload(run(), settings(), row);
+
+      expect(row).toMatchObject({ action: TakeoutRunFileAction.ServerDuplicate, assetId: 'server-asset' });
+      expect(mocks.asset.upsertMetadata).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalledWith('AssetDeletedReimport', expect.anything());
+    });
+
+    it('does not ask again for an asset a resume adopts', async () => {
+      mocks.asset.getByIds.mockResolvedValue([
+        { id: 'asset-uuid', originalPath: '/tmp/does-not-exist/asset-uuid.jpg' },
+      ] as any);
+
+      await (sut as any).processUpload(run(), settings(), uploadRow({ fallbacks: ['previouslyDeleted:trash'] }));
+
+      expect(mocks.assetDeletedChecksum.get).not.toHaveBeenCalled();
+      expect(mocks.asset.create).not.toHaveBeenCalled();
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect((createdUpdate()![1] as any).fallbacks).toContain('previouslyDeleted:trash');
+    });
+
+    it('skips another copy of a file that was not imported', async () => {
+      const source = { id: 'rf-src', seq: 0, action: TakeoutRunFileAction.PreviouslyDeletedSkipped, assetId: null };
+      const copy = copyOf(0);
+
+      await (sut as any).processExisting(run(), settings(), copy, [source, copy]);
+
+      expect(copy).toMatchObject({
+        action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+        status: TakeoutRunFileStatus.Skipped,
+      });
+      expect(mocks.takeout.updateRunFile).toHaveBeenCalledExactlyOnceWith('rf-copy', {
+        action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+        status: TakeoutRunFileStatus.Skipped,
+        reason: 'previously deleted (skipped)',
+        targetPath: null,
+      });
+      // the file was reported to the owner once, by the copy that was not imported
+      expect(mocks.assetDeletedChecksum.markReimported).not.toHaveBeenCalled();
+    });
+
+    it('flags another copy of a file that was imported and trashed', async () => {
+      const source = {
+        id: 'rf-src',
+        seq: 0,
+        action: TakeoutRunFileAction.Upload,
+        assetId: 'asset-uuid',
+        fallbacks: ['previouslyDeleted:trash'],
+      };
+      const copy = copyOf(0);
+      mocks.asset.getByIds.mockResolvedValue([{ id: 'asset-uuid' }] as any);
+
+      await (sut as any).processExisting(run(), settings(), copy, [source, copy]);
+
+      expect(copy.status).toBe(TakeoutRunFileStatus.Done);
+      expect(copy.assetId).toBe('asset-uuid');
+      expect(copy.fallbacks).toEqual(['previouslyDeleted:trash']);
+      expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+      expect(mocks.assetDeletedChecksum.markReimported).not.toHaveBeenCalled();
+    });
+
+    it('never stacks the asset of a previously deleted file', async () => {
+      const members = [
+        { id: 'rf-a', groupOrder: 0, isCover: true, status: TakeoutRunFileStatus.Done, assetId: 'a', fallbacks: [] },
+        {
+          id: 'rf-b',
+          groupOrder: 1,
+          status: TakeoutRunFileStatus.Done,
+          assetId: 'b',
+          fallbacks: ['previouslyDeleted:trash'],
+        },
+      ];
+
+      await (sut as any).stackGroup(run(), members, members);
+
+      expect(mocks.stack.create).not.toHaveBeenCalled();
+      expect((sut as any).stackPending(members, members)).toBe(false);
     });
   });
 

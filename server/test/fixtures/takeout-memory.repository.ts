@@ -56,7 +56,6 @@ export class TakeoutMemoryRepository {
   entries: Row[] = [];
   runs: Row[] = [];
   runFiles: Row[] = [];
-  deletedChecksums: Array<{ ownerId: string; checksum: Buffer }> = [];
   assets: MemoryAsset[] = [];
   largerVersions: Row[] = [];
   private nextEntryId = 1;
@@ -528,10 +527,6 @@ export class TakeoutMemoryRepository {
 
   streamUploadChecksums(userId: string) {
     return iterate(this.uploadAssets(userId).map((a) => ({ checksum: a.checksum })));
-  }
-
-  streamDeletedChecksums(userId: string) {
-    return iterate(this.deletedChecksums.filter((d) => d.ownerId === userId).map((d) => ({ checksum: d.checksum })));
   }
 
   getUploadAssetSizesOver(userId: string, size: number) {

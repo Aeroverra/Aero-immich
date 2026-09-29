@@ -1101,7 +1101,6 @@ export class ReadContext {
 
   /** The server snapshot, sizes, prefix index and budget of the reading phase (single-pass design 6.3) */
   async prepareReading(options: {
-    deletedSkip: boolean;
     quotaLimit: number | null;
     quotaUsage: number;
     statfs: () => Promise<number>;
@@ -1109,7 +1108,7 @@ export class ReadContext {
   }): Promise<void> {
     const repo = this.deps.repo;
     const run = this.run;
-    this.server = await ChecksumSet.fromAsync(options.serverChecksums ?? this.serverChecksums(options.deletedSkip));
+    this.server = await ChecksumSet.fromAsync(options.serverChecksums ?? this.serverChecksums());
     this.serverReady = true;
     this.serverSizes = new Set(await repo.getUploadAssetSizesOver(run.userId, this.limits.bufferLimit));
     this.prefixes = new PrefixIndex(
@@ -1128,22 +1127,20 @@ export class ReadContext {
     await this.budget.refresh(this.limits.readStallMs);
   }
 
-  /** The user's upload checksums (trashed included), plus the deleted ones when re-imports of those are skipped */
-  private async *serverChecksums(deletedSkip: boolean): AsyncIterable<Buffer | null> {
+  /**
+   * The user's upload checksums (trashed included). A file the user permanently deleted before is read like any new
+   * file: the import decides on it the way an upload of it is decided on (utils/deleted-reimport).
+   */
+  private async *serverChecksums(): AsyncIterable<Buffer | null> {
     for await (const row of this.deps.repo.streamUploadChecksums(this.run.userId)) {
       yield row.checksum;
-    }
-    if (deletedSkip) {
-      for await (const row of this.deps.repo.streamDeletedChecksums(this.run.userId)) {
-        yield row.checksum;
-      }
     }
   }
 
   /** The server snapshot of this attempt; built here when the attempt read nothing (planning after a restart) */
-  async serverSet(deletedSkip: boolean): Promise<ChecksumSet> {
+  async serverSet(): Promise<ChecksumSet> {
     if (!this.serverReady) {
-      this.server = await ChecksumSet.fromAsync(this.serverChecksums(deletedSkip));
+      this.server = await ChecksumSet.fromAsync(this.serverChecksums());
       this.serverReady = true;
     }
     return this.server;

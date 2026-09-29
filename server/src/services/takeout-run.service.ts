@@ -11,7 +11,6 @@ import {
   AssetFileType,
   AssetVisibility,
   ChecksumAlgorithm,
-  DeletedReimportMode,
   JobName,
   JobStatus,
   NotificationType,
@@ -104,8 +103,8 @@ import {
 import { JobOf } from 'src/types';
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone, mergeTimeZone } from 'src/utils/date';
+import { DeletedReimportRepositories, checkDeletedReimport, onDeletedReimport } from 'src/utils/deleted-reimport';
 import { mimeTypes } from 'src/utils/mime-types';
-import { getPreferences } from 'src/utils/preferences';
 import { upsertTags } from 'src/utils/tag';
 
 export { RunFailure } from 'src/services/takeout-read';
@@ -123,6 +122,14 @@ const TERMINAL_ROW_STATUSES = new Set<string>([
   TakeoutRunFileStatus.Skipped,
   TakeoutRunFileStatus.Error,
 ]);
+
+// a file the user permanently deleted before (utils/deleted-reimport): the report reason of one that is not imported,
+// and the flag of one that is, followed by the mode it was handled with (previouslyDeleted:trash, previouslyDeleted:album)
+const PREVIOUSLY_DELETED_REASON = 'previously deleted (skipped)';
+const PREVIOUSLY_DELETED_FLAG = 'previouslyDeleted';
+
+const previouslyDeletedFlags = (row: { fallbacks?: string[] | null } | undefined): string[] =>
+  (row?.fallbacks ?? []).filter((flag) => flag.startsWith(`${PREVIOUSLY_DELETED_FLAG}:`));
 
 const uploadFirst = (row: { action: string }) => (row.action === TakeoutRunFileAction.Upload ? 0 : 1);
 
@@ -171,6 +178,16 @@ export class TakeoutRunService extends BaseService {
   stagingFs?: StagingFs;
   /** free bytes of the staging disk (statfs); overridable in tests */
   diskAvailable?: (path: string) => Promise<number>;
+
+  private get deletedReimportRepositories(): DeletedReimportRepositories {
+    return {
+      album: this.albumRepository,
+      asset: this.assetRepository,
+      assetDeletedChecksum: this.assetDeletedChecksumRepository,
+      event: this.eventRepository,
+      user: this.userRepository,
+    };
+  }
 
   private get lifecycle(): LifecycleDeps {
     return {
@@ -445,9 +462,7 @@ export class TakeoutRunService extends BaseService {
     }
 
     const user = await this.userRepository.get(a.run.userId, {} as any).catch(() => null);
-    const preferences = getPreferences(await this.userRepository.getMetadata(a.run.userId));
     await ctx.prepareReading({
-      deletedSkip: preferences.deletedReimport.mode === DeletedReimportMode.Skip,
       quotaLimit: user?.quotaSizeInBytes ?? null,
       quotaUsage: Number(user?.quotaUsageInBytes ?? 0),
       statfs: () => this.availableBytes(a),
@@ -748,8 +763,7 @@ export class TakeoutRunService extends BaseService {
       .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
       .reduce((sum, r) => sum + Number(r.size), 0);
     if (recount.length > 0) {
-      const preferences = getPreferences(await this.userRepository.getMetadata(run.userId));
-      const server = await a.ctx!.serverSet(preferences.deletedReimport.mode === DeletedReimportMode.Skip);
+      const server = await a.ctx!.serverSet();
       recountReadStats(a.stats.stats, recount, {
         onServer: (checksum) => server.has(checksum),
         hasBlob: (key) => a.staging!.hasBlob(key),
@@ -1006,7 +1020,7 @@ export class TakeoutRunService extends BaseService {
     let bytesDone = Number(run.bytesDone ?? 0);
     // bytesDone counts created assets only: the total is what is done plus the uploads still planned, so the rows
     // the server re-check or fetching took out of the plan leave the bar at 100% when the last asset is created
-    const bytesTotal =
+    let bytesTotal =
       bytesDone +
       rows
         .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
@@ -1092,9 +1106,14 @@ export class TakeoutRunService extends BaseService {
         )
         .reduce((sum, m) => sum + Number(m.size), 0);
       quota.created += created;
-      if (created > 0) {
+      // so do the files the import itself took out of the plan: a server duplicate, a skipped previously deleted file
+      const dropped = written
+        .filter((m) => m.action !== TakeoutRunFileAction.Upload)
+        .reduce((sum, m) => sum + Number(m.size), 0);
+      if (created > 0 || dropped > 0) {
         bytesDone += created;
-        await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, { bytesDone });
+        bytesTotal -= dropped;
+        await this.takeoutRepository.updateRunIfLeased(a.runId, a.token, { bytesDone, bytesTotal });
       }
     }
     if (a.signal.aborted) {
@@ -1108,16 +1127,24 @@ export class TakeoutRunService extends BaseService {
     }
   }
 
-  /** assembleStackIds would stack 2 or more assets and no member carries the stacked flag yet */
+  /** stackIds would stack 2 or more assets and no member carries the stacked flag yet */
   private stackPending(members: any[], allRows: any[]): boolean {
-    const ids = assembleStackIds(
+    const ids = this.stackIds(members, allRows);
+    return ids.length >= 2 && members.every((m) => !(m.fallbacks ?? []).includes('stacked'));
+  }
+
+  /**
+   * The assets a group stacks. A re-import of a previously deleted file stays on its own, like an upload of it: it is
+   * in the trash or in the "Previously deleted" album for review, and a trashed stack cover would hide the stack.
+   */
+  private stackIds(members: any[], allRows: any[]): string[] {
+    return assembleStackIds(
       members
-        .filter((m) => m.status === TakeoutRunFileStatus.Done && m.assetId)
+        .filter((m) => m.status === TakeoutRunFileStatus.Done && m.assetId && previouslyDeletedFlags(m).length === 0)
         .sort((x, y) => (x.groupOrder ?? 0) - (y.groupOrder ?? 0))
         .map((m) => ({ assetId: m.assetId, smallerAssetId: m.smallerAssetId })),
       this.linkAssetIds(members, allRows),
     );
-    return ids.length >= 2 && members.every((m) => !(m.fallbacks ?? []).includes('stacked'));
   }
 
   // ---------- phase: finishing (single-pass design 9.3) ----------
@@ -1371,20 +1398,6 @@ export class TakeoutRunService extends BaseService {
       }
     }
 
-    // deleted-reimport pre-check: with mode 'skip' a file whose checksum matches a permanently
-    // deleted asset is reported as previouslyDeletedSkipped and never re-imported (2.6 step 4)
-    const preferences = getPreferences(await this.userRepository.getMetadata(run.userId));
-    const deletedByHex = new Set<string>();
-    if (preferences.deletedReimport.mode === DeletedReimportMode.Skip) {
-      for (let i = 0; i < checksums.length; i += 500) {
-        const batch = checksums.slice(i, i + 500);
-        const hits = await this.assetDeletedChecksumRepository.getByChecksums(run.userId, batch);
-        for (const hit of hits) {
-          deletedByHex.add(hit.checksum.toString('hex'));
-        }
-      }
-    }
-
     // name + time pre-check (DEV 5): a non-edited upload whose on-disk name and capture time match a
     // pre-existing server asset is a server twin. same size -> serverDuplicate; local bigger -> upload
     // keeping the smaller server asset (larger version pair); local smaller -> betterOnServer.
@@ -1448,10 +1461,6 @@ export class TakeoutRunService extends BaseService {
           action = TakeoutRunFileAction.AlreadyProcessed;
           status = TakeoutRunFileStatus.Planned;
           dependsOnSeq = seenChecksum.get(hex)!;
-        } else if (hex && deletedByHex.has(hex)) {
-          action = TakeoutRunFileAction.PreviouslyDeletedSkipped;
-          status = TakeoutRunFileStatus.Skipped;
-          reason = 'previously deleted (skipped)';
         } else {
           const match = file.isEditedCopy ? null : nameTimeMatch(file, nameCandidates);
           if (match?.kind === 'serverDuplicate') {
@@ -1750,6 +1759,17 @@ export class TakeoutRunService extends BaseService {
     // adopt an existing asset on resume, else create
     let [asset] = await this.assetRepository.getByIds([uuid]);
     if (!asset) {
+      // a file the user permanently deleted before is handled exactly like an upload of it (utils/deleted-reimport)
+      const deletedReimport = await checkDeletedReimport(this.deletedReimportRepositories, {
+        userId: run.userId,
+        checksum: row.checksum,
+      });
+      if (deletedReimport?.skip) {
+        await onDeletedReimport(this.deletedReimportRepositories, deletedReimport);
+        await this.skipPreviouslyDeleted(row);
+        return;
+      }
+
       const entryMtime: Date | null = row.mtime ?? null;
       const created = effectiveInstant ?? entryMtime ?? new Date();
       const modified = entryMtime ?? new Date();
@@ -1791,6 +1811,12 @@ export class TakeoutRunService extends BaseService {
         } else {
           throw error;
         }
+      }
+
+      if (deletedReimport) {
+        // right after the asset exists, before its row says so: a resume adopts the asset without asking again
+        await onDeletedReimport(this.deletedReimportRepositories, deletedReimport, asset);
+        fallbacks.push(`${PREVIOUSLY_DELETED_FLAG}:${deletedReimport.mode}`);
       }
     }
 
@@ -1922,9 +1948,17 @@ export class TakeoutRunService extends BaseService {
   private async processExisting(run: any, settings: any, row: any, allRows: any[]) {
     const plan = (row.plan ?? {}) as any;
     let assetId: string | null = row.assetId;
+    const resultFlags: string[] = [];
     if (row.action === TakeoutRunFileAction.AlreadyProcessed && row.dependsOnSeq !== null) {
       const dep = allRows.find((r) => r.seq === row.dependsOnSeq);
+      if (dep?.action === TakeoutRunFileAction.PreviouslyDeletedSkipped) {
+        // another copy of a file that is not imported because the user deleted it before
+        await this.skipPreviouslyDeleted(row);
+        return;
+      }
       assetId = dep?.assetId ?? null;
+      // the asset is the re-import of a previously deleted file: the report says so on this copy too
+      resultFlags.push(...previouslyDeletedFlags(dep));
     }
     if (!assetId) {
       await this.takeoutRepository.updateRunFile(row.id, {
@@ -1950,7 +1984,7 @@ export class TakeoutRunService extends BaseService {
       await unlinkTarget(row.targetPath, this.stagingFs).catch(() => {});
     }
 
-    const resultFlags = await this.addAlbums(run, settings, row, assetId, plan);
+    resultFlags.push(...(await this.addAlbums(run, settings, row, assetId, plan)));
     if (settings.tagServerDuplicates && (await this.addTags(run, settings, row, assetId, plan, true))) {
       resultFlags.push('tagged');
     }
@@ -1985,6 +2019,23 @@ export class TakeoutRunService extends BaseService {
     }
 
     await this.finishRow(row);
+  }
+
+  /** Not imported because the user permanently deleted the file before (skip mode): a report row, no file kept */
+  private async skipPreviouslyDeleted(row: any) {
+    if (row.targetPath) {
+      await unlinkTarget(row.targetPath, this.stagingFs).catch(() => {});
+    }
+    await this.takeoutRepository.updateRunFile(row.id, {
+      action: TakeoutRunFileAction.PreviouslyDeletedSkipped,
+      status: TakeoutRunFileStatus.Skipped,
+      reason: PREVIOUSLY_DELETED_REASON,
+      targetPath: null,
+    });
+    row.action = TakeoutRunFileAction.PreviouslyDeletedSkipped;
+    row.status = TakeoutRunFileStatus.Skipped;
+    row.reason = PREVIOUSLY_DELETED_REASON;
+    row.targetPath = null;
   }
 
   private async finishRow(row: any) {
@@ -2148,13 +2199,7 @@ export class TakeoutRunService extends BaseService {
   }
 
   private async stackGroup(run: any, members: any[], allRows: any[]) {
-    const ids = assembleStackIds(
-      members
-        .filter((m) => m.status === TakeoutRunFileStatus.Done && m.assetId)
-        .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0))
-        .map((m) => ({ assetId: m.assetId, smallerAssetId: m.smallerAssetId })),
-      this.linkAssetIds(members, allRows),
-    );
+    const ids = this.stackIds(members, allRows);
     if (ids.length < 2) {
       return;
     }
@@ -2192,7 +2237,10 @@ export class TakeoutRunService extends BaseService {
   private linkAssetIds(members: any[], allRows: any[]): Array<string | null> {
     const cover = members.find((m) => m.isCover);
     const links: number[] = (cover?.plan as any)?.links ?? [];
-    return links.map((seq) => allRows.find((r) => r.seq === seq)?.assetId ?? null);
+    return links.map((seq) => {
+      const linked = allRows.find((r) => r.seq === seq);
+      return linked && previouslyDeletedFlags(linked).length === 0 ? (linked.assetId ?? null) : null;
+    });
   }
 
   // ---------- rotation hook (2.10) ----------
