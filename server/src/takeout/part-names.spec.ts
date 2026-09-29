@@ -62,6 +62,51 @@ describe('groupExports', () => {
     expect(exports[0].exportKey).toBe('20260914T211500Z-1');
   });
 
+  it('keeps the index of a segmented export that shares the timestamp of its data parts (family folder)', () => {
+    // export A: 15 data parts, its index 1 s earlier; export B (another account): 2 data parts, its index at the
+    // same second. B's index used to count as a data part and was chained onto A.
+    const a = Array.from({ length: 15 }, (_, i) => `takeout-20260928T015749Z-1-${String(i + 1).padStart(3, '0')}.tgz`);
+    const names = [
+      ...a,
+      'takeout-20260928T015748Z-001.tgz',
+      'takeout-20260928T025618Z-1-001.tgz',
+      'takeout-20260928T025618Z-1-002.tgz',
+      'takeout-20260928T025618Z-001.tgz',
+    ];
+    const { exports, orphanIndexes } = groupExports(
+      names.map((n) => file(n)),
+      new Set(),
+      new Set(),
+    );
+    expect(orphanIndexes).toEqual([]);
+    expect(exports).toHaveLength(2);
+    const [exportA, exportB] = exports;
+    expect(exportA.exportKey).toBe('20260928T015749Z-1');
+    expect(exportA.parts.filter((p) => !p.isIndex).map((p) => p.fileName)).toEqual(a);
+    expect(exportA.parts.filter((p) => p.isIndex).map((p) => p.fileName)).toEqual(['takeout-20260928T015748Z-001.tgz']);
+    expect(exportB.exportKey).toBe('20260928T025618Z-1');
+    expect(exportB.parts.filter((p) => !p.isIndex).map((p) => p.fileName)).toEqual([
+      'takeout-20260928T025618Z-1-001.tgz',
+      'takeout-20260928T025618Z-1-002.tgz',
+    ]);
+    expect(exportB.parts.filter((p) => p.isIndex).map((p) => p.fileName)).toEqual(['takeout-20260928T025618Z-001.tgz']);
+  });
+
+  it('still reads -001 as a data part when a segment-less -002 shares its timestamp', () => {
+    const names = ['takeout-20260101T000000Z-001.zip', 'takeout-20260101T000000Z-002.zip'];
+    const { exports, orphanIndexes } = groupExports(
+      names.map((n) => file(n)),
+      new Set(),
+      new Set(),
+    );
+    expect(orphanIndexes).toEqual([]);
+    expect(exports).toHaveLength(1);
+    expect(exports[0].parts.map((p) => [p.partNumber, p.isIndex])).toEqual([
+      [1, false],
+      [2, false],
+    ]);
+  });
+
   it('splits two exports whose part numbers restart', () => {
     const names = [
       'takeout-20260101T000000Z-1-001.tgz',

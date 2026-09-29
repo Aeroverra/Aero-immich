@@ -34,6 +34,12 @@ const targetRow = (runId: string, target: string, over: Record<string, unknown> 
   ...over,
 });
 
+/** exports whose analysis the service queued, one entry per job */
+const analysed = (mocks: ServiceMocks) =>
+  mocks.job.queue.mock.calls
+    .filter((call) => (call[0] as any).name === JobName.TakeoutAnalyzeExport)
+    .map((call) => (call[0] as any).data.exportId);
+
 async function writeUploadFile(mediaLocation: string, name: string) {
   const target = join(mediaLocation, 'upload', userId, name);
   await mkdir(join(mediaLocation, 'upload', userId), { recursive: true });
@@ -271,6 +277,158 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       await sut.syncUserFolder(userId);
       expect(repo.parts[0].isMissing).toBe(true);
       expect(repo.entries).toEqual([]);
+    });
+
+    describe('an index archive an older grouping chained onto another export (family folder)', () => {
+      const aIndex = 'takeout-20260928T015748Z-001.tgz';
+      const bIndex = 'takeout-20260928T025618Z-001.tgz';
+      const aMedia = Array.from(
+        { length: 15 },
+        (_, i) => `takeout-20260928T015749Z-1-${String(i + 1).padStart(3, '0')}.tgz`,
+      );
+      const bMedia = ['takeout-20260928T025618Z-1-001.tgz', 'takeout-20260928T025618Z-1-002.tgz'];
+
+      // What the old grouping stored: export A holds its 15 parts, its own index and, as media part 1 without a
+      // segment, the index of export B (another Google account). B holds its 2 parts and no index.
+      async function seedBrokenFamily() {
+        repo.exports = [];
+        const a = repo.addExport({
+          userId,
+          exportKey: '20260928T015749Z-1',
+          exportedAt: new Date('2026-09-28T01:57:49Z'),
+          indexFileName: aIndex,
+          accountEmail: 'a@example.com',
+          indexFileCount: 89_928,
+          analysis: { indexFiles: ['Takeout/Google Photos/a.jpg'] },
+          createdAt: new Date('2026-09-28T03:00:00Z'),
+        });
+        const b = repo.addExport({
+          userId,
+          exportKey: '20260928T025618Z-1',
+          exportedAt: new Date('2026-09-28T02:56:18Z'),
+          createdAt: new Date('2026-09-28T03:00:01Z'),
+        });
+        const seed = async (exportRow: any, name: string, over: Record<string, unknown>) => {
+          const info = await stat(await writePart(name));
+          return repo.addPart({
+            exportId: exportRow.id,
+            userId,
+            fileName: name,
+            size: info.size,
+            prevSyncSize: info.size,
+            mtime: info.mtime,
+            ctime: info.ctime,
+            catalogStatus: TakeoutCatalogStatus.Complete,
+            catalogVersion: 2,
+            catalogSize: info.size,
+            catalogMtime: info.mtime,
+            entryCount: 1,
+            ...over,
+          });
+        };
+        for (const [i, name] of aMedia.entries()) {
+          await seed(a, name, { timestamp: '20260928T015749Z', segment: 1, partNumber: i + 1 });
+        }
+        await seed(a, aIndex, {
+          timestamp: '20260928T015748Z',
+          segment: null,
+          partNumber: 1,
+          isIndex: true,
+          catalogStatus: TakeoutCatalogStatus.None,
+        });
+        const stray = await seed(a, bIndex, { timestamp: '20260928T025618Z', segment: null, partNumber: 1 });
+        repo.entries.push({
+          id: 1,
+          exportId: a.id,
+          partId: stray.id,
+          seq: 0,
+          path: 'Takeout/archive_browser.html',
+          kind: 'other',
+        });
+        for (const [i, name] of bMedia.entries()) {
+          await seed(b, name, { timestamp: '20260928T025618Z', segment: 1, partNumber: i + 1 });
+        }
+        return { a, b, stray };
+      }
+
+      it('moves it to its own export, and a second sync changes nothing', async () => {
+        const { a, b, stray } = await seedBrokenFamily();
+        await sut.syncUserFolder(userId);
+
+        expect(repo.exports).toHaveLength(2);
+        expect(stray).toMatchObject({
+          exportId: b.id,
+          isIndex: true,
+          segment: null,
+          partNumber: 1,
+          catalogStatus: TakeoutCatalogStatus.None,
+          entryCount: null,
+        });
+        expect(repo.entries).toEqual([]);
+        expect(b.indexFileName).toBe(bIndex);
+        const partsOf = (exportRow: any) =>
+          repo.parts.filter((p) => p.exportId === exportRow.id && !p.isIndex).map((p) => p.fileName);
+        const indexOf = (exportRow: any) =>
+          repo.parts.filter((p) => p.exportId === exportRow.id && p.isIndex).map((p) => p.fileName);
+        expect(partsOf(a)).toEqual(aMedia);
+        expect(indexOf(a)).toEqual([aIndex]);
+        expect(partsOf(b)).toEqual(bMedia);
+        expect(indexOf(b)).toEqual([bIndex]);
+        // A keeps its own index and what came from it; both are analysed again
+        expect(a).toMatchObject({ indexFileName: aIndex, accountEmail: 'a@example.com', indexFileCount: 89_928 });
+        expect(a.analysis.indexFiles).toEqual(['Takeout/Google Photos/a.jpg']);
+        expect(new Set(analysed(mocks))).toEqual(new Set([a.id, b.id]));
+
+        const parts = structuredClone(repo.parts);
+        const exports = structuredClone(repo.exports);
+        await sut.syncUserFolder(userId);
+        expect(repo.parts).toEqual(parts);
+        expect(repo.exports).toEqual(exports);
+        expect(analysed(mocks)).toHaveLength(2);
+      });
+
+      it('makes the export that loses an index forget what came from it', async () => {
+        // the stray index was even taken as A's index: A forgets it and takes its own again
+        const { a, b, stray } = await seedBrokenFamily();
+        Object.assign(a, {
+          indexFileName: bIndex,
+          accountEmail: 'b@example.com',
+          googleJobId: 'job-b',
+          indexTotalSize: '12 GB',
+          indexFileCount: 1200,
+          indexCreatedText: 'created b',
+          analysis: {
+            indexFiles: ['Takeout/Google Photos/b.jpg'],
+            indexSource: { fileName: bIndex, size: 100, mtime: '2026-09-28T03:00:00.000Z' },
+            indexTotalBytes: 12e9,
+            lastRead: { runId: 'r', indexMissingFiles: { count: 3, sample: ['x', 'y', 'z'] }, notInIndex: 2 },
+          },
+        });
+        stray.isIndex = true;
+        await sut.syncUserFolder(userId);
+
+        expect(stray).toMatchObject({ exportId: b.id, isIndex: true });
+        expect(b.indexFileName).toBe(bIndex);
+        expect(a).toMatchObject({
+          indexFileName: aIndex,
+          accountEmail: null,
+          googleJobId: null,
+          indexTotalSize: null,
+          indexFileCount: null,
+          indexCreatedText: null,
+        });
+        expect(a.analysis).toEqual({ lastRead: { runId: 'r', indexMissingFiles: null, notInIndex: 0 } });
+        expect(new Set(analysed(mocks))).toEqual(new Set([a.id, b.id]));
+      });
+
+      it('leaves it where it is while that export is being imported', async () => {
+        const { a, b, stray } = await seedBrokenFamily();
+        repo.addRun({ userId, exportId: a.id, status: TakeoutRunStatus.Reading });
+        await sut.syncUserFolder(userId);
+        expect(stray).toMatchObject({ exportId: a.id, isIndex: false, isMissing: false });
+        expect(b.indexFileName).toBeNull();
+        expect(repo.entries).toHaveLength(1);
+      });
     });
   });
 

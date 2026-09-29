@@ -66,7 +66,15 @@ import {
 } from 'src/services/takeout-mappers';
 import { DEFAULT_READ_LIMITS, resumedReadStats } from 'src/services/takeout-read';
 import { STAGING_TTL_MS, isTrashName, isUuid, listStaging, trashStagingDir } from 'src/services/takeout-staging';
-import { FolderFile, TakeoutSettings, groupExports, mergeSettings, validateSettings } from 'src/takeout';
+import {
+  DetectedExport,
+  DetectedPart,
+  FolderFile,
+  TakeoutSettings,
+  groupExports,
+  mergeSettings,
+  validateSettings,
+} from 'src/takeout';
 import { JobItem } from 'src/types';
 
 export { TAKEOUT_ROOT_FOLDER } from 'src/services/takeout-lifecycle';
@@ -97,6 +105,31 @@ export function awaitsStableParts(
   }
   const media = parts.filter((p) => p.exportId === exp.id && !p.isIndex && !p.isMissing);
   return media.length > 0 && media.every((p) => isStablePart(p, now));
+}
+
+/**
+ * The export fields that come from its index archive, emptied when the export loses that index or gets another one:
+ * the analysis derives them again from the index the export has now.
+ */
+export function forgetIndex(analysis: unknown) {
+  const {
+    indexFiles: _indexFiles,
+    indexSource: _indexSource,
+    indexTotalBytes: _indexTotalBytes,
+    ...rest
+  } = (analysis ?? {}) as Record<string, any>;
+  if (rest.lastRead) {
+    // the last read cross-checked its catalog against the old index
+    rest.lastRead = { ...rest.lastRead, indexMissingFiles: null, notInIndex: 0 };
+  }
+  return {
+    accountEmail: null,
+    googleJobId: null,
+    indexTotalSize: null,
+    indexFileCount: null,
+    indexCreatedText: null,
+    analysis: rest,
+  };
 }
 
 @Injectable()
@@ -542,11 +575,40 @@ export class TakeoutService extends BaseService {
     const seenNames = new Set<string>();
     const changedExports = new Set<string>();
 
-    for (const detected of grouped.exports) {
-      // find or create the export row: reuse when a detected part is already attached
-      let exportRow = existingExports.find((e) =>
-        detected.parts.some((p) => partByName.get(p.fileName)?.exportId === e.id),
-      );
+    // The export row that holds most of the media (or index) parts of a detected export (ties: the oldest row),
+    // leaving out the rows in `taken`
+    const holderOf = (detected: DetectedExport, isIndex: boolean, taken: Set<string>) => {
+      const counts = new Map<string, number>();
+      for (const part of detected.parts) {
+        const exportId = partByName.get(part.fileName)?.exportId;
+        if (part.isIndex === isIndex && exportId && !taken.has(exportId)) {
+          counts.set(exportId, (counts.get(exportId) ?? 0) + 1);
+        }
+      }
+      let best: (typeof existingExports)[number] | undefined;
+      for (const exp of existingExports) {
+        const count = counts.get(exp.id) ?? 0;
+        const bestCount = best ? (counts.get(best.id) ?? 0) : 0;
+        if (count > bestCount || (best && count === bestCount && exp.createdAt < best.createdAt)) {
+          best = exp;
+        }
+      }
+      return best;
+    };
+    // Media parts decide which row a detected export reuses. An older grouping could chain an index archive onto
+    // the wrong export, so index parts only decide when no media part is known yet, and never take a row whose media
+    // another detected export holds.
+    const mediaHolders = grouped.exports.map((detected) => holderOf(detected, false, new Set()));
+    const takenRows = new Set(mediaHolders.filter((exp) => !!exp).map((exp) => exp.id));
+
+    for (const [i, detected] of grouped.exports.entries()) {
+      let exportRow = mediaHolders[i];
+      if (!exportRow) {
+        exportRow = holderOf(detected, true, takenRows);
+        if (exportRow) {
+          takenRows.add(exportRow.id);
+        }
+      }
       if (exportRow && activeByExport.get(exportRow.id)) {
         // parts of an export with a running run are never touched: the run detects changes itself
         for (const p of detected.parts) {
@@ -571,9 +633,22 @@ export class TakeoutService extends BaseService {
 
       for (const part of detected.parts) {
         seenNames.add(part.fileName);
-        const prior = partByName.get(part.fileName);
+        let prior = partByName.get(part.fileName);
+        if (prior && (prior.exportId !== exportRow.id || prior.isIndex !== part.isIndex)) {
+          if (activeByExport.get(prior.exportId)) {
+            // the export it leaves is being imported: the part moves at a later sync
+            continue;
+          }
+          prior = await this.movePart(prior, part, exportRow.id, existingExports, changedExports);
+        }
         if (part.isIndex && exportRow.indexFileName !== part.fileName) {
-          await this.takeoutRepository.updateExport(exportRow.id, { indexFileName: part.fileName });
+          // another index than before: what came from the old one goes, the analysis reads the new one
+          const patch = {
+            ...(!!exportRow.indexFileName && forgetIndex(exportRow.analysis)),
+            indexFileName: part.fileName,
+          };
+          await this.takeoutRepository.updateExport(exportRow.id, patch);
+          Object.assign(exportRow, patch);
           changedExports.add(exportRow.id);
         }
         if (!prior) {
@@ -627,6 +702,44 @@ export class TakeoutService extends BaseService {
         );
       }
     }
+  }
+
+  /**
+   * A part whose row sits in another export, or has another role, than the grouping gives it now (an older grouping
+   * chained the index archive of one export onto another export as a media part): the row moves. Its catalog rows go
+   * (they carry the export and were read for the old role) and the export it leaves forgets that index.
+   */
+  private async movePart<T extends { id: string; exportId: string; fileName: string }>(
+    prior: T,
+    detected: DetectedPart,
+    exportId: string,
+    exports: Array<{ id: string; indexFileName: string | null; analysis: unknown }>,
+    changed: Set<string>,
+  ): Promise<T> {
+    const from = exports.find((e) => e.id === prior.exportId);
+    if (from && from.indexFileName === prior.fileName && (from.id !== exportId || !detected.isIndex)) {
+      const patch = { ...forgetIndex(from.analysis), indexFileName: null };
+      await this.takeoutRepository.updateExport(from.id, patch);
+      Object.assign(from, patch);
+    }
+    await this.takeoutRepository.deleteEntriesOfPart(prior.id);
+    const patch = {
+      exportId,
+      isIndex: detected.isIndex,
+      segment: detected.segment,
+      partNumber: detected.partNumber,
+      catalogStatus: TakeoutCatalogStatus.None,
+      catalogVersion: null,
+      catalogSize: null,
+      catalogMtime: null,
+      catalogError: null,
+      catalogErrorOffset: null,
+      entryCount: null,
+    };
+    await this.takeoutRepository.updatePart(prior.id, patch);
+    changed.add(prior.exportId);
+    changed.add(exportId);
+    return { ...prior, ...patch };
   }
 
   /**

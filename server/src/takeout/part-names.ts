@@ -81,7 +81,11 @@ export function groupExports(
       return false;
     }
     if (part.segment === null && part.partNumber === 1) {
-      const sibling = parsed.some((other) => other !== part && other.timestamp === part.timestamp);
+      // only a segment-less sibling ('-002' next to '-001') makes it a data part: the '-1-NNN' data parts of a
+      // segmented export often carry the same timestamp as its index
+      const sibling = parsed.some(
+        (other) => other !== part && other.segment === null && other.timestamp === part.timestamp,
+      );
       return !sibling;
     }
     return false;
