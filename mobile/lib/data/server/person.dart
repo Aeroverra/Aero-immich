@@ -21,12 +21,12 @@ class PersonApiRepository extends ApiRepository {
     return _toPerson(response);
   }
 
-  /// Tags the person on the videos among [assetIds] with a whole-frame face. Returns the assets that got the person
+  /// Adds the person to the videos among [assetIds] with a whole-frame face. Returns the assets that got the person
   /// and the photos the server left out (their faces are drawn on the photo instead).
-  Future<({List<String> tagged, List<String> photos})> addToAssets(String id, List<String> assetIds) async {
+  Future<({List<String> added, List<String> photos})> addToAssets(String id, List<String> assetIds) async {
     final results = await _api.addPersonToAssets(id, BulkIdsDto(ids: assetIds)) ?? const <BulkIdResponseDto>[];
     return (
-      tagged: [
+      added: [
         for (final result in results)
           if (result.success) result.id,
       ],

@@ -175,9 +175,9 @@ export class PersonController {
   @Put(':id/assets')
   @Authenticated({ permission: Permission.FaceCreate })
   @Endpoint({
-    summary: 'Tag a person on videos',
+    summary: 'Add a person to videos',
     description:
-      'Tag a person on videos, which have no face box to draw: each video gets a manual face covering the whole frame. Videos the person is already on are reported as duplicate, photos as validation errors (tag them with a face box instead).',
+      'Mark videos as having a person in them. A video has no face box to draw, so each one gets a manual face covering the whole frame. Videos the person is already on are reported as duplicate, photos as validation errors (their people are marked on the face itself).',
     history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
   })
   addPersonToAssets(
