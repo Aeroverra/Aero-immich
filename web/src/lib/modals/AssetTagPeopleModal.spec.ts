@@ -77,7 +77,7 @@ describe('AssetTagPeopleModal', () => {
     expect(sdkMock.addPersonToAssets).toHaveBeenCalledWith({ id: 'bob', bulkIdsDto: { ids: assetIds } });
     expect(emit).toHaveBeenCalledWith('PersonAssetsAdd', ['video-1']);
     expect(toastManager.primary).toHaveBeenCalledWith('Tagged Ann, Bob in 1 video');
-    expect(toastManager.info).toHaveBeenCalledWith('1 photo was skipped, tag faces on photos in the photo viewer');
+    expect(toastManager.info).toHaveBeenCalledWith('1 photo was skipped, only videos get tagged this way');
   });
 
   it('says so when every video already had the people', async () => {
@@ -110,14 +110,24 @@ describe('AssetTagPeopleModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('picks the only match with Enter', async () => {
+  it('picks the best match with Enter instead of creating a person', async () => {
+    sdkMock.getAllPeople.mockResolvedValue({
+      people: [newPerson('dana', 'Dana'), newPerson('ann', 'Ann'), newPerson('bob', 'Bob')],
+      hasNextPage: false,
+      total: 3,
+      hidden: 0,
+    });
     renderWithTooltips(AssetTagPeopleModal, { assetIds, onClose });
     await waitFor(() => expect(person('Ann')).toBeInTheDocument());
 
     await userEvent.type(screen.getByTestId('tag-people-search'), 'an{Enter}');
 
     expect(screen.getByTestId('tag-people-selected')).toHaveTextContent('Ann');
+    expect(screen.getByTestId('tag-people-selected')).not.toHaveTextContent('Dana');
     expect(screen.getByTestId('tag-people-search')).toHaveValue('');
     expect(sdkMock.createPerson).not.toHaveBeenCalled();
+
+    await userEvent.type(screen.getByTestId('tag-people-search'), 'an{Enter}');
+    expect(screen.getByTestId('tag-people-selected').textContent?.match(/Ann/g)).toHaveLength(1);
   });
 });
