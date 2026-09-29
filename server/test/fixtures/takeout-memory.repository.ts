@@ -13,6 +13,7 @@ import {
   RUN_FILE_INSERT_CHUNK,
   TAKEOUT_ACTIVE_RUN_STATUSES,
   TAKEOUT_CANCELLED_FLAG,
+  TAKEOUT_LEASED_RUN_STATUSES,
   TAKEOUT_RUNNING_RUN_STATUSES,
 } from 'src/repositories/takeout.repository';
 
@@ -665,10 +666,62 @@ export class TakeoutMemoryRepository {
 
   updateRunIfLeased(id: string, token: string, patch: Row) {
     const run = this.runs.find((r) => r.id === id);
-    if (!run || run.leaseToken !== token || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+    if (!run || run.leaseToken !== token || !TAKEOUT_LEASED_RUN_STATUSES.includes(run.status)) {
       return Promise.resolve(false);
     }
-    Object.assign(run, patch, { updatedAt: new Date() });
+    const next = { ...patch };
+    if (patch.readStats !== undefined) {
+      // like the jsonb merge: new statistics keep the pause the API wrote
+      const kept: Row = {};
+      for (const key of ['pausedAt', 'pausedFrom']) {
+        if (run.readStats?.[key] !== undefined && run.readStats?.[key] !== null) {
+          kept[key] = run.readStats[key];
+        }
+      }
+      if (Object.keys(kept).length > 0) {
+        next.readStats = { ...patch.readStats, ...kept };
+      }
+    }
+    Object.assign(run, next, { updatedAt: new Date() });
+    return Promise.resolve(true);
+  }
+
+  requestPause(id: string, at: Date) {
+    const run = this.runs.find((r) => r.id === id);
+    if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+      return Promise.resolve(false);
+    }
+    run.readStats = { ...run.readStats, pausedAt: at.toISOString(), pausedFrom: run.status };
+    run.status = TakeoutRunStatus.Paused;
+    this.statusLog.push(TakeoutRunStatus.Paused);
+    return Promise.resolve(true);
+  }
+
+  resumePausedRun(id: string) {
+    const run = this.runs.find((r) => r.id === id);
+    if (!run || run.status !== TakeoutRunStatus.Paused || run.leaseToken === null || this.leaseStale(run)) {
+      return Promise.resolve(false);
+    }
+    const { pausedAt: _at, pausedFrom, ...rest } = run.readStats ?? {};
+    run.status = pausedFrom ?? TakeoutRunStatus.Queued;
+    run.readStats = rest;
+    this.statusLog.push(run.status);
+    return Promise.resolve(true);
+  }
+
+  requeuePausedRun(id: string, attempt: number, readStats: Row) {
+    const run = this.runs.find((r) => r.id === id);
+    if (!run || run.status !== TakeoutRunStatus.Paused || !(run.leaseToken === null || this.leaseStale(run))) {
+      return Promise.resolve(false);
+    }
+    Object.assign(run, {
+      status: TakeoutRunStatus.Queued,
+      attempt,
+      heartbeatAt: null,
+      leaseToken: null,
+      readStats: structuredClone(readStats),
+    });
+    this.statusLog.push(TakeoutRunStatus.Queued);
     return Promise.resolve(true);
   }
 
@@ -725,7 +778,7 @@ export class TakeoutMemoryRepository {
 
   requestCancel(id: string) {
     const run = this.runs.find((r) => r.id === id);
-    if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+    if (!run || !TAKEOUT_LEASED_RUN_STATUSES.includes(run.status)) {
       return Promise.resolve(false);
     }
     run.status = TakeoutRunStatus.Cancelling;
@@ -740,7 +793,7 @@ export class TakeoutMemoryRepository {
 
   takeLease(runId: string, token: string) {
     const run = this.runs.find((r) => r.id === runId);
-    if (!run || !TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+    if (!run || !TAKEOUT_LEASED_RUN_STATUSES.includes(run.status)) {
       return Promise.resolve(false);
     }
     if (run.leaseToken === null || run.leaseToken === token || this.leaseStale(run)) {

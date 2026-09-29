@@ -111,6 +111,9 @@ function sourceOptions(options: WalkOptions, meter: ReadMeter): FileSourceOption
     fingerprint: options.fingerprint ?? null,
     signal: options.signal,
     throttleMBps: options.throttleMBps ?? null,
+    throttle: source.throttle ?? null,
+    gate: source.gate ?? null,
+    liveDepth: source.liveDepth,
     meter,
   };
 }

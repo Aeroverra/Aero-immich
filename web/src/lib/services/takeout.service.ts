@@ -4,6 +4,7 @@ import {
   deleteTakeoutExport,
   deleteTakeoutExportArchives,
   isHttpError,
+  pauseTakeoutRun,
   rescanTakeoutExport,
   resolveTakeoutLargerVersion,
   resumeTakeoutRun,
@@ -17,8 +18,9 @@ import {
   type TakeoutLargerVersionDto,
   type TakeoutOverviewDto,
   type TakeoutPartReadStatus,
+  TakeoutRunPartStatus,
   type TakeoutRunDto,
-  type TakeoutRunPartStatus,
+  type TakeoutRunPartStatsDto,
   type TakeoutSizeCheck,
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
@@ -27,13 +29,20 @@ import type { MessageFormatter } from 'svelte-i18n';
 import { getByteUnitString } from '$lib/utils/byte-units';
 import { getServerErrorMessage, handleError } from '$lib/utils/handle-error';
 
-const ACTIVE_RUN_STATUSES = new Set<TakeoutRunStatus>([
+/** Statuses in which a run works: it can be paused */
+const RUNNING_RUN_STATUSES = new Set<TakeoutRunStatus>([
   TakeoutRunStatus.Queued,
   TakeoutRunStatus.Reading,
   TakeoutRunStatus.Planning,
   TakeoutRunStatus.Fetching,
   TakeoutRunStatus.Importing,
   TakeoutRunStatus.Finishing,
+]);
+
+/** Statuses of a run that is not finished: running, paused or cancelling */
+const ACTIVE_RUN_STATUSES = new Set<TakeoutRunStatus>([
+  ...RUNNING_RUN_STATUSES,
+  TakeoutRunStatus.Paused,
   TakeoutRunStatus.Cancelling,
 ]);
 
@@ -43,6 +52,15 @@ const STOPPED_RUN_STATUSES = new Set<TakeoutRunStatus>([TakeoutRunStatus.Failed,
 const STAGING_TTL_MS = 7 * 24 * 3600 * 1000;
 
 export const takeoutRunActive = (status: TakeoutRunStatus): boolean => ACTIVE_RUN_STATUSES.has(status);
+
+/** A running run can be paused: reading stops at once, the other steps at their next safe point */
+export const takeoutRunPausable = (status: TakeoutRunStatus): boolean => RUNNING_RUN_STATUSES.has(status);
+
+export const takeoutRunPaused = (status: TakeoutRunStatus): boolean => status === TakeoutRunStatus.Paused;
+
+/** The status that places a run in its phases: a paused run is in the status it was paused in */
+export const runPhaseStatus = (run: Pick<TakeoutRunDto, 'status' | 'pausedFrom'>): TakeoutRunStatus =>
+  run.status === TakeoutRunStatus.Paused ? (run.pausedFrom ?? TakeoutRunStatus.Queued) : run.status;
 
 /** A failed or cancelled run can be resumed unless a newer run took over its staged files */
 export const takeoutRunResumable = (run: Pick<TakeoutRunDto, 'status' | 'supersededBy'>): boolean =>
@@ -68,8 +86,8 @@ export type TakeoutRunPhase =
   | TakeoutRunStatus.Finishing;
 
 /** The phases of a run in order; fetching only when the run fetches (or fetched) files again */
-export const runPhases = (run: Pick<TakeoutRunDto, 'status' | 'readStats'>): TakeoutRunPhase[] => {
-  const fetching = run.status === TakeoutRunStatus.Fetching || run.readStats.fetchFiles > 0;
+export const runPhases = (run: Pick<TakeoutRunDto, 'status' | 'pausedFrom' | 'readStats'>): TakeoutRunPhase[] => {
+  const fetching = runPhaseStatus(run) === TakeoutRunStatus.Fetching || run.readStats.fetchFiles > 0;
   return [
     TakeoutRunStatus.Reading,
     TakeoutRunStatus.Planning,
@@ -81,13 +99,14 @@ export const runPhases = (run: Pick<TakeoutRunDto, 'status' | 'readStats'>): Tak
 
 /**
  * Index of the current phase in `phases`: every phase before it is done. -1 lights no phase (queued, and stopped
- * runs, whose last phase is not known); phases.length lights all of them (completed).
+ * runs, whose last phase is not known); phases.length lights all of them (completed). A paused run lights the phase
+ * it was paused in.
  */
-export const runPhaseIndex = (run: Pick<TakeoutRunDto, 'status'>, phases: TakeoutRunPhase[]): number => {
+export const runPhaseIndex = (run: Pick<TakeoutRunDto, 'status' | 'pausedFrom'>, phases: TakeoutRunPhase[]): number => {
   if (run.status === TakeoutRunStatus.Completed) {
     return phases.length;
   }
-  return phases.indexOf(run.status as TakeoutRunPhase);
+  return phases.indexOf(runPhaseStatus(run) as TakeoutRunPhase);
 };
 
 export const runPhaseLabel = ($t: MessageFormatter, phase: TakeoutRunPhase): string => {
@@ -123,18 +142,19 @@ export interface TakeoutRunMainProgress {
 export const runMainProgress = (
   run: Pick<
     TakeoutRunDto,
-    'status' | 'readStats' | 'archiveBytesRead' | 'archiveBytesTotal' | 'bytesDone' | 'bytesTotal'
+    'status' | 'pausedFrom' | 'readStats' | 'archiveBytesRead' | 'archiveBytesTotal' | 'bytesDone' | 'bytesTotal'
   >,
 ): TakeoutRunMainProgress | undefined => {
-  switch (run.status) {
+  const phase = runPhaseStatus(run);
+  switch (phase) {
     case TakeoutRunStatus.Reading: {
-      return { phase: run.status, done: run.archiveBytesRead, total: run.archiveBytesTotal };
+      return { phase, done: run.archiveBytesRead, total: run.archiveBytesTotal };
     }
     case TakeoutRunStatus.Fetching: {
-      return { phase: run.status, done: run.readStats.fetchBytesRead, total: run.readStats.fetchBytesTotal };
+      return { phase, done: run.readStats.fetchBytesRead, total: run.readStats.fetchBytesTotal };
     }
     case TakeoutRunStatus.Importing: {
-      return { phase: run.status, done: run.bytesDone, total: run.bytesTotal };
+      return { phase, done: run.bytesDone, total: run.bytesTotal };
     }
     default: {
       return undefined;
@@ -362,12 +382,42 @@ export const handleDiscardStaging = async (
   }
 };
 
+/** Resume a paused run where it waits, or a failed or cancelled run from where it stopped */
 export const handleResumeRun = async ($t: MessageFormatter, runId: string): Promise<TakeoutRunDto | undefined> => {
   try {
     return await resumeTakeoutRun({ id: runId });
   } catch (error) {
-    handleError(error, $t('errors.unable_to_start_takeout_run'));
+    handleError(error, $t('errors.unable_to_resume_takeout_run'));
   }
+};
+
+/** Pause a running run: nothing is read twice, and it stays paused (also across a server restart) until resumed */
+export const handlePauseRun = async ($t: MessageFormatter, runId: string): Promise<TakeoutRunDto | undefined> => {
+  try {
+    return await pauseTakeoutRun({ id: runId });
+  } catch (error) {
+    handleError(error, $t('errors.unable_to_pause_takeout_run'));
+  }
+};
+
+/**
+ * Seconds a part spent reading: from its start to its end (or now), without the time it was paused. A part paused now
+ * stops counting at the start of the pause when it is known (the run's pausedAt).
+ */
+export const partReadSeconds = (
+  part: Pick<TakeoutRunPartStatsDto, 'startedAt' | 'finishedAt' | 'pausedMs' | 'status'>,
+  pausedAt: string | null,
+  now = Date.now(),
+): number | undefined => {
+  if (!part.startedAt) {
+    return undefined;
+  }
+  let end = part.finishedAt ? Date.parse(part.finishedAt) : now;
+  if (!part.finishedAt && part.status === TakeoutRunPartStatus.Paused && pausedAt) {
+    end = Math.min(end, Date.parse(pausedAt));
+  }
+  const seconds = (end - Date.parse(part.startedAt) - part.pausedMs) / 1000;
+  return seconds > 0 ? seconds : undefined;
 };
 
 /** "Read failed parts again": parts in error go back to not read, the next run reads them */

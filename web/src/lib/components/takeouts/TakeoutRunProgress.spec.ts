@@ -1,6 +1,8 @@
 import { TakeoutRunPartStatus, TakeoutRunStatus } from '@immich/sdk';
 import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
+import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import TakeoutRunProgress from '$lib/components/takeouts/TakeoutRunProgress.svelte';
 import { takeoutRunFactory, takeoutRunPartStatsFactory } from '@test-data/factories/takeout-factory';
 
@@ -130,5 +132,62 @@ describe('TakeoutRunProgress component', () => {
     } else {
       expect(button).not.toBeInTheDocument();
     }
+  });
+
+  describe('pause and resume', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('pauses a running run and hands the paused run back', async () => {
+      const run = takeoutRunFactory.build({ status: TakeoutRunStatus.Reading });
+      const paused = {
+        ...run,
+        status: TakeoutRunStatus.Paused,
+        pausedFrom: TakeoutRunStatus.Reading,
+        pausedAt: '2026-09-29T10:00:00.000Z',
+      };
+      sdkMock.pauseTakeoutRun.mockResolvedValue(paused);
+      const onUpdated = vi.fn();
+      render(TakeoutRunProgress, { run, onUpdated });
+
+      expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Pause run' }));
+
+      expect(sdkMock.pauseTakeoutRun).toHaveBeenCalledExactlyOnceWith({ id: run.id });
+      expect(onUpdated).toHaveBeenCalledExactlyOnceWith(paused);
+    });
+
+    it('shows a paused run in its phase, without an ETA, with Resume and Cancel', async () => {
+      const run = takeoutRunFactory.build({
+        status: TakeoutRunStatus.Paused,
+        pausedFrom: TakeoutRunStatus.Reading,
+        pausedAt: '2026-09-29T10:00:00.000Z',
+        archiveBytesRead: 3 * GiB,
+        archiveBytesTotal: 12 * GiB,
+        readStats: { etaSeconds: 3725 },
+      });
+      const resumed = { ...run, status: TakeoutRunStatus.Reading, pausedFrom: null, pausedAt: null };
+      sdkMock.resumeTakeoutRun.mockResolvedValue(resumed);
+      const onUpdated = vi.fn();
+      render(TakeoutRunProgress, { run, onUpdated });
+
+      expect(screen.getByText('Reading', { selector: 'li' })).toHaveAttribute('aria-current', 'step');
+      const reading = within(screen.getByRole('region', { name: 'Reading' }));
+      expect(reading.getByText(/3 GiB \/ 12 GiB/)).not.toHaveTextContent('1h 2m');
+      expect(screen.getByTestId('takeout-run-paused')).toHaveTextContent('Paused since');
+      expect(screen.queryByRole('button', { name: 'Pause run' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Cancel run' })).toBeEnabled();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+      expect(sdkMock.resumeTakeoutRun).toHaveBeenCalledExactlyOnceWith({ id: run.id });
+      expect(onUpdated).toHaveBeenCalledExactlyOnceWith(resumed);
+    });
+
+    it('offers neither Pause nor Resume while the run is cancelling', () => {
+      render(TakeoutRunProgress, { run: takeoutRunFactory.build({ status: TakeoutRunStatus.Cancelling }) });
+      expect(screen.queryByRole('button', { name: 'Pause run' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Resume run' })).not.toBeInTheDocument();
+    });
   });
 });

@@ -1,6 +1,8 @@
 import { TakeoutCompleteness, TakeoutRunStatus } from '@immich/sdk';
 import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
+import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import TakeoutExportCard from '$lib/components/takeouts/TakeoutExportCard.svelte';
 import { takeoutExportFactory, takeoutRunFactory } from '@test-data/factories/takeout-factory';
 
@@ -74,5 +76,40 @@ describe('TakeoutExportCard component', () => {
     render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun }) });
 
     expect(screen.queryByTestId('export-card-run')).not.toBeInTheDocument();
+  });
+
+  it('pauses the active run from the card', async () => {
+    const lastRun = takeoutRunFactory.build({
+      status: TakeoutRunStatus.Importing,
+      bytesDone: GiB,
+      bytesTotal: 3 * GiB,
+    });
+    const paused = { ...lastRun, status: TakeoutRunStatus.Paused, pausedFrom: TakeoutRunStatus.Importing };
+    sdkMock.pauseTakeoutRun.mockResolvedValue(paused);
+    const onRunChanged = vi.fn();
+    render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun }), onRunChanged });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pause run' }));
+    expect(sdkMock.pauseTakeoutRun).toHaveBeenCalledExactlyOnceWith({ id: lastRun.id });
+    expect(onRunChanged).toHaveBeenCalledExactlyOnceWith(paused);
+  });
+
+  it('shows a paused run in the phase it was paused in, with Resume, and no new run', async () => {
+    const lastRun = takeoutRunFactory.build({
+      status: TakeoutRunStatus.Paused,
+      pausedFrom: TakeoutRunStatus.Reading,
+      pausedAt: '2026-09-29T10:00:00.000Z',
+      archiveBytesRead: 2 * GiB,
+      archiveBytesTotal: 8 * GiB,
+    });
+    sdkMock.resumeTakeoutRun.mockResolvedValue({ ...lastRun, status: TakeoutRunStatus.Reading });
+    render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun }) });
+
+    const run = within(screen.getByTestId('export-card-run'));
+    expect(run.getByText('Paused: Reading')).toBeInTheDocument();
+    expect(run.getByText('2 GiB / 8 GiB')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run import' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+    expect(sdkMock.resumeTakeoutRun).toHaveBeenCalledExactlyOnceWith({ id: lastRun.id });
   });
 });

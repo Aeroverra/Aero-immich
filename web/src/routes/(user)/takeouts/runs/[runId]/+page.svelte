@@ -14,6 +14,7 @@
   import {
     handleDiscardStaging,
     handleResumeRun,
+    runPhaseStatus,
     runStatusLabel,
     stagingExpiresAt,
     takeoutRunActive,
@@ -39,8 +40,11 @@
   let active = $derived(takeoutRunActive(run.status));
   let resumable = $derived(takeoutRunResumable(run));
   let discardable = $derived(takeoutRunDiscardable(run));
-  // while the archives are read, the parts table sits under the reading block; afterwards it folds away
-  let readingNow = $derived(run.status === TakeoutRunStatus.Reading || run.status === TakeoutRunStatus.Fetching);
+  // while the archives are read (or reading is paused), the parts table sits under the reading block; afterwards it
+  // folds away
+  let readingNow = $derived(
+    runPhaseStatus(run) === TakeoutRunStatus.Reading || runPhaseStatus(run) === TakeoutRunStatus.Fetching,
+  );
 
   let stagingText = $derived.by(() => {
     const size = getByteUnitString(run.readStats.stagingBytes, $locale);
@@ -52,9 +56,12 @@
     return $t('takeout_staging_kept', { values: { size, date } });
   });
 
-  let badgeColor = $derived.by((): 'danger' | 'primary' | 'success' | 'secondary' => {
+  let badgeColor = $derived.by((): 'danger' | 'primary' | 'success' | 'secondary' | 'warning' => {
     if (run.status === TakeoutRunStatus.Failed || run.status === TakeoutRunStatus.Cancelled) {
       return 'danger';
+    }
+    if (run.status === TakeoutRunStatus.Paused) {
+      return 'warning';
     }
     if (run.status === TakeoutRunStatus.Completed) {
       return 'success';
@@ -158,7 +165,12 @@
     <Card>
       <CardBody>
         {#key run.id}
-          <TakeoutRunProgress {run} showParts={readingNow} onCancelled={(updated) => (run = updated)} />
+          <TakeoutRunProgress
+            {run}
+            showParts={readingNow}
+            onCancelled={(updated) => (run = updated)}
+            onUpdated={(updated) => (run = updated)}
+          />
         {/key}
       </CardBody>
     </Card>
@@ -178,7 +190,7 @@
         </CardHeader>
         {#if showArchiveReads}
           <CardBody>
-            <TakeoutRunPartsTable parts={run.readStats.parts} />
+            <TakeoutRunPartsTable parts={run.readStats.parts} pausedAt={run.pausedAt} />
           </CardBody>
         {/if}
       </Card>

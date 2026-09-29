@@ -8,6 +8,7 @@ import {
   AlbumUserRole,
   AssetStatus,
   DeletedReimportMode,
+  JobName,
   JobStatus,
   TakeoutCatalogStatus,
   TakeoutRunFileAction,
@@ -16,15 +17,18 @@ import {
   UserMetadataKey,
 } from 'src/enum';
 import { LifecycleDeps, cleanupCancelledRun, discardRunStaging } from 'src/services/takeout-lifecycle';
+import { mapRun } from 'src/services/takeout-mappers';
 import {
   CATALOG_VERSION,
   DEFAULT_READ_LIMITS,
+  LeaseLost,
   ReadLimits,
   createProcessResources,
   sha1,
 } from 'src/services/takeout-read';
 import { TakeoutRunService } from 'src/services/takeout-run.service';
 import { StagingFs, nodeStagingFs, runStagingDir } from 'src/services/takeout-staging';
+import { TakeoutService } from 'src/services/takeout.service';
 import { FileSourceFs, TakeoutSettings, hex, mergeSettings, nodeFileSourceFs } from 'src/takeout';
 import { buildTar, buildTarGz, buildZip, randomBytesSeeded } from 'src/takeout/test-fixtures';
 import { TakeoutMemoryRepository } from 'test/fixtures/takeout-memory.repository';
@@ -1282,5 +1286,336 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
       expect(h.repo.assets).toHaveLength(1);
       expect(await exists(runStagingDir(h.folder, first.id))).toBe(false);
     });
+  });
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function until(check: () => boolean, ms = 3000) {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) {
+      throw new Error('condition not met in time');
+    }
+    await sleep(5);
+  }
+}
+
+/** An archive file system that counts opens, reads and bytes, with a hook after every read */
+function countingFs() {
+  const counts = { opens: 0, reads: 0, bytes: 0 };
+  const hooks: {
+    afterRead: ((position: number, bytes: number) => void) | null;
+    beforeRead: (() => Promise<void> | void) | null;
+  } = {
+    afterRead: null,
+    beforeRead: null,
+  };
+  const fs: FileSourceFs = {
+    open: async (path) => {
+      const real = await nodeFileSourceFs.open(path);
+      counts.opens++;
+      return {
+        read: async (buffer, offset, length, position) => {
+          await hooks.beforeRead?.();
+          const result = await real.read(buffer, offset, length, position);
+          counts.reads++;
+          counts.bytes += result.bytesRead;
+          hooks.afterRead?.(position, result.bytesRead);
+          return result;
+        },
+        stat: () => real.stat(),
+        close: () => real.close(),
+      };
+    },
+  };
+  return { fs, counts, hooks };
+}
+
+/** What the pause and resume endpoints do for a run whose job is alive: the check-and-set, then the event */
+const pauseRun = async (h: RunHarness, runId: string) => {
+  expect(await h.repo.requestPause(runId, new Date())).toBe(true);
+  await h.sut.onPauseChange({ runId });
+};
+const resumeRun = async (h: RunHarness, runId: string) => {
+  expect(await h.repo.resumePausedRun(runId)).toBe(true);
+  await h.sut.onPauseChange({ runId });
+};
+
+const smallFiles = (count: number, seed: number) =>
+  Array.from({ length: count }, (_, i) => ({ name: media(`p${i}.mp4`), data: randomBytesSeeded(900, seed + i) }));
+
+describe('TakeoutRunService pause and resume', () => {
+  it('pauses a read at its next read, keeps its lease, and resumes the same read: each byte read once', async () => {
+    const { fs, counts, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
+    h.sut.progressMs = 30;
+    const tgz = buildTarGz(smallFiles(20, 500));
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', tgz);
+    const run = h.newRun();
+    hooks.afterRead = () => {
+      if (counts.reads === 10) {
+        void pauseRun(h, run.id);
+      }
+    };
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    await sleep(100);
+    const readsAtPause = counts.reads;
+    await sleep(200);
+    expect(counts.reads).toBe(readsAtPause);
+    expect(counts.bytes).toBeLessThan(tgz.length);
+
+    const paused = h.run(run.id);
+    // the job keeps its lease and heartbeat; the progress writes keep the pause the API wrote
+    expect(paused.leaseToken).not.toBeNull();
+    expect(paused.readStats).toMatchObject({ pausedFrom: TakeoutRunStatus.Reading });
+    expect(mapRun(paused)).toMatchObject({
+      status: TakeoutRunStatus.Paused,
+      pausedFrom: TakeoutRunStatus.Reading,
+      pausedAt: expect.any(String),
+    });
+    expect(Object.values(paused.readStats.parts).map((ps: any) => ps.status)).toEqual(['paused']);
+    expect(paused.readStats.etaSeconds).toBeNull();
+
+    await resumeRun(h, run.id);
+    expect(await done).toBe(JobStatus.Success);
+    const stored = h.run(run.id);
+    expect(stored.status).toBe(TakeoutRunStatus.Completed);
+    expect(unique(h.repo.statusLog)).toEqual([
+      'reading',
+      'paused',
+      'reading',
+      'planning',
+      'importing',
+      'finishing',
+      'completed',
+    ]);
+    const [ps] = Object.values(stored.readStats.parts) as any[];
+    expect(ps).toMatchObject({ status: 'read', passes: 1, bytesRead: tgz.length });
+    expect(counts).toMatchObject({ opens: 1, bytes: tgz.length });
+    expect(stored.readStats.pausedMs).toBeGreaterThanOrEqual(300);
+    expect(ps.pausedMs).toBeGreaterThanOrEqual(300);
+    expect(stored.readStats.pausedAt).toBeUndefined();
+    expect(mapRun(stored)).toMatchObject({ pausedAt: null, pausedFrom: null });
+    expect(h.repo.assets).toHaveLength(20);
+  });
+
+  it('pauses between groups while importing and continues with the next group', async () => {
+    const h = await harness();
+    h.sut.progressMs = 30;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(3, 520)));
+    const run = h.newRun();
+    const create = h.mocks.asset.create.getMockImplementation()!;
+    let pausedOnce = false;
+    h.mocks.asset.create.mockImplementation(async (asset: any) => {
+      const created = await create(asset);
+      if (!pausedOnce) {
+        pausedOnce = true;
+        await pauseRun(h, run.id);
+      }
+      return created;
+    });
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    await sleep(200);
+    // the group in progress finished: one asset, and no file under upload/ without its asset (I4)
+    expect(h.repo.assets).toHaveLength(1);
+    expect(h.run(run.id).readStats.pausedFrom).toBe(TakeoutRunStatus.Importing);
+    expect(h.files(run.id).filter((f) => f.targetPath && f.status === TakeoutRunFileStatus.Written)).toEqual([]);
+
+    await resumeRun(h, run.id);
+    expect(await done).toBe(JobStatus.Success);
+    expect(h.repo.assets).toHaveLength(3);
+    expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+  });
+
+  it('pauses in finishing and sees the resume without its event (the progress tick is stopped there)', async () => {
+    const h = await harness();
+    h.sut.progressMs = 30;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(2, 530)));
+    const run = h.newRun();
+    const cas = h.repo.setRunStatusCas.bind(h.repo);
+    vi.spyOn(h.repo, 'setRunStatusCas').mockImplementation(async (id, token, status, patch) => {
+      const ok = await cas(id, token, status, patch);
+      if (status === TakeoutRunStatus.Finishing) {
+        await pauseRun(h, id);
+      }
+      return ok;
+    });
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    await sleep(100);
+    expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Paused, hasStaging: true });
+    expect(h.run(run.id).readStats.pausedFrom).toBe(TakeoutRunStatus.Finishing);
+    // resumed, and the event never reaches this worker
+    expect(await h.repo.resumePausedRun(run.id)).toBe(true);
+    expect(await done).toBe(JobStatus.Success);
+    expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Completed, leaseToken: null, hasStaging: false });
+  });
+
+  it('cancels a paused run: the job stops waiting, cleans up and keeps the staging', async () => {
+    const { fs, counts, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
+    h.sut.progressMs = 30;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(20, 540)));
+    const run = h.newRun();
+    hooks.afterRead = () => {
+      if (counts.reads === 10) {
+        void pauseRun(h, run.id);
+      }
+    };
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    await sleep(50);
+
+    expect(await h.repo.requestCancel(run.id)).toBe(true);
+    h.sut.onCancel({ runId: run.id });
+    expect(await done).toBe(JobStatus.Skipped);
+    const stored = h.run(run.id);
+    expect(stored).toMatchObject({ status: TakeoutRunStatus.Cancelled, leaseToken: null, hasStaging: true });
+    expect(stored.readStats.pausedAt).toBeUndefined();
+    expect(Object.values(stored.readStats.parts).map((ps: any) => ps.status)).toEqual(['pending']);
+    expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Partial);
+    expect(await exists(runStagingDir(h.folder, run.id))).toBe(true);
+  });
+
+  it('never fails a paused run as stalled, not even with a read that hung across the pause', async () => {
+    const { fs, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readStallMs: 100 } });
+    h.sut.progressMs = 20;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(3, 560)));
+    const run = h.newRun();
+    let release!: () => void;
+    const stuck = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    hooks.beforeRead = async () => {
+      if (!first) {
+        return;
+      }
+
+      // the share stops answering; the user pauses before the stall limit
+      first = false;
+      await pauseRun(h, run.id);
+      await stuck;
+    };
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    // many ticks, several stall limits
+    await sleep(500);
+    expect(h.run(run.id).status).toBe(TakeoutRunStatus.Paused);
+    release();
+    await resumeRun(h, run.id);
+    expect(await done).toBe(JobStatus.Success);
+    expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+  }, 10_000);
+
+  it('stays paused across a restart; Resume queues it again and a zip part continues at its next entry', async () => {
+    const { fs, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1, flushRows: 1000 } });
+    h.sut.progressMs = 30;
+    // entries large enough that the zip tail read for the central directory (64 KiB) stays clear of the first ones
+    const files = Array.from({ length: 20 }, (_, i) => ({
+      name: media(`v${i}.mp4`),
+      data: randomBytesSeeded(8 * KiB, 580 + i),
+    }));
+    const zip = buildZip(files.map((file) => ({ nameBytes: Buffer.from(file.name), data: file.data, method: 0 })));
+    const part = await h.addPart('takeout-20260914T211500Z-1-001.zip', zip);
+    const run = h.newRun();
+    const reads: Array<{ attempt: number; position: number; bytes: number }> = [];
+    let attempt = 0;
+    // reads from here on belong to the central directory (the tail search reads the last 64 KiB)
+    const tail = zip.length - 65_557;
+    hooks.afterRead = (position, bytes) => {
+      reads.push({ attempt, position, bytes });
+      const inEntries = position >= 48 * KiB && position < tail;
+      if (attempt === 0 && inEntries && h.run(run.id).status === TakeoutRunStatus.Reading) {
+        void pauseRun(h, run.id);
+      }
+    };
+    const first = h.execute(run);
+    // the pause stores the rows read so far, and the write-behind settles while paused
+    await until(
+      () =>
+        h.run(run.id).status === TakeoutRunStatus.Paused &&
+        h.repo.entries.some((entry) => entry.partId === part.id) &&
+        h.sut.processResources!.writes.pending(run.id) === 0,
+    );
+    // the process dies while paused: the job stops without cleaning anything up
+    (h.sut as any).controllers.get(run.id).abort(new LeaseLost());
+    expect(await first).toBe(JobStatus.Skipped);
+
+    // the new process boots: the run stays paused and is not queued, its lease is gone
+    const api = newTestService(TakeoutService, { takeout: h.repo as any });
+    // (the storage mock of a new service points the media location elsewhere)
+    StorageCore.setMediaLocation(h.dir);
+    api.mocks.user.getList.mockResolvedValue([]);
+    api.mocks.job.queue.mockResolvedValue();
+    api.mocks.job.removeJob.mockResolvedValue();
+    api.mocks.storage.checkDiskUsage.mockResolvedValue({ available: 1e13, free: 1e13, total: 1e13 });
+    vi.spyOn(api.sut, 'sweepStaging').mockResolvedValue();
+    await api.sut.recoverAtBoot();
+    expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Paused, leaseToken: null, heartbeatAt: null });
+    expect(api.mocks.job.queue).not.toHaveBeenCalledWith(expect.objectContaining({ name: JobName.TakeoutRun }));
+    expect(part.catalogStatus).toBe(TakeoutCatalogStatus.Partial);
+    const committed = h.repo.entries.filter((entry) => entry.partId === part.id);
+    expect(committed.length).toBeGreaterThan(0);
+    expect(committed.length).toBeLessThan(20);
+    const committedEnd = Math.max(...committed.map((entry) => Number(entry.endOffset)));
+
+    // Resume: no live job, so the run is queued again with the next attempt
+    const resumed = await api.sut.resumeRun({ user: { id: userId } } as any, run.id);
+    expect(resumed).toMatchObject({ status: TakeoutRunStatus.Queued, pausedAt: null });
+    expect(api.mocks.job.removeJob).toHaveBeenCalledWith(JobName.TakeoutRun, `${run.id}/0`);
+    expect(api.mocks.job.queue).toHaveBeenCalledWith({
+      name: JobName.TakeoutRun,
+      data: { runId: run.id, attempt: 1 },
+    });
+    expect(h.run(run.id).readStats.pausedMs).toBeGreaterThan(0);
+    expect(Object.values(h.run(run.id).readStats.parts).map((ps: any) => ps.status)).toEqual(['pending']);
+
+    attempt = 1;
+    expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
+    expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+    expect(h.repo.assets).toHaveLength(20);
+    // the zip continued after its committed entries: no byte of them is read again (the central directory is)
+    const again = reads.filter((read) => read.attempt === 1 && read.position < committedEnd && read.position < tail);
+    expect(again).toEqual([]);
+    expect(h.run(run.id).readStats.fetchFiles).toBe(0);
+    const [ps] = Object.values(h.run(run.id).readStats.parts) as any[];
+    expect(ps).toMatchObject({ status: 'read', passes: 2 });
+  });
+
+  it('applies changed read settings to a running run: reader count, readahead and the read limit', async () => {
+    const { fs, counts, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 2 } });
+    h.sut.progressMs = 30;
+    for (const n of [1, 2]) {
+      await h.addPart(
+        `takeout-20260914T211500Z-1-00${n}.tgz`,
+        buildTarGz([{ name: media(`v${n}.mp4`), data: randomBytesSeeded(30 * KiB, 600 + n) }]),
+        n,
+      );
+    }
+    const run = h.newRun();
+    let seen: { readers: number; readaheadDepth: number } | null = null;
+    hooks.afterRead = () => {
+      if (counts.reads !== 6) {
+        return;
+      }
+
+      h.sut.onConfigUpdate({
+        newConfig: { takeout: { readers: 1, throttleMBps: 500, readaheadDepth: 1 } },
+      } as any);
+      const ctx = (h.sut as any).attempts.get(run.id).ctx;
+      seen = { readers: ctx.readers, readaheadDepth: ctx.readaheadDepth };
+    };
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    expect(seen).toEqual({ readers: 1, readaheadDepth: 1 });
+    expect(h.sut.processResources!.throttle.rateMBps).toBe(500);
+    expect(h.run(run.id).readStats).toMatchObject({ readers: 1, readahead: 1 });
+    for (const ps of Object.values(h.run(run.id).readStats.parts) as any[]) {
+      expect(ps).toMatchObject({ status: 'read', passes: 1, bytesRead: ps.size });
+    }
   });
 });

@@ -125,6 +125,17 @@ void main() {
       expect(features!.customViews.orElse(null), isFalse);
     });
 
+    test('reads the admin config from servers without the takeout read settings', () {
+      final dynamic value = jsonDecode('{"trash": {"enabled": true, "days": 30}}');
+      upgradeDto(value, 'AdminConfigDto');
+      final takeout = AdminConfigTakeoutDto.fromJson(value['takeout']);
+      expect(takeout, isNotNull);
+      expect(takeout!.readers, 3);
+      expect(takeout.readaheadDepth, 4);
+      expect(takeout.throttleMBps, isNull);
+      expect(value['trash'], {'enabled': true, 'days': 30});
+    });
+
     test('addDefault', () {
       final dynamic value = jsonDecode("""
 {

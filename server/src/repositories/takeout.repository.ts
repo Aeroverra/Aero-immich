@@ -32,8 +32,14 @@ export const TAKEOUT_RUNNING_RUN_STATUSES = [
   TakeoutRunStatus.Finishing,
 ];
 
-/** statuses that block a new run and mean the export must not be regrouped (running + cancelling) */
-export const TAKEOUT_ACTIVE_RUN_STATUSES = [...TAKEOUT_RUNNING_RUN_STATUSES, TakeoutRunStatus.Cancelling];
+/**
+ * statuses whose lease the job keeps: running, and paused (the job waits with its archives open, its heartbeat goes
+ * on). A paused run changes no phase (setRunStatusCas needs a running status) and is never re-queued at boot.
+ */
+export const TAKEOUT_LEASED_RUN_STATUSES = [...TAKEOUT_RUNNING_RUN_STATUSES, TakeoutRunStatus.Paused];
+
+/** statuses that block a new run and mean the export must not be regrouped (running + paused + cancelling) */
+export const TAKEOUT_ACTIVE_RUN_STATUSES = [...TAKEOUT_LEASED_RUN_STATUSES, TakeoutRunStatus.Cancelling];
 
 /** plan inserts per statement: 1000 rows x 25 columns stays far below the 65534 parameters postgres.js allows */
 export const RUN_FILE_INSERT_CHUNK = 1000;
@@ -751,15 +757,95 @@ export class TakeoutRepository {
       .execute();
   }
 
-  /** Progress and statistics written by the job holding the lease; a stale job writes nothing */
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID, {}] })
+  /**
+   * Progress and statistics written by the job holding the lease, also while the run is paused; a stale job writes
+   * nothing. New statistics keep the pause the API wrote into them (pausedAt, pausedFrom): only the pause and resume
+   * check-and-sets change it.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID, { readStats: {} }] })
   async updateRunIfLeased(id: string, token: string, patch: Updateable<TakeoutRunTable>) {
+    const { readStats, ...rest } = patch;
     const row = await this.db
       .updateTable('takeout_run')
-      .set({ ...patch, updatedAt: sql`now()` })
+      .set({
+        ...rest,
+        ...(readStats !== undefined && {
+          readStats: sql<object>`${JSON.stringify(readStats)}::jsonb || jsonb_strip_nulls(jsonb_build_object('pausedAt', "readStats"->'pausedAt', 'pausedFrom', "readStats"->'pausedFrom'))`,
+        }),
+        updatedAt: sql`now()`,
+      })
       .where('id', '=', id)
       .where('leaseToken', '=', token)
+      .where('status', 'in', TAKEOUT_LEASED_RUN_STATUSES)
+      .returning('id')
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /**
+   * Pause request of the API: a running run becomes paused, and its statistics note when and from which status. The
+   * job holding the lease holds its reads at the next read (its archives stay open) and its other steps at the next
+   * group, and keeps its heartbeat.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.DATE] })
+  async requestPause(id: string, at: Date): Promise<boolean> {
+    const row = await this.db
+      .updateTable('takeout_run')
+      .set({
+        status: TakeoutRunStatus.Paused,
+        readStats: sql<object>`coalesce("readStats", '{}'::jsonb) || jsonb_build_object('pausedAt', ${at.toISOString()}::text, 'pausedFrom', "status")`,
+        updatedAt: sql`now()`,
+      })
+      .where('id', '=', id)
       .where('status', 'in', TAKEOUT_RUNNING_RUN_STATUSES)
+      .returning('id')
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /**
+   * Resume of a paused run whose job is alive (it holds a lease renewed within 60 s): back to the status it was paused
+   * from; the job continues the same reads. False when no live job holds it (see requeuePausedRun).
+   */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async resumePausedRun(id: string): Promise<boolean> {
+    const row = await this.db
+      .updateTable('takeout_run')
+      .set({
+        status: sql<TakeoutRunStatus>`coalesce("readStats"->>'pausedFrom', ${TakeoutRunStatus.Queued}::text)`,
+        readStats: sql<object>`"readStats" - 'pausedAt' - 'pausedFrom'`,
+        updatedAt: sql`now()`,
+      })
+      .where('id', '=', id)
+      .where('status', '=', TakeoutRunStatus.Paused)
+      .where('leaseToken', 'is not', null)
+      .where('heartbeatAt', '>=', STALE_LEASE)
+      .returning('id')
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /**
+   * Resume of a paused run whose job is gone (a restart, a dead worker): queued again with the next attempt, which
+   * continues like any resumed run (a part read to its middle continues: zip at the next entry, tgz from byte 0).
+   */
+  @GenerateSql({ params: [DummyValue.UUID, 1, {}] })
+  async requeuePausedRun(id: string, attempt: number, readStats: object): Promise<boolean> {
+    const row = await this.db
+      .updateTable('takeout_run')
+      .set({
+        status: TakeoutRunStatus.Queued,
+        attempt,
+        heartbeatAt: null,
+        leaseToken: null,
+        readStats,
+        updatedAt: sql`now()`,
+      })
+      .where('id', '=', id)
+      .where('status', '=', TakeoutRunStatus.Paused)
+      .where((eb) =>
+        eb.or([eb('leaseToken', 'is', null), eb('heartbeatAt', 'is', null), eb('heartbeatAt', '<', STALE_LEASE)]),
+      )
       .returning('id')
       .executeTakeFirst();
     return !!row;
@@ -850,14 +936,14 @@ export class TakeoutRepository {
     return !!row;
   }
 
-  /** Cancel request of the API: a running run becomes cancelling (the job holding the lease cleans up) */
+  /** Cancel request of the API: a running or paused run becomes cancelling (the job holding the lease cleans up) */
   @GenerateSql({ params: [DummyValue.UUID] })
   async requestCancel(id: string): Promise<boolean> {
     const row = await this.db
       .updateTable('takeout_run')
       .set({ status: TakeoutRunStatus.Cancelling, updatedAt: sql`now()` })
       .where('id', '=', id)
-      .where('status', 'in', TAKEOUT_RUNNING_RUN_STATUSES)
+      .where('status', 'in', TAKEOUT_LEASED_RUN_STATUSES)
       .returning('id')
       .executeTakeFirst();
     return !!row;
@@ -880,14 +966,14 @@ export class TakeoutRepository {
       .execute();
   }
 
-  /** Lease CAS: take or renew the lease of a running run unless another live worker holds it */
+  /** Lease CAS: take or renew the lease of a running or paused run unless another live worker holds it */
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
   async takeLease(runId: string, token: string) {
     const row = await this.db
       .updateTable('takeout_run')
       .set({ heartbeatAt: sql`now()`, leaseToken: token })
       .where('id', '=', runId)
-      .where('status', 'in', TAKEOUT_RUNNING_RUN_STATUSES)
+      .where('status', 'in', TAKEOUT_LEASED_RUN_STATUSES)
       .where((eb) =>
         eb.or([eb('leaseToken', 'is', null), eb('leaseToken', '=', token), eb('heartbeatAt', '<', STALE_LEASE)]),
       )

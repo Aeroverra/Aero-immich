@@ -1,5 +1,6 @@
 import type { ByteSemaphore } from 'src/takeout/byte-semaphore';
 import type { FileSourceClock, FileSourceFs } from 'src/takeout/file-source';
+import type { ReadGate, ReadThrottle } from 'src/takeout/flow-control';
 
 // ---------- part names and exports ----------
 export type ArchiveKind = 'zip' | 'tgz';
@@ -196,6 +197,12 @@ export interface WalkSourceOptions {
   memory?: ByteSemaphore | null;
   fs?: FileSourceFs;
   clock?: FileSourceClock;
+  /** the read rate limit shared by the process (FileSourceOptions.throttle) */
+  throttle?: ReadThrottle | null;
+  /** passed before every positional read (FileSourceOptions.gate) */
+  gate?: ReadGate | null;
+  /** the readahead depth wanted now (FileSourceOptions.liveDepth) */
+  liveDepth?: () => number;
 }
 
 export interface WalkOptions {
@@ -629,7 +636,7 @@ export interface CounterRow {
 }
 
 // ---------- read statistics (single-pass design 13.2) ----------
-export type RunPartStatus = 'pending' | 'cached' | 'reading' | 'read' | 'error' | 'missing';
+export type RunPartStatus = 'pending' | 'cached' | 'reading' | 'paused' | 'read' | 'error' | 'missing';
 
 export interface TakeoutRunPartStats {
   partId: string;
@@ -657,6 +664,8 @@ export interface TakeoutRunPartStats {
   errorOffset: number | null;
   startedAt: string | null;
   finishedAt: string | null;
+  /** time the part spent paused (a paused run, or its reader held back by a lowered reader count) */
+  pausedMs: number;
 }
 
 export interface TakeoutReadStats {
@@ -686,5 +695,7 @@ export interface TakeoutReadStats {
   discardedStagedBytes: number;
   stagingBytes: number;
   stagingExpiresAt: string | null;
+  /** time the run spent paused, pauses that ended (the current one counts from the run's pausedAt) */
+  pausedMs: number;
   parts: Record<string, TakeoutRunPartStats>;
 }

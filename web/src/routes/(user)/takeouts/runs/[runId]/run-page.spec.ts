@@ -129,4 +129,35 @@ describe('Takeout run page', () => {
     expect(screen.getByText('takeout-x-001.tgz')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Archive reads' })).not.toBeInTheDocument();
   });
+
+  it('shows a paused run with its badge, its parts under reading, and resumes it', async () => {
+    const part = takeoutRunPartStatsFactory.build({
+      partId: 'p1',
+      status: TakeoutRunPartStatus.Paused,
+      position: GiB,
+      size: 2 * GiB,
+    });
+    const run = takeoutRunFactory.build({
+      status: TakeoutRunStatus.Paused,
+      pausedFrom: TakeoutRunStatus.Reading,
+      pausedAt: '2026-09-29T10:00:00.000Z',
+      readStats: { parts: [part] },
+    });
+    sdkMock.resumeTakeoutRun.mockResolvedValue({
+      ...run,
+      status: TakeoutRunStatus.Reading,
+      pausedFrom: null,
+      pausedAt: null,
+    });
+
+    render(RunPage, { data: data(run) });
+
+    expect(screen.getAllByText('Paused').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('run-part-p1')).toBeInTheDocument();
+    expect(screen.queryByText('Archive reads')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Resume run' }));
+    expect(sdkMock.resumeTakeoutRun).toHaveBeenCalledExactlyOnceWith({ id: run.id });
+    expect(screen.getByRole('button', { name: 'Pause run' })).toBeInTheDocument();
+  });
 });

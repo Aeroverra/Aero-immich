@@ -90,6 +90,8 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     ).toJson(),
   },
   'AdminConfigNightlyTasksDto': {'autoStack': false},
+  // the takeout read settings of a server without them are its built-in defaults
+  'AdminConfigDto': {'takeout': AdminConfigTakeoutDto(readaheadDepth: 4, readers: 3, throttleMBps: null).toJson()},
   'UserConfigMachineLearningDto': {
     'faceAttributes': UserConfigFaceAttributesDto(enabled: false).toJson(),
     'autoStack': UserConfigAutoStackDto(enabled: false).toJson(),

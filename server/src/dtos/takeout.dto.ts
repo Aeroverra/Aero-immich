@@ -255,6 +255,10 @@ const TakeoutRunPartStatsSchema = z
     errorOffset: z.int().min(0).nullable().describe('Compressed byte offset of the failure'),
     startedAt: dateTime().nullable().describe('When this run started reading the part'),
     finishedAt: dateTime().nullable().describe('When this run finished the part'),
+    pausedMs: z
+      .int()
+      .min(0)
+      .describe('Milliseconds the part spent paused (a paused run, or fewer readers); not counted in its read speed'),
   })
   .meta({ id: 'TakeoutRunPartStatsDto' });
 
@@ -285,6 +289,10 @@ const TakeoutRunReadStatsSchema = z
     discardedStagedBytes: z.int().min(0).describe('Bytes of the staged files the plan did not use'),
     stagingBytes: z.int().min(0).describe('Bytes held in staging by a failed or cancelled run'),
     stagingExpiresAt: dateTime().nullable().describe('When the staging of a failed or cancelled run is removed'),
+    pausedMs: z
+      .int()
+      .min(0)
+      .describe('Milliseconds the run spent in pauses that ended (a current pause counts from pausedAt)'),
     parts: z.array(TakeoutRunPartStatsSchema).describe('Per part, in part order'),
   })
   .meta({ id: 'TakeoutRunReadStatsDto' });
@@ -304,6 +312,10 @@ const TakeoutRunSchema = z
     readStats: TakeoutRunReadStatsSchema,
     hasStaging: z.boolean().describe('Staged files are held for this run (a failed or cancelled run can be discarded)'),
     supersededBy: z.uuidv4().nullable().describe('The newer run that took over the staged files of this run'),
+    pausedAt: dateTime().nullable().describe('When the run was paused (null unless it is paused)'),
+    pausedFrom: TakeoutRunStatusSchema.nullable().describe(
+      'The status the run was paused in; Resume continues there (null unless it is paused)',
+    ),
     currentFile: z.string().nullable().describe('Archive path of the file being processed'),
     error: z.string().nullable().describe('Why the run failed'),
     startedAt: dateTime().nullable().describe('When the run started'),

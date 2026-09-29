@@ -2,6 +2,7 @@ import { open as fsOpen } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { ByteLease, ByteSemaphore } from 'src/takeout/byte-semaphore';
 import { ArchiveChangedError, PartMissingError } from 'src/takeout/errors';
+import { ReadGate, ReadThrottle } from 'src/takeout/flow-control';
 import { FileFingerprint, ReadMeter } from 'src/takeout/types';
 
 // Positional reads with application readahead over one file (single-pass design 6.7). Transport errors (EIO,
@@ -44,8 +45,21 @@ export interface FileSourceOptions {
   signal?: AbortSignal;
   fs?: FileSourceFs;
   clock?: FileSourceClock;
-  /** test only: limit the read rate */
+  /** limit the read rate of this source alone (tests); `throttle` is the shared limit and takes precedence */
   throttleMBps?: number | null;
+  /** the read rate limit shared by every source of the process; its rate can change while reads wait */
+  throttle?: ReadThrottle | null;
+  /**
+   * Passed before every positional read: while it is closed no read is issued (a paused run, a reader held back by a
+   * lowered reader count). The source and its handle stay open; reads already in flight complete. The wait does not
+   * count as a pending read for the stall watchdog.
+   */
+  gate?: ReadGate | null;
+  /**
+   * The readahead depth wanted now. A lower value applies at once; a higher one only up to `depth`, the depth the
+   * source reserved its memory for (new sources take the new value).
+   */
+  liveDepth?: () => number;
   /** counters shared with the caller (bytesRead, bytesSkipped, transportRetries, pendingSince, position) */
   meter?: ReadMeter;
 }
@@ -383,10 +397,17 @@ export class FileSource {
     };
   }
 
+  /** the readahead depth now: the live value, never above the depth the memory was reserved for */
+  private currentDepth(): number {
+    const live = this.options.liveDepth?.();
+    return live === undefined ? this.depth : Math.max(1, Math.min(this.depth, Math.floor(live)));
+  }
+
   private fill() {
+    const depth = this.currentDepth();
     while (
       this.destroyedError === null &&
-      this.slots.length + this.cancelledInflight < this.depth &&
+      this.slots.length + this.cancelledInflight < depth &&
       this.nextPos < this.end
     ) {
       this.issue();
@@ -481,6 +502,10 @@ export class FileSource {
   }
 
   private async throttle(len: number) {
+    if (this.options.throttle) {
+      await this.options.throttle.take(len, this.abortSignal);
+      return;
+    }
     const rate = this.options.throttleMBps;
     if (!rate || rate <= 0) {
       return;
@@ -518,7 +543,14 @@ export class FileSource {
       if (this.destroyedError !== null || slot.cancelled) {
         return;
       }
+      // a closed gate (paused run, held reader) issues no read; the wait is not a pending read (stall watchdog)
+      await this.options.gate?.wait(this.abortSignal);
+      if (this.destroyedError !== null || slot.cancelled) {
+        return;
+      }
       await this.throttle(slot.len);
+      // the gate may have closed while the read waited for the throttle: no read slips through a pause
+      await this.options.gate?.wait(this.abortSignal);
       const ref = await this.currentHandle();
       if (this.destroyedError !== null || slot.cancelled) {
         return;

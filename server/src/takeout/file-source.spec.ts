@@ -1,8 +1,9 @@
 import { ByteSemaphore } from 'src/takeout/byte-semaphore';
 import { ArchiveChangedError, PartMissingError } from 'src/takeout/errors';
 import { FileHandleLike, FileSource, FileSourceClock, FileSourceFs, newReadMeter } from 'src/takeout/file-source';
+import { Gate, ReadThrottle } from 'src/takeout/flow-control';
 import { randomBytesSeeded } from 'src/takeout/test-fixtures';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const errno = (code: string) => Object.assign(new Error(code), { code });
 
@@ -308,6 +309,124 @@ describe(FileSource.name, () => {
     await readAll(src);
     // 3 MB at 1 MB/s: the second and third reads wait about a second each
     expect(clock.sleeps.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(1900);
+    src.destroy();
+  });
+
+  it('issues no read while its gate is closed, keeps its handle open and continues where it stopped', async () => {
+    const data = randomBytesSeeded(40_000, 8);
+    const fs = new FakeFs(data);
+    const gate = new Gate();
+    const src = await FileSource.open('x', { fs, chunk: 1000, depth: 2, gate });
+    src.setRange(0, data.length);
+    const chunks: Buffer[] = [];
+    for (let i = 0; i < 5; i++) {
+      chunks.push(Buffer.from((await src.next())!));
+    }
+    gate.close();
+    const readsAtPause = fs.reads;
+    // the readahead already in flight may complete, nothing new is issued
+    const next = src.next();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const whilePaused = fs.reads;
+    expect(whilePaused - readsAtPause).toBeLessThanOrEqual(2);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fs.reads).toBe(whilePaused);
+    // a read waiting at the gate is not a pending read (stall watchdog)
+    expect(src.pendingSince()).toBeNull();
+    expect(fs.openHandles.size).toBe(1);
+    gate.open();
+    chunks.push(Buffer.from((await next)!), await readAll(src));
+    // every byte once, in order, one open
+    expect(Buffer.concat(chunks)).toEqual(data);
+    expect(src.meter.bytesRead).toBe(data.length);
+    expect(fs.opens).toBe(1);
+    src.destroy();
+  });
+
+  it('rejects a read waiting at a closed gate on abort', async () => {
+    const data = randomBytesSeeded(10_000, 9);
+    const fs = new FakeFs(data);
+    const gate = new Gate();
+    gate.close();
+    const controller = new AbortController();
+    const src = await FileSource.open('x', { fs, chunk: 1000, depth: 2, gate, signal: controller.signal });
+    src.setRange(0, data.length);
+    const next = src.next();
+    controller.abort(new Error('cancelled'));
+    await expect(next).rejects.toThrow('cancelled');
+    expect(fs.reads).toBe(0);
+    await src.closed;
+    expect(fs.openHandles.size).toBe(0);
+  });
+
+  it('shares one throttle between sources and follows its rate changes', async () => {
+    vi.useFakeTimers();
+    try {
+      const throttle = new ReadThrottle(1);
+      const data = randomBytesSeeded(4_000_000, 10);
+      const sources = await Promise.all(
+        [0, 1].map(() => FileSource.open('x', { fs: new FakeFs(data), chunk: 100_000, depth: 2, throttle })),
+      );
+      const delivered = [0, 0];
+      const pumps = sources.map(async (src, i) => {
+        src.setRange(0, data.length);
+        for (;;) {
+          const chunk = await src.next();
+          if (!chunk) {
+            return;
+          }
+          delivered[i] += chunk.length;
+        }
+      });
+      const total = () => delivered[0] + delivered[1];
+      await vi.advanceTimersByTimeAsync(2000);
+      const atOne = total();
+      throttle.setRate(4);
+      await vi.advanceTimersByTimeAsync(1000);
+      const atFour = total() - atOne;
+      // both sources together: about 1 MB/s, then about 4 MB/s (the readahead of 2 x 100 kB per source aside)
+      expect(atOne).toBeGreaterThanOrEqual(1_600_000);
+      expect(atOne).toBeLessThanOrEqual(2_800_000);
+      expect(atFour).toBeGreaterThanOrEqual(3_600_000);
+      expect(atFour).toBeLessThanOrEqual(4_800_000);
+      throttle.setRate(null);
+      await vi.advanceTimersByTimeAsync(10);
+      await Promise.all(pumps);
+      expect(delivered).toEqual([data.length, data.length]);
+      for (const src of sources) {
+        src.destroy();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lowers its readahead at once when the live depth drops', async () => {
+    const data = randomBytesSeeded(40_000, 11);
+    const fs = new FakeFs(data);
+    let inFlight = 0;
+    let peak = 0;
+    let release!: () => void;
+    let gate = new Promise<void>((resolve) => (release = resolve));
+    fs.onRead = async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await gate;
+      inFlight--;
+    };
+    let depth = 4;
+    const src = await FileSource.open('x', { fs, chunk: 1000, depth: 4, liveDepth: () => depth });
+    src.setRange(0, data.length);
+    const first = src.next();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(inFlight).toBe(4);
+    depth = 1;
+    release();
+    await first;
+    peak = 0;
+    gate = Promise.resolve();
+    await readAll(src);
+    expect(peak).toBe(1);
     src.destroy();
   });
 });

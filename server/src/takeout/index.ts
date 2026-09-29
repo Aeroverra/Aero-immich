@@ -93,6 +93,8 @@ export {
   sameFingerprint,
 } from 'src/takeout/file-source';
 export type { FileHandleLike, FileSourceClock, FileSourceFs, FileSourceOptions } from 'src/takeout/file-source';
+export { Gate, ReadThrottle, allGates, realThrottleClock } from 'src/takeout/flow-control';
+export type { GateChange, ReadGate, ThrottleClock } from 'src/takeout/flow-control';
 export { groupEdges, orderGroups } from 'src/takeout/group-order';
 export type { GroupOrderRow } from 'src/takeout/group-order';
 export { hashTap, sha1 } from 'src/takeout/hashing';

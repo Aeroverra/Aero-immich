@@ -411,7 +411,7 @@ from
   "takeout_run"
 where
   "userId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7, $8)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8, $9)
 order by
   "createdAt" desc
 
@@ -422,7 +422,7 @@ from
   "takeout_run"
 where
   "exportId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7, $8)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8, $9)
 
 -- TakeoutRepository.getAdoptableRun
 select
@@ -457,11 +457,65 @@ where
 -- TakeoutRepository.updateRunIfLeased
 update "takeout_run"
 set
+  "readStats" = $1::jsonb || jsonb_strip_nulls(
+    jsonb_build_object(
+      'pausedAt',
+      "readStats" -> 'pausedAt',
+      'pausedFrom',
+      "readStats" -> 'pausedFrom'
+    )
+  ),
   "updatedAt" = now()
 where
-  "id" = $1
-  and "leaseToken" = $2
-  and "status" in ($3, $4, $5, $6, $7, $8)
+  "id" = $2
+  and "leaseToken" = $3
+  and "status" in ($4, $5, $6, $7, $8, $9, $10)
+returning
+  "id"
+
+-- TakeoutRepository.requestPause
+update "takeout_run"
+set
+  "status" = $1,
+  "readStats" = coalesce("readStats", '{}'::jsonb) || jsonb_build_object('pausedAt', $2::text, 'pausedFrom', "status"),
+  "updatedAt" = now()
+where
+  "id" = $3
+  and "status" in ($4, $5, $6, $7, $8, $9)
+returning
+  "id"
+
+-- TakeoutRepository.resumePausedRun
+update "takeout_run"
+set
+  "status" = coalesce("readStats" ->> 'pausedFrom', $1::text),
+  "readStats" = "readStats" - 'pausedAt' - 'pausedFrom',
+  "updatedAt" = now()
+where
+  "id" = $2
+  and "status" = $3
+  and "leaseToken" is not null
+  and "heartbeatAt" >= now() - interval '60 seconds'
+returning
+  "id"
+
+-- TakeoutRepository.requeuePausedRun
+update "takeout_run"
+set
+  "status" = $1,
+  "attempt" = $2,
+  "heartbeatAt" = $3,
+  "leaseToken" = $4,
+  "readStats" = $5,
+  "updatedAt" = now()
+where
+  "id" = $6
+  and "status" = $7
+  and (
+    "leaseToken" is null
+    or "heartbeatAt" is null
+    or "heartbeatAt" < now() - interval '60 seconds'
+  )
 returning
   "id"
 
@@ -526,7 +580,7 @@ set
   "updatedAt" = now()
 where
   "id" = $2
-  and "status" in ($3, $4, $5, $6, $7, $8)
+  and "status" in ($3, $4, $5, $6, $7, $8, $9)
 returning
   "id"
 
@@ -536,7 +590,7 @@ select
 from
   "takeout_run"
 where
-  "status" in ($1, $2, $3, $4, $5, $6, $7)
+  "status" in ($1, $2, $3, $4, $5, $6, $7, $8)
 
 -- TakeoutRepository.getActiveRunsByUser
 select
@@ -545,7 +599,7 @@ from
   "takeout_run"
 where
   "userId" = $1
-  and "status" in ($2, $3, $4, $5, $6, $7, $8)
+  and "status" in ($2, $3, $4, $5, $6, $7, $8, $9)
 
 -- TakeoutRepository.takeLease
 update "takeout_run"
@@ -554,10 +608,10 @@ set
   "leaseToken" = $1
 where
   "id" = $2
-  and "status" in ($3, $4, $5, $6, $7, $8)
+  and "status" in ($3, $4, $5, $6, $7, $8, $9)
   and (
     "leaseToken" is null
-    or "leaseToken" = $9
+    or "leaseToken" = $10
     or "heartbeatAt" < now() - interval '60 seconds'
   )
 returning

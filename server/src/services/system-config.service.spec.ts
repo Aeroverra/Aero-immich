@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { defaults, SystemConfig } from 'src/dtos/config.dto';
+import { defaults, SystemConfig, takeoutReadDefaults } from 'src/dtos/config.dto';
 import {
   AudioCodec,
   Colorspace,
@@ -278,6 +278,11 @@ const updatedConfig = Object.freeze<SystemConfig>({
       albumUpdateTemplate: '',
     },
   },
+  takeout: {
+    readers: 3,
+    throttleMBps: null,
+    readaheadDepth: 4,
+  },
 });
 
 describe(SystemConfigService.name, () => {
@@ -369,6 +374,26 @@ describe(SystemConfigService.name, () => {
       await expect(sut.getAdminConfig()).rejects.toThrow(
         '[oauth.issuerUrl] Issuer URL must be an empty string or a valid URL',
       );
+    });
+
+    it('should accept the takeout read settings, with 0 or null as no read limit', async () => {
+      mocks.config.getEnv.mockReturnValue(mockEnvData({ configFile: 'immich-config.json' }));
+      mocks.systemMetadata.readFile.mockResolvedValue(
+        JSON.stringify({ takeout: { readers: 1, throttleMBps: 0, readaheadDepth: 8 } }),
+      );
+
+      await expect(sut.getAdminConfig()).resolves.toMatchObject({
+        takeout: { readers: 1, throttleMBps: 0, readaheadDepth: 8 },
+      });
+    });
+
+    it('should reject takeout read settings out of range', async () => {
+      mocks.config.getEnv.mockReturnValue(mockEnvData({ configFile: 'immich-config.json' }));
+      mocks.systemMetadata.readFile.mockResolvedValue(JSON.stringify({ takeout: { readers: 5 } }));
+      await expect(sut.getAdminConfig()).rejects.toThrow('[takeout.readers]');
+
+      mocks.systemMetadata.readFile.mockResolvedValue(JSON.stringify({ takeout: { readaheadDepth: 0 } }));
+      await expect(sut.getAdminConfig()).rejects.toThrow('[takeout.readaheadDepth]');
     });
 
     it('should reject invalid cron expressions', async () => {
@@ -521,6 +546,28 @@ describe(SystemConfigService.name, () => {
       mocks.systemMetadata.readFile.mockResolvedValue(JSON.stringify({}));
       await expect(sut.updateAdminConfig(defaults)).rejects.toBeInstanceOf(BadRequestException);
       expect(mocks.systemMetadata.set).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('takeout read defaults', () => {
+    it('come from the environment variables that set them before, kept in range', () => {
+      expect(
+        takeoutReadDefaults({
+          IMMICH_TAKEOUT_READERS: '9',
+          IMMICH_TAKEOUT_READ_THROTTLE_MBPS: '40',
+          IMMICH_TAKEOUT_READAHEAD: '2',
+        }),
+      ).toEqual({ readers: 4, throttleMBps: 40, readaheadDepth: 2 });
+      expect(takeoutReadDefaults({ IMMICH_TAKEOUT_READERS: '1', IMMICH_TAKEOUT_READAHEAD: '20' })).toEqual({
+        readers: 1,
+        throttleMBps: null,
+        readaheadDepth: 8,
+      });
+    });
+
+    it('are 3 readers, no read limit and a readahead of 4 without them', () => {
+      expect(takeoutReadDefaults({})).toEqual({ readers: 3, throttleMBps: null, readaheadDepth: 4 });
+      expect(defaults.takeout).toEqual(takeoutReadDefaults());
     });
   });
 

@@ -2,22 +2,24 @@
   import { TakeoutRunPartStatus, type TakeoutRunPartStatsDto } from '@immich/sdk';
   import { ProgressBar, Text } from '@immich/ui';
   import { t } from 'svelte-i18n';
-  import { progressFraction, readErrorLabel, runPartStatusLabel } from '$lib/services/takeout.service';
+  import { partReadSeconds, progressFraction, readErrorLabel, runPartStatusLabel } from '$lib/services/takeout.service';
   import { locale } from '$lib/stores/preferences.store';
   import { getByteUnitString } from '$lib/utils/byte-units';
 
   interface Props {
     parts: TakeoutRunPartStatsDto[];
+    /** when the run was paused, if it is: the speed of a paused part counts until then */
+    pausedAt?: string | null;
   }
 
-  let { parts }: Props = $props();
+  let { parts, pausedAt = null }: Props = $props();
 
   // columns that are almost always zero are shown only when a part needs them
   let showEntryErrors = $derived(parts.some((part) => part.entryErrors > 0));
   let showFetched = $derived(parts.some((part) => part.fetchBytesRead > 0));
   let showRetries = $derived(parts.some((part) => part.transportRetries > 0));
 
-  const statusColor = (status: TakeoutRunPartStatus): 'muted' | 'danger' | 'primary' | undefined => {
+  const statusColor = (status: TakeoutRunPartStatus): 'muted' | 'danger' | 'primary' | 'warning' | undefined => {
     switch (status) {
       case TakeoutRunPartStatus.Error:
       case TakeoutRunPartStatus.Missing: {
@@ -25,6 +27,9 @@
       }
       case TakeoutRunPartStatus.Reading: {
         return 'primary';
+      }
+      case TakeoutRunPartStatus.Paused: {
+        return 'warning';
       }
       case TakeoutRunPartStatus.Pending:
       case TakeoutRunPartStatus.Cached: {
@@ -36,14 +41,13 @@
     }
   };
 
-  /** Bytes per second over the time the part was read (until now while it is being read) */
+  /** Bytes per second over the time the part was read (until now while it is being read), paused time left out */
   const rate = (part: TakeoutRunPartStatsDto): number | undefined => {
-    if (!part.startedAt || part.bytesRead <= 0) {
+    if (part.bytesRead <= 0) {
       return undefined;
     }
-    const end = part.finishedAt ? Date.parse(part.finishedAt) : Date.now();
-    const seconds = (end - Date.parse(part.startedAt)) / 1000;
-    return seconds > 0 ? part.bytesRead / seconds : undefined;
+    const seconds = partReadSeconds(part, pausedAt);
+    return seconds === undefined ? undefined : part.bytesRead / seconds;
   };
 
   const passesLabel = (passes: number): string | undefined => {
@@ -85,7 +89,7 @@
             <Text size="small" color={statusColor(part.status)} class="whitespace-nowrap">
               {runPartStatusLabel($t, part.status)}
             </Text>
-            {#if part.status === TakeoutRunPartStatus.Reading}
+            {#if part.status === TakeoutRunPartStatus.Reading || part.status === TakeoutRunPartStatus.Paused}
               <ProgressBar progress={progressFraction(part.position, part.size)} size="tiny" class="mt-1 w-24" />
             {/if}
             {#if part.error}

@@ -99,4 +99,34 @@ describe('TakeoutRunPartsTable component', () => {
     expect(screen.getByRole('columnheader', { name: 'Unreadable files' })).toBeInTheDocument();
     expect(screen.getByText('5 MiB')).toBeInTheDocument();
   });
+
+  it('shows a paused part with its progress, and leaves the paused time out of its speed', () => {
+    const paused = takeoutRunPartStatsFactory.build({
+      partId: 'p1',
+      status: TakeoutRunPartStatus.Paused,
+      size: 2 * GiB,
+      position: GiB,
+      bytesRead: 640 * MiB,
+      // 30 s paused earlier, then 10 s read until the run was paused at 12:01:00
+      startedAt: '2026-09-29T12:00:20.000Z',
+      pausedMs: 30_000,
+    });
+    const done = takeoutRunPartStatsFactory.build({
+      partId: 'p2',
+      status: TakeoutRunPartStatus.Read,
+      size: GiB,
+      bytesRead: GiB,
+      startedAt: '2026-09-29T11:00:00.000Z',
+      finishedAt: '2026-09-29T11:01:04.000Z',
+      pausedMs: 32_000,
+    });
+
+    render(TakeoutRunPartsTable, { parts: [paused, done], pausedAt: '2026-09-29T12:01:00.000Z' });
+
+    const row = within(screen.getByTestId('run-part-p1'));
+    expect(row.getByText('Paused')).toBeInTheDocument();
+    expect(row.getByRole('progressbar')).toBeInTheDocument();
+    expect(row.getByText('64 MiB/s')).toBeInTheDocument();
+    expect(within(screen.getByTestId('run-part-p2')).getByText('32 MiB/s')).toBeInTheDocument();
+  });
 });

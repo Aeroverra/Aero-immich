@@ -109,7 +109,12 @@
             </Button>
           </div>
           <!-- the per-part table lives on the run page -->
-          <TakeoutRunProgress run={overview.activeRun} onCancelled={onRunEvent} showParts={false} />
+          <TakeoutRunProgress
+            run={overview.activeRun}
+            onCancelled={onRunEvent}
+            onUpdated={onRunEvent}
+            showParts={false}
+          />
         </CardBody>
       </Card>
     {/if}
@@ -127,7 +132,7 @@
     {#if overview.exports.length > 0}
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         {#each overview.exports as exp (exp.id)}
-          <TakeoutExportCard {exp} onRun={refresh} />
+          <TakeoutExportCard {exp} onRun={refresh} onRunChanged={onRunEvent} />
         {/each}
       </div>
     {:else}

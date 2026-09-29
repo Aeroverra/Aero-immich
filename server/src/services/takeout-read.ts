@@ -18,14 +18,18 @@ import {
   EntryDataError,
   EntryOpener,
   FileFingerprint,
+  Gate,
   GzipIntegrityError,
   ImageSampleResult,
   PartMissingError,
+  ReadGate,
   ReadMeter,
+  ReadThrottle,
   StagingView,
   TakeoutReadStats,
   TakeoutRunPartStats,
   WalkSourceOptions,
+  allGates,
   chooseReadMode,
   classifyEntry,
   compactGoogleJson,
@@ -382,6 +386,8 @@ export interface ProcessResources {
   readers: ByteSemaphore;
   writes: WriteQueue;
   sampler: Sampler;
+  /** the archive read rate limit of the whole process (admin setting, changes apply to waiting reads at once) */
+  throttle: ReadThrottle;
 }
 
 let processResources: ProcessResources | null = null;
@@ -394,7 +400,77 @@ export function createProcessResources(limits: ReadLimits): ProcessResources {
     readers: new ByteSemaphore(limits.maxReaders),
     writes: new WriteQueue(limits.maxWritesInFlight, limits.transportRetryBudgetMs),
     sampler: new Sampler(decode, 2),
+    throttle: new ReadThrottle(limits.throttleMBps),
   };
+}
+
+/**
+ * The write slot of a streamed write (a large entry streamed into staging, a lost blob written again, a fetch). While
+ * its reader is paused no byte reaches the write, so the slot is given back (`suspend`) and the queued write-behind of
+ * the process can settle; the reader takes a slot again before its next read (`resume`, called by its gate).
+ */
+export class WriteSlot {
+  private lease: ByteLease | null;
+  private generation = 0;
+  private done = false;
+  private acquiring: Promise<void> | null = null;
+
+  constructor(
+    private readonly writes: WriteQueue,
+    lease: ByteLease,
+  ) {
+    this.lease = lease;
+  }
+
+  get held(): boolean {
+    return this.lease !== null;
+  }
+
+  /** suspended and not given back for good: the reader needs a slot again before it reads */
+  get needed(): boolean {
+    return !this.done && this.lease === null;
+  }
+
+  suspend(): void {
+    this.generation++;
+    this.lease?.release();
+    this.lease = null;
+  }
+
+  async resume(signal?: AbortSignal): Promise<void> {
+    while (!this.done && !this.lease) {
+      if (!this.acquiring) {
+        const generation = this.generation;
+        this.acquiring = this.writes
+          .acquireSlot(signal)
+          .then((lease) => {
+            if (this.done || this.lease || generation !== this.generation) {
+              // released, or suspended again while it waited: the slot is not needed now
+              lease.release();
+              return;
+            }
+            this.lease = lease;
+          })
+          .finally(() => {
+            this.acquiring = null;
+          });
+      }
+      await this.acquiring;
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
+      if (!this.lease) {
+        // suspended again meanwhile: the caller's gate decides whether to wait
+        return;
+      }
+    }
+  }
+
+  release(): void {
+    this.done = true;
+    this.lease?.release();
+    this.lease = null;
+  }
 }
 
 /** Wait for `promise` (never rejects) at most `ms`; a promise that never settles is left behind */
@@ -652,19 +728,65 @@ export function emptyReadStats(): TakeoutReadStats {
     discardedStagedBytes: 0,
     stagingBytes: 0,
     stagingExpiresAt: null,
+    pausedMs: 0,
     parts: {},
+  };
+}
+
+/**
+ * The pause of a run lives in its readStats next to the statistics: `pausedAt` (ISO) and `pausedFrom` (the status
+ * Resume returns to). The API writes them in the pause and resume check-and-sets; the job's progress writes keep them
+ * (TakeoutRepository.updateRunIfLeased), and the job never holds them in its statistics.
+ */
+export const PAUSE_KEYS = ['pausedAt', 'pausedFrom'] as const;
+
+export interface RunPauseState {
+  pausedAt: string | null;
+  pausedFrom: string | null;
+}
+
+export function pauseStateOf(stored: unknown): RunPauseState {
+  const value = (stored ?? {}) as Partial<Record<(typeof PAUSE_KEYS)[number], unknown>>;
+  return {
+    pausedAt: typeof value.pausedAt === 'string' ? value.pausedAt : null,
+    pausedFrom: typeof value.pausedFrom === 'string' ? value.pausedFrom : null,
   };
 }
 
 /** Stored readStats (possibly `{}` for runs created before the upgrade) with every field defaulted */
 export function normalizeReadStats(stored: unknown): TakeoutReadStats {
   const base = emptyReadStats();
-  const value = (stored ?? {}) as Partial<TakeoutReadStats>;
+  const value = { ...(stored as object) } as Partial<TakeoutReadStats> & Record<string, unknown>;
+  for (const key of PAUSE_KEYS) {
+    delete value[key];
+  }
   const out: TakeoutReadStats = { ...base, ...value, version: 1, parts: {} };
   for (const [id, part] of Object.entries(value.parts ?? {})) {
     out.parts[id] = { ...emptyPartStats(id, part.fileName ?? '', part.size ?? 0), ...part };
   }
   return out;
+}
+
+/**
+ * The statistics of a paused run whose job is gone (a restart), as Resume queues it again: the pause counts as paused
+ * time of the run and of the parts it held, and those parts wait for the next attempt.
+ */
+export function resumedReadStats(stored: unknown, now = Date.now()): TakeoutReadStats {
+  const stats = normalizeReadStats(stored);
+  const { pausedAt } = pauseStateOf(stored);
+  const since = pausedAt ? Date.parse(pausedAt) : NaN;
+  const paused = Number.isFinite(since) ? Math.max(0, now - since) : 0;
+  stats.pausedMs += paused;
+  for (const ps of Object.values(stats.parts)) {
+    if (ps.status !== 'paused' && ps.status !== 'reading') {
+      continue;
+    }
+
+    ps.pausedMs += ps.status === 'paused' ? paused : 0;
+    ps.status = 'pending';
+  }
+  stats.etaSeconds = null;
+  return stats;
 }
 
 export function emptyPartStats(partId: string, fileName: string, size: number): TakeoutRunPartStats {
@@ -693,6 +815,7 @@ export function emptyPartStats(partId: string, fileName: string, size: number): 
     errorOffset: null,
     startedAt: null,
     finishedAt: null,
+    pausedMs: 0,
   };
 }
 
@@ -730,8 +853,20 @@ export class ReadStatsTracker {
   /** live meters of the parts being read (bytesRead of earlier passes is in the part's base) */
   private live = new Map<
     string,
-    { meter: ReadMeter; bytesBase: number; skippedBase: number; retriesBase: number; floor: number }
+    {
+      meter: ReadMeter;
+      bytesBase: number;
+      skippedBase: number;
+      retriesBase: number;
+      floor: number;
+      /** the reader of the pass: its hold gate says whether a lowered reader count holds it back */
+      token: ReaderToken | null;
+      /** since when the pass is paused (run paused or reader held), null while it reads */
+      heldSince: number | null;
+    }
   >();
+  /** the run is paused: every pass is held */
+  private runPaused = false;
   private samples: Array<{ t: number; covered: number; busy: number }> = [];
   /** fetches in progress, and the bytes read by the fetches that ended */
   private fetches = new Set<FetchPass>();
@@ -761,7 +896,7 @@ export class ReadStatsTracker {
    * covered position as a floor until the reader passes it (it re-reads the directory and the last uncommitted
    * entries first), so the progress of a part never goes back.
    */
-  beginPass(ps: TakeoutRunPartStats, meter: ReadMeter, restartFromZero: boolean): number {
+  beginPass(ps: TakeoutRunPartStats, meter: ReadMeter, restartFromZero: boolean, token?: ReaderToken): number {
     let grew = 0;
     if (restartFromZero && ps.position > 0) {
       ps.passBase += ps.position;
@@ -779,8 +914,47 @@ export class ReadStatsTracker {
       skippedBase: ps.bytesSkipped,
       retriesBase: ps.transportRetries,
       floor: restartFromZero ? 0 : ps.position,
+      token: token ?? null,
+      heldSince: null,
     });
+    this.refreshHolds();
     return grew;
+  }
+
+  /**
+   * Parts whose reader is paused (the run is paused, or a lowered reader count holds the reader back) show as paused,
+   * and the time counts as paused time of the part, not as reading time (read speed, ETA).
+   */
+  refreshHolds(runPaused?: boolean, now = Date.now()): void {
+    if (runPaused !== undefined) {
+      this.runPaused = runPaused;
+    }
+    for (const [partId, live] of this.live) {
+      const ps = this.stats.parts[partId];
+      if (!ps) {
+        continue;
+      }
+      const held = this.runPaused || (live.token?.hold ? !live.token.hold.isOpen : false);
+      if (held && live.heldSince === null) {
+        live.heldSince = now;
+        ps.status = 'paused';
+      } else if (!held && live.heldSince !== null) {
+        ps.pausedMs += Math.max(0, now - live.heldSince);
+        live.heldSince = null;
+        ps.status = 'reading';
+      }
+    }
+  }
+
+  /** The run was paused for `ms`: paused time of the run; the rate samples skip the pause (ETA) */
+  resumeAfter(ms: number): void {
+    this.stats.pausedMs += ms;
+    for (const sample of this.samples) {
+      sample.t += ms;
+    }
+    for (const sample of this.fetchSamples) {
+      sample.t += ms;
+    }
   }
 
   /** Copy the live meter into the part stats */
@@ -844,8 +1018,15 @@ export class ReadStatsTracker {
     return Math.max(0, Math.round(Math.max(0, this.stats.fetchBytesTotal - done) / rate));
   }
 
-  endPass(ps: TakeoutRunPartStats): void {
+  endPass(ps: TakeoutRunPartStats, now = Date.now()): void {
     this.sync(ps);
+    const live = this.live.get(ps.partId);
+    if (live?.heldSince !== null && live?.heldSince !== undefined) {
+      ps.pausedMs += Math.max(0, now - live.heldSince);
+      if (ps.status === 'paused') {
+        ps.status = 'reading';
+      }
+    }
     this.live.delete(ps.partId);
   }
 
@@ -888,7 +1069,11 @@ export class ReadStatsTracker {
   /** remaining / (per-reader rate x min(readers, parts left)), from the bytes covered in the last two minutes */
   eta(total: number, readers: number, now = Date.now()): number | null {
     const covered = this.covered();
-    const busy = this.live.size;
+    // a paused pass reads nothing: it would make the per-reader rate look slower than it is
+    const busy = this.live
+      .values()
+      .filter((live) => live.heldSince === null)
+      .toArray().length;
     this.samples.push({ t: now, covered, busy });
     while (this.samples.length > 0 && now - this.samples[0].t > 120_000) {
       this.samples.shift();
@@ -900,8 +1085,8 @@ export class ReadStatsTracker {
       return null;
     }
     const perReader = (covered - first.covered) / seconds / avgBusy;
-    const partsLeft = Object.values(this.stats.parts).filter(
-      (ps) => ps.status === 'reading' || ps.status === 'pending',
+    const partsLeft = Object.values(this.stats.parts).filter((ps) =>
+      ['reading', 'paused', 'pending'].includes(ps.status),
     ).length;
     const parallel = Math.max(1, Math.min(readers, partsLeft));
     return Math.max(0, Math.round(Math.max(0, total - covered) / (perReader * parallel)));
@@ -915,7 +1100,7 @@ export class ReadStatsTracker {
  */
 export function stopLiveParts(stats: TakeoutReadStats, at = new Date().toISOString()): TakeoutReadStats {
   for (const ps of Object.values(stats.parts)) {
-    if (ps.status !== 'reading') {
+    if (ps.status !== 'reading' && ps.status !== 'paused') {
       continue;
     }
     ps.status = 'pending';
@@ -1014,6 +1199,20 @@ export function recountReadStats(
 
 export interface ReaderToken {
   detached: boolean;
+  /** closed while a lowered reader count holds this reader back (readerPool) */
+  hold?: Gate;
+  /** the write slot of the streamed write in progress, given back while the reader is paused */
+  writeSlot?: WriteSlot | null;
+}
+
+/** The read settings an admin can change while runs read (system config `takeout`) */
+export interface LiveReadSettings {
+  /** parts of one run read in parallel */
+  readers: number;
+  /** positional reads in flight per part */
+  readaheadDepth: number;
+  /** archive read limit of the process in MB/s; null or 0: unlimited */
+  throttleMBps: number | null;
 }
 
 export interface ReadDeps {
@@ -1039,6 +1238,8 @@ export interface ReadContextInit {
   stats: ReadStatsTracker;
   partPath: (fileName: string) => string;
   signal: AbortSignal;
+  /** the pause gate of the run attempt (closed while the run is paused); a new open gate when not given */
+  pause?: Gate;
 }
 
 export class ReadContext {
@@ -1066,7 +1267,21 @@ export class ReadContext {
   /** covered prefixes of tgz parts restarted from byte 0 in this attempt: archiveBytesTotal grows by them */
   archiveTotalGrowth = 0;
   readonly view: StagingView;
+  /** closed while the run is paused: no archive read is issued, streams and handles stay open */
+  readonly pause: Gate;
+  /** parts read in parallel now (admin setting, changes apply to the running pools) */
+  readers: number;
+  /** readahead depth of the reads now (new sources take it; running ones only lower theirs) */
+  readaheadDepth: number;
+  /** the readers of the pools of this context: their write slots are given back while the run is paused */
+  readonly tokens = new Set<ReaderToken>();
+  /** the entry batches of the parts being read: flushed when the run pauses */
+  readonly batches = new Set<EntryBatch>();
+  /** parts the reading phase reads (the statistics show min(readers, parts)) */
+  partsToRead = 0;
+  private readonly readersListeners = new Set<() => void>();
   private readonly unlinkRunSignal: () => void;
+  private readonly unlinkPause: () => void;
   /** meters of the reads outside the reading passes, by the name the stall message shows */
   private readonly watched = new Map<ReadMeter, string>();
 
@@ -1078,6 +1293,13 @@ export class ReadContext {
     this.staging = init.staging;
     this.stats = init.stats;
     this.partPath = init.partPath;
+    this.pause = init.pause ?? new Gate();
+    this.readers = init.limits.readers;
+    this.readaheadDepth = init.limits.readaheadDepth;
+    this.unlinkPause = this.pause.onChange(({ open }) => (open ? this.onResumed() : this.onPaused()));
+    if (!this.pause.isOpen) {
+      this.stats.refreshHolds(true);
+    }
     this.prefixes = new PrefixIndex(
       init.deps.repo,
       init.run.userId,
@@ -1146,14 +1368,99 @@ export class ReadContext {
     return this.server;
   }
 
-  sourceOptions(): WalkSourceOptions {
+  /**
+   * Options of the file sources of this run: the live readahead depth, the process throttle, and the gate that holds
+   * the reads while the run is paused (and, for a reader of a pool, while a lowered reader count holds it back)
+   */
+  sourceOptions(token?: ReaderToken): WalkSourceOptions {
     return {
       chunk: this.limits.readChunk,
-      depth: this.limits.readaheadDepth,
+      depth: this.readaheadDepth,
       retryBudgetMs: this.limits.transportRetryBudgetMs,
       memory: this.resources.memory,
       fs: this.deps.fs,
+      throttle: this.resources.throttle,
+      gate: token ? this.gateFor(token) : this.pause,
+      liveDepth: () => this.readaheadDepth,
     };
+  }
+
+  /** The gate a reader passes before each read: the pause of the run, its own hold, then its write slot back */
+  gateFor(token: ReaderToken): ReadGate {
+    const pause = this.pause;
+    const open = () => pause.isOpen && (token.hold?.isOpen ?? true);
+    return {
+      get isOpen() {
+        return open() && !token.writeSlot?.needed;
+      },
+      wait: async (signal?: AbortSignal) => {
+        for (;;) {
+          // the hold gate can be created after this gate: look it up on every pass
+          await allGates(pause, token.hold).wait(signal);
+          const slot = token.writeSlot;
+          if (slot?.needed) {
+            await slot.resume(signal);
+          }
+          if (open() && !token.writeSlot?.needed) {
+            return;
+          }
+        }
+      },
+    };
+  }
+
+  /** Apply changed read settings to this attempt: its pools resize, new reads take the readahead */
+  applySettings(settings: Pick<LiveReadSettings, 'readers' | 'readaheadDepth'>): void {
+    const readers = Math.max(1, Math.min(this.limits.maxReaders, Math.floor(settings.readers)));
+    const depth = Math.max(1, Math.floor(settings.readaheadDepth));
+    const changed = readers !== this.readers;
+    this.readers = readers;
+    this.readaheadDepth = depth;
+    if (this.stats.stats.readers > 0) {
+      this.stats.stats.readers = Math.min(readers, Math.max(1, this.partsToRead));
+    }
+    if (this.stats.stats.readahead > 0) {
+      this.stats.stats.readahead = depth;
+    }
+    if (changed) {
+      for (const listener of this.readersListeners) {
+        listener();
+      }
+    }
+  }
+
+  /** A pool listens for reader count changes; returns the unsubscribe function */
+  onReadersChange(listener: () => void): () => void {
+    this.readersListeners.add(listener);
+    return () => this.readersListeners.delete(listener);
+  }
+
+  /** Hold a reader back (a lowered reader count) or let it continue */
+  setHold(token: ReaderToken, held: boolean): void {
+    token.hold ??= new Gate();
+    const changed = held ? token.hold.close() : token.hold.open() > 0;
+    if (!changed) {
+      return;
+    }
+    if (held) {
+      token.writeSlot?.suspend();
+    }
+    this.stats.refreshHolds();
+  }
+
+  /** The run paused: write slots go back to the queue, pending rows are stored, parts show as paused */
+  private onPaused(): void {
+    for (const token of this.tokens) {
+      token.writeSlot?.suspend();
+    }
+    for (const batch of this.batches) {
+      batch.flushNow();
+    }
+    this.stats.refreshHolds(true);
+  }
+
+  private onResumed(): void {
+    this.stats.refreshHolds(false);
   }
 
   /**
@@ -1165,8 +1472,15 @@ export class ReadContext {
     return () => this.watched.delete(meter);
   }
 
-  /** Every progress tick: a read pending longer than READ_STALL_MS fails the run (resumable) */
+  /**
+   * Every progress tick: a read pending longer than READ_STALL_MS fails the run (resumable). Never while the run is
+   * paused, and a read issued before a pause counts from the resume.
+   */
   checkStall(now = Date.now()): void {
+    if (!this.pause.isOpen) {
+      return;
+    }
+    const resumedAt = this.pause.openedAt ?? 0;
     const meters = [
       ...this.stats
         .meters()
@@ -1174,7 +1488,7 @@ export class ReadContext {
       ...[...this.watched].map(([meter, name]) => ({ name, meter })),
     ];
     for (const { name, meter } of meters) {
-      if (meter.pendingSince === null || !(now - meter.pendingSince > this.limits.readStallMs)) {
+      if (meter.pendingSince === null || !(now - Math.max(meter.pendingSince, resumedAt) > this.limits.readStallMs)) {
         continue;
       }
       const minutes = Math.round(this.limits.readStallMs / 60_000);
@@ -1186,6 +1500,8 @@ export class ReadContext {
 
   dispose(): void {
     this.unlinkRunSignal();
+    this.unlinkPause();
+    this.readersListeners.clear();
   }
 }
 
@@ -1375,7 +1691,16 @@ export class EntryBatch {
   constructor(
     private readonly ctx: ReadContext,
     private readonly token: ReaderToken,
-  ) {}
+  ) {
+    ctx.batches.add(this);
+  }
+
+  /** The run paused: store the rows read so far now instead of at the next push (a restart then loses none) */
+  flushNow(): void {
+    if (this.rows.length > 0 && !this.outstanding && !this.error) {
+      this.startFlush();
+    }
+  }
 
   async push(row: EntryRow): Promise<void> {
     this.throwIfFailed();
@@ -1449,6 +1774,7 @@ export class EntryBatch {
 
   /** The last rows and `commit` (the part state) in one transaction */
   async finish(commit: (rows: any[]) => Promise<void>): Promise<void> {
+    this.ctx.batches.delete(this);
     if (this.outstanding) {
       await this.outstanding;
     }
@@ -1477,6 +1803,7 @@ export class EntryBatch {
 
   /** On failure: outstanding and pending rows are flushed (valid rows help the resume), unless detached */
   async settle(): Promise<void> {
+    this.ctx.batches.delete(this);
     if (this.outstanding) {
       await this.outstanding.catch(noop);
     }
@@ -1540,6 +1867,32 @@ async function readJsonInto(row: EntryRow, open: EntryOpener, size: number, limi
 }
 
 type Decision = 'serverDuplicate' | 'stagedDuplicate' | 'deferred' | 'stage';
+
+/**
+ * A write slot for a streamed write of `token`'s reader. While that reader is paused the slot is given back
+ * (ReadContext.onPaused, setHold) and taken again before its next read (gateFor).
+ */
+async function acquireWriteSlot(ctx: ReadContext, token: ReaderToken | undefined, signal: AbortSignal) {
+  const slot = new WriteSlot(ctx.resources.writes, await ctx.resources.writes.acquireSlot(signal));
+  if (token) {
+    token.writeSlot = slot;
+    if (!ctx.pause.isOpen || !(token.hold?.isOpen ?? true)) {
+      // granted while the reader is paused: no byte flows until it continues
+      slot.suspend();
+    }
+  }
+  return slot;
+}
+
+function releaseWriteSlot(token: ReaderToken | undefined, slot: WriteSlot | null) {
+  if (!slot) {
+    return;
+  }
+  slot.release();
+  if (token?.writeSlot === slot) {
+    token.writeSlot = null;
+  }
+}
 
 function count(ctx: ReadContext, ps: TakeoutRunPartStats, decision: Decision, size: number) {
   const s = ctx.stats.stats;
@@ -1666,9 +2019,9 @@ export async function handleNewEntry(
         if (streamMode === 'stream') {
           const present = ctx.prefixes.markStreaming(info.size, prefixHash);
           let tmp: string | null = null;
-          let slot: ByteLease | null = null;
+          let slot: WriteSlot | null = null;
           try {
-            slot = await ctx.resources.writes.acquireSlot(signal);
+            slot = await acquireWriteSlot(ctx, token, signal);
             const written = await ctx.staging.streamToTemp(rest, prefix);
             tmp = written.tmp;
             row.checksum = written.checksum;
@@ -1695,7 +2048,7 @@ export async function handleNewEntry(
             if (tmp) {
               await ctx.staging.discardTemp(tmp);
             }
-            slot?.release();
+            releaseWriteSlot(token, slot);
             present.dropIfNotKept();
           }
         } else {
@@ -1734,6 +2087,7 @@ export async function handleCachedEntry(
   cached: { path: string; size: number; kind: string; checksum: Buffer | null },
   info: ArchiveEntryInfo,
   open: EntryOpener,
+  token?: ReaderToken,
 ): Promise<void> {
   if (cached.path !== info.path || cached.size !== info.size) {
     throw new ArchiveChangedError(`${info.path} is not what an earlier read of this part found`);
@@ -1757,9 +2111,9 @@ export async function handleCachedEntry(
     space.release();
     return;
   }
-  let slot: ByteLease | null = null;
+  let slot: WriteSlot | null = null;
   try {
-    slot = await ctx.resources.writes.acquireSlot(ctx.readAbort.signal);
+    slot = await acquireWriteSlot(ctx, token, ctx.readAbort.signal);
     const written = await ctx.staging.streamToTemp(await open());
     if (!written.checksum.equals(cached.checksum)) {
       await ctx.staging.discardTemp(written.tmp);
@@ -1768,7 +2122,7 @@ export async function handleCachedEntry(
     await ctx.staging.commitTemp(written.tmp, reservation, written.size);
     space.commit();
   } finally {
-    slot?.release();
+    releaseWriteSlot(token, slot);
     reservation.releaseIfPending();
     space.release();
   }
@@ -1818,7 +2172,7 @@ export async function readPart(
 
   const meter = newReadMeter();
   // tgz always restarts from byte 0; zip does unless it resumes after its last committed entry
-  ctx.archiveTotalGrowth += ctx.stats.beginPass(ps, meter, resume.mode !== 'zipFrom');
+  ctx.archiveTotalGrowth += ctx.stats.beginPass(ps, meter, resume.mode !== 'zipFrom', token);
   if (resume.mode === 'fresh') {
     ps.entries = 0;
     ps.media = 0;
@@ -1844,7 +2198,7 @@ export async function readPart(
         }
         const cached = resume.mode === 'tgzSkip' ? resume.cached.get(info.seq) : undefined;
         if (cached) {
-          await handleCachedEntry(ctx, cached, info, open);
+          await handleCachedEntry(ctx, cached, info, open, token);
           return;
         }
         pendingRows.set(info.seq, await handleNewEntry(ctx, part, ps, token, info, open, partWrites));
@@ -1852,11 +2206,10 @@ export async function readPart(
       {
         signal: ctx.readAbort.signal,
         fingerprint: st,
-        source: ctx.sourceOptions(),
+        source: ctx.sourceOptions(token),
         meter,
         startSeq: resume.mode === 'zipFrom' ? resume.seq : undefined,
         zipSeekGap: ctx.limits.zipSeekGap,
-        throttleMBps: ctx.limits.throttleMBps,
         afterEntry: async (info, endOffset) => {
           inFlight = null;
           const row = pendingRows.get(info.seq);
@@ -1996,27 +2349,63 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
 // ---------- the reader pool ----------
 
 /**
- * Runs `fn` over the items with `n` workers, each holding a process reader slot per item. The first rejection
- * aborts the run's read signal with that reason; after an abort the workers get `capMs` to settle, and a worker still
- * inside a read is detached: it writes nothing more and its file handle closes when the read returns. Then the run's
- * writes are drained (queued ones dropped after an abort) and the first failure is rethrown.
+ * Runs `fn` over the items with `n` workers, each holding a process reader slot per item. `n` may be a function: the
+ * pool follows it while it runs (the admin changed the reader count). A raised count starts more workers at once; a
+ * lowered one holds the newest busy workers back at their next read (their files stay open, ReadContext.setHold) and
+ * lets a worker that finishes its item end instead of taking a new one, so no new item starts above the count and a
+ * held worker continues as soon as an older one ends. The first rejection aborts the run's read signal with that
+ * reason; after an abort the workers get `capMs` to settle, and a worker still inside a read is detached: it writes
+ * nothing more and its file handle closes when the read returns. Then the run's writes are drained (queued ones dropped
+ * after an abort) and the first failure is rethrown.
  */
 export async function readerPool<T>(
   ctx: ReadContext,
   items: T[],
-  n: number,
+  n: number | (() => number),
   fn: (item: T, token: ReaderToken) => Promise<void>,
 ): Promise<void> {
+  const target = () => Math.max(1, Math.floor(typeof n === 'function' ? n() : n));
   let next = 0;
+  let order = 0;
   let firstError: unknown = null;
-  const tokens: ReaderToken[] = [];
-  const worker = async (token: ReaderToken) => {
+  interface PoolWorker {
+    token: ReaderToken;
+    done: boolean;
+    /** start order of the item it works on, null between items */
+    busy: number | null;
+  }
+  const workers: PoolWorker[] = [];
+  let resolveIdle!: () => void;
+  const idle = new Promise<void>((resolve) => (resolveIdle = resolve));
+  const alive = () => workers.filter((w) => !w.done).length;
+
+  const rebalance = () => {
+    if (!ctx.readAbort.signal.aborted) {
+      while (alive() < target() && next < items.length) {
+        spawn();
+      }
+    }
+    // the oldest busy workers up to the count read; the newer ones wait at their next read
+    const busy = workers.filter((w) => !w.done && w.busy !== null).toSorted((a, b) => (a.busy ?? 0) - (b.busy ?? 0));
+    for (const [index, w] of busy.entries()) {
+      ctx.setHold(w.token, index >= target());
+    }
+  };
+
+  const work = async (w: PoolWorker) => {
     while (!ctx.readAbort.signal.aborted && next < items.length) {
+      if (alive() > target()) {
+        // the count was lowered: this worker ends instead of starting a new item
+        return;
+      }
       const item = items[next++];
+      w.busy = order++;
       let slot: ByteLease | null = null;
       try {
         slot = await ctx.resources.readers.acquire(1, ctx.readAbort.signal);
-        await fn(item, token);
+        // more workers start once this one has its process slot: items take their slots in item order
+        rebalance();
+        await fn(item, w.token);
       } catch (error) {
         if (!ctx.readAbort.signal.aborted) {
           firstError ??= error;
@@ -2025,20 +2414,32 @@ export async function readerPool<T>(
         return;
       } finally {
         slot?.release();
+        w.busy = null;
+        ctx.setHold(w.token, false);
       }
     }
   };
-  const workers = Array.from({ length: Math.max(1, n) }, () => {
-    const token: ReaderToken = { detached: false };
-    tokens.push(token);
-    return { token, done: false, promise: null as Promise<void> | null };
-  });
-  for (const w of workers) {
-    w.promise = worker(w.token).finally(() => {
+
+  const spawn = () => {
+    const w: PoolWorker = { token: { detached: false }, done: false, busy: null };
+    workers.push(w);
+    ctx.tokens.add(w.token);
+    void work(w).finally(() => {
       w.done = true;
+      ctx.tokens.delete(w.token);
+      // a held worker continues, or a new one takes the next item
+      rebalance();
+      if (alive() === 0) {
+        resolveIdle();
+      }
     });
+  };
+
+  const unsubscribe = ctx.onReadersChange(rebalance);
+  rebalance();
+  if (alive() === 0) {
+    resolveIdle();
   }
-  const all = Promise.allSettled(workers.map((w) => w.promise!));
   const aborted = new Promise<void>((resolve) => {
     if (ctx.readAbort.signal.aborted) {
       resolve();
@@ -2046,10 +2447,14 @@ export async function readerPool<T>(
       ctx.readAbort.signal.addEventListener('abort', () => resolve(), { once: true });
     }
   });
-  await Promise.race([
-    all,
-    aborted.then(() => new Promise<void>((resolve) => setTimeout(resolve, ctx.limits.cancelReaderCapMs))),
-  ]);
+  try {
+    await Promise.race([
+      idle,
+      aborted.then(() => new Promise<void>((resolve) => setTimeout(resolve, ctx.limits.cancelReaderCapMs))),
+    ]);
+  } finally {
+    unsubscribe();
+  }
   for (const w of workers) {
     if (w.done) {
       continue;
@@ -2115,7 +2520,12 @@ export function rankOccurrences(occurrences: FetchOccurrence[]): FetchOccurrence
   );
 }
 
-async function stageVerified(ctx: ReadContext, request: FetchRequest, open: EntryOpener): Promise<void> {
+async function stageVerified(
+  ctx: ReadContext,
+  request: FetchRequest,
+  open: EntryOpener,
+  token?: ReaderToken,
+): Promise<void> {
   if (request.kind === 'sample') {
     if (request.size > ctx.limits.sampleBufferLimit) {
       await ctx.deps.repo.updateEntry(request.entryId!, { sampleSkipped: TakeoutSampleSkipped.TooLarge });
@@ -2146,9 +2556,9 @@ async function stageVerified(ctx: ReadContext, request: FetchRequest, open: Entr
     request.satisfied = true;
     return;
   }
-  let slot: ByteLease | null = null;
+  let slot: WriteSlot | null = null;
   try {
-    slot = await ctx.resources.writes.acquireSlot(ctx.readAbort.signal);
+    slot = await acquireWriteSlot(ctx, token, ctx.readAbort.signal);
     const written = await ctx.staging.streamToTemp(await open());
     if (written.checksum.equals(request.checksum)) {
       await ctx.staging.commitTemp(written.tmp, reservation, written.size);
@@ -2159,7 +2569,7 @@ async function stageVerified(ctx: ReadContext, request: FetchRequest, open: Entr
       request.failure = 'the archive changed since it was read';
     }
   } finally {
-    slot?.release();
+    releaseWriteSlot(token, slot);
     reservation.releaseIfPending();
   }
 }
@@ -2266,7 +2676,7 @@ async function fetchPartWalk(
         // only when both exist (rare); the blob comes first
         const [first, ...others] = matched.sort((a, b) => (a.kind === b.kind ? 0 : a.kind === 'blob' ? -1 : 1));
         try {
-          await stageVerified(ctx, first, open);
+          await stageVerified(ctx, first, open, token);
         } catch (error) {
           if (!(error instanceof EntryDataError)) {
             throw error;
@@ -2285,13 +2695,12 @@ async function fetchPartWalk(
       {
         signal: ctx.readAbort.signal,
         fingerprint: st,
-        source: ctx.sourceOptions(),
+        source: ctx.sourceOptions(token),
         meter,
         seqs: kind === 'zip' && allSeqs ? new Set(seqs) : undefined,
         untilSeq: kind === 'tgz' && allSeqs && seqs.length > 0 ? Math.max(...seqs) : undefined,
         shouldStop: () => remaining <= 0,
         zipSeekGap: ctx.limits.zipSeekGap,
-        throttleMBps: ctx.limits.throttleMBps,
       },
     );
   } catch (error) {
@@ -2409,10 +2818,15 @@ export async function fetchEntries(
     ctx.stats.stats.fetchBytesTotal += work.reduce((sum, item) => sum + item.planned, 0);
     try {
       if (work.length > 0) {
-        await readerPool(ctx, work, Math.min(ctx.limits.readers, work.length), (item, token) => {
-          item.started = true;
-          return fetchPart(ctx, item.part, item.requests, item.planned, token);
-        });
+        await readerPool(
+          ctx,
+          work,
+          () => Math.min(ctx.readers, work.length),
+          (item, token) => {
+            item.started = true;
+            return fetchPart(ctx, item.part, item.requests, item.planned, token);
+          },
+        );
       }
     } finally {
       // parts an abort kept from starting leave the total

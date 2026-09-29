@@ -428,6 +428,14 @@ export type AdminConfigStorageTemplateDto = {
     /** Template */
     template: string;
 };
+export type AdminConfigTakeoutDto = {
+    /** Reads in flight per part (application readahead) */
+    readaheadDepth: number;
+    /** Parts of one Google Takeout import read in parallel */
+    readers: number;
+    /** Read limit in MB/s for all Google Takeout imports together; 0 or null means unlimited */
+    throttleMBps: number | null;
+};
 export type AdminConfigTemplateEmailsDto = {
     /** Album invite template */
     albumInviteTemplate: string;
@@ -472,6 +480,7 @@ export type AdminConfigDto = {
     reverseGeocoding: AdminConfigReverseGeocodingDto;
     server: AdminConfigServerDto;
     storageTemplate: AdminConfigStorageTemplateDto;
+    takeout: AdminConfigTakeoutDto;
     templates: AdminConfigTemplatesDto;
     theme: AdminConfigThemeDto;
     trash: AdminConfigTrashDto;
@@ -3338,6 +3347,8 @@ export type TakeoutRunPartStatsDto = {
     partId: string;
     /** How many times this run started reading the part (1 when nothing went wrong) */
     passes: number;
+    /** Milliseconds the part spent paused (a paused run, or fewer readers); not counted in its read speed */
+    pausedMs: number;
     /** Covered file offset of the current pass */
     position: number;
     /** File size in bytes */
@@ -3383,6 +3394,8 @@ export type TakeoutRunReadStatsDto = {
     mediaFound: number;
     /** Per part, in part order */
     parts: TakeoutRunPartStatsDto[];
+    /** Milliseconds the run spent in pauses that ended (a current pause counts from pausedAt) */
+    pausedMs: number;
     /** Reads in flight per part */
     readahead: number;
     /** Parts read in parallel */
@@ -3473,6 +3486,10 @@ export type TakeoutRunDto = {
     id: string;
     /** Whether the run was started although the export is not complete */
     importAnyway: boolean;
+    /** When the run was paused (null unless it is paused) */
+    pausedAt: string | null;
+    /** The status the run was paused in; Resume continues there (null unless it is paused) */
+    pausedFrom: (TakeoutRunStatus) | null;
     readStats: TakeoutRunReadStatsDto;
     settings: TakeoutSettingsDto;
     /** When the run started */
@@ -8382,6 +8399,20 @@ export function getTakeoutRunFiles({ action, id, page, search, size, status }: {
     }));
 }
 /**
+ * Pause a takeout run
+ */
+export function pauseTakeoutRun({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: TakeoutRunDto;
+    }>(`/takeouts/runs/${encodeURIComponent(id)}/pause`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
  * Download the report of a takeout run
  */
 export function getTakeoutRunReport({ id }: {
@@ -9805,10 +9836,24 @@ export enum SyncRequestType {
     ViewsV1 = "ViewsV1",
     ViewTagsV1 = "ViewTagsV1"
 }
+export enum TakeoutRunStatus {
+    Queued = "queued",
+    Reading = "reading",
+    Planning = "planning",
+    Fetching = "fetching",
+    Importing = "importing",
+    Finishing = "finishing",
+    Paused = "paused",
+    Completed = "completed",
+    Failed = "failed",
+    Cancelling = "cancelling",
+    Cancelled = "cancelled"
+}
 export enum TakeoutRunPartStatus {
     Pending = "pending",
     Cached = "cached",
     Reading = "reading",
+    Paused = "paused",
     Read = "read",
     Error = "error",
     Missing = "missing"
@@ -9841,18 +9886,6 @@ export enum TakeoutVideoBoostMode {
     NoStack = "NoStack",
     Stack = "Stack",
     KeepMain = "KeepMain"
-}
-export enum TakeoutRunStatus {
-    Queued = "queued",
-    Reading = "reading",
-    Planning = "planning",
-    Fetching = "fetching",
-    Importing = "importing",
-    Finishing = "finishing",
-    Completed = "completed",
-    Failed = "failed",
-    Cancelling = "cancelling",
-    Cancelled = "cancelled"
 }
 export enum TakeoutCompleteness {
     Unknown = "unknown",

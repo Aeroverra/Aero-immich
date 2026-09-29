@@ -13,10 +13,11 @@ import {
   TakeoutExportReadStatus,
   TakeoutPartReadStatus,
   TakeoutRunPartStatus,
+  TakeoutRunStatus,
   TakeoutScanStatus,
   TakeoutSizeCheck,
 } from 'src/enum';
-import { CATALOG_VERSION, normalizeReadStats } from 'src/services/takeout-read';
+import { CATALOG_VERSION, normalizeReadStats, pauseStateOf } from 'src/services/takeout-read';
 import { ANALYSIS_REASONS, mergeSettings } from 'src/takeout';
 
 // DTO mappers shared by the takeout services (single-pass design 13.1).
@@ -175,6 +176,7 @@ export function mapReadStats(stored: unknown): TakeoutRunReadStatsDto {
       errorOffset: ps.errorOffset,
       startedAt: ps.startedAt,
       finishedAt: ps.finishedAt,
+      pausedMs: Math.max(0, Math.round(ps.pausedMs)),
     }));
   return {
     readers: stats.readers,
@@ -202,6 +204,7 @@ export function mapReadStats(stored: unknown): TakeoutRunReadStatsDto {
     discardedStagedBytes: stats.discardedStagedBytes,
     stagingBytes: stats.stagingBytes,
     stagingExpiresAt: stats.stagingExpiresAt,
+    pausedMs: Math.max(0, Math.round(stats.pausedMs)),
     parts,
   };
 }
@@ -232,12 +235,27 @@ export function mapRun(run: any, rotationCounts?: Record<string, number>): Takeo
     readStats: mapReadStats(run.readStats),
     hasStaging: !!run.hasStaging,
     supersededBy: run.supersededBy ?? null,
+    ...mapPause(run),
     currentFile: run.currentFile,
     error: run.error,
     startedAt: iso(run.startedAt),
     finishedAt: iso(run.finishedAt),
     createdAt: iso(run.createdAt)!,
   };
+}
+
+/** The pause of a paused run (null otherwise): since when, and the status Resume returns to */
+function mapPause(run: { status: string; readStats?: unknown }): {
+  pausedAt: string | null;
+  pausedFrom: TakeoutRunStatus | null;
+} {
+  if (run.status !== TakeoutRunStatus.Paused) {
+    return { pausedAt: null, pausedFrom: null };
+  }
+  const { pausedAt, pausedFrom } = pauseStateOf(run.readStats);
+  const at = pausedAt ? new Date(pausedAt) : null;
+  const from = Object.values(TakeoutRunStatus).find((status) => status === pausedFrom) ?? null;
+  return { pausedAt: at && !Number.isNaN(at.getTime()) ? at.toISOString() : null, pausedFrom: from };
 }
 
 export function normalizeCounters(c: any) {

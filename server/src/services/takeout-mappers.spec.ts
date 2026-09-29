@@ -104,6 +104,36 @@ describe('takeout DTO mappers', () => {
     expect(run.counters.discarded.missingFromArchive).toBe(0);
   });
 
+  it('shows the pause of a paused run only, and never as statistics', () => {
+    const base = {
+      id: 'r1',
+      exportId: 'e1',
+      importAnyway: false,
+      settings: {},
+      counters: {},
+      createdAt: new Date(),
+    };
+    const readStats = {
+      pausedAt: '2026-09-29T10:00:00.000Z',
+      pausedFrom: TakeoutRunStatus.Fetching,
+      pausedMs: 1500.4,
+      parts: { a: { partId: 'a', fileName: 'a', size: 1, status: 'paused', pausedMs: 20 } },
+    };
+    const paused = mapRun({ ...base, status: TakeoutRunStatus.Paused, readStats });
+    expect(paused).toMatchObject({ pausedAt: '2026-09-29T10:00:00.000Z', pausedFrom: TakeoutRunStatus.Fetching });
+    expect(paused.readStats.pausedMs).toBe(1500);
+    expect(paused.readStats.parts[0]).toMatchObject({ status: 'paused', pausedMs: 20 });
+    expect(Object.keys(paused.readStats)).not.toContain('pausedAt');
+    // a pause the run left (a resume raced a progress write) is not shown
+    expect(mapRun({ ...base, status: TakeoutRunStatus.Fetching, readStats })).toMatchObject({
+      pausedAt: null,
+      pausedFrom: null,
+    });
+    expect(
+      mapRun({ ...base, status: TakeoutRunStatus.Paused, readStats: { pausedAt: 'x', pausedFrom: 'nope' } }),
+    ).toMatchObject({ pausedAt: null, pausedFrom: null });
+  });
+
   it('orders the part statistics by segment and part number', () => {
     const stats = mapReadStats({
       parts: {

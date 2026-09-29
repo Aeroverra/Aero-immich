@@ -1,7 +1,8 @@
 <script lang="ts">
   import { TakeoutRunStatus, type TakeoutRunDto } from '@immich/sdk';
-  import { Button, ProgressBar, Text } from '@immich/ui';
-  import { mdiStopCircleOutline } from '@mdi/js';
+  import { Button, HStack, ProgressBar, Text } from '@immich/ui';
+  import { mdiPause, mdiPlay, mdiStopCircleOutline } from '@mdi/js';
+  import { DateTime } from 'luxon';
   import { t } from 'svelte-i18n';
   import TakeoutRunPartsTable from '$lib/components/takeouts/TakeoutRunPartsTable.svelte';
   import {
@@ -9,11 +10,15 @@
     counterGroups,
     counterLabel,
     handleCancelRun,
+    handlePauseRun,
+    handleResumeRun,
     progressFraction,
     runPhaseIndex,
     runPhaseLabel,
     runPhases,
     takeoutRunActive,
+    takeoutRunPausable,
+    takeoutRunPaused,
   } from '$lib/services/takeout.service';
   import { locale } from '$lib/stores/preferences.store';
   import { getByteUnitString } from '$lib/utils/byte-units';
@@ -21,11 +26,13 @@
   interface Props {
     run: TakeoutRunDto;
     onCancelled?: (run: TakeoutRunDto) => void;
+    /** the run after a pause or a resume */
+    onUpdated?: (run: TakeoutRunDto) => void;
     /** show the per-part read table under the reading block */
     showParts?: boolean;
   }
 
-  let { run, onCancelled, showParts = true }: Props = $props();
+  let { run, onCancelled, onUpdated, showParts = true }: Props = $props();
 
   let phases = $derived(runPhases(run));
   let phaseIndex = $derived(runPhaseIndex(run, phases));
@@ -46,6 +53,11 @@
 
   $effect(() => {
     const now = Date.now();
+    if (run.status !== TakeoutRunStatus.Importing) {
+      // no rate while not creating assets (paused included): the rate after a resume starts from there
+      prev = { bytesDone: run.bytesDone, at: now };
+      return;
+    }
     const dt = (now - prev.at) / 1000;
     const db = run.bytesDone - prev.bytesDone;
     if (dt > 0.25 && db >= 0) {
@@ -68,11 +80,45 @@
   let active = $derived(takeoutRunActive(run.status));
   let reading = $derived(run.status === TakeoutRunStatus.Reading);
   let importing = $derived(run.status === TakeoutRunStatus.Importing);
+  let pausable = $derived(takeoutRunPausable(run.status));
+  let paused = $derived(takeoutRunPaused(run.status));
+  // one request at a time: the buttons wait for the answer
+  let busy = $state(false);
+
+  let pausedSince = $derived(
+    run.pausedAt
+      ? DateTime.fromISO(run.pausedAt).toLocaleString(DateTime.DATETIME_MED, { locale: $locale })
+      : undefined,
+  );
 
   const cancel = async () => {
     const cancelled = await handleCancelRun($t, run, $locale);
     if (cancelled) {
       onCancelled?.(cancelled);
+    }
+  };
+
+  const pause = async () => {
+    busy = true;
+    try {
+      const updated = await handlePauseRun($t, run.id);
+      if (updated) {
+        onUpdated?.(updated);
+      }
+    } finally {
+      busy = false;
+    }
+  };
+
+  const resume = async () => {
+    busy = true;
+    try {
+      const updated = await handleResumeRun($t, run.id);
+      if (updated) {
+        onUpdated?.(updated);
+      }
+    } finally {
+      busy = false;
     }
   };
 
@@ -143,7 +189,7 @@
     </dl>
 
     {#if showParts && stats.parts.length > 0}
-      <TakeoutRunPartsTable parts={stats.parts} />
+      <TakeoutRunPartsTable parts={stats.parts} pausedAt={run.pausedAt} />
     {/if}
   </section>
 
@@ -179,6 +225,15 @@
     </Text>
   </section>
 
+  {#if paused}
+    <div class="rounded-lg border border-warning px-3 py-2" data-testid="takeout-run-paused">
+      {#if pausedSince}
+        <Text size="small" class="font-semibold">{$t('takeout_paused_since', { values: { time: pausedSince } })}</Text>
+      {/if}
+      <Text size="tiny" color="muted">{$t('takeout_paused_note')}</Text>
+    </div>
+  {/if}
+
   {#if run.currentFile && active}
     <Text size="tiny" color="muted" class="break-all">{run.currentFile}</Text>
   {/if}
@@ -207,10 +262,26 @@
   </div>
 
   {#if active && run.status !== TakeoutRunStatus.Cancelling}
-    <div>
-      <Button size="small" color="danger" variant="outline" leadingIcon={mdiStopCircleOutline} onclick={cancel}>
+    <HStack gap={2} class="flex-wrap">
+      {#if paused}
+        <Button size="small" color="primary" leadingIcon={mdiPlay} disabled={busy} onclick={resume}>
+          {$t('takeout_resume_run')}
+        </Button>
+      {:else if pausable}
+        <Button size="small" color="secondary" variant="outline" leadingIcon={mdiPause} disabled={busy} onclick={pause}>
+          {$t('takeout_pause_run')}
+        </Button>
+      {/if}
+      <Button
+        size="small"
+        color="danger"
+        variant="outline"
+        leadingIcon={mdiStopCircleOutline}
+        disabled={busy}
+        onclick={cancel}
+      >
         {$t('takeout_cancel_run')}
       </Button>
-    </div>
+    </HStack>
   {/if}
 </div>

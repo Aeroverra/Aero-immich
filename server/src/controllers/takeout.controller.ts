@@ -159,13 +159,26 @@ export class TakeoutController {
     return this.service.cancelRun(auth, id);
   }
 
+  @Post('runs/:id/pause')
+  @Authenticated({ permission: Permission.TakeoutRun })
+  @HttpCode(HttpStatus.OK)
+  @Endpoint({
+    summary: 'Pause a takeout run',
+    description:
+      'Pause a running run: reading stops at once with the archives kept open, the other steps stop at the next safe point. A paused run keeps its staged files and stays paused across a server restart until it is resumed or cancelled.',
+    history: history(),
+  })
+  pauseTakeoutRun(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<TakeoutRunDto> {
+    return this.service.pauseRun(auth, id);
+  }
+
   @Post('runs/:id/resume')
   @Authenticated({ permission: Permission.TakeoutRun })
   @HttpCode(HttpStatus.OK)
   @Endpoint({
     summary: 'Resume a takeout run',
     description:
-      'Resume a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.',
+      'Resume a paused run where it waits, or a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.',
     history: history(),
   })
   resumeTakeoutRun(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<TakeoutRunDto> {

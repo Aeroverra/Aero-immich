@@ -16713,6 +16713,63 @@
         "x-immich-state": "Beta"
       }
     },
+    "/takeouts/runs/{id}/pause": {
+      "post": {
+        "description": "Pause a running run: reading stops at once with the archives kept open, the other steps stop at the next safe point. A paused run keeps its staged files and stays paused across a server restart until it is resumed or cancelled.",
+        "operationId": "pauseTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Pause a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
     "/takeouts/runs/{id}/report.csv": {
       "get": {
         "description": "Download the per-file report of a run as CSV.",
@@ -16773,7 +16830,7 @@
     },
     "/takeouts/runs/{id}/resume": {
       "post": {
-        "description": "Resume a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.",
+        "description": "Resume a paused run where it waits, or a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.",
         "operationId": "resumeTakeoutRun",
         "parameters": [
           {
@@ -20276,6 +20333,9 @@
           "storageTemplate": {
             "$ref": "#/components/schemas/AdminConfigStorageTemplateDto"
           },
+          "takeout": {
+            "$ref": "#/components/schemas/AdminConfigTakeoutDto"
+          },
           "templates": {
             "$ref": "#/components/schemas/AdminConfigTemplatesDto"
           },
@@ -20308,6 +20368,7 @@
           "reverseGeocoding",
           "server",
           "storageTemplate",
+          "takeout",
           "templates",
           "theme",
           "trash",
@@ -21338,6 +21399,36 @@
           "enabled",
           "hashVerificationEnabled",
           "template"
+        ],
+        "type": "object"
+      },
+      "AdminConfigTakeoutDto": {
+        "description": "Google Takeout import reading; changes apply to running imports within seconds",
+        "properties": {
+          "readaheadDepth": {
+            "description": "Reads in flight per part (application readahead)",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "readers": {
+            "description": "Parts of one Google Takeout import read in parallel",
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "throttleMBps": {
+            "description": "Read limit in MB/s for all Google Takeout imports together; 0 or null means unlimited",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "readaheadDepth",
+          "readers",
+          "throttleMBps"
         ],
         "type": "object"
       },
@@ -35767,6 +35858,21 @@
             "description": "Whether the run was started although the export is not complete",
             "type": "boolean"
           },
+          "pausedAt": {
+            "description": "When the run was paused (null unless it is paused)",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "pausedFrom": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRunStatus"
+              }
+            ],
+            "description": "The status the run was paused in; Resume continues there (null unless it is paused)",
+            "nullable": true
+          },
           "readStats": {
             "$ref": "#/components/schemas/TakeoutRunReadStatsDto"
           },
@@ -35804,6 +35910,8 @@
           "hasStaging",
           "id",
           "importAnyway",
+          "pausedAt",
+          "pausedFrom",
           "readStats",
           "settings",
           "startedAt",
@@ -36135,6 +36243,12 @@
             "minimum": 0,
             "type": "integer"
           },
+          "pausedMs": {
+            "description": "Milliseconds the part spent paused (a paused run, or fewer readers); not counted in its read speed",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
           "position": {
             "description": "Covered file offset of the current pass",
             "maximum": 9007199254740991,
@@ -36190,6 +36304,7 @@
           "media",
           "partId",
           "passes",
+          "pausedMs",
           "position",
           "size",
           "staged",
@@ -36206,6 +36321,7 @@
           "pending",
           "cached",
           "reading",
+          "paused",
           "read",
           "error",
           "missing"
@@ -36304,6 +36420,12 @@
             },
             "type": "array"
           },
+          "pausedMs": {
+            "description": "Milliseconds the run spent in pauses that ended (a current pause counts from pausedAt)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
           "readahead": {
             "description": "Reads in flight per part",
             "maximum": 9007199254740991,
@@ -36387,6 +36509,7 @@
           "localDuplicatesSkipped",
           "mediaFound",
           "parts",
+          "pausedMs",
           "readahead",
           "readers",
           "sampleBackfillFiles",
@@ -36410,6 +36533,7 @@
           "fetching",
           "importing",
           "finishing",
+          "paused",
           "completed",
           "failed",
           "cancelling",

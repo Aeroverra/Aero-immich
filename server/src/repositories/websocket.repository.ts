@@ -27,6 +27,7 @@ export const serverEvents = [
   'HlsSessionResult',
   'HlsSessionEnd',
   'TakeoutRunCancel',
+  'TakeoutRunPause',
 ] as const;
 export type ServerEvents = (typeof serverEvents)[number];
 

@@ -37,7 +37,11 @@ import {
   TakeoutRunFileStatus,
   TakeoutRunStatus,
 } from 'src/enum';
-import { TAKEOUT_RUNNING_RUN_STATUSES } from 'src/repositories/takeout.repository';
+import {
+  TAKEOUT_ACTIVE_RUN_STATUSES,
+  TAKEOUT_LEASED_RUN_STATUSES,
+  TAKEOUT_RUNNING_RUN_STATUSES,
+} from 'src/repositories/takeout.repository';
 import { BaseService } from 'src/services/base.service';
 import { isStablePart } from 'src/services/takeout-analyze.service';
 import {
@@ -45,6 +49,7 @@ import {
   TAKEOUT_ROOT_FOLDER,
   cleanupCancelledRun,
   discardRunStaging,
+  emitRun,
   openRunStaging,
   reclaimRunTargets,
   takeoutFolderPath,
@@ -59,7 +64,7 @@ import {
   mapUpload,
   reportFallbacks,
 } from 'src/services/takeout-mappers';
-import { DEFAULT_READ_LIMITS } from 'src/services/takeout-read';
+import { DEFAULT_READ_LIMITS, resumedReadStats } from 'src/services/takeout-read';
 import { STAGING_TTL_MS, isTrashName, isUuid, listStaging, trashStagingDir } from 'src/services/takeout-staging';
 import { FolderFile, TakeoutSettings, groupExports, mergeSettings, validateSettings } from 'src/takeout';
 import { JobItem } from 'src/types';
@@ -134,10 +139,22 @@ export class TakeoutService extends BaseService {
   async onUserTrash({ id }: { id: string }) {
     const runs = await this.takeoutRepository.getActiveRunsByUser(id);
     for (const run of runs) {
+      if (run.status === TakeoutRunStatus.Paused && this.leaseStale(run)) {
+        // paused, and no job holds it any more (a restart): nobody would finish a cancel request
+        await this.takeoutRepository.withUserSyncLock(run.userId, () =>
+          cleanupCancelledRun(this.lifecycle, run.id, { token: null, from: [TakeoutRunStatus.Paused] }),
+        );
+        continue;
+      }
       if (await this.takeoutRepository.requestCancel(run.id)) {
         this.websocketRepository.serverSend('TakeoutRunCancel', { runId: run.id });
       }
     }
+  }
+
+  /** No live job holds the run: no lease, or a heartbeat older than 60 s */
+  private leaseStale(run: { leaseToken: string | null; heartbeatAt: Date | null }) {
+    return !run.leaseToken || !run.heartbeatAt || Date.now() - new Date(run.heartbeatAt).getTime() > STALE_RUN_MS;
   }
 
   @OnEvent({ name: 'UserDelete' })
@@ -190,10 +207,15 @@ export class TakeoutService extends BaseService {
     // 3. parts left 'reading' by a run that is not running any more
     await this.wrapStep('reset reading parts', () => this.takeoutRepository.resetReadingParts());
 
-    // 4. runs left non-final by a crash: re-queued (a cancelling one finishes as cancelled in its job)
+    // 4. runs left non-final by a crash: re-queued (a cancelling one finishes as cancelled in its job). A paused run
+    // stays paused: its job is gone, so its lease goes, and Resume queues it again when the user wants it
     await this.wrapStep('recover runs', async () => {
       const runs = await this.takeoutRepository.getInterruptedRuns();
       for (const run of runs) {
+        if (run.status === TakeoutRunStatus.Paused) {
+          await this.takeoutRepository.updateRun(run.id, { heartbeatAt: null, leaseToken: null });
+          continue;
+        }
         await this.takeoutRepository.updateRun(run.id, {
           heartbeatAt: null,
           leaseToken: null,
@@ -303,12 +325,13 @@ export class TakeoutService extends BaseService {
     if (!run) {
       return true;
     }
-    if (TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status) || run.status === TakeoutRunStatus.Cancelling) {
+    // running, cancelling, or paused: a paused run keeps its staging for as long as it stays paused (no TTL)
+    if (TAKEOUT_ACTIVE_RUN_STATUSES.includes(run.status)) {
       return false;
     }
     if (run.supersededBy) {
       const successor = await this.takeoutRepository.getRun(run.supersededBy);
-      return !(successor && TAKEOUT_RUNNING_RUN_STATUSES.includes(successor.status));
+      return !(successor && TAKEOUT_LEASED_RUN_STATUSES.includes(successor.status));
     }
     const stopped = run.status === TakeoutRunStatus.Failed || run.status === TakeoutRunStatus.Cancelled;
     if (stopped && run.hasStaging) {
@@ -824,7 +847,11 @@ export class TakeoutService extends BaseService {
     if (run.status === TakeoutRunStatus.Completed) {
       throw new BadRequestException('A completed run cannot be cancelled');
     }
-    const stale = !run.heartbeatAt || Date.now() - run.heartbeatAt.getTime() > STALE_RUN_MS;
+    // a paused run whose job is gone (a restart) has no lease: it is cleaned up here like a stale one
+    const stale =
+      !run.heartbeatAt ||
+      Date.now() - run.heartbeatAt.getTime() > STALE_RUN_MS ||
+      (run.status === TakeoutRunStatus.Paused && !run.leaseToken);
     if (run.status === TakeoutRunStatus.Failed || (run.status === TakeoutRunStatus.Cancelled && run.hasStaging)) {
       await discardRunStaging(this.lifecycle, id);
     } else if (run.status === TakeoutRunStatus.Cancelled) {
@@ -837,7 +864,8 @@ export class TakeoutService extends BaseService {
         // the job took the run meanwhile: let it stop
         this.websocketRepository.serverSend('TakeoutRunCancel', { runId: id });
       }
-    } else if (TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status) && (await this.takeoutRepository.requestCancel(id))) {
+    } else if (TAKEOUT_LEASED_RUN_STATUSES.includes(run.status) && (await this.takeoutRepository.requestCancel(id))) {
+      // running or paused: the job holding the run stops (a paused one stops waiting) and cleans up
       this.websocketRepository.serverSend('TakeoutRunCancel', { runId: id });
     }
     const fresh = await this.takeoutRepository.getRun(id);
@@ -849,10 +877,71 @@ export class TakeoutService extends BaseService {
     return cleanupCancelledRun(this.lifecycle, runId, { token: null, from });
   }
 
+  /**
+   * Pause a running run. Its job holds the archive reads at the next read (the archives stay open, so nothing is read
+   * twice) and its other steps at the next safe point, and keeps its lease. A paused run stays paused across a restart.
+   */
+  async pauseRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
+    const run = await this.findRun(auth.user.id, id);
+    if (run.status === TakeoutRunStatus.Paused) {
+      return mapRun(run);
+    }
+    if (!TAKEOUT_RUNNING_RUN_STATUSES.includes(run.status)) {
+      throw new BadRequestException('Only a running import can be paused');
+    }
+    if (!(await this.takeoutRepository.requestPause(id, new Date()))) {
+      throw new ConflictException('The run changed meanwhile, try again');
+    }
+    this.websocketRepository.serverSend('TakeoutRunPause', { runId: id });
+    await emitRun(this.lifecycle, id);
+    const fresh = await this.takeoutRepository.getRun(id);
+    return mapRun(fresh ?? run);
+  }
+
+  /**
+   * Resume a paused run: its live job continues where it waited (the same reads); without a live job (a restart) the
+   * run is queued again and the next attempt continues like any resumed run.
+   */
+  private async resumePausedRun(auth: AuthDto, run: { id: string }): Promise<TakeoutRunDto> {
+    const id = run.id;
+    let queued: number | null = null;
+    let previous = 0;
+    await this.takeoutRepository.withUserSyncLock(auth.user.id, async () => {
+      if (await this.takeoutRepository.resumePausedRun(id)) {
+        return;
+      }
+      const fresh = await this.takeoutRepository.getRun(id);
+      if (fresh?.status !== TakeoutRunStatus.Paused) {
+        throw new ConflictException('The run changed meanwhile, try again');
+      }
+      await this.checkFreeSpaceReserve(auth.user.id);
+      previous = fresh.attempt;
+      const attempt = fresh.attempt + 1;
+      const readStats = resumedReadStats(fresh.readStats) as unknown as object;
+      if (!(await this.takeoutRepository.requeuePausedRun(id, attempt, readStats))) {
+        throw new ConflictException('The run changed meanwhile, try again');
+      }
+      queued = attempt;
+    });
+    if (queued === null) {
+      this.websocketRepository.serverSend('TakeoutRunPause', { runId: id });
+    } else {
+      // a job of the earlier attempt still waiting (the run was paused before it started) would only look again
+      await this.jobRepository.removeJob(JobName.TakeoutRun, `${id}/${previous}`).catch(() => {});
+      await this.queueUnique({ name: JobName.TakeoutRun, data: { runId: id, attempt: queued } }, `${id}/${queued}`);
+    }
+    await emitRun(this.lifecycle, id);
+    const fresh = await this.takeoutRepository.getRun(id);
+    return mapRun(fresh ?? run);
+  }
+
   async resumeRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
     const run = await this.findRun(auth.user.id, id);
+    if (run.status === TakeoutRunStatus.Paused) {
+      return this.resumePausedRun(auth, run);
+    }
     if (run.status !== TakeoutRunStatus.Failed && run.status !== TakeoutRunStatus.Cancelled) {
-      throw new BadRequestException('Only a failed or cancelled run can be resumed');
+      throw new BadRequestException('Only a failed, cancelled or paused run can be resumed');
     }
     if (run.supersededBy) {
       throw new ConflictException('A newer import took over this one');

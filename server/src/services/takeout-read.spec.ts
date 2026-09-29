@@ -23,6 +23,7 @@ import {
   readerPool,
   recountReadStats,
   sha1,
+  withDeadline,
 } from 'src/services/takeout-read';
 import { StagingFs, StagingStore, nodeStagingFs } from 'src/services/takeout-staging';
 import { FileHandleLike, FileSourceFs, hex, newReadMeter, nodeFileSourceFs } from 'src/takeout';
@@ -1133,5 +1134,283 @@ describe('SpaceBudget', () => {
     await budget.refresh(20);
     expect(calls).toBe(2);
     expect(budget.available).toBe(1000);
+  });
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** A file system that counts the opens, reads and bytes of the archive files, with a hook after every read */
+function countingFs(options: { delayMs?: number } = {}) {
+  const counts = { opens: 0, reads: 0, bytes: 0 };
+  const byFile = new Map<string, { reads: number; bytes: number }>();
+  const hooks: { afterRead: ((path: string) => void) | null } = { afterRead: null };
+  const fs: FileSourceFs = {
+    open: async (path) => {
+      const real = await nodeFileSourceFs.open(path);
+      counts.opens++;
+      const file = byFile.get(path) ?? { reads: 0, bytes: 0 };
+      byFile.set(path, file);
+      return {
+        read: async (buffer, offset, length, position) => {
+          if (options.delayMs) {
+            await sleep(options.delayMs);
+          }
+          const result = await real.read(buffer, offset, length, position);
+          counts.reads++;
+          counts.bytes += result.bytesRead;
+          file.reads++;
+          file.bytes += result.bytesRead;
+          hooks.afterRead?.(path);
+          return result;
+        },
+        stat: () => real.stat(),
+        close: () => real.close(),
+      };
+    },
+  };
+  return { fs, counts, byFile, hooks };
+}
+
+async function until(check: () => boolean, ms = 2000) {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) {
+      throw new Error('condition not met in time');
+    }
+    await sleep(5);
+  }
+}
+
+describe('pause (the run gate)', () => {
+  it('stops a tgz read at its next read, keeps the stream, and continues it: every byte read once', async () => {
+    const { fs, counts, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 2, flushRows: 1000 } });
+    const files = Array.from({ length: 30 }, (_, i) => ({
+      name: media(`p${i}.mp4`),
+      data: randomBytesSeeded(900, 300 + i),
+    }));
+    const part = await addPart(h, 'takeout-20260914T211500Z-1-001.tgz', buildTarGz(files));
+    hooks.afterRead = () => {
+      if (counts.reads === 12) {
+        h.ctx.pause.close();
+      }
+    };
+    const reading = readAll(h, [part]);
+    await until(() => !h.ctx.pause.isOpen);
+    await sleep(50);
+    const pausedAt = counts.reads;
+    await sleep(150);
+    // nothing is read while paused (the reads in flight at the pause completed before pausedAt was taken)
+    expect(counts.reads).toBe(pausedAt);
+    expect(counts.bytes).toBeLessThan(Number(part.size));
+    const ps = h.ctx.stats.stats.parts[part.id];
+    expect(ps.status).toBe('paused');
+    // the rows of the entries read so far are stored at the pause, not only at the next flush
+    expect(entriesOf(h, part.id).length).toBeGreaterThan(0);
+    expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Reading);
+
+    h.ctx.pause.open();
+    await reading;
+    // one pass over one open file: each byte of the archive read once, the pause not counted as reading time
+    expect(ps).toMatchObject({ status: 'read', passes: 1, bytesRead: part.size });
+    expect(counts).toMatchObject({ opens: 1, bytes: part.size });
+    expect(ps.pausedMs).toBeGreaterThanOrEqual(150);
+    expect(entriesOf(h, part.id)).toHaveLength(30);
+    expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Complete);
+    for (const file of files) {
+      expect(await blobExists(h, file.data)).toBe(true);
+    }
+  });
+
+  it('gives the write slot of a streamed entry back while paused, so the write-behind of the process settles', async () => {
+    const { fs, counts, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1, maxWritesInFlight: 1 } });
+    // above the buffer limit and without a same-size server asset: streamed into staging with the only write slot
+    const big = randomBytesSeeded(64 * KiB, 400);
+    const part = await addPart(
+      h,
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([{ name: media('big.mp4'), data: big }]),
+    );
+    hooks.afterRead = () => {
+      if (counts.reads === 30) {
+        h.ctx.pause.close();
+      }
+    };
+    const reading = readAll(h, [part]);
+    await until(() => !h.ctx.pause.isOpen);
+    // another write of the process gets the slot while this reader waits
+    const slot = await withDeadline(
+      h.resources.writes.acquireSlot(),
+      1000,
+      () => new Error('write slot held while paused'),
+    );
+    const content = Buffer.from('queued write-behind of another reader');
+    const reservation = h.staging.reserve(hex(sha1(content)))!;
+    const settled = h.resources.writes.enqueue({
+      runId: 'other-run',
+      token: { detached: false },
+      store: h.staging,
+      reservation,
+      buf: content,
+      lease: null,
+      space: null,
+    });
+    slot.release();
+    await withDeadline(settled, 1000, () => new Error('write-behind did not settle while paused'));
+    expect(h.staging.hasBlob(hex(sha1(content)))).toBe(true);
+
+    h.ctx.pause.open();
+    await reading;
+    expect(await blobExists(h, big)).toBe(true);
+    expect(counts.bytes).toBe(part.size);
+  });
+
+  it('never fails a paused run for a stalled read, and counts a read pending since the pause from the resume', async () => {
+    const h = await harness({ limits: { readStallMs: 1000 } });
+    const meter = newReadMeter();
+    meter.pendingSince = 0;
+    h.ctx.watch('takeout-001.tgz', meter);
+    h.ctx.pause.close(10);
+    h.ctx.checkStall(100_000);
+    expect(h.ctx.readAbort.signal.aborted).toBe(false);
+    h.ctx.pause.open(100_000);
+    h.ctx.checkStall(100_900);
+    expect(h.ctx.readAbort.signal.aborted).toBe(false);
+    h.ctx.checkStall(101_001);
+    expect(h.ctx.readAbort.signal.reason).toBeInstanceOf(RunFailure);
+    expect(h.ctx.readAbort.signal.reason.message).toMatch(/stalled/);
+  });
+
+  it('stops waiting at the gate on cancel', async () => {
+    const { fs, counts } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
+    const part = await addPart(
+      h,
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([{ name: media('a.mp4'), data: randomBytesSeeded(8 * KiB, 401) }]),
+    );
+    h.ctx.pause.close();
+    const reading = readAll(h, [part]);
+    await sleep(50);
+    expect(counts.reads).toBe(0);
+    h.controller.abort(new CancelReason());
+    await expect(reading).rejects.toBeInstanceOf(CancelReason);
+  });
+});
+
+/** a pool whose items "read" through their reader's gate until they are released */
+function gatedPool(h: Harness, count: number) {
+  const started: number[] = [];
+  const progress = Array.from({ length: count }, () => 0);
+  const release = new Set<number>();
+  const pool = readerPool(
+    h.ctx,
+    Array.from({ length: count }, (_, i) => i),
+    () => h.ctx.readers,
+    async (item, token) => {
+      started.push(item);
+      const gate = h.ctx.gateFor(token);
+      while (!release.has(item)) {
+        await gate.wait(h.ctx.readAbort.signal);
+        progress[item]++;
+        await sleep(2);
+      }
+    },
+  );
+  return { started, progress, release, pool };
+}
+
+describe('reader count changes (live settings)', () => {
+  it('holds the newest readers back when the count drops, and starts no new part above it', async () => {
+    const h = await harness();
+    h.ctx.applySettings({ readers: 3, readaheadDepth: 2 });
+    const { started, progress, release, pool } = gatedPool(h, 4);
+    const held = () => [...h.ctx.tokens].filter((token) => token.hold && !token.hold.isOpen).length;
+    await until(() => started.length === 3);
+    expect(started).toEqual([0, 1, 2]);
+
+    h.ctx.applySettings({ readers: 1, readaheadDepth: 2 });
+    expect(held()).toBe(2);
+    // a held reader may finish the step it was in; after that it makes no progress while the oldest one does
+    await sleep(10);
+    let frozen = [...progress];
+    await until(() => progress[0] >= frozen[0] + 5);
+    expect(progress[1]).toBe(frozen[1]);
+    expect(progress[2]).toBe(frozen[2]);
+
+    // the oldest held reader continues when a reader ends; the fourth part does not start
+    release.add(0);
+    await until(() => held() === 1);
+    await sleep(10);
+    frozen = [...progress];
+    await until(() => progress[1] >= frozen[1] + 5);
+    expect(progress[2]).toBe(frozen[2]);
+    expect(started).toEqual([0, 1, 2]);
+
+    release.add(1);
+    await until(() => held() === 0);
+    expect(started).toEqual([0, 1, 2]);
+    release.add(2);
+    await until(() => started.length === 4);
+    expect(started).toEqual([0, 1, 2, 3]);
+    release.add(3);
+    await pool;
+  });
+
+  it('starts more readers at once when the count rises', async () => {
+    const h = await harness();
+    h.ctx.applySettings({ readers: 1, readaheadDepth: 2 });
+    const { started, release, pool } = gatedPool(h, 4);
+    await until(() => started.length === 1);
+    await sleep(20);
+    expect(started).toEqual([0]);
+    h.ctx.applySettings({ readers: 3, readaheadDepth: 2 });
+    // before the first reader ends
+    await until(() => started.length === 3);
+    expect(started).toEqual([0, 1, 2]);
+    for (const item of [0, 1, 2, 3]) {
+      release.add(item);
+    }
+    await pool;
+    expect(started).toEqual([0, 1, 2, 3]);
+  });
+
+  it('shows a held part as paused and reads every part once', async () => {
+    const { fs, byFile } = countingFs({ delayMs: 3 });
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
+    h.ctx.applySettings({ readers: 2, readaheadDepth: 1 });
+    const parts: ReadPartRow[] = [];
+    for (const n of [1, 2]) {
+      parts.push(
+        await addPart(
+          h,
+          `takeout-20260914T211500Z-1-00${n}.tgz`,
+          buildTarGz([{ name: media(`v${n}.mp4`), data: randomBytesSeeded(40 * KiB, 410 + n) }]),
+          n,
+        ),
+      );
+    }
+    const reading = readerPool(
+      h.ctx,
+      parts,
+      () => h.ctx.readers,
+      (part, token) => readPartWithRetry(h.ctx, part, token),
+    );
+    await until(() => byFile.size === 2 && byFile.values().every((file) => file.reads > 0));
+    h.ctx.applySettings({ readers: 1, readaheadDepth: 1 });
+    await until(() => Object.values(h.ctx.stats.stats.parts).some((ps) => ps.status === 'paused'));
+    const held = Object.values(h.ctx.stats.stats.parts).find((ps) => ps.status === 'paused')!;
+    const heldFile = [...byFile].find(([path]) => path.endsWith(held.fileName))![1];
+    await sleep(30);
+    const readsWhileHeld = heldFile.reads;
+    await sleep(60);
+    expect(heldFile.reads).toBe(readsWhileHeld);
+    await reading;
+    for (const part of parts) {
+      const ps = h.ctx.stats.stats.parts[part.id];
+      expect(ps).toMatchObject({ status: 'read', passes: 1, bytesRead: part.size });
+    }
+    expect(held.pausedMs).toBeGreaterThan(0);
   });
 });

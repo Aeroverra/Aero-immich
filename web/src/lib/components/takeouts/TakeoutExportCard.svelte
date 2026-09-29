@@ -1,14 +1,16 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
-  import { TakeoutCompleteness, type TakeoutExportDto } from '@immich/sdk';
+  import { TakeoutCompleteness, type TakeoutExportDto, type TakeoutRunDto } from '@immich/sdk';
   import { Badge, Button, Card, CardBody, HStack, ProgressBar, Text } from '@immich/ui';
-  import { mdiOpenInNew, mdiPlay } from '@mdi/js';
+  import { mdiOpenInNew, mdiPause, mdiPlay } from '@mdi/js';
   import { DateTime } from 'luxon';
   import { t } from 'svelte-i18n';
   import { Route } from '$lib/route';
   import {
     completenessColor,
     completenessLabel,
+    handlePauseRun,
+    handleResumeRun,
     handleRunImport,
     progressFraction,
     runMainProgress,
@@ -16,6 +18,8 @@
     runStatusLabel,
     takeoutExportChecking,
     takeoutRunActive,
+    takeoutRunPausable,
+    takeoutRunPaused,
   } from '$lib/services/takeout.service';
   import { locale } from '$lib/stores/preferences.store';
   import { getByteUnitString } from '$lib/utils/byte-units';
@@ -23,14 +27,34 @@
   interface Props {
     exp: TakeoutExportDto;
     onRun?: () => void;
+    /** the run of the export after a pause or a resume */
+    onRunChanged?: (run: TakeoutRunDto) => void;
   }
 
-  let { exp, onRun }: Props = $props();
+  let { exp, onRun, onRunChanged }: Props = $props();
 
   let complete = $derived(exp.completeness === TakeoutCompleteness.Complete);
   let checking = $derived(takeoutExportChecking(exp));
   let activeRun = $derived(exp.lastRun && takeoutRunActive(exp.lastRun.status) ? exp.lastRun : undefined);
   let runProgress = $derived(activeRun ? runMainProgress(activeRun) : undefined);
+  let paused = $derived(!!activeRun && takeoutRunPaused(activeRun.status));
+  let pausable = $derived(!!activeRun && takeoutRunPausable(activeRun.status));
+  let busy = $state(false);
+
+  const togglePause = async () => {
+    if (!activeRun) {
+      return;
+    }
+    busy = true;
+    try {
+      const updated = paused ? await handleResumeRun($t, activeRun.id) : await handlePauseRun($t, activeRun.id);
+      if (updated) {
+        onRunChanged?.(updated);
+      }
+    } finally {
+      busy = false;
+    }
+  };
 
   const open = () => goto(Route.viewTakeoutExport({ id: exp.id }));
 
@@ -71,8 +95,12 @@
     {#if activeRun}
       <div class="mt-2" data-testid="export-card-run">
         <div class="flex flex-wrap justify-between gap-x-2">
-          <Text size="tiny" color="muted">
-            {runProgress ? runPhaseLabel($t, runProgress.phase) : runStatusLabel($t, activeRun.status)}
+          <Text size="tiny" color={paused ? 'warning' : 'muted'}>
+            {#if paused}
+              {runStatusLabel($t, activeRun.status)}{#if runProgress}: {runPhaseLabel($t, runProgress.phase)}{/if}
+            {:else}
+              {runProgress ? runPhaseLabel($t, runProgress.phase) : runStatusLabel($t, activeRun.status)}
+            {/if}
           </Text>
           {#if runProgress}
             <Text size="tiny" color="muted">
@@ -90,6 +118,18 @@
       <Button size="small" variant="ghost" color="secondary" leadingIcon={mdiOpenInNew} onclick={open}>
         {$t('open')}
       </Button>
+      {#if paused || pausable}
+        <Button
+          size="small"
+          variant="ghost"
+          color={paused ? 'primary' : 'secondary'}
+          leadingIcon={paused ? mdiPlay : mdiPause}
+          disabled={busy}
+          onclick={togglePause}
+        >
+          {paused ? $t('takeout_resume_run') : $t('takeout_pause_run')}
+        </Button>
+      {/if}
       {#if complete}
         <Button size="small" leadingIcon={mdiPlay} disabled={!!activeRun} onclick={runImport}>
           {$t('takeout_run_import')}

@@ -545,6 +545,156 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
     });
   });
 
+  describe('pauseRun', () => {
+    it('pauses a running run, notes when and from which status, and tells the job', async () => {
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Reading,
+        leaseToken: 'job',
+        heartbeatAt: new Date(),
+        readStats: { stagedFiles: 3 },
+      });
+      const result = await sut.pauseRun(auth, run.id);
+      expect(result).toMatchObject({
+        status: TakeoutRunStatus.Paused,
+        pausedFrom: TakeoutRunStatus.Reading,
+        pausedAt: expect.any(String),
+      });
+      expect(result.readStats.stagedFiles).toBe(3);
+      // the job keeps the run: its lease is untouched
+      expect(repo.runs[0].leaseToken).toBe('job');
+      expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunPause', { runId: run.id });
+      expect(mocks.websocket.clientSend).toHaveBeenCalledWith(
+        'on_takeout_run',
+        userId,
+        expect.objectContaining({ status: TakeoutRunStatus.Paused }),
+      );
+      // pausing again changes nothing
+      const again = await sut.pauseRun(auth, run.id);
+      expect(again.pausedAt).toBe(result.pausedAt);
+    });
+
+    it('pauses a queued run too, and refuses a run that is not running', async () => {
+      const queued = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Queued });
+      const paused = await sut.pauseRun(auth, queued.id);
+      expect(paused.status).toBe(TakeoutRunStatus.Paused);
+      for (const status of [
+        TakeoutRunStatus.Completed,
+        TakeoutRunStatus.Failed,
+        TakeoutRunStatus.Cancelled,
+        TakeoutRunStatus.Cancelling,
+      ]) {
+        const run = repo.addRun({ userId, exportId, status });
+        await expect(sut.pauseRun(auth, run.id)).rejects.toBeInstanceOf(BadRequestException);
+        expect(repo.runs.find((r) => r.id === run.id)!.status).toBe(status);
+      }
+    });
+
+    it('blocks a new run while one is paused', async () => {
+      repo.addRun({ userId, exportId, status: TakeoutRunStatus.Paused });
+      await expect(sut.createRun(auth, exportId, { importAnyway: false })).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  const pausedRun = (over: Record<string, unknown> = {}) =>
+    repo.addRun({
+      userId,
+      exportId,
+      status: TakeoutRunStatus.Paused,
+      attempt: 2,
+      readStats: {
+        pausedAt: new Date(Date.now() - 60_000).toISOString(),
+        pausedFrom: TakeoutRunStatus.Importing,
+        parts: { p1: { partId: 'p1', fileName: 'a.tgz', size: 10, status: 'paused', pausedMs: 0 } },
+      },
+      ...over,
+    });
+
+  describe('resumeRun of a paused run', () => {
+    it('lets the live job continue where it waits: back to the status it was paused in', async () => {
+      const run = pausedRun({ leaseToken: 'job', heartbeatAt: new Date() });
+      const result = await sut.resumeRun(auth, run.id);
+      expect(result).toMatchObject({ status: TakeoutRunStatus.Importing, pausedAt: null, pausedFrom: null });
+      expect(repo.runs[0]).toMatchObject({ leaseToken: 'job', attempt: 2 });
+      expect(repo.runs[0].readStats.pausedAt).toBeUndefined();
+      expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunPause', { runId: run.id });
+      expect(mocks.job.queue).not.toHaveBeenCalled();
+    });
+
+    it('queues a run whose job is gone (a restart) again with the next attempt, counting the pause', async () => {
+      const run = pausedRun({ leaseToken: null, heartbeatAt: null });
+      const result = await sut.resumeRun(auth, run.id);
+      expect(result.status).toBe(TakeoutRunStatus.Queued);
+      expect(repo.runs[0].attempt).toBe(3);
+      expect(mocks.job.removeJob).toHaveBeenCalledWith(JobName.TakeoutRun, `${run.id}/2`);
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.TakeoutRun, data: { runId: run.id, attempt: 3 } });
+      const stats = repo.runs[0].readStats;
+      expect(stats.pausedAt).toBeUndefined();
+      expect(stats.pausedMs).toBeGreaterThanOrEqual(60_000);
+      expect(stats.parts.p1).toMatchObject({ status: 'pending' });
+      expect(stats.parts.p1.pausedMs).toBeGreaterThanOrEqual(60_000);
+    });
+
+    it('treats a lease whose heartbeat is older than 60 s as gone', async () => {
+      const run = pausedRun({ leaseToken: 'dead', heartbeatAt: new Date(Date.now() - 2 * 60_000) });
+      const resumed = await sut.resumeRun(auth, run.id);
+      expect(resumed.status).toBe(TakeoutRunStatus.Queued);
+      expect(repo.runs[0].leaseToken).toBeNull();
+    });
+  });
+
+  describe('cancelRun of a paused run', () => {
+    it('asks the live job to stop waiting and clean up', async () => {
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Paused,
+        leaseToken: 'job',
+        heartbeatAt: new Date(),
+        readStats: { pausedAt: new Date().toISOString(), pausedFrom: TakeoutRunStatus.Reading },
+      });
+      const result = await sut.cancelRun(auth, run.id);
+      expect(result.status).toBe(TakeoutRunStatus.Cancelling);
+      expect(repo.runs[0].leaseToken).toBe('job');
+      expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunCancel', { runId: run.id });
+    });
+
+    it('cleans up a paused run whose job is gone (after a restart) right away, keeping its staging', async () => {
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Paused,
+        hasStaging: true,
+        readStats: {
+          pausedAt: new Date().toISOString(),
+          pausedFrom: TakeoutRunStatus.Reading,
+          parts: { p1: { partId: 'p1', fileName: 'a.tgz', size: 10, status: 'paused' } },
+        },
+      });
+      await mkdir(runStagingDir(folder, run.id), { recursive: true });
+      const result = await sut.cancelRun(auth, run.id);
+      expect(result).toMatchObject({ status: TakeoutRunStatus.Cancelled, pausedAt: null, hasStaging: true });
+      expect(repo.runs[0].readStats.pausedAt).toBeUndefined();
+      expect(repo.runs[0].readStats.parts.p1.status).toBe('pending');
+      expect(await readdir(stagingRoot(folder))).toEqual([run.id]);
+    });
+
+    it('cleans up the paused run of a trashed user whose job is gone', async () => {
+      repo.addRun({ userId, exportId, status: TakeoutRunStatus.Paused });
+      const live = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Paused,
+        leaseToken: 'job',
+        heartbeatAt: new Date(),
+      });
+      await sut.onUserTrash({ id: userId });
+      expect(repo.runs.map((r) => r.status)).toEqual([TakeoutRunStatus.Cancelled, TakeoutRunStatus.Cancelling]);
+      expect(mocks.websocket.serverSend).toHaveBeenCalledWith('TakeoutRunCancel', { runId: live.id });
+    });
+  });
+
   describe('rescanExport', () => {
     it('resets the parts in error only, and queues the analysis', async () => {
       const bad = addPart({ catalogStatus: TakeoutCatalogStatus.Error, catalogVersion: 2, catalogError: 'truncated' });
@@ -649,6 +799,31 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(repo.runFiles[0].targetPath).toBe(target);
     });
 
+    it('keeps a paused run paused: its lease goes, nothing is queued, its parts can be continued', async () => {
+      const run = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Paused,
+        leaseToken: 'dead-job',
+        heartbeatAt: new Date(),
+        attempt: 1,
+        readStats: { pausedAt: new Date().toISOString(), pausedFrom: TakeoutRunStatus.Reading },
+      });
+      const part = addPart({ catalogStatus: TakeoutCatalogStatus.Reading, lastReadRunId: run.id });
+      vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
+      await sut.recoverAtBoot();
+      expect(repo.runs[0]).toMatchObject({
+        status: TakeoutRunStatus.Paused,
+        leaseToken: null,
+        heartbeatAt: null,
+        attempt: 1,
+      });
+      expect(repo.runs[0].readStats.pausedFrom).toBe(TakeoutRunStatus.Reading);
+      expect(mocks.job.queue).not.toHaveBeenCalledWith(expect.objectContaining({ name: JobName.TakeoutRun }));
+      // the part the paused run was reading continues on Resume (zip at its next entry, tgz from byte 0)
+      expect(part.catalogStatus).toBe(TakeoutCatalogStatus.Partial);
+    });
+
     it('re-queues running runs', async () => {
       const run = repo.addRun({ userId, exportId, status: TakeoutRunStatus.Fetching, attempt: 2 });
       vitest.spyOn(sut, 'sweepStaging').mockResolvedValue();
@@ -696,6 +871,20 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(await names()).toEqual([running.id, recent.id, adopted.id, fresh].toSorted((a, b) => a.localeCompare(b)));
       expect(repo.runs.find((r) => r.id === expired.id)!.hasStaging).toBe(false);
       expect(repo.runs.find((r) => r.id === expired.id)!.status).toBe(TakeoutRunStatus.Cancelled);
+    });
+
+    it('keeps the staging of a paused run however long it is paused', async () => {
+      const paused = repo.addRun({
+        userId,
+        exportId,
+        status: TakeoutRunStatus.Paused,
+        hasStaging: true,
+        finishedAt: null,
+      });
+      await stagingDir(paused.id, STAGING_TTL_MS + HOUR);
+      await sut.sweepStaging(Date.now() + 30 * 24 * HOUR);
+      expect(await names()).toEqual([paused.id]);
+      expect(repo.runs[0].hasStaging).toBe(true);
     });
 
     it('keeps the directory of a run resumed between the listing and the claim', async () => {
