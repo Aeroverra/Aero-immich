@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { getTakeoutExport, TakeoutCompleteness, type TakeoutExportDto, type TakeoutRunDto } from '@immich/sdk';
   import { Badge, Button, Card, CardBody, CardHeader, CardTitle, HStack, modalManager, Text } from '@immich/ui';
-  import { mdiPlay, mdiRefresh, mdiTrashCanOutline } from '@mdi/js';
+  import { mdiPlay, mdiTrashCanOutline } from '@mdi/js';
   import { DateTime } from 'luxon';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
@@ -18,6 +18,7 @@
     handleRescanExport,
     handleRunImport,
     runStatusLabel,
+    takeoutExportChecking,
     takeoutRunActive,
   } from '$lib/services/takeout.service';
   import { locale } from '$lib/stores/preferences.store';
@@ -33,6 +34,7 @@
   let detail = $state(data.takeoutExport);
 
   let complete = $derived(detail.completeness === TakeoutCompleteness.Complete);
+  let checking = $derived(takeoutExportChecking(detail));
   let hasActiveRun = $derived(!!detail.lastRun && takeoutRunActive(detail.lastRun.status));
 
   const refresh = async () => {
@@ -147,12 +149,14 @@
             >
             {#if detail.accountEmail}<Text size="small" color="muted" class="block">{detail.accountEmail}</Text>{/if}
           </div>
-          <Badge color={completenessColor(detail.completeness)}>{completenessLabel($t, detail.completeness)}</Badge>
+          <Badge color={completenessColor(detail.completeness)}
+            >{checking ? $t('takeout_checking_parts') : completenessLabel($t, detail.completeness)}</Badge
+          >
         </div>
       </CardBody>
     </Card>
 
-    {#if detail.analysis.reasons.length > 0 || detail.analysis.lastPartMayBeMissing}
+    {#if !checking}
       <Card>
         <CardHeader><CardTitle>{completenessLabel($t, detail.completeness)}</CardTitle></CardHeader>
         <CardBody><TakeoutAnalysisPanel analysis={detail.analysis} /></CardBody>
@@ -161,27 +165,23 @@
 
     <Card>
       <CardHeader>
-        <HStack class="w-full justify-between">
-          <CardTitle
-            >{$t('takeout_parts_found', {
-              values: {
-                found: detail.partCount,
-                expected: detail.indexFileCount ?? detail.partCount + detail.analysis.missingParts.length,
-              },
-            })}</CardTitle
-          >
-          <Button size="tiny" variant="ghost" color="secondary" leadingIcon={mdiRefresh} onclick={rescan}
-            >{$t('takeout_rescan_failed_parts')}</Button
-          >
-        </HStack>
+        <CardTitle
+          >{$t('takeout_parts_found', {
+            values: {
+              found: detail.partCount,
+              expected: detail.indexFileCount ?? detail.partCount + detail.analysis.missingParts.length,
+            },
+          })}</CardTitle
+        >
       </CardHeader>
       <CardBody>
+        <!-- the server refuses "read failed parts again" while a run of this export is active -->
         <TakeoutPartsTable
           parts={detail.parts}
           missingParts={detail.analysis.missingParts}
           smallParts={detail.analysis.smallParts}
           corruptParts={detail.analysis.corruptParts}
-          onRescan={rescan}
+          onRescan={hasActiveRun ? undefined : rescan}
         />
       </CardBody>
     </Card>
@@ -201,7 +201,11 @@
                   <Text size="small"
                     >{DateTime.fromISO(run.createdAt).toLocaleString(DateTime.DATETIME_MED, { locale: $locale })}</Text
                   >
-                  <Text size="small" color="muted">{runStatusLabel($t, run.status)}</Text>
+                  <Text size="small" color="muted" class="text-right"
+                    >{runStatusLabel($t, run.status)}{#if run.supersededBy}<span class="block text-xs"
+                        >{$t('takeout_run_superseded')}</span
+                      >{/if}</Text
+                  >
                 </button>
               </li>
             {/each}

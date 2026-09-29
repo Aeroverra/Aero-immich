@@ -108,7 +108,8 @@
               {$t('open')}
             </Button>
           </div>
-          <TakeoutRunProgress run={overview.activeRun} onCancelled={onRunEvent} />
+          <!-- the per-part table lives on the run page -->
+          <TakeoutRunProgress run={overview.activeRun} onCancelled={onRunEvent} showParts={false} />
         </CardBody>
       </Card>
     {/if}

@@ -3,38 +3,144 @@ import {
   createTakeoutRun,
   deleteTakeoutExport,
   deleteTakeoutExportArchives,
+  isHttpError,
   rescanTakeoutExport,
   resolveTakeoutLargerVersion,
   resumeTakeoutRun,
   syncTakeouts,
   TakeoutCompleteness,
+  TakeoutExportReadStatus,
   TakeoutLargerVersionAction,
   TakeoutRunFileAction,
   TakeoutRunStatus,
   type TakeoutExportDto,
   type TakeoutLargerVersionDto,
   type TakeoutOverviewDto,
+  type TakeoutPartReadStatus,
   type TakeoutRunDto,
+  type TakeoutRunPartStatus,
+  type TakeoutSizeCheck,
 } from '@immich/sdk';
-import { modalManager, type ActionItem } from '@immich/ui';
+import { modalManager, toastManager, type ActionItem } from '@immich/ui';
 import { mdiDeleteOutline, mdiPlay, mdiRefresh, mdiTrashCanOutline } from '@mdi/js';
 import type { MessageFormatter } from 'svelte-i18n';
-import { handleError } from '$lib/utils/handle-error';
+import { getByteUnitString } from '$lib/utils/byte-units';
+import { getServerErrorMessage, handleError } from '$lib/utils/handle-error';
 
 const ACTIVE_RUN_STATUSES = new Set<TakeoutRunStatus>([
   TakeoutRunStatus.Queued,
-  TakeoutRunStatus.Scanning,
+  TakeoutRunStatus.Reading,
   TakeoutRunStatus.Planning,
+  TakeoutRunStatus.Fetching,
   TakeoutRunStatus.Importing,
   TakeoutRunStatus.Finishing,
   TakeoutRunStatus.Cancelling,
 ]);
 
-const RESUMABLE_RUN_STATUSES = new Set<TakeoutRunStatus>([TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled]);
+const STOPPED_RUN_STATUSES = new Set<TakeoutRunStatus>([TakeoutRunStatus.Failed, TakeoutRunStatus.Cancelled]);
+
+/** How long the server keeps the staged files of a failed or cancelled run (single-pass design 5.3) */
+const STAGING_TTL_MS = 7 * 24 * 3600 * 1000;
 
 export const takeoutRunActive = (status: TakeoutRunStatus): boolean => ACTIVE_RUN_STATUSES.has(status);
 
-export const takeoutRunResumable = (status: TakeoutRunStatus): boolean => RESUMABLE_RUN_STATUSES.has(status);
+/** A failed or cancelled run can be resumed unless a newer run took over its staged files */
+export const takeoutRunResumable = (run: Pick<TakeoutRunDto, 'status' | 'supersededBy'>): boolean =>
+  STOPPED_RUN_STATUSES.has(run.status) && !run.supersededBy;
+
+/** A failed or cancelled run that still holds staged files: Discard deletes them (the server's cancel endpoint) */
+export const takeoutRunDiscardable = (run: Pick<TakeoutRunDto, 'status' | 'hasStaging' | 'supersededBy'>): boolean =>
+  STOPPED_RUN_STATUSES.has(run.status) && run.hasStaging && !run.supersededBy;
+
+/** When the staged files of a stopped run are removed: the server's date, else its rule (finishedAt + 7 days) */
+export const stagingExpiresAt = (run: Pick<TakeoutRunDto, 'readStats' | 'finishedAt'>): string | null => {
+  if (run.readStats.stagingExpiresAt) {
+    return run.readStats.stagingExpiresAt;
+  }
+  return run.finishedAt ? new Date(Date.parse(run.finishedAt) + STAGING_TTL_MS).toISOString() : null;
+};
+
+export type TakeoutRunPhase =
+  | TakeoutRunStatus.Reading
+  | TakeoutRunStatus.Planning
+  | TakeoutRunStatus.Fetching
+  | TakeoutRunStatus.Importing
+  | TakeoutRunStatus.Finishing;
+
+/** The phases of a run in order; fetching only when the run fetches (or fetched) files again */
+export const runPhases = (run: Pick<TakeoutRunDto, 'status' | 'readStats'>): TakeoutRunPhase[] => {
+  const fetching = run.status === TakeoutRunStatus.Fetching || run.readStats.fetchFiles > 0;
+  return [
+    TakeoutRunStatus.Reading,
+    TakeoutRunStatus.Planning,
+    ...(fetching ? [TakeoutRunStatus.Fetching as const] : []),
+    TakeoutRunStatus.Importing,
+    TakeoutRunStatus.Finishing,
+  ];
+};
+
+/**
+ * Index of the current phase in `phases`: every phase before it is done. -1 lights no phase (queued, and stopped
+ * runs, whose last phase is not known); phases.length lights all of them (completed).
+ */
+export const runPhaseIndex = (run: Pick<TakeoutRunDto, 'status'>, phases: TakeoutRunPhase[]): number => {
+  if (run.status === TakeoutRunStatus.Completed) {
+    return phases.length;
+  }
+  return phases.indexOf(run.status as TakeoutRunPhase);
+};
+
+export const runPhaseLabel = ($t: MessageFormatter, phase: TakeoutRunPhase): string => {
+  switch (phase) {
+    case TakeoutRunStatus.Reading: {
+      return $t('takeout_phase_reading');
+    }
+    case TakeoutRunStatus.Planning: {
+      return $t('takeout_phase_planning');
+    }
+    case TakeoutRunStatus.Fetching: {
+      return $t('takeout_phase_fetching');
+    }
+    case TakeoutRunStatus.Importing: {
+      return $t('takeout_phase_creating');
+    }
+    case TakeoutRunStatus.Finishing: {
+      return $t('takeout_phase_finishing');
+    }
+  }
+};
+
+export const progressFraction = (done: number, total: number): number =>
+  total > 0 ? Math.min(1, Math.max(0, done / total)) : 0;
+
+export interface TakeoutRunMainProgress {
+  phase: TakeoutRunPhase;
+  done: number;
+  total: number;
+}
+
+/** The byte bar that measures the current phase: archive bytes, fetch bytes or media bytes; none for the others */
+export const runMainProgress = (
+  run: Pick<
+    TakeoutRunDto,
+    'status' | 'readStats' | 'archiveBytesRead' | 'archiveBytesTotal' | 'bytesDone' | 'bytesTotal'
+  >,
+): TakeoutRunMainProgress | undefined => {
+  switch (run.status) {
+    case TakeoutRunStatus.Reading: {
+      return { phase: run.status, done: run.archiveBytesRead, total: run.archiveBytesTotal };
+    }
+    case TakeoutRunStatus.Fetching: {
+      return { phase: run.status, done: run.readStats.fetchBytesRead, total: run.readStats.fetchBytesTotal };
+    }
+    case TakeoutRunStatus.Importing: {
+      return { phase: run.status, done: run.bytesDone, total: run.bytesTotal };
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
 
 // snake_case suffix used by the i18n keys, from the camelCase enum values.
 const toSnake = (value: string): string => value.replaceAll(/[A-Z]/g, (m) => '_' + m.toLowerCase());
@@ -47,6 +153,21 @@ export const runStatusLabel = ($t: MessageFormatter, status: TakeoutRunStatus): 
 
 export const runFileActionLabel = ($t: MessageFormatter, action: TakeoutRunFileAction): string =>
   $t(`takeout_action_${toSnake(action)}` as unknown as TranslationKey);
+
+/** Read state of a part of an export (parts table) */
+export const partReadStatusLabel = ($t: MessageFormatter, status: TakeoutPartReadStatus): string =>
+  $t(`takeout_part_status_${toSnake(status)}` as unknown as TranslationKey);
+
+/** State of a part inside one run (run parts table) */
+export const runPartStatusLabel = ($t: MessageFormatter, status: TakeoutRunPartStatus): string =>
+  $t(`takeout_run_part_status_${status}`);
+
+export const sizeCheckLabel = ($t: MessageFormatter, sizeCheck: TakeoutSizeCheck): string =>
+  $t(`takeout_size_check_${sizeCheck}`);
+
+/** "Error at byte N of M" when the offset is known, else the plain error state */
+export const readErrorLabel = ($t: MessageFormatter, offset: number | null, size: number): string =>
+  offset === null ? $t('takeout_part_status_error') : $t('takeout_error_at_byte', { values: { offset, size } });
 
 // analysis reasons are stable snake_case keys straight from the server
 export const analysisReasonLabel = ($t: MessageFormatter, reason: string): string =>
@@ -91,6 +212,10 @@ export const completenessLabel = ($t: MessageFormatter, completeness: TakeoutCom
   }
 };
 
+/** The cheap pre-run checks (numbering, index, zip listings) have not run yet for an export that has its archives */
+export const takeoutExportChecking = (exp: Pick<TakeoutExportDto, 'completeness' | 'archivesDeletedAt'>): boolean =>
+  exp.completeness === TakeoutCompleteness.Unknown && !exp.archivesDeletedAt;
+
 // The list of counter fields shown in the run counter grid, grouped as in TakeoutCountersDto.
 export const counterGroups = {
   scanned: [
@@ -117,6 +242,8 @@ export const counterGroups = {
     'rotateOnlyDropped',
     'failedVideos',
     'previouslyDeleted',
+    'unreadable',
+    'missingFromArchive',
   ],
   result: [
     'toUpload',
@@ -150,6 +277,24 @@ export const handleSyncTakeouts = async (): Promise<TakeoutOverviewDto | undefin
   }
 };
 
+/**
+ * The 409 refusals of Run that need a full sentence: the generic error toast cuts server messages at 75 characters,
+ * which drops the count of half-imported files.
+ */
+export const runConflictMessage = ($t: MessageFormatter, error: unknown): string | undefined => {
+  if (!isHttpError(error) || error.status !== 409) {
+    return;
+  }
+  const message = getServerErrorMessage(error) ?? '';
+  if (message.includes('still being copied')) {
+    return $t('takeout_part_still_copying');
+  }
+  const halfImported = /(\d+) files? of it (?:is|are) half imported/.exec(message);
+  if (halfImported) {
+    return $t('takeout_previous_run_half_imported', { values: { count: Number(halfImported[1]) } });
+  }
+};
+
 export const handleRunImport = async (
   $t: MessageFormatter,
   exportId: string,
@@ -158,14 +303,28 @@ export const handleRunImport = async (
   try {
     return await createTakeoutRun({ id: exportId, takeoutRunCreateDto: { importAnyway } });
   } catch (error) {
+    const conflict = runConflictMessage($t, error);
+    if (conflict) {
+      toastManager.danger(conflict);
+      return;
+    }
     handleError(error, $t('errors.unable_to_start_takeout_run'));
   }
 };
 
-export const handleCancelRun = async ($t: MessageFormatter, runId: string): Promise<TakeoutRunDto | undefined> => {
+/** Cancel keeps the files staged so far (single-pass design 10.1); the dialog says so when there are any */
+export const handleCancelRun = async (
+  $t: MessageFormatter,
+  run: Pick<TakeoutRunDto, 'id' | 'readStats'>,
+  locale?: string,
+): Promise<TakeoutRunDto | undefined> => {
+  const stagedBytes = run.readStats.stagedBytes;
   const confirmed = await modalManager.showDialog({
     title: $t('takeout_cancel_run'),
-    prompt: $t('takeout_cancel_run'),
+    prompt:
+      stagedBytes > 0
+        ? $t('takeout_cancel_keeps_staging', { values: { size: getByteUnitString(stagedBytes, locale) } })
+        : $t('takeout_cancel_run_description'),
     confirmText: $t('takeout_cancel_run'),
   });
   if (!confirmed) {
@@ -173,7 +332,31 @@ export const handleCancelRun = async ($t: MessageFormatter, runId: string): Prom
   }
 
   try {
-    return await cancelTakeoutRun({ id: runId });
+    return await cancelTakeoutRun({ id: run.id });
+  } catch (error) {
+    handleError(error, $t('errors.unable_to_start_takeout_run'));
+  }
+};
+
+/** Discard: on a failed or cancelled run the server's cancel endpoint deletes the staged files */
+export const handleDiscardStaging = async (
+  $t: MessageFormatter,
+  run: Pick<TakeoutRunDto, 'id' | 'readStats'>,
+  locale?: string,
+): Promise<TakeoutRunDto | undefined> => {
+  const confirmed = await modalManager.showDialog({
+    title: $t('takeout_discard_staging'),
+    prompt: $t('takeout_discard_staging_description', {
+      values: { size: getByteUnitString(run.readStats.stagingBytes, locale) },
+    }),
+    confirmText: $t('takeout_discard_staging'),
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    return await cancelTakeoutRun({ id: run.id });
   } catch (error) {
     handleError(error, $t('errors.unable_to_start_takeout_run'));
   }
@@ -187,6 +370,7 @@ export const handleResumeRun = async ($t: MessageFormatter, runId: string): Prom
   }
 };
 
+/** "Read failed parts again": parts in error go back to not read, the next run reads them */
 export const handleRescanExport = async ($t: MessageFormatter, exportId: string) => {
   try {
     return await rescanTakeoutExport({ id: exportId });
@@ -256,7 +440,8 @@ export const getTakeoutExportActions = ($t: MessageFormatter, exp: TakeoutExport
 
   const Rescan: ActionItem = {
     icon: mdiRefresh,
-    title: $t('takeout_rescan_failed_parts'),
+    title: $t('takeout_read_failed_parts_again'),
+    $if: () => exp.readStatus === TakeoutExportReadStatus.Error && !hasActiveRun,
     onAction: () => handleRescanExport($t, exp.id),
   };
 
