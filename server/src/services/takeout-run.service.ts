@@ -1184,7 +1184,7 @@ export class TakeoutRunService extends BaseService {
           await this.takeoutRepository.updateRunFile(row.id, {
             action: TakeoutRunFileAction.ServerDuplicate,
             assetId: hit.id,
-            reason: hit.deletedAt ? 'already on the server (in trash)' : 'already on the server',
+            reason: hit.deletedAt ? IN_TRASH_REASON : 'already on the server',
           });
         }
       }
@@ -1438,11 +1438,18 @@ export class TakeoutRunService extends BaseService {
   /**
    * The assets a group stacks. A re-import of a previously deleted file stays on its own, like an upload of it: it is
    * in the trash or in the "Previously deleted" album for review, and a trashed stack cover would hide the stack.
+   * A server duplicate in the trash stays out too: the user deleted it, and as the cover it would hide the stack.
    */
   private stackIds(members: any[], allRows: any[]): string[] {
     return assembleStackIds(
       members
-        .filter((m) => m.status === TakeoutRunFileStatus.Done && m.assetId && previouslyDeletedFlags(m).length === 0)
+        .filter(
+          (m) =>
+            m.status === TakeoutRunFileStatus.Done &&
+            m.assetId &&
+            previouslyDeletedFlags(m).length === 0 &&
+            m.reason !== IN_TRASH_REASON,
+        )
         .sort((x, y) => (x.groupOrder ?? 0) - (y.groupOrder ?? 0))
         .map((m) => ({ assetId: m.assetId, smallerAssetId: m.smallerAssetId })),
       this.linkAssetIds(members, allRows),
@@ -1826,7 +1833,7 @@ export class TakeoutRunService extends BaseService {
           action = TakeoutRunFileAction.ServerDuplicate;
           status = TakeoutRunFileStatus.Planned;
           assetId = hit.id;
-          reason = hit.deletedAt ? 'already on the server (in trash)' : 'already on the server';
+          reason = hit.deletedAt ? IN_TRASH_REASON : 'already on the server';
         } else if (hex && seenChecksum.has(hex)) {
           action = TakeoutRunFileAction.AlreadyProcessed;
           status = TakeoutRunFileStatus.Planned;
@@ -2736,6 +2743,9 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
 
   return { make, model, fileOffsetZone, fileHasGps, fileClock, gpsDateTime };
 }
+
+/** The reason of a server duplicate whose asset is in the trash: it never joins a stack (a trashed cover hides it) */
+const IN_TRASH_REASON = 'already on the server (in trash)';
 
 function nfcBase(name: string | null | undefined): string {
   return basename(name ?? '').normalize('NFC');

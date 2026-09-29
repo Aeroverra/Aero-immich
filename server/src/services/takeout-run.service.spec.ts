@@ -475,6 +475,27 @@ describe(TakeoutRunService.name, () => {
       expect(mocks.stack.create).not.toHaveBeenCalled();
       expect((sut as any).stackPending(members, members)).toBe(false);
     });
+    it('never stacks a server duplicate that is in the trash', async () => {
+      // family 2026-09-29: an original was stacked with its trashed edited copy, and the trashed cover hid the stack
+      const members = [
+        {
+          id: 'rf-a',
+          groupOrder: 0,
+          isCover: true,
+          action: TakeoutRunFileAction.ServerDuplicate,
+          status: TakeoutRunFileStatus.Done,
+          assetId: 'a',
+          reason: 'already on the server (in trash)',
+          fallbacks: [],
+        },
+        { id: 'rf-b', groupOrder: 1, status: TakeoutRunFileStatus.Done, assetId: 'b', fallbacks: [] },
+      ];
+
+      await (sut as any).stackGroup(run(), members, members);
+
+      expect(mocks.stack.create).not.toHaveBeenCalled();
+      expect((sut as any).stackPending(members, members)).toBe(false);
+    });
   });
 
   describe('phaseRotateFaces: section 11 D1 rotate-only face reconciliation', () => {
