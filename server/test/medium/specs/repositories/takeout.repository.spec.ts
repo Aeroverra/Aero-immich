@@ -347,6 +347,71 @@ describe(TakeoutRepository.name, () => {
       ).resolves.toBe(true);
     });
 
+    it('pauses a running run, keeps the pause through progress writes, and resumes it where it was', async () => {
+      const { sut, newRun } = await seed();
+      const job = 'b0000000-0000-4000-8000-000000000020';
+      const run = await newRun(TakeoutRunStatus.Queued, { readStats: { stagedFiles: 2 } });
+      await expect(sut.takeLease(run.id, job)).resolves.toBe(true);
+      await expect(sut.setRunStatusCas(run.id, job, TakeoutRunStatus.Reading)).resolves.toBe(true);
+
+      const at = new Date('2026-09-29T10:00:00.000Z');
+      await expect(sut.requestPause(run.id, at)).resolves.toBe(true);
+      await expect(sut.requestPause(run.id, at)).resolves.toBe(false);
+      let stored = await sut.getRun(run.id);
+      expect(stored).toMatchObject({ status: TakeoutRunStatus.Paused, leaseToken: job });
+      expect(stored!.readStats).toMatchObject({
+        stagedFiles: 2,
+        pausedAt: at.toISOString(),
+        pausedFrom: TakeoutRunStatus.Reading,
+      });
+
+      // the job keeps its lease and writes its progress; the pause stays; no phase moves while paused
+      await expect(sut.takeLease(run.id, job)).resolves.toBe(true);
+      await expect(sut.updateRunIfLeased(run.id, job, { readStats: { stagedFiles: 5 } })).resolves.toBe(true);
+      stored = await sut.getRun(run.id);
+      expect(stored!.readStats).toEqual({
+        stagedFiles: 5,
+        pausedAt: at.toISOString(),
+        pausedFrom: TakeoutRunStatus.Reading,
+      });
+      await expect(sut.setRunStatusCas(run.id, job, TakeoutRunStatus.Planning)).resolves.toBe(false);
+      // a run whose job is alive is not queued again
+      await expect(sut.requeuePausedRun(run.id, 1, {})).resolves.toBe(false);
+
+      await expect(sut.resumePausedRun(run.id)).resolves.toBe(true);
+      stored = await sut.getRun(run.id);
+      expect(stored).toMatchObject({ status: TakeoutRunStatus.Reading, leaseToken: job });
+      expect(stored!.readStats).toEqual({ stagedFiles: 5 });
+      // progress writes of a running run do not bring the pause back
+      await expect(sut.updateRunIfLeased(run.id, job, { readStats: { stagedFiles: 6 } })).resolves.toBe(true);
+      await expect(sut.getRun(run.id)).resolves.toMatchObject({ readStats: { stagedFiles: 6 } });
+    });
+
+    it('queues a paused run again only when no live job holds it, and cancels a paused run', async () => {
+      const { sut, newRun } = await seed();
+      const dead = await newRun(TakeoutRunStatus.Reading, {
+        leaseToken: 'b0000000-0000-4000-8000-000000000021',
+        heartbeatAt: new Date(Date.now() - 2 * 60_000),
+      });
+      await expect(sut.requestPause(dead.id, new Date())).resolves.toBe(true);
+      // no live lease: resume queues it again instead
+      await expect(sut.resumePausedRun(dead.id)).resolves.toBe(false);
+      await expect(sut.requeuePausedRun(dead.id, 3, { pausedMs: 1000 })).resolves.toBe(true);
+      await expect(sut.getRun(dead.id)).resolves.toMatchObject({
+        status: TakeoutRunStatus.Queued,
+        attempt: 3,
+        leaseToken: null,
+        heartbeatAt: null,
+        readStats: { pausedMs: 1000 },
+      });
+
+      const paused = await newRun(TakeoutRunStatus.Importing);
+      await expect(sut.requestPause(paused.id, new Date())).resolves.toBe(true);
+      await expect(sut.getActiveRun(paused.userId)).resolves.toBeDefined();
+      await expect(sut.requestCancel(paused.id)).resolves.toBe(true);
+      await expect(sut.getRun(paused.id)).resolves.toMatchObject({ status: TakeoutRunStatus.Cancelling });
+    });
+
     it('skips only the open rows without a file on cancel, and a Resume restores them with their reason', async () => {
       const { sut, newRun } = await seed();
       const run = await newRun(TakeoutRunStatus.Cancelled);
