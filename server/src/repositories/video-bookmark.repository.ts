@@ -26,7 +26,9 @@ export class VideoBookmarkRepository {
     return this.db.selectFrom('video_bookmark').selectAll().where('id', '=', id).executeTakeFirst();
   }
 
-  @GenerateSql({ params: [{ assetId: DummyValue.UUID, userId: DummyValue.UUID, time: 1000, label: DummyValue.STRING }] })
+  @GenerateSql({
+    params: [{ assetId: DummyValue.UUID, userId: DummyValue.UUID, time: 1000, label: DummyValue.STRING }],
+  })
   create(bookmark: Insertable<VideoBookmarkTable>) {
     return this.db.insertInto('video_bookmark').values(bookmark).returningAll().executeTakeFirstOrThrow();
   }
