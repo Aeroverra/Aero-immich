@@ -6,22 +6,22 @@ import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/widgets/search/search_filter/people_picker.dart';
 
-/// Opens the sheet that picks the people to tag on [assetCount] selected assets. Resolves to the picked people, or to
-/// null when the sheet is closed without tagging.
-Future<Set<Person>?> showTagPeopleSheet(BuildContext context, int assetCount) {
+/// Opens the sheet that picks the people to add to [assetCount] selected assets. Resolves to the picked people, or to
+/// null when the sheet is closed without adding anyone.
+Future<Set<Person>?> showAddPeopleSheet(BuildContext context, int assetCount) {
   return showModalBottomSheet<Set<Person>>(
     context: context,
     useSafeArea: true,
     isScrollControlled: true,
     showDragHandle: true,
-    builder: (_) => FractionallySizedBox(heightFactor: 0.8, child: TagPeopleSheet(assetCount: assetCount)),
+    builder: (_) => FractionallySizedBox(heightFactor: 0.8, child: AddPeopleSheet(assetCount: assetCount)),
   );
 }
 
-class TagPeopleSheet extends HookWidget {
+class AddPeopleSheet extends HookWidget {
   final int assetCount;
 
-  const TagPeopleSheet({super.key, required this.assetCount});
+  const AddPeopleSheet({super.key, required this.assetCount});
 
   @override
   Widget build(BuildContext context) {
@@ -32,12 +32,12 @@ class TagPeopleSheet extends HookWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Text(context.t.tag_people_in_videos, style: context.textTheme.headlineSmall),
+            child: Text(context.t.add_people_to_videos, style: context.textTheme.headlineSmall),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(
-              context.t.tag_people_in_videos_description(count: assetCount),
+              context.t.add_people_to_videos_description(count: assetCount),
               style: context.textTheme.bodyMedium?.copyWith(color: context.colorScheme.onSurfaceSecondary),
               textAlign: TextAlign.center,
             ),
@@ -51,9 +51,9 @@ class TagPeopleSheet extends HookWidget {
                 OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: Text(context.t.cancel)),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  key: const Key('tag_people_apply'),
+                  key: const Key('add_people_apply'),
                   onPressed: selected.value.isEmpty ? null : () => Navigator.of(context).pop(selected.value),
-                  child: Text(context.t.tag),
+                  child: Text(context.t.add),
                 ),
               ],
             ),

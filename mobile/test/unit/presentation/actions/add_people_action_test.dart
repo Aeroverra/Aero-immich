@@ -6,7 +6,7 @@ import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/domain/services/people.service.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.widget.dart';
-import 'package:immich_mobile/presentation/actions/tag_people.action.dart';
+import 'package:immich_mobile/presentation/actions/add_people.action.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
@@ -48,7 +48,7 @@ void main() {
           builder: (widgetContext, ref, _) {
             actionContext = widgetContext;
             actionRef = ref;
-            return const ActionIconButton(action: TagPeopleAction(source: .timeline));
+            return const ActionIconButton(action: AddPeopleAction(source: .timeline));
           },
         ),
         overrides: [
@@ -84,38 +84,38 @@ void main() {
     expect(find.byType(ImmichIconButton), findsNothing);
   });
 
-  testWidgets('tags the people, reports the videos and the skipped photos and syncs', (tester) async {
+  testWidgets('adds the people, reports the videos and the skipped photos and syncs', (tester) async {
     when(
-      () => peopleService.tagOnVideos(any(), any()),
-    ).thenAnswer((_) async => (tagged: {'video-1', 'video-2'}, photos: {'photo-1'}));
+      () => peopleService.addToVideos(any(), any()),
+    ).thenAnswer((_) async => (added: {'video-1', 'video-2'}, photos: {'photo-1'}));
 
     await pumpAction(tester, {video()});
-    final tagged = await tagPeopleOnVideos(actionContext, actionRef, ['video-1', 'video-2', 'photo-1'], {ann, unnamed});
+    final added = await addPeopleToVideos(actionContext, actionRef, ['video-1', 'video-2', 'photo-1'], {ann, unnamed});
     await tester.pumpAndSettle();
 
-    expect(tagged, isTrue);
-    final personIds = verify(() => peopleService.tagOnVideos(captureAny(), ['video-1', 'video-2', 'photo-1'])).captured;
+    expect(added, isTrue);
+    final personIds = verify(() => peopleService.addToVideos(captureAny(), ['video-1', 'video-2', 'photo-1'])).captured;
     expect((personIds.single as Iterable<String>).toList(), ['ann', 'unnamed']);
     final success = verify(() => context.service.toast.success(captureAny())).captured.single as String;
     final names = 'Ann, ${StaticTranslations.instance.no_name}';
-    expect(success, StaticTranslations.instance.tagged_people_in_videos(people: names, count: 2));
+    expect(success, StaticTranslations.instance.added_people_to_videos(people: names, count: 2));
     final info = verify(() => context.service.toast.info(captureAny())).captured.single as String;
-    expect(info, StaticTranslations.instance.tag_people_photos_skipped(count: 1));
+    expect(info, StaticTranslations.instance.add_people_to_videos_photos_skipped(count: 1));
     verify(() => context.service.backgroundSync.syncRemote()).called(1);
   });
 
   testWidgets('says so when the videos already have the people', (tester) async {
     when(
-      () => peopleService.tagOnVideos(any(), any()),
-    ).thenAnswer((_) async => (tagged: <String>{}, photos: <String>{}));
+      () => peopleService.addToVideos(any(), any()),
+    ).thenAnswer((_) async => (added: <String>{}, photos: <String>{}));
 
     await pumpAction(tester, {video()});
-    final tagged = await tagPeopleOnVideos(actionContext, actionRef, ['video-1'], {ann});
+    final added = await addPeopleToVideos(actionContext, actionRef, ['video-1'], {ann});
     await tester.pumpAndSettle();
 
-    expect(tagged, isFalse);
+    expect(added, isFalse);
     final info = verify(() => context.service.toast.info(captureAny())).captured.single as String;
-    expect(info, StaticTranslations.instance.tag_people_nothing_to_tag);
+    expect(info, StaticTranslations.instance.add_people_to_videos_none_added);
     verifyNever(() => context.service.toast.success(any()));
     verifyNever(() => context.service.backgroundSync.syncRemote());
   });

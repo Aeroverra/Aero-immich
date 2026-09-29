@@ -7094,7 +7094,7 @@ export function updatePerson({ id, personUpdateDto }: {
     })));
 }
 /**
- * Tag a person on videos
+ * Add a person to videos
  */
 export function addPersonToAssets({ id, bulkIdsDto }: {
     id: string;

@@ -777,8 +777,8 @@ export class PersonService extends BaseService {
   }
 
   /**
-   * Tags a person on videos. A video has no face box to draw, so each one gets a manual face covering the whole frame,
-   * unless the person is already on it. Photos are refused: their faces are drawn with the face editor.
+   * Marks videos as having a person in them. A video has no face box to draw, so each one gets a manual face covering
+   * the whole frame, unless the person is already on it. Photos are refused: their people are marked on the face itself.
    */
   async addToAssets(auth: AuthDto, personGroupId: string, { ids }: BulkIdsDto): Promise<BulkIdResponseDto[]> {
     await this.requireAccess({ auth, permission: Permission.PersonUpdate, ids: [personGroupId] });
