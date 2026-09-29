@@ -5,6 +5,7 @@ import 'package:immich_mobile/domain/models/exif.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/theme_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
+import 'package:immich_mobile/presentation/widgets/asset_viewer/asset_details/uploaded_details.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/sheet_tile.widget.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/utils/bytes_units.dart';
@@ -58,6 +59,7 @@ class TechnicalDetails extends ConsumerWidget {
             leading: Icon(Icons.camera_outlined, size: 24, color: context.textTheme.labelLarge?.color),
           ),
         ],
+        UploadedDetails(asset: asset),
       ],
     );
   }
