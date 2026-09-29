@@ -76,6 +76,24 @@ const SWEEP_MIN_AGE_MS = 3_600_000;
 const MAX_ACTIVE_UPLOAD_WRITES = 8;
 const STALE_RUN_MS = 60_000;
 
+/**
+ * An analysis made while a part was still being copied (reason part_unstable) is made again once every present media
+ * part is stable. Stability is a matter of time (ctime older than 30 s), not a file change, so without this the
+ * export would keep "uncertain" after every drop or upload that a sync saw while it was being written.
+ */
+export function awaitsStableParts(
+  exp: { id: string; analysis: unknown },
+  parts: Array<{ exportId: string; isIndex: boolean; isMissing: boolean; ctime: Date; size: any; prevSyncSize: any }>,
+  now = Date.now(),
+): boolean {
+  const reasons = (exp.analysis as { reasons?: unknown } | null)?.reasons;
+  if (!Array.isArray(reasons) || !reasons.includes('part_unstable')) {
+    return false;
+  }
+  const media = parts.filter((p) => p.exportId === exp.id && !p.isIndex && !p.isMissing);
+  return media.length > 0 && media.every((p) => isStablePart(p, now));
+}
+
 @Injectable()
 export class TakeoutService extends BaseService {
   private uploadChains = new Map<string, Promise<unknown>>();
@@ -570,7 +588,7 @@ export class TakeoutService extends BaseService {
     }
 
     for (const exp of existingExports) {
-      if (activeByExport.get(exp.id) || !changedExports.has(exp.id)) {
+      if (activeByExport.get(exp.id) || !(changedExports.has(exp.id) || awaitsStableParts(exp, existingParts))) {
         continue;
       }
       await this.takeoutRepository.updateExport(exp.id, { analysisInputsAt: new Date() });

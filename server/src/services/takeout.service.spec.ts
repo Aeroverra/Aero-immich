@@ -233,6 +233,36 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(part.size).toBe(100);
     });
 
+    it('analyses again once a part that was still being copied is stable', async () => {
+      vitest.useFakeTimers({ toFake: ['Date'] });
+      try {
+        // a sync saw the file while it was being written (fresh ctime): the analysis said part_unstable
+        await writePart('takeout-20260914T211500Z-1-001.tgz');
+        await sut.syncUserFolder(userId);
+        const exp = repo.exports.find((e) => e.id === repo.parts[0].exportId)!;
+        exp.analysis = { reasons: ['part_unstable'] };
+        const analyses = () =>
+          mocks.job.queue.mock.calls.filter((call) => (call[0] as any).name === JobName.TakeoutAnalyzeExport).length;
+        const first = analyses();
+
+        // nothing changed on disk and the part is still fresh: no new analysis
+        await sut.syncUserFolder(userId);
+        expect(analyses()).toBe(first);
+
+        // time passes: the part is stable now, the file itself did not change
+        vitest.setSystemTime(Date.now() + 60_000);
+        await sut.syncUserFolder(userId);
+        expect(analyses()).toBe(first + 1);
+
+        // once the analysis saw the stable part, syncs stay quiet again
+        exp.analysis = { reasons: [] };
+        await sut.syncUserFolder(userId);
+        expect(analyses()).toBe(first + 1);
+      } finally {
+        vitest.useRealTimers();
+      }
+    });
+
     it('marks a vanished part missing and forgets its rows', async () => {
       const path = await writePart('takeout-20260914T211500Z-1-001.tgz');
       await sut.syncUserFolder(userId);
