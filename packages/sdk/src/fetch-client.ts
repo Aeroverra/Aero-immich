@@ -7090,6 +7090,22 @@ export function updatePerson({ id, personUpdateDto }: {
     })));
 }
 /**
+ * Add a person to videos
+ */
+export function addPersonToAssets({ id, bulkIdsDto }: {
+    id: string;
+    bulkIdsDto: BulkIdsDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: BulkIdResponseDto[];
+    }>(`/people/${encodeURIComponent(id)}/assets`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: bulkIdsDto
+    })));
+}
+/**
  * Merge people
  */
 export function mergePersonLegacy({ id, mergePersonDto }: {
