@@ -1,10 +1,8 @@
 import { schemaDiff, schemaFromCode, schemaFromDatabase } from '@immich/sql-tools';
 import { Injectable } from '@nestjs/common';
 import AsyncLock from 'async-lock';
-import { FileMigrationProvider, Kysely, Migrator, sql } from 'kysely';
+import { Kysely, Migrator, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import semver from 'semver';
 import {
   EXTENSION_NAMES,
@@ -25,6 +23,7 @@ import { DB } from 'src/schema';
 import { immich_uuid_v7 } from 'src/schema/functions';
 import { ExtensionVersion, VectorExtension } from 'src/types';
 import { vectorIndexQuery } from 'src/utils/database';
+import { CompositeMigrationProvider, migrationFolders } from 'src/utils/migration';
 import z from 'zod';
 
 export let cachedVectorExtension: VectorExtension | undefined;
@@ -497,14 +496,11 @@ export class DatabaseRepository {
     return new Migrator({
       db: this.db,
       migrationLockTableName: 'kysely_migrations_lock',
-      allowUnorderedMigrations: this.configRepository.isDev(),
+      // the fork's migrations (src/schema/migrations-aero) carry timestamps that upstream keeps
+      // adding migrations after, so pending migrations must be allowed to sort before applied ones
+      allowUnorderedMigrations: true,
       migrationTableName: 'kysely_migrations',
-      provider: new FileMigrationProvider({
-        fs: { readdir },
-        path: { join },
-        // eslint-disable-next-line unicorn/prefer-module
-        migrationFolder: join(__dirname, '..', 'schema/migrations'),
-      }),
+      provider: new CompositeMigrationProvider(migrationFolders),
     });
   }
 }
