@@ -210,11 +210,13 @@ function paxWithLength(records: string): Buffer {
   const lines = records.trimEnd().split('\n');
   const out: string[] = [];
   for (const line of lines) {
-    let len = line.length + 1 + 1; // space + newline
+    // len counts bytes, not characters
+    const bytes = Buffer.byteLength(line, 'utf8');
+    let len = bytes + 1 + 1; // space + newline
     len += String(len).length;
     // fixed-point: recompute if digit count changed
-    while (String(len).length + line.length + 2 !== len) {
-      len = String(len).length + line.length + 2;
+    while (String(len).length + bytes + 2 !== len) {
+      len = String(len).length + bytes + 2;
     }
     out.push(`${len} ${line}\n`);
   }

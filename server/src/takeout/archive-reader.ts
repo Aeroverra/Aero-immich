@@ -860,18 +860,18 @@ function verifyChecksum(header: Buffer): boolean {
 
 function parsePaxRecords(data: Buffer): Map<string, string> {
   const records = new Map<string, string>();
+  // a record's length counts bytes, so walk the bytes and decode each value alone (multi-byte UTF-8 names)
   let i = 0;
-  const text = data.toString('utf8');
-  while (i < text.length) {
-    const space = text.indexOf(' ', i);
+  while (i < data.length) {
+    const space = data.indexOf(0x20, i);
     if (space === -1) {
       break;
     }
-    const len = Number(text.slice(i, space));
-    if (!Number.isFinite(len) || len <= 0) {
+    const len = Number(data.toString('latin1', i, space));
+    if (!Number.isSafeInteger(len) || len <= space - i + 1 || i + len > data.length) {
       break;
     }
-    const record = text.slice(space + 1, i + len - 1);
+    const record = data.toString('utf8', space + 1, i + len - 1);
     const eq = record.indexOf('=');
     if (eq !== -1) {
       records.set(record.slice(0, eq), record.slice(eq + 1));

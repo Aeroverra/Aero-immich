@@ -386,6 +386,22 @@ describe('tgz reader', () => {
     }
   });
 
+  it('reads pax paths with multi-byte characters (record lengths count bytes)', async () => {
+    const utf8Inputs = [
+      {
+        name: 'Takeout/Google Photos/Photos from 2022/🌿｜Asuuuuuh - Discord 2022-04-06 00-10-44.mp4.supplemental-metadata.json',
+        data: Buffer.from('{"title":"x"}'),
+        pax: true,
+      },
+      { name: 'Takeout/Google Photos/Café/été 📷.jpg', data: Buffer.from('photo-bytes'), pax: true },
+      { name: 'Takeout/Google Photos/after.jpg', data: Buffer.from('after') },
+    ];
+    const path = join(dir, 'utf8-pax.tgz');
+    await writeFile(path, buildTarGz(utf8Inputs));
+    const entries = await collect(path, 'tgz');
+    expect(entries.map((e) => [e.path, e.size])).toEqual(utf8Inputs.map((i) => [i.name, i.data.length]));
+  });
+
   it('reads every byte once and verifies the gzip trailer (I1, F10)', async () => {
     const meter = newReadMeter();
     const result = await walkArchive(file, 'tgz', async () => {}, { meter });
