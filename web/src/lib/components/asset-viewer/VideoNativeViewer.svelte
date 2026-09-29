@@ -7,11 +7,14 @@
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { mediaCapabilitiesManager } from '$lib/managers/media-capabilities-manager.svelte';
+  import { videoBookmarkManager } from '$lib/managers/video-bookmark-manager.svelte';
   import { autoPlayVideo, lang, loopVideo as loopVideoPreference } from '$lib/stores/preferences.store';
   import { getAssetHlsSessionUrl, getAssetHlsUrl, getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
-  import { AssetMediaSize, type AssetResponseDto } from '@immich/sdk';
+  import { formatVideoPosition } from '$lib/utils/people-utils';
+  import { AssetMediaSize, AssetTypeEnum, type AssetResponseDto } from '@immich/sdk';
   import { Icon, LoadingSpinner, shortcuts } from '@immich/ui';
   import {
+    mdiBookmarkPlusOutline,
     mdiCheck,
     mdiChevronLeft,
     mdiChevronRight,
@@ -324,7 +327,7 @@
     }
   });
 
-  const onVideoSeek = (positionMs: number) => {
+  const onVideoSeek = (positionMs: number, play = false) => {
     const seconds = positionMs / 1000;
     if (castManager.isCasting) {
       castManager.seekTo(seconds);
@@ -335,10 +338,71 @@
       return;
     }
 
-    // pause on the moment so it can be checked
-    videoPlayer.pause();
+    // pause on the moment so it can be checked, unless the caller wants to watch from there
+    if (play) {
+      void videoPlayer.play();
+    } else {
+      videoPlayer.pause();
+    }
     videoPlayer.currentTime = Number.isFinite(videoPlayer.duration) ? Math.min(seconds, videoPlayer.duration) : seconds;
   };
+
+  // bookmarks belong to a user, so they are left out of shared links and of stack and motion photo previews
+  const bookmarksEnabled = $derived(
+    extendedControls && authManager.authenticated && !authManager.isSharedLink && asset.type === AssetTypeEnum.Video,
+  );
+  let durationSeconds = $state(0);
+  const bookmarkDuration = $derived(durationSeconds || (asset.duration ?? 0) / 1000);
+
+  $effect(() => {
+    if (bookmarksEnabled) {
+      void videoBookmarkManager.load(assetId);
+    }
+  });
+
+  onDestroy(() => {
+    if (videoBookmarkManager.assetId === assetId) {
+      videoBookmarkManager.clear();
+    }
+  });
+
+  const getPositionMs = () => {
+    if (castManager.isCasting) {
+      return (castManager.currentTime ?? 0) * 1000;
+    }
+    return (videoPlayer?.currentTime ?? 0) * 1000;
+  };
+
+  const addBookmark = () => {
+    if (bookmarksEnabled) {
+      void videoBookmarkManager.add(assetId, getPositionMs());
+    }
+  };
+
+  // keeps playing or paused like any other seek
+  const jumpToBookmark = (positionMs: number | undefined) => {
+    if (positionMs === undefined) {
+      return;
+    }
+    if (castManager.isCasting) {
+      castManager.seekTo(positionMs / 1000);
+      return;
+    }
+    if (videoPlayer) {
+      videoPlayer.currentTime = positionMs / 1000;
+    }
+  };
+
+  const onDurationChange = (event: Event) => {
+    const duration = (event.currentTarget as HTMLVideoElement).duration;
+    durationSeconds = Number.isFinite(duration) ? duration : 0;
+  };
+
+  $effect(() => {
+    if (bookmarksEnabled) {
+      return videoBookmarkManager.attachPlayer(assetId, getPositionMs);
+    }
+  });
 
   onMount(() => assetViewerManager.on({ VideoSeek: onVideoSeek }));
 
@@ -365,6 +429,19 @@
           ? (videoPlayer.currentTime = Math.min(videoPlayer.currentTime + 0.4, videoPlayer.duration))
           : undefined,
     },
+    ...(bookmarksEnabled
+      ? [
+          { shortcut: { key: 'b' }, onShortcut: addBookmark },
+          {
+            shortcut: { key: ']' },
+            onShortcut: () => jumpToBookmark(videoBookmarkManager.next(getPositionMs())?.time),
+          },
+          {
+            shortcut: { key: '[' },
+            onShortcut: () => jumpToBookmark(videoBookmarkManager.previous(getPositionMs())?.time),
+          },
+        ]
+      : []),
   ]}
 />
 
@@ -406,6 +483,7 @@
             class="h-full object-contain"
             oncanplay={(e: Event) => handleCanPlay(e.currentTarget as HTMLVideoElement)}
             onloadedmetadata={() => (hasLoadedMetadata = true)}
+            ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
             onplaying={(e: Event) => {
@@ -432,6 +510,7 @@
             class="h-full object-contain"
             oncanplay={(e) => handleCanPlay(e.currentTarget)}
             onloadedmetadata={() => (hasLoadedMetadata = true)}
+            ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
             onplaying={(e) => {
@@ -478,6 +557,17 @@
               <Icon slot="pause" icon={mdiPause} />
             </media-play-button>
             <media-time-display showduration class="rounded-lg p-2 outline-none"></media-time-display>
+            {#if bookmarksEnabled}
+              <button
+                type="button"
+                class="bookmark-button shrink-0 rounded-full p-2 outline-none"
+                title={$t('add_video_bookmark_shortcut')}
+                aria-label={$t('add_video_bookmark')}
+                onclick={addBookmark}
+              >
+                <Icon icon={mdiBookmarkPlusOutline} />
+              </button>
+            {/if}
 
             <span class="grow"></span>
 
@@ -501,7 +591,28 @@
               <media-settings-menu-button class="shrink-0 rounded-full p-2 outline-none"></media-settings-menu-button>
             {/if}
           </media-control-bar>
-          <immich-time-range class="h-8 w-full rounded-lg px-2 pb-3 outline-none"></immich-time-range>
+          <div class="relative w-full">
+            <immich-time-range class="h-8 w-full rounded-lg px-2 pb-3 outline-none"></immich-time-range>
+            {#if bookmarksEnabled && videoBookmarkManager.assetId === assetId && bookmarkDuration > 0}
+              <!-- same box as the range track: px-2 and pb-3 of the time range -->
+              <div class="pointer-events-none absolute inset-x-2 top-0 bottom-3" data-testid="video-bookmark-markers">
+                {#each videoBookmarkManager.bookmarks as bookmark (bookmark.id)}
+                  {@const time = formatVideoPosition(bookmark.time)}
+                  {@const title = bookmark.label
+                    ? `${time} ${bookmark.label}`
+                    : $t('jump_to_time', { values: { time } })}
+                  <button
+                    type="button"
+                    class="bookmark-marker pointer-events-auto absolute top-1/2 h-4 w-3 -translate-1/2"
+                    style:left="{Math.min(100, (bookmark.time / 1000 / bookmarkDuration) * 100)}%"
+                    {title}
+                    aria-label={title}
+                    onclick={() => jumpToBookmark(bookmark.time)}
+                  ></button>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
       </media-controller>
 
@@ -552,6 +663,39 @@
 
   media-time-display {
     font-variant-numeric: tabular-nums;
+  }
+
+  .bookmark-button:hover,
+  .bookmark-button:focus-visible {
+    background: var(--media-control-hover-background);
+  }
+
+  .bookmark-button:focus-visible {
+    box-shadow: var(--media-focus-box-shadow);
+  }
+
+  /* a short bright tick over the track, inside a wider invisible button for the pointer */
+  .bookmark-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 3px;
+    height: 10px;
+    border-radius: 1px;
+    transform: translate(-50%, -50%);
+    background: #facc15;
+    box-shadow: 0 0 2px rgb(0 0 0 / 0.8);
+    transition: height 0.15s ease;
+  }
+
+  .bookmark-marker:hover::after,
+  .bookmark-marker:focus-visible::after {
+    height: 14px;
+  }
+
+  .bookmark-marker:focus-visible {
+    outline: none;
   }
 
   immich-time-range,
