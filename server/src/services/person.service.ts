@@ -23,6 +23,7 @@ import {
   PersonUpdateDto,
 } from 'src/dtos/person.dto';
 import {
+  AssetType,
   AssetVisibility,
   CacheControl,
   JobName,
@@ -773,6 +774,74 @@ export class PersonService extends BaseService {
     if (!person.faceAssetId) {
       await this.createNewFeaturePhoto([person]);
     }
+  }
+
+  /**
+   * Tags a person on videos. A video has no face box to draw, so each one gets a manual face covering the whole frame,
+   * unless the person is already on it. Photos are refused: their faces are drawn with the face editor.
+   */
+  async addToAssets(auth: AuthDto, personGroupId: string, { ids }: BulkIdsDto): Promise<BulkIdResponseDto[]> {
+    await this.requireAccess({ auth, permission: Permission.PersonUpdate, ids: [personGroupId] });
+    const person = await this.findOrFail(auth, personGroupId);
+
+    const allowedIds = await this.checkAccess({ auth, permission: Permission.AssetUpdate, ids });
+    const found = await this.assetRepository.getByIds([...allowedIds]);
+    const assets = new Map(found.map((asset) => [asset.id, asset]));
+    const faces = await this.personRepository.getFacesByIds(
+      [...allowedIds].map((assetId) => ({ assetId, personGroupId })),
+      { viewingUserId: auth.user.id },
+    );
+    const tagged = new Set(faces.map(({ assetId }) => assetId));
+
+    const results: BulkIdResponseDto[] = [];
+    const newFaces: Insertable<AssetFaceTable>[] = [];
+    for (const id of ids) {
+      if (!allowedIds.has(id)) {
+        results.push({ id, success: false, error: BulkIdErrorReason.NO_PERMISSION });
+        continue;
+      }
+
+      const asset = assets.get(id);
+      if (!asset) {
+        results.push({ id, success: false, error: BulkIdErrorReason.NOT_FOUND });
+        continue;
+      }
+
+      if (asset.type !== AssetType.Video) {
+        results.push({ id, success: false, error: BulkIdErrorReason.VALIDATION });
+        continue;
+      }
+
+      if (tagged.has(id)) {
+        results.push({ id, success: false, error: BulkIdErrorReason.DUPLICATE });
+        continue;
+      }
+
+      // a unit frame still covers the whole picture when the video has no known dimensions
+      const width = asset.width || 1;
+      const height = asset.height || 1;
+      newFaces.push({
+        assetId: id,
+        personGroupId: person.personGroupId,
+        imageWidth: width,
+        imageHeight: height,
+        boundingBoxX1: 0,
+        boundingBoxY1: 0,
+        boundingBoxX2: width,
+        boundingBoxY2: height,
+        sourceType: SourceType.Manual,
+      });
+      tagged.add(id);
+      results.push({ id, success: true });
+    }
+
+    await this.personRepository.createAssetFaces(newFaces);
+
+    if (newFaces.length > 0 && !person.faceAssetId) {
+      await this.createNewFeaturePhoto([person]);
+    }
+
+    return results;
   }
 
   async deleteFace(auth: AuthDto, id: string, dto: AssetFaceDeleteDto): Promise<void> {

@@ -172,6 +172,22 @@ export class PersonController {
     await sendFile(res, next, () => this.service.getThumbnail(auth, id), this.logger);
   }
 
+  @Put(':id/assets')
+  @Authenticated({ permission: Permission.FaceCreate })
+  @Endpoint({
+    summary: 'Tag a person on videos',
+    description:
+      'Tag a person on videos, which have no face box to draw: each video gets a manual face covering the whole frame. Videos the person is already on are reported as duplicate, photos as validation errors (tag them with a face box instead).',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  addPersonToAssets(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: BulkIdsDto,
+  ): Promise<BulkIdResponseDto[]> {
+    return this.service.addToAssets(auth, id, dto);
+  }
+
   @Put(':id/reassign')
   @Authenticated({ permission: Permission.PersonReassign })
   @Endpoint({
