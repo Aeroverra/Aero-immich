@@ -41,6 +41,7 @@ import {
   openRunStaging,
   queueAnalysis,
   reclaimRunTargets,
+  stopReadingParts,
   takeoutFolderPath,
   verifyAndRequeue,
 } from 'src/services/takeout-lifecycle';
@@ -56,6 +57,7 @@ import {
   ReadLimits,
   ReadPartRow,
   ReadStatsTracker,
+  RecountEntry,
   RunFailure,
   asRunReason,
   catalogUsable,
@@ -65,6 +67,7 @@ import {
   keyEqual,
   readPartWithRetry,
   readerPool,
+  recountReadStats,
   settleWithin,
   statFingerprint,
   withDeadline,
@@ -584,11 +587,27 @@ export class TakeoutRunService extends BaseService {
     const entryRefs: Array<{ partName: string; seq: number; readError: string | null }> = [];
     const catalogInputs: CatalogInput[] = [];
     const catalogKeys = new Set<string>();
+    // the committed rows of the parts this run read give their exact counters (the live ones are estimates)
+    const readPartIds = new Set(
+      Object.values(a.stats.stats.parts)
+        .filter((ps) => ps.passes > 0)
+        .map((ps) => ps.partId),
+    );
+    const recount: RecountEntry[] = [];
     let unreadableEntries = 0;
     for await (const row of this.takeoutRepository.streamEntriesForExport(exportId, {
       catalogVersion: CATALOG_VERSION,
       excludePartIds: [...(a.ctx?.missingThisAttempt ?? [])],
     })) {
+      if (readPartIds.has(row.partId)) {
+        recount.push({
+          partId: row.partId,
+          kind: row.kind,
+          size: Number(row.size),
+          checksum: row.checksum,
+          readError: row.readError,
+        });
+      }
       entryRefs.push({ partName: row.partName, seq: row.seq, readError: row.readError });
       if (row.readError) {
         unreadableEntries++;
@@ -728,6 +747,14 @@ export class TakeoutRunService extends BaseService {
     const bytesTotal = rows
       .filter((r) => r.action === TakeoutRunFileAction.Upload && r.status === TakeoutRunFileStatus.Planned)
       .reduce((sum, r) => sum + Number(r.size), 0);
+    if (recount.length > 0) {
+      const preferences = getPreferences(await this.userRepository.getMetadata(run.userId));
+      const server = await a.ctx!.serverSet(preferences.deletedReimport.mode === DeletedReimportMode.Skip);
+      recountReadStats(a.stats.stats, recount, {
+        onServer: (checksum) => server.has(checksum),
+        hasBlob: (key) => a.staging!.hasBlob(key),
+      });
+    }
     // "deferred" is recounted as planned uploads without a blob
     const withoutBlob = rows.filter(
       (r) =>
@@ -1188,7 +1215,7 @@ export class TakeoutRunService extends BaseService {
         error: reason.message,
         finishedAt: new Date(),
         currentFile: null,
-        readStats: this.snapshotStats(a) as unknown as object,
+        readStats: (await stopReadingParts(this.lifecycle, this.snapshotStats(a))) as unknown as object,
         ...(counters && { counters: counters as unknown as object }),
       })
       .catch(() => false);

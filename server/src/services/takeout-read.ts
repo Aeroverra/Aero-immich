@@ -171,6 +171,8 @@ interface WriteJob {
   buf: Buffer;
   lease: ByteLease | null;
   space: SpaceReservation | null;
+  /** set by enqueue: resolves once the job settled (written, failed or dropped) */
+  settled?: () => void;
 }
 
 /**
@@ -205,14 +207,22 @@ export class WriteQueue {
     return this.slots.acquire(1, signal);
   }
 
-  enqueue(job: WriteJob): void {
+  /**
+   * Queue a write-behind job. The returned promise resolves once the job settled: written, failed (`store.fatal` is
+   * set) or dropped; it never rejects.
+   */
+  enqueue(job: WriteJob): Promise<void> {
+    const settled = new Promise<void>((resolve) => {
+      job.settled = resolve;
+    });
     if (job.token.detached || job.store.fatal) {
       this.release(job);
-      return;
+      return settled;
     }
     this.perRun.set(job.runId, (this.perRun.get(job.runId) ?? 0) + 1);
     this.queue.push(job);
     this.pump();
+    return settled;
   }
 
   pending(runId: string): number {
@@ -269,6 +279,7 @@ export class WriteQueue {
     job.reservation.releaseIfPending();
     job.lease?.release();
     job.space?.release();
+    job.settled?.();
   }
 
   private done(runId: string) {
@@ -897,6 +908,108 @@ export class ReadStatsTracker {
   }
 }
 
+/**
+ * A run stopped (failed or cancelled) while parts were being read: they are not being read any more. They show as
+ * waiting (a Resume continues them) with the time the reading stopped, so the parts table neither shows a live
+ * progress bar nor a read speed that keeps falling after the stop.
+ */
+export function stopLiveParts(stats: TakeoutReadStats, at = new Date().toISOString()): TakeoutReadStats {
+  for (const ps of Object.values(stats.parts)) {
+    if (ps.status !== 'reading') {
+      continue;
+    }
+    ps.status = 'pending';
+    ps.finishedAt = at;
+  }
+  stats.etaSeconds = null;
+  return stats;
+}
+
+/** One committed catalog row, as planning streams it */
+export interface RecountEntry {
+  partId: string;
+  kind: string;
+  size: number;
+  checksum: Buffer | null;
+  readError: string | null;
+}
+
+/**
+ * Exact file counters of the parts this run read, from their committed catalog rows (called by planning).
+ *
+ * While parts are read the counters are live estimates, persisted every 2 s: a restart or a cancel loses the counts
+ * of entries committed after the last progress write, and entries that are read again after it are counted twice
+ * (a tgz part read again from byte 0 finds some of its own blobs and counts them as "seen earlier"). The recount
+ * classifies every media entry of those parts once, in part order: already on the server, the same content earlier
+ * in these parts, staged (its blob is present) or not staged. The I/O figures (bytes, passes, retries, wasted writes,
+ * fetches) stay as measured, and `deferredFiles`/`deferredBytes` are recounted from the plan by the caller.
+ */
+export function recountReadStats(
+  stats: TakeoutReadStats,
+  entries: Iterable<RecountEntry>,
+  view: { onServer: (checksum: Buffer) => boolean; hasBlob: (hex: string) => boolean },
+): void {
+  const parts = new Map<string, TakeoutRunPartStats>();
+  for (const ps of Object.values(stats.parts)) {
+    if (ps.passes === 0) {
+      continue;
+    }
+    Object.assign(ps, { entries: 0, media: 0, entryErrors: 0, staged: 0, stagedBytes: 0, duplicates: 0, deferred: 0 });
+    parts.set(ps.partId, ps);
+  }
+  if (parts.size === 0) {
+    return;
+  }
+  const totals = { files: 0, media: 0, json: 0, server: 0, local: 0, staged: 0, stagedBytes: 0 };
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    const ps = parts.get(entry.partId);
+    if (!ps) {
+      continue;
+    }
+    ps.entries++;
+    totals.files++;
+    if (entry.readError) {
+      ps.entryErrors++;
+      continue;
+    }
+    if (entry.kind === 'json') {
+      totals.json++;
+    }
+    if (entry.kind !== 'media') {
+      continue;
+    }
+    ps.media++;
+    totals.media++;
+    if (!entry.checksum) {
+      continue;
+    }
+    const key = hex(entry.checksum);
+    if (view.onServer(entry.checksum)) {
+      ps.duplicates++;
+      totals.server++;
+    } else if (seen.has(key)) {
+      ps.duplicates++;
+      totals.local++;
+    } else if (view.hasBlob(key)) {
+      ps.staged++;
+      ps.stagedBytes += entry.size;
+      totals.staged++;
+      totals.stagedBytes += entry.size;
+    } else {
+      ps.deferred++;
+    }
+    seen.add(key);
+  }
+  stats.filesFound = totals.files;
+  stats.mediaFound = totals.media;
+  stats.jsonFound = totals.json;
+  stats.serverDuplicatesSkipped = totals.server;
+  stats.localDuplicatesSkipped = totals.local;
+  stats.stagedFiles = totals.staged;
+  stats.stagedBytes = totals.stagedBytes;
+}
+
 // ---------- the read context ----------
 
 export interface ReaderToken {
@@ -939,6 +1052,7 @@ export class ReadContext {
   /** aborted by the run signal (cancel, lease loss), the first reader failure and the stall watchdog */
   readonly readAbort = new AbortController();
   server: ChecksumSet = ChecksumSet.empty();
+  private serverReady = false;
   serverSizes = new Set<number>();
   prefixes: PrefixIndex;
   sampleSet: Set<string> | 'all' = 'all';
@@ -995,17 +1109,8 @@ export class ReadContext {
   }): Promise<void> {
     const repo = this.deps.repo;
     const run = this.run;
-    async function* checksums(): AsyncIterable<Buffer | null> {
-      for await (const row of repo.streamUploadChecksums(run.userId)) {
-        yield row.checksum;
-      }
-      if (options.deletedSkip) {
-        for await (const row of repo.streamDeletedChecksums(run.userId)) {
-          yield row.checksum;
-        }
-      }
-    }
-    this.server = await ChecksumSet.fromAsync(options.serverChecksums ?? checksums());
+    this.server = await ChecksumSet.fromAsync(options.serverChecksums ?? this.serverChecksums(options.deletedSkip));
+    this.serverReady = true;
     this.serverSizes = new Set(await repo.getUploadAssetSizesOver(run.userId, this.limits.bufferLimit));
     this.prefixes = new PrefixIndex(
       repo,
@@ -1021,6 +1126,27 @@ export class ReadContext {
       statfs: options.statfs,
     });
     await this.budget.refresh(this.limits.readStallMs);
+  }
+
+  /** The user's upload checksums (trashed included), plus the deleted ones when re-imports of those are skipped */
+  private async *serverChecksums(deletedSkip: boolean): AsyncIterable<Buffer | null> {
+    for await (const row of this.deps.repo.streamUploadChecksums(this.run.userId)) {
+      yield row.checksum;
+    }
+    if (deletedSkip) {
+      for await (const row of this.deps.repo.streamDeletedChecksums(this.run.userId)) {
+        yield row.checksum;
+      }
+    }
+  }
+
+  /** The server snapshot of this attempt; built here when the attempt read nothing (planning after a restart) */
+  async serverSet(deletedSkip: boolean): Promise<ChecksumSet> {
+    if (!this.serverReady) {
+      this.server = await ChecksumSet.fromAsync(this.serverChecksums(deletedSkip));
+      this.serverReady = true;
+    }
+    return this.server;
   }
 
   sourceOptions(): WalkSourceOptions {
@@ -1455,6 +1581,8 @@ export async function handleNewEntry(
   token: ReaderToken,
   info: ArchiveEntryInfo,
   open: EntryOpener,
+  /** the write-behind jobs of the part being read, until they settled */
+  partWrites?: Set<Promise<void>>,
 ): Promise<EntryRow> {
   const row = newEntryRow(part, info);
   const signal = ctx.readAbort.signal;
@@ -1505,7 +1633,7 @@ export async function handleNewEntry(
         }
         count(ctx, ps, decision, info.size);
         if (reservation) {
-          ctx.resources.writes.enqueue({
+          const settled = ctx.resources.writes.enqueue({
             runId: ctx.run.id,
             token,
             store: ctx.staging,
@@ -1514,6 +1642,10 @@ export async function handleNewEntry(
             lease: lease.share(),
             space,
           });
+          if (partWrites) {
+            partWrites.add(settled);
+            void settled.then(() => partWrites.delete(settled));
+          }
         }
       } finally {
         lease.release();
@@ -1699,6 +1831,7 @@ export async function readPart(
   // 2. walk
   const batch = new EntryBatch(ctx, token);
   const pendingRows = new Map<number, EntryRow>();
+  const partWrites = new Set<Promise<void>>();
   let inFlight: ArchiveEntryInfo | null = null;
   try {
     const result = await walkArchive(
@@ -1717,7 +1850,7 @@ export async function readPart(
           await handleCachedEntry(ctx, cached, info, open);
           return;
         }
-        pendingRows.set(info.seq, await handleNewEntry(ctx, part, ps, token, info, open));
+        pendingRows.set(info.seq, await handleNewEntry(ctx, part, ps, token, info, open, partWrites));
       },
       {
         signal: ctx.readAbort.signal,
@@ -1744,6 +1877,19 @@ export async function readPart(
     }
     if (kind === 'tgz' && !result.trailerVerified) {
       throw new ArchiveDataError('the gzip stream ended without its trailer', meter.position);
+    }
+    // 'complete' means every row and every blob of the part is on disk: the blobs still in the write-behind queue
+    // are written first, so a crash after this point never leaves a complete part whose staged files have to be
+    // fetched again (for tgz that is a walk of the whole part)
+    await Promise.all(partWrites);
+    if (ctx.staging.fatal) {
+      throw new RunFailure(messageOf(ctx.staging.fatal));
+    }
+    if (ctx.readAbort.signal.aborted) {
+      throw asRunReason(ctx.readAbort.signal.reason);
+    }
+    if (token.detached) {
+      throw new RunFailure('reader detached');
     }
     ctx.stats.sync(ps);
     await batch.finish((rows) => repo.completePart(part.id, rows, { bytesRead: ps.bytesRead }));

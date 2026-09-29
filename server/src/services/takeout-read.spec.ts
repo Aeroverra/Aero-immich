@@ -21,6 +21,7 @@ import {
   fetchEntries,
   readPartWithRetry,
   readerPool,
+  recountReadStats,
   sha1,
 } from 'src/services/takeout-read';
 import { StagingFs, StagingStore, nodeStagingFs } from 'src/services/takeout-staging';
@@ -195,6 +196,34 @@ describe('reading: content addressing', () => {
     expect(h.ctx.stats.stats.localDuplicatesSkipped).toBe(2);
     expect(h.repo.parts.every((p) => p.catalogStatus === TakeoutCatalogStatus.Complete)).toBe(true);
     expect(h.staging.pendingReservations()).toBe(0);
+  });
+
+  it('marks a part complete only once the blobs of its entries are written (a crash then needs no fetch)', async () => {
+    const h = await harness();
+    const contents = [0, 1, 2, 3].map((i) => randomBytesSeeded(500, 40 + i));
+    const part = await addPart(
+      h,
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz(contents.map((data, i) => ({ name: media(`${i}.jpg`), data }))),
+    );
+    // slow staging writes: the reader reaches the end of the part while its blobs are still queued
+    const write = h.staging.writeBuffer.bind(h.staging);
+    vi.spyOn(h.staging, 'writeBuffer').mockImplementation(async (reservation, buf) => {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return write(reservation, buf);
+    });
+    const blobsAtComplete: boolean[] = [];
+    const complete = h.repo.completePart.bind(h.repo);
+    vi.spyOn(h.repo, 'completePart').mockImplementation(async (...args: Parameters<typeof complete>) => {
+      for (const content of contents) {
+        blobsAtComplete.push(await blobExists(h, content));
+      }
+      return complete(...args);
+    });
+
+    await readAll(h, [part]);
+    expect(blobsAtComplete).toEqual([true, true, true, true]);
+    expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Complete);
   });
 
   it('does not stage a file whose checksum is on the server', async () => {
@@ -967,7 +996,7 @@ describe('write slots (12)', () => {
     const s = await harness();
     const content = Buffer.from('write-behind');
     const reservation = s.staging.reserve(hex(sha1(content)))!;
-    queue.enqueue({
+    void queue.enqueue({
       runId: s.run.id,
       token: { detached: false },
       store: s.staging,
@@ -1036,6 +1065,57 @@ describe('ReadStatsTracker', () => {
     expect(stats.fetchEta(0)).toBeNull();
     meter.bytesRead = 1000;
     expect(stats.fetchEta(10_000)).toBe(90);
+  });
+});
+
+const checksumOf = (n: number) => Buffer.alloc(20, n);
+
+describe('recountReadStats', () => {
+  it('replaces the drifted live counters of the parts this run read with the committed catalog', () => {
+    // live counters after a restart and a cancel: entries counted twice, others never counted
+    const stats = new ReadStatsTracker({
+      filesFound: 9,
+      mediaFound: 7,
+      jsonFound: 1,
+      serverDuplicatesSkipped: 0,
+      localDuplicatesSkipped: 3,
+      stagedFiles: 2,
+      stagedBytes: 20,
+      wastedWriteFiles: 1,
+      fetchBytesRead: 77,
+      parts: {
+        p1: { partId: 'p1', fileName: 'a.tgz', size: 100, passes: 2, entries: 9, media: 7, staged: 2, duplicates: 3 },
+        p2: { partId: 'p2', fileName: 'b.tgz', size: 100, passes: 0, status: 'cached', entries: 0 },
+      },
+    }).stats;
+    const c = checksumOf;
+    const entries = [
+      { partId: 'p1', kind: 'media', size: 10, checksum: c(1), readError: null }, // staged
+      { partId: 'p1', kind: 'json', size: 1, checksum: null, readError: null },
+      { partId: 'p1', kind: 'media', size: 11, checksum: c(2), readError: null }, // on the server
+      { partId: 'p1', kind: 'media', size: 10, checksum: c(1), readError: null }, // same content again
+      { partId: 'p1', kind: 'media', size: 12, checksum: c(3), readError: null }, // hashed only, no blob
+      { partId: 'p1', kind: 'other', size: 5, checksum: null, readError: 'CRC-32 mismatch' },
+      { partId: 'p2', kind: 'media', size: 13, checksum: c(4), readError: null }, // a part this run did not read
+    ];
+    recountReadStats(stats, entries, {
+      onServer: (checksum) => checksum.equals(c(2)),
+      hasBlob: (key) => key === hex(c(1)) || key === hex(c(4)),
+    });
+
+    expect(stats.filesFound).toBe(6);
+    expect(stats.mediaFound).toBe(4);
+    expect(stats.jsonFound).toBe(1);
+    expect(stats.serverDuplicatesSkipped).toBe(1);
+    expect(stats.localDuplicatesSkipped).toBe(1);
+    expect([stats.stagedFiles, stats.stagedBytes]).toEqual([1, 10]);
+    const p1 = stats.parts.p1;
+    expect([p1.entries, p1.media, p1.entryErrors, p1.staged, p1.stagedBytes, p1.duplicates, p1.deferred]).toEqual([
+      6, 4, 1, 1, 10, 2, 1,
+    ]);
+    // the parts this run did not read, and the I/O figures, keep what was measured
+    expect([stats.parts.p2.entries, stats.parts.p2.staged]).toEqual([0, 0]);
+    expect([stats.wastedWriteFiles, stats.fetchBytesRead, p1.passes]).toEqual([1, 77, 2]);
   });
 });
 

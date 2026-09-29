@@ -15,7 +15,7 @@ import type { LoggingRepository } from 'src/repositories/logging.repository';
 import type { TakeoutRepository } from 'src/repositories/takeout.repository';
 import type { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { mapExport, mapRun } from 'src/services/takeout-mappers';
-import { normalizeReadStats } from 'src/services/takeout-read';
+import { normalizeReadStats, stopLiveParts } from 'src/services/takeout-read';
 import {
   ReclaimResult,
   ReclaimRow,
@@ -26,7 +26,7 @@ import {
   reclaimFile,
   trashStagingDir,
 } from 'src/services/takeout-staging';
-import { countersFromRows } from 'src/takeout';
+import { TakeoutReadStats, countersFromRows } from 'src/takeout';
 import { JobItem } from 'src/types';
 
 // Cleanup paths shared by the run job and the API (single-pass design 5.3, 5.4, 10.1, 10.2).
@@ -273,7 +273,7 @@ async function cancelClaimedRun(
   await deps.takeout.skipOpenRunFiles(runId);
   await deps.takeout.updatePartsOfRun(runId);
 
-  const readStats = normalizeReadStats(statsOfJob ?? run.readStats);
+  const readStats = await stopReadingParts(deps, normalizeReadStats(statsOfJob ?? run.readStats));
   if (store) {
     const held = await store.bytesHeld();
     readStats.stagingBytes = held.bytes;
@@ -290,6 +290,19 @@ async function cancelClaimedRun(
     readStats: readStats as unknown as object,
     currentFile: null,
   });
+}
+
+/**
+ * The parts a stopping run was reading: their rows keep the bytes it read (the 10 s progress write may be behind) and
+ * the run's statistics stop showing them as being read.
+ */
+export async function stopReadingParts(deps: LifecycleDeps, stats: TakeoutReadStats): Promise<TakeoutReadStats> {
+  for (const ps of Object.values(stats.parts)) {
+    if (ps.status === 'reading') {
+      await deps.takeout.updatePart(ps.partId, { bytesRead: ps.bytesRead }).catch(() => {});
+    }
+  }
+  return stopLiveParts(stats);
 }
 
 /**

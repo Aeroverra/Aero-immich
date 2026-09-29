@@ -316,6 +316,10 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Partial);
     expect(h.run(run.id).leaseToken).toBeNull();
     expect(h.mocks.job.queue).toHaveBeenCalledWith({ name: 'TakeoutAnalyzeExport', data: { exportId: h.exportId } });
+    // the parts table of the stopped run shows the part waiting for Resume, not still being read
+    const [ps] = Object.values(h.run(run.id).readStats.parts) as any[];
+    expect(ps.status).toBe('pending');
+    expect(ps.finishedAt).not.toBeNull();
   });
 
   it('fails a run whose read is stuck longer than the stall limit', async () => {
@@ -521,6 +525,53 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.statusLog).not.toContain('reading');
     expect(h.repo.statusLog).not.toContain('planning');
     expect(h.repo.assets).toHaveLength(1);
+  });
+
+  it('plans with exact file counters although the live ones drifted over a restart', async () => {
+    const h = await harness();
+    const a = randomBytesSeeded(500, 21);
+    const b = randomBytesSeeded(600, 22);
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media('a.mp4'), data: a },
+        { name: media('a.mp4.supplemental-metadata.json'), data: Buffer.from('{"title":"a.mp4"}') },
+        { name: media('Album/a.mp4'), data: a },
+        { name: media('b.mp4'), data: b },
+      ]),
+    );
+    const run = h.newRun();
+    // the first attempt reads the part completely, then stops before its plan is committed
+    vi.spyOn(h.repo, 'commitPlan').mockRejectedValueOnce(new Error('connection lost'));
+    expect(await h.execute(run)).toBe(JobStatus.Failed);
+    // what a restart and a cancel leave in the live counters: entries counted twice, blobs seen as duplicates
+    const stored = h.run(run.id).readStats;
+    const [partId] = Object.keys(stored.parts);
+    Object.assign(stored, { filesFound: 7, mediaFound: 5, localDuplicatesSkipped: 3, stagedFiles: 1 });
+    Object.assign(stored.parts[partId], { entries: 7, media: 5, duplicates: 3, staged: 1 });
+
+    await h.repo.requeueRun(run.id, 1);
+    expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
+    const stats = h.run(run.id).readStats;
+    expect(stats.parts[partId]).toMatchObject({
+      status: 'read',
+      passes: 1,
+      entries: 4,
+      media: 3,
+      staged: 2,
+      duplicates: 1,
+    });
+    expect(stats).toMatchObject({
+      filesFound: 4,
+      mediaFound: 3,
+      jsonFound: 1,
+      serverDuplicatesSkipped: 0,
+      localDuplicatesSkipped: 1,
+      stagedFiles: 2,
+      stagedBytes: 1100,
+      deferredFiles: 0,
+    });
+    expect(h.repo.assets).toHaveLength(2);
   });
 
   it('moves the blob to its target before the asset is created, with the same create arguments', async () => {
@@ -1052,6 +1103,33 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
       );
       expect(h.run(run.id).status).toBe(TakeoutRunStatus.Cancelled);
       expect(h.mocks.job.removeJob).toHaveBeenCalled();
+    });
+
+    it('stops showing the parts of a cancelled run as being read, and keeps the bytes they read', async () => {
+      const h = await harness();
+      const part = await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz([]));
+      const run = h.newRun({
+        status: TakeoutRunStatus.Cancelling,
+        readStats: {
+          parts: {
+            [part.id]: {
+              partId: part.id,
+              fileName: part.fileName,
+              size: 900,
+              status: 'reading',
+              passes: 1,
+              bytesRead: 700,
+            },
+          },
+        },
+      });
+      expect(
+        await cleanupCancelledRun(lifecycleOf(h), run.id, { token: null, from: [TakeoutRunStatus.Cancelling] }),
+      ).toBe(true);
+      const ps = h.run(run.id).readStats.parts[part.id];
+      expect(ps).toMatchObject({ status: 'pending', bytesRead: 700 });
+      expect(ps.finishedAt).not.toBeNull();
+      expect(h.repo.parts[0].bytesRead).toBe(700);
     });
 
     it('keeps the staging of a failed run with its size and expiry', async () => {
