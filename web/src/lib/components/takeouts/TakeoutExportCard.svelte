@@ -87,7 +87,7 @@
 
     <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
       <Text size="small" color="muted">
-        {$t('takeout_parts_found', { values: { found: exp.partCount, expected: exp.indexFileCount ?? exp.partCount } })}
+        {$t('takeout_parts_found', { values: { found: exp.partCount, expected: exp.expectedPartCount } })}
       </Text>
       <Text size="small" color="muted">{getByteUnitString(exp.totalSize, $locale)}</Text>
     </div>

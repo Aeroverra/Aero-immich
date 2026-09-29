@@ -169,7 +169,7 @@
           >{$t('takeout_parts_found', {
             values: {
               found: detail.partCount,
-              expected: detail.indexFileCount ?? detail.partCount + detail.analysis.missingParts.length,
+              expected: detail.expectedPartCount,
             },
           })}</CardTitle
         >

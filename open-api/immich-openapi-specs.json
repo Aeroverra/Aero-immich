@@ -34932,6 +34932,12 @@
           "completeness": {
             "$ref": "#/components/schemas/TakeoutCompleteness"
           },
+          "expectedPartCount": {
+            "description": "Number of parts the export should have: the parts found plus the gaps in their numbering",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
           "exportKey": {
             "description": "Timestamp of the first part, plus \"-<segment>\" when segmented",
             "type": "string"
@@ -35024,6 +35030,7 @@
           "archivesDeletedAt",
           "bytesScanned",
           "completeness",
+          "expectedPartCount",
           "exportKey",
           "exportedAt",
           "id",
@@ -35072,6 +35079,12 @@
           },
           "completeness": {
             "$ref": "#/components/schemas/TakeoutCompleteness"
+          },
+          "expectedPartCount": {
+            "description": "Number of parts the export should have: the parts found plus the gaps in their numbering",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
           },
           "exportKey": {
             "description": "Timestamp of the first part, plus \"-<segment>\" when segmented",
@@ -35150,6 +35163,7 @@
           "archivesDeletedAt",
           "bytesScanned",
           "completeness",
+          "expectedPartCount",
           "exportKey",
           "exportedAt",
           "id",

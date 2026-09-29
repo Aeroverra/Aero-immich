@@ -3506,6 +3506,8 @@ export type TakeoutExportDto = {
     /** Deprecated: bytes read from the parts by their last reads */
     bytesScanned: number;
     completeness: TakeoutCompleteness;
+    /** Number of parts the export should have: the parts found plus the gaps in their numbering */
+    expectedPartCount: number;
     /** Timestamp of the first part, plus "-<segment>" when segmented */
     exportKey: string;
     /** Timestamp of the first part */
@@ -3671,6 +3673,8 @@ export type TakeoutExportDetailDto = {
     /** Deprecated: bytes read from the parts by their last reads */
     bytesScanned: number;
     completeness: TakeoutCompleteness;
+    /** Number of parts the export should have: the parts found plus the gaps in their numbering */
+    expectedPartCount: number;
     /** Timestamp of the first part, plus "-<segment>" when segmented */
     exportKey: string;
     /** Timestamp of the first part */

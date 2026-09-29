@@ -6,7 +6,7 @@ import {
   TakeoutScanStatus,
   TakeoutSizeCheck,
 } from 'src/enum';
-import { exportReadStatus, mapAnalysis, mapPart, mapReadStats, mapRun } from 'src/services/takeout-mappers';
+import { exportReadStatus, mapAnalysis, mapExport, mapPart, mapReadStats, mapRun } from 'src/services/takeout-mappers';
 import { describe, expect, it } from 'vitest';
 
 const part = (over: Record<string, unknown> = {}) => ({
@@ -80,6 +80,30 @@ describe('takeout DTO mappers', () => {
     expect(
       exportReadStatus([part(read), part({ catalogStatus: TakeoutCatalogStatus.Error, catalogVersion: 2 })]).readStatus,
     ).toBe(TakeoutExportReadStatus.Error);
+  });
+
+  it('expects the parts found plus the numbering gaps, never the file count of the index', () => {
+    // family export: 15 parts and an index that lists 89928 files; the card said "16 of 89928 parts"
+    const parts = [
+      ...Array.from({ length: 15 }, (_, i) => part({ id: `p${i}`, partNumber: i + 1 })),
+      part({ id: 'index', segment: null, partNumber: 1, isIndex: true }),
+    ];
+    const exp = { id: 'e1', indexFileCount: 89_928, analysis: { missingParts: [] } };
+    expect(mapExport(exp, parts, null)).toMatchObject({ partCount: 15, expectedPartCount: 15, indexFileCount: 89_928 });
+
+    // parts 16 and 18 were missing at the last analysis; 16 arrived since
+    const gaps = [
+      { segment: 1, partNumber: 16, expectedName: 'takeout-20260914T211500Z-1-016.tgz' },
+      { segment: 1, partNumber: 18, expectedName: 'takeout-20260914T211500Z-1-018.tgz' },
+    ];
+    const withGaps = [...parts, part({ id: 'p17', partNumber: 17 }), part({ id: 'p16', partNumber: 16 })];
+    expect(mapExport({ ...exp, analysis: { missingParts: gaps } }, withGaps, null)).toMatchObject({
+      partCount: 17,
+      expectedPartCount: 18,
+    });
+
+    // an export that was never analysed
+    expect(mapExport({ id: 'e2', indexFileCount: null, analysis: {} }, parts, null).expectedPartCount).toBe(15);
   });
 
   it('maps the {} readStats of runs created before the upgrade to zeros', () => {

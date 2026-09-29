@@ -256,6 +256,7 @@ export const takeoutExportFactory = {
     partsRead: 0,
     scanStatus: TakeoutScanStatus.Pending,
     partCount: 16,
+    expectedPartCount: 16,
     totalSize: 785 * 10 ** 9,
     bytesScanned: 0,
     accountEmail: 'someone@example.com',

@@ -128,6 +128,17 @@ const SCAN_STATUS_OF_EXPORT: Record<TakeoutExportReadStatus, TakeoutScanStatus> 
   [TakeoutExportReadStatus.Error]: TakeoutScanStatus.Error,
 };
 
+/**
+ * The parts an export should have: the parts found plus the gaps of the last analysis that are still gaps. The index
+ * lists files, not parts, so its file count is no part count.
+ */
+export function expectedPartCount(exp: { analysis?: unknown }, parts: any[]): number {
+  const media = parts.filter((p) => !p.isIndex);
+  const gaps: Array<{ segment: number | null; partNumber: number }> = (exp.analysis as any)?.missingParts ?? [];
+  const open = gaps.filter((gap) => media.every((p) => p.segment !== gap.segment || p.partNumber !== gap.partNumber));
+  return media.length + open.length;
+}
+
 export function mapExport(exp: any, parts: any[], lastRun: any): TakeoutExportDto {
   const mediaParts = parts.filter((p) => !p.isIndex);
   const { readStatus, partsRead } = exportReadStatus(parts);
@@ -140,6 +151,7 @@ export function mapExport(exp: any, parts: any[], lastRun: any): TakeoutExportDt
     partsRead,
     scanStatus: SCAN_STATUS_OF_EXPORT[readStatus],
     partCount: mediaParts.length,
+    expectedPartCount: expectedPartCount(exp, parts),
     totalSize: parts.reduce((sum, p) => sum + Number(p.size), 0),
     bytesScanned: parts.reduce((sum, p) => sum + Number(p.bytesRead ?? 0), 0),
     accountEmail: exp.accountEmail,

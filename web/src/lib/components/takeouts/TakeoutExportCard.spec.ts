@@ -28,6 +28,15 @@ describe('TakeoutExportCard component', () => {
     expect(screen.queryByTestId('export-card-run')).not.toBeInTheDocument();
   });
 
+  it('counts the parts against the expected parts, not the files the index lists', () => {
+    // family export: 15 parts, an index listing 89928 files; the card said "16 of 89928 parts"
+    render(TakeoutExportCard, {
+      exp: takeoutExportFactory.build({ partCount: 15, expectedPartCount: 15, indexFileCount: 89_928 }),
+    });
+
+    expect(screen.getByText('15 of 15 parts')).toBeInTheDocument();
+  });
+
   it('offers Run import for a complete export without an active run', () => {
     render(TakeoutExportCard, { exp: takeoutExportFactory.build({ completeness: TakeoutCompleteness.Complete }) });
 

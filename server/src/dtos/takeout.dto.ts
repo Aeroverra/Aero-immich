@@ -334,6 +334,10 @@ const TakeoutExportSchema = z
     partsRead: z.int().min(0).describe('Media parts that were read completely'),
     scanStatus: TakeoutScanStatusSchema.meta(deprecated()),
     partCount: z.int().min(0).describe('Number of parts found'),
+    expectedPartCount: z
+      .int()
+      .min(0)
+      .describe('Number of parts the export should have: the parts found plus the gaps in their numbering'),
     totalSize: z.int().min(0).describe('Total size of the parts in bytes'),
     bytesScanned: z
       .int()
