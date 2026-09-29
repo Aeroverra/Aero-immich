@@ -2,7 +2,8 @@
 // write-behind and image decode take their bytes from one process-wide budget. FIFO order means a large request is
 // never starved by a stream of small ones. A request larger than the whole budget is admitted when nothing else is
 // held. A lease can be shared (write-behind and sampling keep the buffer of an entry alive after its reader moved on):
-// the bytes are returned when the last share is released.
+// the bytes are returned when the last share is released. A holder that does not use its bytes for a while (a paused
+// reader) can lend them to the budget and take them back at once when it continues.
 
 interface Waiter {
   bytes: number;
@@ -14,6 +15,8 @@ interface Waiter {
 
 class Grant {
   refs = 1;
+  /** the bytes are lent to the budget: others may hold them until the holder takes them back */
+  lent = false;
   constructor(
     readonly semaphore: ByteSemaphore,
     readonly bytes: number,
@@ -29,6 +32,11 @@ export class ByteLease {
     return this.grant.bytes;
   }
 
+  /** the bytes are lent to the budget (lend) and not taken back yet */
+  get lent(): boolean {
+    return this.grant.lent;
+  }
+
   /** Another handle on the same bytes; the bytes return to the budget when every handle is released */
   share(): ByteLease {
     if (this.released) {
@@ -38,6 +46,30 @@ export class ByteLease {
     return new ByteLease(this.grant);
   }
 
+  /**
+   * Lend the bytes to the budget while the holder does not use them: requests waiting for bytes may take them. The
+   * lease stays the holder's. Idempotent.
+   */
+  lend(): void {
+    if (this.released || this.grant.lent) {
+      return;
+    }
+    this.grant.lent = true;
+    this.grant.semaphore.free(this.grant.bytes);
+  }
+
+  /**
+   * Take lent bytes back. Never waits: the budget may be above its capacity until other holders release theirs,
+   * because waiting here could wait on a holder that itself waits for something this holder keeps. Idempotent.
+   */
+  reclaim(): void {
+    if (this.released || !this.grant.lent) {
+      return;
+    }
+    this.grant.lent = false;
+    this.grant.semaphore.take(this.grant.bytes);
+  }
+
   /** Idempotent per handle */
   release(): void {
     if (this.released) {
@@ -45,7 +77,7 @@ export class ByteLease {
     }
     this.released = true;
     this.grant.refs--;
-    if (this.grant.refs === 0) {
+    if (this.grant.refs === 0 && !this.grant.lent) {
       this.grant.semaphore.free(this.grant.bytes);
     }
   }
@@ -97,10 +129,16 @@ export class ByteSemaphore {
     return null;
   }
 
-  /** @internal called by the last release of a grant */
+  /** @internal called by the last release of a grant, and when a holder lends its bytes */
   free(bytes: number): void {
     this.held -= bytes;
     this.admit();
+  }
+
+  /** @internal called when a holder takes lent bytes back: at once, even above the capacity */
+  take(bytes: number): void {
+    this.held += bytes;
+    this.peak = Math.max(this.peak, this.held);
   }
 
   private fits(bytes: number): boolean {

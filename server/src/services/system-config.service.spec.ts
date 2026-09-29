@@ -547,6 +547,64 @@ describe(SystemConfigService.name, () => {
       await expect(sut.updateAdminConfig(defaults)).rejects.toBeInstanceOf(BadRequestException);
       expect(mocks.systemMetadata.set).not.toHaveBeenCalled();
     });
+
+    it('should store a cleared takeout read limit as no limit when the environment sets a default limit', async () => {
+      const takeout = defaults.takeout as { throttleMBps: number | null };
+      const envDefault = takeout.throttleMBps;
+      // IMMICH_TAKEOUT_READ_THROTTLE_MBPS=40
+      takeout.throttleMBps = 40;
+      try {
+        let stored: any = {};
+        mocks.systemMetadata.set.mockImplementation((_key, value) => {
+          stored = value;
+          return Promise.resolve();
+        });
+        mocks.systemMetadata.get.mockImplementation(() => Promise.resolve(stored));
+
+        // the admin clears the field: null, which would otherwise not be stored and bring the limit of 40 back
+        const cleared = await sut.updateAdminConfig({
+          ...defaults,
+          takeout: { ...defaults.takeout, throttleMBps: null },
+        });
+        expect(stored.takeout).toEqual({ throttleMBps: 0 });
+        expect(cleared.takeout.throttleMBps).toBe(0);
+        expect(mocks.event.emit).toHaveBeenCalledWith(
+          'ConfigUpdate',
+          expect.objectContaining({
+            newConfig: expect.objectContaining({ takeout: expect.objectContaining({ throttleMBps: 0 }) }),
+          }),
+        );
+
+        // left at the default limit: nothing is stored, the environment keeps deciding
+        const kept = await sut.updateAdminConfig({ ...defaults, takeout: { ...defaults.takeout } });
+        expect(stored.takeout).toBeUndefined();
+        expect(kept.takeout.throttleMBps).toBe(40);
+      } finally {
+        takeout.throttleMBps = envDefault;
+      }
+    });
+
+    it('should keep a cleared takeout read limit empty when no default limit is set', async () => {
+      const takeout = defaults.takeout as { throttleMBps: number | null };
+      const envDefault = takeout.throttleMBps;
+      takeout.throttleMBps = null;
+      try {
+        let stored: any = {};
+        mocks.systemMetadata.set.mockImplementation((_key, value) => {
+          stored = value;
+          return Promise.resolve();
+        });
+        mocks.systemMetadata.get.mockImplementation(() => Promise.resolve(stored));
+        const config = await sut.updateAdminConfig({
+          ...defaults,
+          takeout: { ...defaults.takeout, throttleMBps: null },
+        });
+        expect(stored.takeout).toBeUndefined();
+        expect(config.takeout.throttleMBps).toBeNull();
+      } finally {
+        takeout.throttleMBps = envDefault;
+      }
+    });
   });
 
   describe('takeout read defaults', () => {

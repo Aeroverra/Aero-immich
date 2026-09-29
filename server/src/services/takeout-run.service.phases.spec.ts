@@ -1,3 +1,4 @@
+import { getEventListeners } from 'node:events';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import {
   DeletedReimportMode,
   JobName,
   JobStatus,
+  QueueName,
   TakeoutCatalogStatus,
   TakeoutRunFileAction,
   TakeoutRunFileStatus,
@@ -1345,6 +1347,35 @@ const resumeRun = async (h: RunHarness, runId: string) => {
 const smallFiles = (count: number, seed: number) =>
   Array.from({ length: count }, (_, i) => ({ name: media(`p${i}.mp4`), data: randomBytesSeeded(900, seed + i) }));
 
+/** A run that is paused at its 10th read, on a worker whose only Takeout queue place it holds */
+const parkedHarness = async (seed: number) => {
+  const { fs, counts, hooks } = countingFs();
+  const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
+  h.sut.progressMs = 20;
+  h.sut.parkAfterMs = 100;
+  // one place: the paused run holds all of them
+  h.sut.queueConcurrency = 1;
+  h.mocks.job.getJobCounts.mockResolvedValue({ waiting: 0 } as any);
+  await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(20, seed)));
+  const run = h.newRun();
+  hooks.afterRead = () => {
+    if (counts.reads === 10) {
+      void pauseRun(h, run.id);
+    }
+  };
+  return { h, run };
+};
+
+/** The API service of a new process over the same repository */
+const bootedApi = (h: RunHarness) => {
+  const api = newTestService(TakeoutService, { takeout: h.repo as any });
+  StorageCore.setMediaLocation(h.dir);
+  api.mocks.job.queue.mockResolvedValue();
+  api.mocks.job.removeJob.mockResolvedValue();
+  api.mocks.storage.checkDiskUsage.mockResolvedValue({ available: 1e13, free: 1e13, total: 1e13 });
+  return api;
+};
+
 describe('TakeoutRunService pause and resume', () => {
   it('pauses a read at its next read, keeps its lease, and resumes the same read: each byte read once', async () => {
     const { fs, counts, hooks } = countingFs();
@@ -1452,6 +1483,64 @@ describe('TakeoutRunService pause and resume', () => {
     expect(await h.repo.resumePausedRun(run.id)).toBe(true);
     expect(await done).toBe(JobStatus.Success);
     expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Completed, leaseToken: null, hasStaging: false });
+  });
+
+  it.each([
+    ['with its event', true],
+    ['seen by the pause poll', false],
+  ])('completes a run cancelled while it is paused in finishing, %s: every file is imported', async (_name, event) => {
+    const h = await harness();
+    h.sut.progressMs = 30;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(2, 535)));
+    const run = h.newRun();
+    const cas = h.repo.setRunStatusCas.bind(h.repo);
+    vi.spyOn(h.repo, 'setRunStatusCas').mockImplementation(async (id, token, status, patch) => {
+      const ok = await cas(id, token, status, patch);
+      if (status === TakeoutRunStatus.Finishing) {
+        await pauseRun(h, id);
+      }
+      return ok;
+    });
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    await sleep(100);
+    expect(await h.repo.requestCancel(run.id)).toBe(true);
+    if (event) {
+      h.sut.onCancel({ runId: run.id });
+    }
+    expect(await done).toBe(JobStatus.Success);
+    expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Completed, leaseToken: null, hasStaging: false });
+    expect(h.repo.assets).toHaveLength(2);
+    expect(h.mocks.notification.create).toHaveBeenCalled();
+    expect(await exists(runStagingDir(h.folder, run.id))).toBe(false);
+  });
+
+  it('waits at a pause point with one wait for the whole pause, not one per poll', async () => {
+    const h = await harness();
+    h.sut.progressMs = 5;
+    await h.addPart('takeout-20260914T211500Z-1-001.tgz', buildTarGz(smallFiles(3, 545)));
+    const run = h.newRun();
+    const create = h.mocks.asset.create.getMockImplementation()!;
+    let pausedOnce = false;
+    h.mocks.asset.create.mockImplementation(async (asset: any) => {
+      const created = await create(asset);
+      if (!pausedOnce) {
+        pausedOnce = true;
+        await pauseRun(h, run.id);
+      }
+      return created;
+    });
+    const done = h.execute(run);
+    await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+    const signal: AbortSignal = (h.sut as any).attempts.get(run.id).signal;
+    await sleep(50);
+    const early = getEventListeners(signal, 'abort').length;
+    // dozens of polls later
+    await sleep(300);
+    expect(getEventListeners(signal, 'abort').length).toBe(early);
+    await resumeRun(h, run.id);
+    expect(await done).toBe(JobStatus.Success);
+    expect(h.repo.assets).toHaveLength(3);
   });
 
   it('cancels a paused run: the job stops waiting, cleans up and keeps the staging', async () => {
@@ -1584,6 +1673,72 @@ describe('TakeoutRunService pause and resume', () => {
     expect(h.run(run.id).readStats.fetchFiles).toBe(0);
     const [ps] = Object.values(h.run(run.id).readStats.parts) as any[];
     expect(ps).toMatchObject({ status: 'read', passes: 2 });
+  });
+
+  describe('a paused run that holds every place of the Takeout queue while jobs wait for one', () => {
+    it('gives its place back after the grace period, stays paused, and Resume queues it again', async () => {
+      const { h, run } = await parkedHarness(610);
+      const done = h.execute(run);
+      await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+      // longer than the grace period, but nothing waits: the job keeps its place and its open reads
+      await sleep(300);
+      expect(h.run(run.id).leaseToken).not.toBeNull();
+
+      h.mocks.job.getJobCounts.mockResolvedValue({ waiting: 1 } as any);
+      expect(await done).toBe(JobStatus.Skipped);
+      const parked = h.run(run.id);
+      expect(parked).toMatchObject({ status: TakeoutRunStatus.Paused, leaseToken: null, heartbeatAt: null });
+      expect(mapRun(parked)).toMatchObject({ pausedFrom: TakeoutRunStatus.Reading, pausedAt: expect.any(String) });
+      expect(Object.values(parked.readStats.parts).map((ps: any) => ps.status)).toEqual(['pending']);
+      expect(h.repo.parts[0].catalogStatus).toBe(TakeoutCatalogStatus.Partial);
+      expect(h.mocks.job.getJobCounts).toHaveBeenCalledWith(QueueName.Takeout);
+
+      // like a paused run after a restart: Resume queues it again, and the next attempt completes it
+      const api = bootedApi(h);
+      const resumed = await api.sut.resumeRun({ user: { id: userId } } as any, run.id);
+      expect(resumed).toMatchObject({ status: TakeoutRunStatus.Queued, pausedAt: null });
+      expect(api.mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.TakeoutRun,
+        data: { runId: run.id, attempt: 1 },
+      });
+      expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
+      expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+      expect(h.repo.assets).toHaveLength(20);
+    });
+
+    it('keeps its place while not every place of the queue is paused', async () => {
+      const { h, run } = await parkedHarness(640);
+      h.sut.queueConcurrency = 2;
+      h.mocks.job.getJobCounts.mockResolvedValue({ waiting: 3 } as any);
+      const done = h.execute(run);
+      await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+      await sleep(300);
+      expect(h.run(run.id).leaseToken).not.toBeNull();
+      await resumeRun(h, run.id);
+      expect(await done).toBe(JobStatus.Success);
+      expect(h.run(run.id).status).toBe(TakeoutRunStatus.Completed);
+    });
+
+    it('queues the run again when it is resumed while it gives its place back', async () => {
+      const { h, run } = await parkedHarness(670);
+      const finish = h.repo.finishRunCas.bind(h.repo);
+      const spy = vi.spyOn(h.repo, 'finishRunCas').mockImplementation(async (id, from, token, status, patch) => {
+        if (status === TakeoutRunStatus.Paused) {
+          // the user resumes while the job still holds the lease: the live-job resume wins the check-and-set
+          expect(await h.repo.resumePausedRun(id)).toBe(true);
+        }
+        return finish(id, from, token, status, patch);
+      });
+      const done = h.execute(run);
+      await until(() => h.run(run.id).status === TakeoutRunStatus.Paused);
+      h.mocks.job.getJobCounts.mockResolvedValue({ waiting: 1 } as any);
+      expect(await done).toBe(JobStatus.Skipped);
+      expect(h.run(run.id)).toMatchObject({ status: TakeoutRunStatus.Queued, leaseToken: null, attempt: 1 });
+      expect(h.mocks.job.queue).toHaveBeenCalledWith({ name: JobName.TakeoutRun, data: { runId: run.id, attempt: 1 } });
+      spy.mockRestore();
+      expect(await h.execute({ id: run.id, attempt: 1 })).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(20);
+    });
   });
 
   it('applies changed read settings to a running run: reader count, readahead and the read limit', async () => {

@@ -113,4 +113,44 @@ describe(ByteSemaphore.name, () => {
     expect(sem.tryAcquire(40)).not.toBeNull();
     expect(sem.peak).toBe(70);
   });
+
+  it('lends the bytes of a lease to waiting requests and takes them back at once, above the capacity', async () => {
+    const sem = new ByteSemaphore(2);
+    const paused = await sem.acquire(1);
+    const other = await sem.acquire(1);
+    const waiting = sem.acquire(1);
+    let granted = false;
+    void waiting.then(() => (granted = true));
+    await Promise.resolve();
+    expect(granted).toBe(false);
+
+    paused.lend();
+    paused.lend();
+    const lent = await waiting;
+    expect(paused.lent).toBe(true);
+    expect(sem.held).toBe(2);
+
+    // the holder continues: it never waits, the budget is over its capacity until someone releases
+    paused.reclaim();
+    paused.reclaim();
+    expect(paused.lent).toBe(false);
+    expect(sem.held).toBe(3);
+    expect(sem.tryAcquire(1)).toBeNull();
+    lent.release();
+    other.release();
+    expect(sem.held).toBe(1);
+    expect(sem.tryAcquire(1)).not.toBeNull();
+  });
+
+  it('frees nothing twice when a lent lease is released', async () => {
+    const sem = new ByteSemaphore(1);
+    const lease = await sem.acquire(1);
+    lease.lend();
+    const next = await sem.acquire(1);
+    lease.release();
+    lease.reclaim();
+    expect(sem.held).toBe(1);
+    next.release();
+    expect(sem.held).toBe(0);
+  });
 });

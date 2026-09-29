@@ -158,8 +158,24 @@ export class LeaseLost extends Error {
   }
 }
 
+/**
+ * A run paused for long gives its job's place in the Takeout queue to jobs that wait for one: the attempt stops like a
+ * paused run whose job ended in a restart, and Resume queues the run again
+ */
+export class RunParked extends Error {
+  constructor() {
+    super('parked while paused');
+    this.name = 'RunParked';
+  }
+}
+
 export function asRunReason(error: unknown): Error {
-  if (error instanceof RunFailure || error instanceof CancelReason || error instanceof LeaseLost) {
+  if (
+    error instanceof RunFailure ||
+    error instanceof CancelReason ||
+    error instanceof LeaseLost ||
+    error instanceof RunParked
+  ) {
     return error;
   }
   return new RunFailure(messageOf(error));
@@ -1203,6 +1219,11 @@ export interface ReaderToken {
   hold?: Gate;
   /** the write slot of the streamed write in progress, given back while the reader is paused */
   writeSlot?: WriteSlot | null;
+  /**
+   * the process reader slot of the part in progress (readerPool): lent to the other runs of the process while this
+   * reader is paused, taken back at once when it continues (ReadContext.syncReaderSlot)
+   */
+  readerSlot?: ByteLease | null;
 }
 
 /** The read settings an admin can change while runs read (system config `takeout`) */
@@ -1438,20 +1459,51 @@ export class ReadContext {
   /** Hold a reader back (a lowered reader count) or let it continue */
   setHold(token: ReaderToken, held: boolean): void {
     token.hold ??= new Gate();
-    const changed = held ? token.hold.close() : token.hold.open() > 0;
+    // decided on the state, not on how long the gate was closed (0 ms when it closed and opened in one millisecond)
+    const changed = held ? token.hold.close() : !token.hold.isOpen;
     if (!changed) {
       return;
     }
     if (held) {
       token.writeSlot?.suspend();
+    } else {
+      token.hold.open();
     }
+    this.syncReaderSlot(token);
     this.stats.refreshHolds();
   }
 
-  /** The run paused: write slots go back to the queue, pending rows are stored, parts show as paused */
+  /** a reader of this run is paused: the run is paused, or a lowered reader count holds it back */
+  isReaderPaused(token: ReaderToken): boolean {
+    return !this.pause.isOpen || !(token.hold?.isOpen ?? true);
+  }
+
+  /**
+   * A paused reader lends its process reader slot to the other runs (their parts start or continue while this run is
+   * paused) and takes it back at once when it continues. It never waits for it: the process may be above its reader
+   * count for a while, but a reader that continues never waits on a reader of another run that waits for memory this
+   * one holds (its readahead and buffers stay allocated while it is paused).
+   */
+  syncReaderSlot(token: ReaderToken): void {
+    const slot = token.readerSlot;
+    if (!slot) {
+      return;
+    }
+    if (this.isReaderPaused(token)) {
+      slot.lend();
+    } else {
+      slot.reclaim();
+    }
+  }
+
+  /**
+   * The run paused: process reader slots are lent to the other runs, write slots go back to the queue, pending rows
+   * are stored, parts show as paused
+   */
   private onPaused(): void {
     for (const token of this.tokens) {
       token.writeSlot?.suspend();
+      this.syncReaderSlot(token);
     }
     for (const batch of this.batches) {
       batch.flushNow();
@@ -1460,6 +1512,9 @@ export class ReadContext {
   }
 
   private onResumed(): void {
+    for (const token of this.tokens) {
+      this.syncReaderSlot(token);
+    }
     this.stats.refreshHolds(false);
   }
 
@@ -1686,6 +1741,8 @@ export class EntryBatch {
   private lastFlush = Date.now();
   private outstanding: Promise<void> | null = null;
   private error: unknown = null;
+  /** finish or settle took over: no flush starts on its own any more */
+  private closed = false;
   count = 0;
 
   constructor(
@@ -1697,9 +1754,15 @@ export class EntryBatch {
 
   /** The run paused: store the rows read so far now instead of at the next push (a restart then loses none) */
   flushNow(): void {
-    if (this.rows.length > 0 && !this.outstanding && !this.error) {
-      this.startFlush();
+    if (this.closed || this.error || this.rows.length === 0) {
+      return;
     }
+    if (this.outstanding) {
+      // right after the flush in progress: the rows pushed meanwhile are stored too
+      void this.outstanding.then(() => this.flushNow());
+      return;
+    }
+    this.startFlush();
   }
 
   async push(row: EntryRow): Promise<void> {
@@ -1715,15 +1778,21 @@ export class EntryBatch {
       this.rows.length >= limits.flushRows ||
       this.jsonBytes >= limits.flushJsonBytes ||
       this.entryBytes >= limits.flushEntryBytes ||
-      Date.now() - this.lastFlush >= limits.flushIntervalMs;
+      Date.now() - this.lastFlush >= limits.flushIntervalMs ||
+      // an entry that completed while its reader is paused (a read in flight, buffered readahead): stored at once,
+      // since no next push may come for as long as the pause lasts
+      this.ctx.isReaderPaused(this.token);
     if (!full) {
       return;
     }
-    if (this.outstanding) {
+    // a flush started meanwhile (flushNow) is waited for too: at most one flush is outstanding
+    while (this.outstanding) {
       await this.outstanding;
       this.throwIfFailed();
     }
-    this.startFlush();
+    if (this.rows.length > 0) {
+      this.startFlush();
+    }
   }
 
   private throwIfFailed() {
@@ -1775,7 +1844,8 @@ export class EntryBatch {
   /** The last rows and `commit` (the part state) in one transaction */
   async finish(commit: (rows: any[]) => Promise<void>): Promise<void> {
     this.ctx.batches.delete(this);
-    if (this.outstanding) {
+    this.closed = true;
+    while (this.outstanding) {
       await this.outstanding;
     }
     this.throwIfFailed();
@@ -1804,7 +1874,8 @@ export class EntryBatch {
   /** On failure: outstanding and pending rows are flushed (valid rows help the resume), unless detached */
   async settle(): Promise<void> {
     this.ctx.batches.delete(this);
-    if (this.outstanding) {
+    this.closed = true;
+    while (this.outstanding) {
       await this.outstanding.catch(noop);
     }
     const rows = this.rows;
@@ -1876,7 +1947,7 @@ async function acquireWriteSlot(ctx: ReadContext, token: ReaderToken | undefined
   const slot = new WriteSlot(ctx.resources.writes, await ctx.resources.writes.acquireSlot(signal));
   if (token) {
     token.writeSlot = slot;
-    if (!ctx.pause.isOpen || !(token.hold?.isOpen ?? true)) {
+    if (ctx.isReaderPaused(token)) {
       // granted while the reader is paused: no byte flows until it continues
       slot.suspend();
     }
@@ -2353,10 +2424,11 @@ function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
  * pool follows it while it runs (the admin changed the reader count). A raised count starts more workers at once; a
  * lowered one holds the newest busy workers back at their next read (their files stay open, ReadContext.setHold) and
  * lets a worker that finishes its item end instead of taking a new one, so no new item starts above the count and a
- * held worker continues as soon as an older one ends. The first rejection aborts the run's read signal with that
- * reason; after an abort the workers get `capMs` to settle, and a worker still inside a read is detached: it writes
- * nothing more and its file handle closes when the read returns. Then the run's writes are drained (queued ones dropped
- * after an abort) and the first failure is rethrown.
+ * held worker continues as soon as an older one ends. While the run is paused no item starts, and a paused or held
+ * worker lends its process reader slot to the other runs (ReadContext.syncReaderSlot). The first rejection aborts the
+ * run's read signal with that reason; after an abort the workers get `capMs` to settle, and a worker still inside a
+ * read is detached: it writes nothing more and its file handle closes when the read returns. Then the run's writes are
+ * drained (queued ones dropped after an abort) and the first failure is rethrown.
  */
 export async function readerPool<T>(
   ctx: ReadContext,
@@ -2393,27 +2465,38 @@ export async function readerPool<T>(
   };
 
   const work = async (w: PoolWorker) => {
-    while (!ctx.readAbort.signal.aborted && next < items.length) {
+    const signal = ctx.readAbort.signal;
+    while (!signal.aborted && next < items.length) {
       if (alive() > target()) {
         // the count was lowered: this worker ends instead of starting a new item
         return;
       }
+      if (!ctx.pause.isOpen) {
+        // a paused run starts no item: the worker waits here holding nothing (no process slot, file or memory)
+        await ctx.pause.wait(signal).catch(noop);
+        continue;
+      }
       const item = items[next++];
       w.busy = order++;
-      let slot: ByteLease | null = null;
       try {
-        slot = await ctx.resources.readers.acquire(1, ctx.readAbort.signal);
+        w.token.readerSlot = await ctx.resources.readers.acquire(1, signal);
+        // paused or held back while it waited for the slot: lent until the reader continues
+        ctx.syncReaderSlot(w.token);
         // more workers start once this one has its process slot: items take their slots in item order
         rebalance();
+        // paused while it waited for the slot: the item starts after the resume, so no file is opened and no memory
+        // is taken while paused
+        await ctx.pause.wait(signal);
         await fn(item, w.token);
       } catch (error) {
-        if (!ctx.readAbort.signal.aborted) {
+        if (!signal.aborted) {
           firstError ??= error;
           ctx.readAbort.abort(asRunReason(error));
         }
         return;
       } finally {
-        slot?.release();
+        w.token.readerSlot?.release();
+        w.token.readerSlot = null;
         w.busy = null;
         ctx.setHold(w.token, false);
       }

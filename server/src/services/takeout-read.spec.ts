@@ -14,6 +14,7 @@ import {
   ReadLimits,
   ReadPartRow,
   ReadStatsTracker,
+  ReaderToken,
   RunFailure,
   SpaceBudget,
   WriteQueue,
@@ -1282,6 +1283,152 @@ describe('pause (the run gate)', () => {
     expect(h.ctx.readAbort.signal.reason.message).toMatch(/stalled/);
   });
 
+  it('lends its process reader slots to another run while paused, and takes them back at once on resume', async () => {
+    const { fs, byFile, hooks } = countingFs();
+    const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1, maxReaders: 2 } });
+    h.ctx.applySettings({ readers: 2, readaheadDepth: 1 });
+    const parts: ReadPartRow[] = [];
+    for (const n of [1, 2]) {
+      parts.push(
+        await addPart(
+          h,
+          `takeout-20260914T211500Z-1-00${n}.tgz`,
+          buildTarGz([{ name: media(`v${n}.mp4`), data: randomBytesSeeded(40 * KiB, 420 + n) }]),
+          n,
+        ),
+      );
+    }
+    let paused = false;
+    hooks.afterRead = () => {
+      if (paused || byFile.size < 2 || !byFile.values().every((file) => file.reads >= 2)) {
+        return;
+      }
+      paused = true;
+      h.ctx.pause.close();
+    };
+    const reading = readAll(h, parts, 2);
+    await until(() => !h.ctx.pause.isOpen);
+    // both readers are paused in the middle of their parts; another run of the process gets both slots
+    const other = await withDeadline(
+      Promise.all([h.resources.readers.acquire(1), h.resources.readers.acquire(1)]),
+      1000,
+      () => new Error('reader slots held while paused'),
+    );
+
+    // the paused readers continue at once, without waiting for the slots the other run holds now
+    h.ctx.pause.open();
+    await withDeadline(reading, 3000, () => new Error('the resumed readers waited for reader slots'));
+    for (const part of parts) {
+      expect(h.ctx.stats.stats.parts[part.id]).toMatchObject({ status: 'read', passes: 1, bytesRead: part.size });
+    }
+    expect(h.resources.readers.held).toBe(2);
+    for (const lease of other) {
+      lease.release();
+    }
+    expect(h.resources.readers.held).toBe(0);
+  });
+
+  it('starts no part while paused, not even one whose reader slot is granted during the pause', async () => {
+    const h = await harness({ limits: { maxReaders: 1 } });
+    h.ctx.applySettings({ readers: 1, readaheadDepth: 2 });
+    const started: number[] = [];
+    const finish = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    // another run holds the only process reader slot
+    const other = await h.resources.readers.acquire(1);
+    const pool = readerPool(
+      h.ctx,
+      [0, 1],
+      () => h.ctx.readers,
+      async (item) => {
+        started.push(item);
+        await finish[item].promise;
+      },
+    );
+    await sleep(20);
+    expect(started).toEqual([]);
+
+    h.ctx.pause.close();
+    other.release();
+    await sleep(30);
+    // granted while paused: lent again at once, and the part does not start (no file, no memory)
+    expect(started).toEqual([]);
+    expect(h.resources.readers.held).toBe(0);
+
+    h.ctx.pause.open();
+    await until(() => started.length === 1);
+    expect(h.resources.readers.held).toBe(1);
+
+    // a part that ends while the run is paused: its worker takes no new one until the resume
+    h.ctx.pause.close();
+    expect(h.resources.readers.held).toBe(0);
+    finish[0].resolve();
+    await sleep(30);
+    expect(started).toEqual([0]);
+    expect(h.resources.readers.held).toBe(0);
+
+    h.ctx.pause.open();
+    await until(() => started.length === 2);
+    finish[1].resolve();
+    await pool;
+    expect(h.resources.readers.held).toBe(0);
+  });
+
+  it('stores the rows of entries that complete after the pause at once, also behind a flush in progress', async () => {
+    const h = await harness({ limits: { flushRows: 2 } });
+    const token: ReaderToken = { detached: false };
+    const batch = new EntryBatch(h.ctx, token);
+    const row = (seq: number) =>
+      ({
+        exportId: h.exportId,
+        partId: 'p',
+        seq,
+        path: `a${seq}`,
+        size: 1,
+        mtime: null,
+        kind: 'other',
+        checksum: null,
+        json: null,
+        jsonError: null,
+        readError: null,
+        width: null,
+        height: null,
+        sample: null,
+        sampleSkipped: null,
+        endOffset: null,
+      }) as any;
+    const stored = () => h.repo.entries.filter((e) => e.partId === 'p').length;
+    const insert = h.repo.insertEntries.bind(h.repo);
+    // the flushes wait for these, in order
+    const slow = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
+    const waits = [...slow];
+    vi.spyOn(h.repo, 'insertEntries').mockImplementation(async (rows) => {
+      await waits.shift()?.promise;
+      return insert(rows);
+    });
+    try {
+      // rows 0 and 1 fill the batch: their flush is in progress; row 2 waits for the next one
+      await batch.push(row(0));
+      await batch.push(row(1));
+      await batch.push(row(2));
+
+      // the pause asks for row 2 while the flush of rows 0 and 1 is outstanding: it is stored right after it
+      h.ctx.pause.close();
+      slow[0].resolve();
+      await until(() => stored() === 2);
+      slow[1].resolve();
+      await until(() => stored() === 3);
+
+      // an entry that completes while paused (a read in flight at the pause) is stored at once
+      await batch.push(row(3));
+      await until(() => stored() === 4);
+      h.ctx.pause.open();
+      await batch.finish((rows) => insert(rows));
+      expect(stored()).toBe(4);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('stops waiting at the gate on cancel', async () => {
     const { fs, counts } = countingFs();
     const h = await harness({ fs, limits: { readChunk: 1 * KiB, readaheadDepth: 1 } });
@@ -1374,6 +1521,32 @@ describe('reader count changes (live settings)', () => {
     }
     await pool;
     expect(started).toEqual([0, 1, 2, 3]);
+  });
+
+  it('ends a hold that begins and ends within the same millisecond, and lends the slot of a held reader', async () => {
+    const h = await harness();
+    const token: ReaderToken = { detached: false, readerSlot: await h.resources.readers.acquire(1) };
+    h.ctx.tokens.add(token);
+    const ps = h.ctx.stats.part({ id: 'p1', fileName: 'a.tgz', size: 100, segment: null, partNumber: 1 } as any);
+    h.ctx.stats.beginPass(ps, newReadMeter(), true, token);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    try {
+      h.ctx.setHold(token, true);
+      expect(ps.status).toBe('paused');
+      h.ctx.setHold(token, false);
+      expect(ps.status).toBe('reading');
+      expect(token.hold!.isOpen).toBe(true);
+
+      // a held reader lends its process reader slot to the other runs, and takes it back when it continues
+      h.ctx.setHold(token, true);
+      expect(token.readerSlot!.lent).toBe(true);
+      expect(h.resources.readers.held).toBe(0);
+      h.ctx.setHold(token, false);
+      expect(token.readerSlot!.lent).toBe(false);
+      expect(h.resources.readers.held).toBe(1);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it('shows a held part as paused and reads every part once', async () => {

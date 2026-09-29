@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { statfs, utimes } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
+import { TAKEOUT_QUEUE_CONCURRENCY } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
 import { LockableProperty } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
@@ -61,6 +62,7 @@ import {
   ReadStatsTracker,
   RecountEntry,
   RunFailure,
+  RunParked,
   asRunReason,
   catalogUsable,
   fetchEntries,
@@ -121,6 +123,10 @@ const STATFS_REFRESH_MS = 10_000;
 const TICK_SETTLE_CAP_MS = 2000;
 // a cancel whose run is held by another live worker is looked at again once that lease could have expired
 const LEASE_RETRY_DELAY_MS = 70_000;
+// a run paused this long gives its place in the Takeout queue back when every place is paused and jobs wait
+const PARK_AFTER_MS = 10 * 60_000;
+// a look at the Takeout queue that takes longer is given up (a pause point waits for it)
+const QUEUE_LOOK_CAP_MS = 5000;
 const TERMINAL_ROW_STATUSES = new Set<string>([
   TakeoutRunFileStatus.Done,
   TakeoutRunFileStatus.Skipped,
@@ -186,6 +192,11 @@ export class TakeoutRunService extends BaseService {
   private liveSettings: LiveReadSettings | null = null;
   /** how often progress is written and the stall watchdog and the pause fallback look (tests shorten it) */
   progressMs = PROGRESS_MS;
+  /** how long every place of the Takeout queue may be held by paused runs while jobs wait for one (parkIfBlocking) */
+  parkAfterMs = PARK_AFTER_MS;
+  /** the jobs the Takeout queue runs at once on this worker (QueueService) */
+  queueConcurrency = TAKEOUT_QUEUE_CONCURRENCY;
+  private parking = false;
   /** overridable in tests: small limits, own process resources, fault-injecting file systems */
   readLimits: ReadLimits = DEFAULT_READ_LIMITS;
   processResources: ProcessResources | null = null;
@@ -328,38 +339,110 @@ export class TakeoutRunService extends BaseService {
 
   /**
    * A safe point outside the reads (between phases, groups, rotated originals): while the run is paused the attempt
-   * waits here, holding its lease; a cancel or a lost lease ends the wait. `checkAbort: false` (finishing, which a
-   * cancel does not stop) only waits. The wait looks at the status itself too, so a resume whose event got lost is
-   * seen also when the progress tick is stopped (finishing).
+   * waits here, holding its lease; a cancel or a lost lease ends the wait. With `checkAbort: false` (finishing, which a
+   * cancel does not stop) a cancel only ends the wait: finishing continues and the run completes (finishRunCas takes a
+   * cancelling run). The wait looks at the status itself too, so a resume whose event got lost is seen also when the
+   * progress tick is stopped (finishing).
    */
   private async pausePoint(a: Attempt, { checkAbort = true }: { checkAbort?: boolean } = {}) {
     if (checkAbort) {
       this.throwIfAborted(a);
     }
-    if (a.pause.isOpen) {
+    if (a.pause.isOpen || this.cancelledWhileFinishing(a, checkAbort)) {
       return;
     }
     await this.persistProgress(a).catch(() => {});
+    // one wait on the gate for as long as it stays closed, shared by the polls: a wait per poll would leave a waiter
+    // on the gate and a listener on the signal every poll for as long as the pause lasts
+    let resumed: Promise<void> | null = null;
     while (!a.pause.isOpen) {
+      if (!resumed) {
+        const wait: Promise<void> = a.pause.wait(a.signal).finally(() => {
+          if (resumed === wait) {
+            resumed = null;
+          }
+        });
+        wait.catch(() => {});
+        resumed = wait;
+      }
       let timer: NodeJS.Timeout | undefined;
       const poll = new Promise<void>((resolve) => {
         timer = setTimeout(resolve, this.progressMs);
       });
       try {
-        await Promise.race([a.pause.wait(a.signal), poll]);
+        await Promise.race([resumed, poll]);
+      } catch (error) {
+        // the signal aborted: a cancel, a lost lease or a park
+        if (this.cancelledWhileFinishing(a, checkAbort)) {
+          return;
+        }
+        throw error;
       } finally {
         clearTimeout(timer);
       }
       if (a.pause.isOpen) {
         break;
       }
+      await this.parkIfBlocking(a);
       const { run, read } = await this.readStatus(a);
       if (!run || !TAKEOUT_LEASED_RUN_STATUSES.includes(run.status)) {
         const reason = run?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost();
         a.controller.abort(reason);
+        if (this.cancelledWhileFinishing(a, checkAbort)) {
+          return;
+        }
         throw reason;
       }
       this.syncPause(a, run, read);
+    }
+  }
+
+  /** finishing (a pause point with `checkAbort: false`) is not stopped by a cancel: the run completes */
+  private cancelledWhileFinishing(a: Attempt, checkAbort: boolean): boolean {
+    return !checkAbort && a.signal.aborted && a.signal.reason instanceof CancelReason;
+  }
+
+  /**
+   * Every attempt holds a place in the Takeout queue, a paused one too, so that it can continue its open reads (a tgz
+   * part is never read twice). When every place of this worker is held by an attempt paused for longer than
+   * `parkAfterMs` and other Takeout jobs wait for a place (another user's import, a scan, an analysis), the attempt
+   * paused longest gives its place back (parkRun): its job ends like after a restart while paused, and Resume queues
+   * the run again (a zip part continues at its next entry, a tgz part is read again from byte 0).
+   */
+  private async parkIfBlocking(a: Attempt): Promise<void> {
+    if (this.parking || a.pause.isOpen || a.signal.aborted) {
+      return;
+    }
+    const paused = this.attempts
+      .values()
+      .filter((other) => !other.pause.isOpen && !other.signal.aborted)
+      .toArray();
+    if (paused.length < this.queueConcurrency) {
+      return;
+    }
+    const since = (other: Attempt) => other.pause.closedAt ?? Infinity;
+    const longest = paused.toSorted((x, y) => since(x) - since(y))[0];
+    if (longest !== a || Date.now() - since(a) < this.parkAfterMs) {
+      return;
+    }
+    this.parking = true;
+    try {
+      const { waiting } = await withDeadline(
+        this.jobRepository.getJobCounts(QueueName.Takeout),
+        QUEUE_LOOK_CAP_MS,
+        () => new Error('no answer'),
+      );
+      if (waiting > 0 && !a.pause.isOpen && !a.signal.aborted) {
+        this.logger.log(
+          `Takeout run ${a.runId}: paused for ${Math.round((Date.now() - since(a)) / 60_000)} min while ${waiting} ` +
+            `Takeout job(s) wait for a place in the queue; it gives its place back, Resume queues it again`,
+        );
+        a.controller.abort(new RunParked());
+      }
+    } catch (error) {
+      this.logger.warn(`Takeout run ${a.runId}: could not look at the Takeout queue: ${messageOf(error)}`);
+    } finally {
+      this.parking = false;
     }
   }
 
@@ -444,8 +527,9 @@ export class TakeoutRunService extends BaseService {
     };
     this.attempts.set(runId, a);
 
+    let renewing: Promise<void> | null = null;
     const lease = setInterval(() => {
-      void this.takeoutRepository
+      const renewal: Promise<void> = this.takeoutRepository
         .takeLease(runId, token)
         .then(async (held) => {
           if (held) {
@@ -455,8 +539,19 @@ export class TakeoutRunService extends BaseService {
           const current = await this.takeoutRepository.getRun(runId);
           controller.abort(current?.status === TakeoutRunStatus.Cancelling ? new CancelReason() : new LeaseLost());
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          if (renewing === renewal) {
+            renewing = null;
+          }
+        });
+      renewing = renewal;
     }, LEASE_RENEW_MS);
+    // before the job releases a paused run's lease: a renewal that ran after the release would take it again
+    const stopLease = async () => {
+      clearInterval(lease);
+      await settleWithin(renewing, TICK_SETTLE_CAP_MS);
+    };
     let inflight: Promise<void> | null = null;
     const progress = setInterval(() => {
       // the stall watchdog (I9) runs on every tick, even while an earlier tick still waits for the database
@@ -537,6 +632,11 @@ export class TakeoutRunService extends BaseService {
           from: [TakeoutRunStatus.Cancelling, ...TAKEOUT_LEASED_RUN_STATUSES],
           readStats: this.snapshotStats(a),
         });
+        return JobStatus.Skipped;
+      }
+      if (reason instanceof RunParked) {
+        await stopLease();
+        await this.parkRun(a);
         return JobStatus.Skipped;
       }
       await this.failRun(a, reason);
@@ -1418,6 +1518,64 @@ export class TakeoutRunService extends BaseService {
     this.albumCache.delete(runId);
   }
 
+  // ---------- parking a paused run (parkIfBlocking) ----------
+
+  /**
+   * The paused run gives its queue place back: it stays paused, as after a restart while paused (its lease is released,
+   * its parts wait), and Resume queues it again. Resumed or cancelled while the attempt stopped: queued again now, or
+   * cleaned up like any cancel.
+   */
+  private async parkRun(a: Attempt) {
+    const runId = a.runId;
+    try {
+      // the job stops like after a failure: a file taken out of staging for an asset goes back to it
+      await reclaimRunTargets(this.lifecycle, runId, a.staging, 'stage');
+    } catch (error) {
+      this.logger.warn(`Takeout run ${runId}: reclaim failed, the next attempt repairs it: ${messageOf(error)}`);
+    }
+    await this.takeoutRepository.updatePartsOfRun(runId).catch(() => {});
+    const readStats = await stopReadingParts(this.lifecycle, this.snapshotStats(a));
+    // the progress write keeps the pause the API wrote (pausedAt, pausedFrom): Resume reads it
+    await this.takeoutRepository
+      .updateRunIfLeased(runId, a.token, {
+        readStats: readStats as unknown as object,
+        archiveBytesTotal: this.archiveTotal(a),
+        archiveBytesRead: Math.min(a.stats.covered(), this.archiveTotal(a)),
+      })
+      .catch(() => false);
+    const parked = await this.takeoutRepository
+      .finishRunCas(runId, [TakeoutRunStatus.Paused], a.token, TakeoutRunStatus.Paused, { heartbeatAt: null })
+      .catch(() => false);
+    if (parked) {
+      await emitRun(this.lifecycle, runId);
+      return;
+    }
+    const current = await this.takeoutRepository.getRun(runId);
+    if (current?.status === TakeoutRunStatus.Cancelling) {
+      await cleanupCancelledRun(this.lifecycle, runId, {
+        token: a.token,
+        from: [TakeoutRunStatus.Cancelling],
+        readStats: this.snapshotStats(a),
+      });
+      return;
+    }
+    if (current && current.leaseToken === a.token && TAKEOUT_RUNNING_RUN_STATUSES.includes(current.status)) {
+      // resumed while the attempt stopped: the next attempt continues it, like a Resume after a restart
+      const attempt = current.attempt + 1;
+      const requeued = await this.takeoutRepository.finishRunCas(
+        runId,
+        TAKEOUT_RUNNING_RUN_STATUSES,
+        a.token,
+        TakeoutRunStatus.Queued,
+        { heartbeatAt: null, attempt },
+      );
+      if (requeued) {
+        await this.jobRepository.queue({ name: JobName.TakeoutRun, data: { runId, attempt } });
+        await emitRun(this.lifecycle, runId);
+      }
+    }
+  }
+
   // ---------- failure (single-pass design 10.2) ----------
 
   private async failRun(a: Attempt, reason: Error) {
@@ -1522,6 +1680,8 @@ export class TakeoutRunService extends BaseService {
     }
     // and when the TakeoutRunPause server event did not
     this.syncPause(a, run, read);
+    // a paused attempt waiting in its reads never reaches a pause point
+    await this.parkIfBlocking(a);
     const now = Date.now();
     if (a.ctx && now - a.lastStatfs >= STATFS_REFRESH_MS) {
       a.lastStatfs = now;

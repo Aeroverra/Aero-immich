@@ -401,6 +401,77 @@ describe(FileSource.name, () => {
     }
   });
 
+  it('does not count a pause against the in-place retry budget of a streak of transport errors', async () => {
+    const fs = new FakeFs(data);
+    const clock = new FakeClock();
+    const gate = new Gate();
+    let failures = 0;
+    fs.onRead = ({ pos }) => {
+      if (pos !== 0 || failures >= 2) {
+        return;
+      }
+      failures++;
+      if (failures === 1) {
+        // the share answers EIO, and the user pauses the run
+        gate.close();
+      }
+      throw errno('EIO');
+    };
+    const src = await FileSource.open('x', { fs, clock, gate, chunk: 1000, depth: 1, retryBudgetMs: 600_000 });
+    src.setRange(0, data.length);
+    const first = src.next();
+    for (let i = 0; i < 10; i++) {
+      await tick();
+    }
+    // the retry waits at the closed gate; the run stays paused for longer than the retry budget
+    expect(fs.reads).toBe(1);
+    clock.t += 15 * 60_000;
+    gate.open();
+    // one more EIO after the resume is retried in place, like any other in the streak
+    expect(await first).toEqual(data.subarray(0, 1000));
+    expect(fs.reads).toBe(3);
+    expect(src.meter.transportRetries).toBe(2);
+    expect(await readAll(src)).toEqual(data.subarray(1000));
+    src.destroy();
+  });
+
+  it('takes no throttle tokens for readahead that a seek or a destroy cancelled while it waited', async () => {
+    const data = randomBytesSeeded(40_000, 12);
+    // a bucket whose debt is never paid back while the test looks: every read after the first waits in it
+    const throttle = new ReadThrottle(1, { now: () => 0, setTimeout: () => 0, clearTimeout: () => {} });
+    const src = await FileSource.open('x', { fs: new FakeFs(data), chunk: 1000, depth: 4, throttle });
+    src.setRange(0, data.length);
+    expect(await src.next()).toEqual(data.subarray(0, 1000));
+    await tick();
+    expect(throttle.waiting).toBe(4);
+
+    // a zip seek past the readahead: the reads that waited for the throttle leave its queue without their bytes
+    src.seek(20_000);
+    await tick();
+    expect(throttle.waiting).toBe(0);
+    const next = src.next();
+    await tick();
+    expect(throttle.waiting).toBe(4);
+    expect(throttle.passed).toBe(1000);
+
+    // lifting the limit lets the 4 waiting reads through: the bytes of the cancelled ones are not among them
+    throttle.setRate(null);
+    expect(throttle.passed).toBe(1000 + 4000);
+    expect(await next).toEqual(data.subarray(20_000, 21_000));
+
+    throttle.setRate(1);
+    await throttle.take(1_000_000);
+    const slow = await FileSource.open('x', { fs: new FakeFs(data), chunk: 1000, depth: 2, throttle });
+    const pending = slow.readAt(0, 1000);
+    pending.catch(() => {});
+    await tick();
+    expect(throttle.waiting).toBe(1);
+    slow.destroy(new Error('stopped'));
+    await expect(pending).rejects.toThrow('stopped');
+    expect(throttle.waiting).toBe(0);
+    src.destroy();
+  });
+
   it('lowers its readahead at once when the live depth drops', async () => {
     const data = randomBytesSeeded(40_000, 11);
     const fs = new FakeFs(data);

@@ -770,7 +770,8 @@ export class TakeoutRepository {
       .set({
         ...rest,
         ...(readStats !== undefined && {
-          readStats: sql<object>`${JSON.stringify(readStats)}::jsonb || jsonb_strip_nulls(jsonb_build_object('pausedAt', "readStats"->'pausedAt', 'pausedFrom', "readStats"->'pausedFrom'))`,
+          // the object itself: the driver serializes a jsonb parameter, so a JSON string would be stored as a string
+          readStats: sql<object>`${readStats}::jsonb || jsonb_strip_nulls(jsonb_build_object('pausedAt', "readStats"->'pausedAt', 'pausedFrom', "readStats"->'pausedFrom'))`,
         }),
         updatedAt: sql`now()`,
       })

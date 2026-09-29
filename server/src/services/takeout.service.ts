@@ -879,7 +879,8 @@ export class TakeoutService extends BaseService {
 
   /**
    * Pause a running run. Its job holds the archive reads at the next read (the archives stay open, so nothing is read
-   * twice) and its other steps at the next safe point, and keeps its lease. A paused run stays paused across a restart.
+   * twice) and its other steps at the next safe point, and keeps its lease (until it gives its queue place to waiting
+   * jobs, TakeoutRunService.parkIfBlocking). A paused run stays paused across a restart.
    */
   async pauseRun(auth: AuthDto, id: string): Promise<TakeoutRunDto> {
     const run = await this.findRun(auth.user.id, id);

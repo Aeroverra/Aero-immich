@@ -136,9 +136,14 @@ interface Slot {
   /** part of the sequential readahead (not a readAt) */
   sequential: boolean;
   startedAt: number | null;
+  /** aborted when the slot is cancelled or its source destroyed: its waits (gate, throttle, backoff) end at once */
+  abort: AbortController;
   settle: () => void;
   promise: Promise<void>;
 }
+
+/** the abort reason of a slot that was cancelled (seek, a new range): never delivered to a caller */
+const SLOT_CANCELLED = new Error('readahead slot cancelled');
 
 export class FileSource {
   readonly size: number;
@@ -150,6 +155,8 @@ export class FileSource {
   private slots: Slot[] = [];
   private cancelledInflight = 0;
   private inflight = new Set<Slot>();
+  /** slots whose read has not ended (waiting or in flight), readAt included */
+  private live = new Set<Slot>();
   private handle: HandleRef;
   private reopening: Promise<HandleRef> | null = null;
   private retiredHandles = new Set<HandleRef>();
@@ -194,6 +201,10 @@ export class FileSource {
     this.abortSignal = options.signal;
     this.onAbort = () => this.destroy(options.signal?.reason);
     options.signal?.addEventListener('abort', this.onAbort, { once: true });
+    if (options.signal?.aborted) {
+      // aborted while the source opened: the waits of its slots listen to the source, not to the signal
+      this.onAbort();
+    }
   }
 
   static async open(path: string, options: FileSourceOptions = {}): Promise<FileSource> {
@@ -330,6 +341,10 @@ export class FileSource {
     this.destroyedError = error ?? new Error('file source destroyed');
     this.abortSignal?.removeEventListener('abort', this.onAbort);
     this.dropSlots();
+    // readAt slots too: a slot waiting at the gate or the throttle leaves the queue without taking its tokens
+    for (const slot of this.live) {
+      slot.abort.abort(this.destroyedError);
+    }
     for (const waiter of this.destroyWaiters) {
       waiter(this.destroyedError);
     }
@@ -392,6 +407,7 @@ export class FileSource {
       counted: false,
       sequential,
       startedAt: null,
+      abort: new AbortController(),
       settle,
       promise,
     };
@@ -432,6 +448,9 @@ export class FileSource {
       slot.counted = true;
       this.cancelledInflight++;
     }
+    // a slot that waits (gate, throttle, backoff) stops waiting: under a read limit it would otherwise take tokens of
+    // the shared bucket ahead of the reads that replaced it
+    slot.abort.abort(SLOT_CANCELLED);
   }
 
   private dropSlots() {
@@ -501,9 +520,9 @@ export class FileSource {
     return done;
   }
 
-  private async throttle(len: number) {
+  private async throttle(len: number, signal: AbortSignal) {
     if (this.options.throttle) {
-      await this.options.throttle.take(len, this.abortSignal);
+      await this.options.throttle.take(len, signal);
       return;
     }
     const rate = this.options.throttleMBps;
@@ -514,17 +533,24 @@ export class FileSource {
     const start = Math.max(now, this.throttleAt);
     this.throttleAt = start + (len * 1000) / (rate * 1_000_000);
     if (start > now) {
-      await this.clock.sleep(start - now, this.abortSignal);
+      await this.clock.sleep(start - now, signal);
     }
   }
 
+  /** the slot was cancelled or the source destroyed: it issues no read and delivers nothing */
+  private stopped(slot: Slot): boolean {
+    return this.destroyedError !== null || slot.cancelled;
+  }
+
   private async runSlot(slot: Slot): Promise<void> {
+    this.live.add(slot);
     try {
       await this.readSlot(slot);
     } catch (error) {
       // never let a read promise reject unhandled: the error is delivered through the slot
       slot.error ??= error;
     } finally {
+      this.live.delete(slot);
       slot.done = true;
       if (slot.cancelled) {
         slot.buf = null;
@@ -537,22 +563,41 @@ export class FileSource {
   }
 
   private async readSlot(slot: Slot): Promise<void> {
+    try {
+      await this.readWithRetries(slot);
+    } catch (error) {
+      if (slot.abort.signal.aborted && this.stopped(slot)) {
+        // cancelled or destroyed while it waited: a cancelled slot is dropped, a destroy is reported by the source
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async readWithRetries(slot: Slot): Promise<void> {
+    const signal = slot.abort.signal;
     let streakStart: number | null = null;
     let attempt = 0;
     for (;;) {
-      if (this.destroyedError !== null || slot.cancelled) {
+      if (this.stopped(slot)) {
         return;
       }
-      // a closed gate (paused run, held reader) issues no read; the wait is not a pending read (stall watchdog)
-      await this.options.gate?.wait(this.abortSignal);
-      if (this.destroyedError !== null || slot.cancelled) {
+      // a closed gate (paused run, held reader) issues no read; the wait is not a pending read (stall watchdog), and
+      // the time before a read is issued (gate, throttle) is not part of a streak of transport errors: a pause in the
+      // middle of a streak would otherwise use up its in-place retry budget
+      const waitStart = this.clock.now();
+      await this.options.gate?.wait(signal);
+      if (this.stopped(slot)) {
         return;
       }
-      await this.throttle(slot.len);
+      await this.throttle(slot.len, signal);
       // the gate may have closed while the read waited for the throttle: no read slips through a pause
-      await this.options.gate?.wait(this.abortSignal);
+      await this.options.gate?.wait(signal);
+      if (streakStart !== null) {
+        streakStart += this.clock.now() - waitStart;
+      }
       const ref = await this.currentHandle();
-      if (this.destroyedError !== null || slot.cancelled) {
+      if (this.stopped(slot)) {
         return;
       }
       ref.inflight++;
@@ -588,7 +633,7 @@ export class FileSource {
         this.meter.transportRetries++;
         const wait = this.backoff[Math.min(attempt, this.backoff.length - 1)];
         attempt++;
-        await this.clock.sleep(wait, this.abortSignal);
+        await this.clock.sleep(wait, signal);
         continue;
       }
       if (REOPEN_CODES.has(codeOf(failure) ?? '')) {

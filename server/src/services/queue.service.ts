@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { TAKEOUT_QUEUE_CONCURRENCY } from 'src/constants';
 import { OnEvent } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { SystemConfig } from 'src/dtos/config.dto';
@@ -93,9 +94,12 @@ export class QueueService extends BaseService {
   private updateConcurrency(config: SystemConfig) {
     this.logger.debug(`Updating queue concurrency settings`);
     for (const queueName of Object.values(QueueName)) {
-      // takeout jobs read whole archives sequentially; two keep one user from blocking another without thrashing the disk
       const concurrency =
-        queueName === QueueName.Takeout ? 2 : this.isConcurrentQueue(queueName) ? config.job[queueName].concurrency : 1;
+        queueName === QueueName.Takeout
+          ? TAKEOUT_QUEUE_CONCURRENCY
+          : this.isConcurrentQueue(queueName)
+            ? config.job[queueName].concurrency
+            : 1;
       this.logger.debug(`Setting ${queueName} concurrency to ${concurrency}`);
       this.jobRepository.setConcurrency(queueName, concurrency);
     }

@@ -2499,7 +2499,7 @@
   "takeout_part_still_copying": "A part is still being copied. Try again when the copy is finished.",
   "takeout_parts_found": "{found, number} of {expected} parts",
   "takeout_pause_run": "Pause run",
-  "takeout_paused_note": "Reading stopped with the archives kept open: Resume continues where it stopped, without reading anything twice. A paused import keeps its staged files, holds its place in the import queue and stays paused after a server restart.",
+  "takeout_paused_note": "Reading stopped with the archives kept open: Resume continues where it stopped, without reading anything twice. A paused import keeps its staged files and stays paused after a server restart. It keeps its place in the import queue, unless paused imports have held every place for 10 minutes while other imports wait: then the one paused longest gives its place back. After a restart or once it gave its place back, Resume continues zip parts at their next file and reads a .tgz part it was in the middle of again from the start.",
   "takeout_paused_since": "Paused since {time}",
   "takeout_phase_creating": "Creating assets",
   "takeout_phase_fetching": "Fetching",

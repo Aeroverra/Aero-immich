@@ -27,6 +27,9 @@ export const VECTOR_VERSION_RANGE = '>=0.5 <1';
 export const JOBS_ASSET_PAGINATION_SIZE = 1000;
 export const JOBS_LIBRARY_PAGINATION_SIZE = 10_000;
 
+// takeout jobs read whole archives sequentially; two keep one user from blocking another without thrashing the disk
+export const TAKEOUT_QUEUE_CONCURRENCY = 2;
+
 export const EXTENSION_NAMES: Record<DatabaseExtension, string> = {
   cube: 'cube',
   earthdistance: 'earthdistance',
