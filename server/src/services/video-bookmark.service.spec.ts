@@ -4,6 +4,7 @@ import { AssetType } from 'src/enum';
 import { VideoBookmarkService } from 'src/services/video-bookmark.service';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { AuthFactory } from 'test/factories/auth.factory';
+import { getForAsset } from 'test/mappers';
 import { newDate, newUuid } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
@@ -66,7 +67,7 @@ describe(VideoBookmarkService.name, () => {
       const auth = AuthFactory.create();
       const asset = AssetFactory.create({ ownerId: auth.user.id, type: AssetType.Image });
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
-      mocks.asset.getById.mockResolvedValue(asset);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
 
       await expect(sut.create(auth, { assetId: asset.id, time: 0 })).rejects.toThrow('Only videos can have bookmarks');
 
@@ -78,7 +79,7 @@ describe(VideoBookmarkService.name, () => {
       const asset = AssetFactory.create({ type: AssetType.Video });
       const bookmark = newBookmark({ assetId: asset.id, userId: auth.user.id, time: 83_500, label: 'Goal' });
       mocks.access.asset.checkPartnerAccess.mockResolvedValue(new Set([asset.id]));
-      mocks.asset.getById.mockResolvedValue(asset);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
       mocks.videoBookmark.create.mockResolvedValue(bookmark);
 
       await expect(sut.create(auth, { assetId: asset.id, time: 83_500, label: 'Goal' })).resolves.toEqual(
@@ -97,7 +98,7 @@ describe(VideoBookmarkService.name, () => {
       const auth = AuthFactory.create();
       const asset = AssetFactory.create({ ownerId: auth.user.id, type: AssetType.Video });
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
-      mocks.asset.getById.mockResolvedValue(asset);
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
       mocks.videoBookmark.create.mockResolvedValue(newBookmark({ assetId: asset.id, userId: auth.user.id }));
 
       await sut.create(auth, { assetId: asset.id, time: 1000 });
