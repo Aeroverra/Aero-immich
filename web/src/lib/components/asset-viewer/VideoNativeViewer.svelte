@@ -565,7 +565,7 @@
                 aria-label={$t('add_video_bookmark')}
                 onclick={addBookmark}
               >
-                <Icon icon={mdiBookmarkPlusOutline} />
+                <Icon icon={mdiBookmarkPlusOutline} size="24" />
               </button>
             {/if}
 
