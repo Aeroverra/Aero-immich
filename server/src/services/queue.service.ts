@@ -93,7 +93,9 @@ export class QueueService extends BaseService {
   private updateConcurrency(config: SystemConfig) {
     this.logger.debug(`Updating queue concurrency settings`);
     for (const queueName of Object.values(QueueName)) {
-      const concurrency = this.isConcurrentQueue(queueName) ? config.job[queueName].concurrency : 1;
+      // takeout jobs read whole archives sequentially; two keep one user from blocking another without thrashing the disk
+      const concurrency =
+        queueName === QueueName.Takeout ? 2 : this.isConcurrentQueue(queueName) ? config.job[queueName].concurrency : 1;
       this.logger.debug(`Setting ${queueName} concurrency to ${concurrency}`);
       this.jobRepository.setConcurrency(queueName, concurrency);
     }
@@ -270,6 +272,7 @@ export class QueueService extends BaseService {
       QueueName.DuplicateDetection,
       QueueName.AutoStack,
       QueueName.BackupDatabase,
+      QueueName.Takeout,
     ].includes(name);
   }
 
