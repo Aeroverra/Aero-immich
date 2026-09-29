@@ -56,14 +56,18 @@ describe(ChecksumSet.name, () => {
     }
   });
 
-  it('builds a set of 1M random checksums in under a second', () => {
+  // well under a second on a laptop, but a busy CI runner took just over one: the generous bound still catches a
+  // pathological build (a quadratic sort, a copy per comparison) without making the test depend on the runner
+  it('builds a set of 1M random checksums in a few seconds at most', { timeout: 60_000 }, () => {
     const data = randomBytes(20 * 1_000_000);
     const list = Array.from({ length: 1_000_000 }, (_, i) => data.subarray(i * 20, i * 20 + 20));
     const start = performance.now();
     const set = ChecksumSet.from(list);
     const elapsed = performance.now() - start;
     expect(set.size).toBe(1_000_000);
-    expect(set.has(list[123_456])).toBe(true);
-    expect(elapsed).toBeLessThan(1000);
+    for (const i of [0, 123_456, 999_999]) {
+      expect(set.has(list[i])).toBe(true);
+    }
+    expect(elapsed).toBeLessThan(5000);
   });
 });
