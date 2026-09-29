@@ -92,12 +92,18 @@ export class UserService extends BaseService {
 
   async updateMyPreferences(auth: AuthDto, dto: UserPreferencesUpdateDto) {
     const metadata = await this.userRepository.getMetadata(auth.user.id);
+    const wasAutoStackEnabled = getPreferences(metadata).autoStack.enabled;
     const updated = mergePreferences(getPreferences(metadata), dto);
 
     await this.userRepository.upsertMetadata(auth.user.id, {
       key: UserMetadataKey.Preferences,
       value: getPreferencesPartial(updated),
     });
+
+    if (!wasAutoStackEnabled && updated.autoStack.enabled) {
+      // stack the existing library instead of waiting for the nightly run
+      await this.jobRepository.queue({ name: JobName.AutoStackQueueAll, data: { force: false } });
+    }
 
     return mapPreferences(updated);
   }
