@@ -225,6 +225,51 @@ const AdminConfigSchemaWithVisibility = z
             .describe('Maximum distance threshold for duplicate detection')
             .meta({ format: 'double' }),
         }).meta({ id: 'AdminConfigDuplicateDetectionDto' }),
+        autoStack: AdminConfigMachineLearningTaskSchema.extend({
+          maxGapSeconds: z
+            .number()
+            .min(0)
+            .max(60)
+            .describe('Maximum time between two consecutive photos of an automatic stack, in seconds')
+            .meta({ format: 'double' }),
+          maxSpanSeconds: z
+            .number()
+            .min(0)
+            .max(600)
+            .describe('Maximum time between the first and the last photo of an automatic stack, in seconds')
+            .meta({ format: 'double' }),
+          maxAssets: z.int().min(2).max(100).describe('Maximum number of photos in an automatic stack'),
+          maxDistance: z
+            .number()
+            .min(0.001)
+            .max(0.2)
+            .describe('Maximum smart search distance between any two photos of an automatic stack')
+            .meta({ format: 'double' }),
+          maxFaceShift: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe('Maximum movement of the largest face between two photos, as a fraction of the image')
+            .meta({ format: 'double' }),
+          maxFaceSizeChange: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe('Maximum relative change in size of the largest face between two photos')
+            .meta({ format: 'double' }),
+          maxYawChange: z
+            .number()
+            .min(0)
+            .max(180)
+            .describe('Maximum change in head yaw of the largest face between two photos, in degrees')
+            .meta({ format: 'double' }),
+          maxSmileChange: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe('Maximum change in the smile score (0-1) of the largest face between two photos')
+            .meta({ format: 'double' }),
+        }).meta({ id: 'AdminConfigAutoStackDto' }),
         facialRecognition: AdminConfigMachineLearningModelSchema.extend({
           minScore: z
             .number()
@@ -366,6 +411,7 @@ const AdminConfigSchemaWithVisibility = z
         clusterNewFaces: configBool.describe('Cluster new faces'),
         generateMemories: configBool.describe('Generate memories'),
         syncQuotaUsage: configBool.describe('Sync quota usage'),
+        autoStack: configBool.describe('Automatic stacks for new photos that were not evaluated yet'),
       })
       .meta({ id: 'AdminConfigNightlyTasksDto' }),
     trash: z
@@ -635,6 +681,17 @@ export const defaults = Object.freeze<SystemConfig>({
       enabled: true,
       maxDistance: 0.01,
     },
+    autoStack: {
+      enabled: true,
+      maxGapSeconds: 5,
+      maxSpanSeconds: 30,
+      maxAssets: 100,
+      maxDistance: 0.06,
+      maxFaceShift: 0.1,
+      maxFaceSizeChange: 0.25,
+      maxYawChange: 15,
+      maxSmileChange: 0.4,
+    },
     facialRecognition: {
       enabled: true,
       modelName: 'buffalo_l',
@@ -732,6 +789,7 @@ export const defaults = Object.freeze<SystemConfig>({
     syncQuotaUsage: true,
     missingThumbnails: true,
     clusterNewFaces: true,
+    autoStack: true,
   },
   trash: {
     enabled: true,
