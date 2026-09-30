@@ -10,7 +10,15 @@ import { AssetFaceTable } from 'src/schema/tables/asset-face.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonGroupTable } from 'src/schema/tables/person-group.table';
 import { PersonTable } from 'src/schema/tables/person.table';
-import { asUuid, dummy, inSharedAlbum, removeUndefinedKeys, withFilePath } from 'src/utils/database';
+import {
+  asUuid,
+  dummy,
+  inSharedAlbum,
+  PrivateScope,
+  removeUndefinedKeys,
+  withFilePath,
+  withPrivateScope,
+} from 'src/utils/database';
 import { paginationHelper, PaginationOptions } from 'src/utils/pagination';
 
 export interface PersonSearchOptions {
@@ -229,8 +237,13 @@ export class PersonRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [{ take: 1, skip: 0 }, DummyValue.UUID] })
-  async getAllForUser(pagination: PaginationOptions, userId: string, options?: PersonSearchOptions) {
+  @GenerateSql({ params: [{ take: 1, skip: 0 }, DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  async getAllForUser(
+    pagination: PaginationOptions,
+    userId: string,
+    scope: PrivateScope,
+    options?: PersonSearchOptions,
+  ) {
     const items = await this.db
       .selectFrom('person')
       .selectAll('person')
@@ -289,6 +302,8 @@ export class PersonRepository {
           .orderBy('person.createdAt'),
       )
       .$if(!options?.withHidden, (qb) => qb.where('person.isHidden', '=', false))
+      // last, because the helper narrows the builder to the asset table
+      .$call(withPrivateScope(scope))
       .offset(pagination.skip ?? 0)
       .limit(pagination.take + 1)
       .execute();
@@ -430,8 +445,8 @@ export class PersonRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
-  async getStatistics(personGroupId: string, userId: string): Promise<PersonStatistics> {
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  async getStatistics(personGroupId: string, userId: string, scope: PrivateScope): Promise<PersonStatistics> {
     const result = await this.db
       .selectFrom('asset_face')
       .leftJoin('asset', (join) =>
@@ -445,6 +460,12 @@ export class PersonRepository {
       .where('asset_face.deletedAt', 'is', null)
       .where('asset_face.isVisible', 'is', true)
       .where('asset_face.personGroupId', '=', personGroupId)
+      // count(distinct asset.id) ignores unmatched rows, so filtering here only drops what must stay hidden
+      .where((eb) =>
+        scope.privateMode
+          ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
+          : eb('asset.isPrivate', '=', false),
+      )
       .executeTakeFirst();
 
     return {
@@ -452,8 +473,8 @@ export class PersonRepository {
     };
   }
 
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getNumberOfPeople(userId: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getNumberOfPeople(userId: string, scope: PrivateScope) {
     const zero = sql.lit(0);
     return this.db
       .selectFrom('person')
@@ -470,7 +491,8 @@ export class PersonRepository {
                   .selectFrom('asset')
                   .whereRef('asset.id', '=', 'asset_face.assetId')
                   .where('asset.visibility', '=', sql.lit(AssetVisibility.Timeline))
-                  .where('asset.deletedAt', 'is', null),
+                  .where('asset.deletedAt', 'is', null)
+                  .$call(withPrivateScope(scope)),
               ),
             ),
         ),
@@ -694,13 +716,32 @@ export class PersonRepository {
 
   @GenerateSql({ params: [DummyValue.UUID] })
   getRandomFace(personGroupId: string) {
+    return (
+      this.db
+        .selectFrom('asset_face')
+        .selectAll('asset_face')
+        .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+        .where('asset_face.personGroupId', '=', personGroupId)
+        .where('asset_face.deletedAt', 'is', null)
+        .where('asset_face.isVisible', 'is', true)
+        // prefer a non-private feature photo so the person stays presentable outside private mode
+        .orderBy('asset.isPrivate', 'asc')
+        .executeTakeFirst()
+    );
+  }
+
+  /** Whether the person's current feature photo belongs to a private asset. */
+  @GenerateSql({ params: [{ ownerId: DummyValue.UUID, personGroupId: DummyValue.UUID }] })
+  isCoverAssetPrivate({ ownerId, personGroupId }: PersonId) {
     return this.db
-      .selectFrom('asset_face')
-      .selectAll('asset_face')
-      .where('asset_face.personGroupId', '=', personGroupId)
-      .where('asset_face.deletedAt', 'is', null)
-      .where('asset_face.isVisible', 'is', true)
-      .executeTakeFirst();
+      .selectFrom('person')
+      .innerJoin('asset_face', 'asset_face.id', 'person.faceAssetId')
+      .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+      .select('asset.isPrivate')
+      .where('person.ownerId', '=', ownerId)
+      .where('person.personGroupId', '=', personGroupId)
+      .executeTakeFirst()
+      .then((row) => row?.isPrivate ?? false);
   }
 
   @GenerateSql()
