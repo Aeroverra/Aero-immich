@@ -25,6 +25,7 @@ import {
   AssetType,
   AssetVisibility,
   CalendarHeatmapType,
+  StackSource,
 } from 'src/enum';
 import { DB } from 'src/schema';
 import { AssetAudioTable, AssetKeyframeTable, AssetVideoTable } from 'src/schema/tables/asset-av.table';
@@ -94,6 +95,8 @@ interface AssetBuilderOptions {
   personId?: string;
   userIds?: string[];
   withStacked?: boolean;
+  /** with `withStacked`, whether automatic stacks are collapsed too; when false their assets are listed individually */
+  withAutoStacked?: boolean;
   exifInfo?: boolean;
   status?: AssetStatus;
   assetType?: AssetType;
@@ -179,6 +182,15 @@ const withBoundingBox = <T>(qb: SelectQueryBuilder<DB, 'asset' | 'asset_exif', T
     eb.or([eb('asset_exif.longitude', '>=', west), eb('asset_exif.longitude', '<=', east)]),
   );
 };
+
+/** the asset belongs to a stack that was created automatically */
+const isInAutoStack = (eb: ExpressionBuilder<DB, 'asset'>) =>
+  eb.exists(
+    eb
+      .selectFrom('stack as auto_stack')
+      .whereRef('auto_stack.id', '=', 'asset.stackId')
+      .where('auto_stack.source', '=', StackSource.Auto),
+  );
 
 @Injectable()
 export class AssetRepository {
@@ -883,7 +895,13 @@ export class AssetRepository {
               .leftJoin('stack', (join) =>
                 join.onRef('stack.id', '=', 'asset.stackId').onRef('stack.primaryAssetId', '=', 'asset.id'),
               )
-              .where((eb) => eb.or([eb('asset.stackId', 'is', null), eb(eb.table('stack'), 'is not', null)])),
+              .where((eb) =>
+                eb.or([
+                  eb('asset.stackId', 'is', null),
+                  eb(eb.table('stack'), 'is not', null),
+                  ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
+                ]),
+              ),
           )
           .$if(!!options.userIds, (qb) =>
             qb.where((eb) => {
@@ -997,7 +1015,10 @@ export class AssetRepository {
                     eb
                       .selectFrom('stack')
                       .whereRef('stack.id', '=', 'asset.stackId')
-                      .whereRef('stack.primaryAssetId', '!=', 'asset.id'),
+                      .whereRef('stack.primaryAssetId', '!=', 'asset.id')
+                      .$if(options.withAutoStacked === false, (qb) =>
+                        qb.where('stack.source', '=', StackSource.Manual),
+                      ),
                   ),
                 ),
               )
@@ -1010,6 +1031,7 @@ export class AssetRepository {
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
                     .$if(!scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
+                    .$if(options.withAutoStacked === false, (qb) => qb.where((eb) => eb.not(isInAutoStack(eb))))
                     .groupBy('stacked.stackId')
                     .as('stacked_assets'),
                 (join) => join.onTrue(),
