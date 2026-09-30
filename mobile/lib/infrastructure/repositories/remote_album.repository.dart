@@ -24,6 +24,30 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
 
   Drift get _db => attachedDatabase;
 
+  /// With a view applied, the album cover is the stored thumbnail when it passes the view, otherwise the newest visible
+  /// asset (null when none is visible). Null without a view, the stored thumbnail applies.
+  Expression<String>? _visibleCover(PrivateModeFilter privateFilter) {
+    if (privateFilter.restrictingView == null) {
+      return null;
+    }
+
+    final asset = _db.alias(_db.remoteAssetEntity, 'cover_asset');
+    final link = _db.alias(_db.remoteAlbumAssetEntity, 'cover_link');
+    final query = _db.selectOnly(link).join([innerJoin(asset, asset.id.equalsExp(link.assetId), useColumns: false)])
+      ..addColumns([asset.id])
+      ..where(
+        link.albumId.equalsExp(_db.remoteAlbumEntity.id) &
+            asset.deletedAt.isNull() &
+            asset.albumPrivateFilter(privateFilter),
+      )
+      ..orderBy([
+        OrderingTerm.desc(asset.id.equalsExp(_db.remoteAlbumEntity.thumbnailAssetId)),
+        OrderingTerm.desc(asset.createdAt),
+      ])
+      ..limit(1);
+    return subqueryExpression<String>(query);
+  }
+
   Future<List<RemoteAlbum>> getAll({
     Set<SortRemoteAlbumsBy> sortBy = const {SortRemoteAlbumsBy.updatedAt},
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
@@ -59,9 +83,10 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
         useColumns: false,
       ),
     ]);
+    final cover = _visibleCover(privateFilter);
     query
       ..where(_db.remoteAlbumEntity.privateFilter(privateFilter))
-      ..addColumns([assetCount])
+      ..addColumns([assetCount, ?cover])
       ..addColumns([_db.userEntity.name, _db.userEntity.id])
       ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
       ..groupBy([_db.remoteAlbumEntity.id]);
@@ -86,6 +111,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
                 ownerId: row.read(_db.userEntity.id)!,
                 ownerName: row.read(_db.userEntity.name)!,
                 isShared: row.read(_db.remoteAlbumUserEntity.userId.count(distinct: true))! > 0,
+                cover: cover == null ? null : Value(row.read(cover)),
               ),
         )
         .get();
@@ -93,6 +119,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
 
   Future<RemoteAlbum?> get(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final assetCount = _db.remoteAssetEntity.id.count(distinct: true);
+    final cover = _visibleCover(privateFilter);
 
     final query =
         _db.remoteAlbumEntity.select().join([
@@ -122,7 +149,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             ),
           ])
           ..where(_db.remoteAlbumEntity.id.equals(albumId) & _db.remoteAlbumEntity.privateFilter(privateFilter))
-          ..addColumns([assetCount])
+          ..addColumns([assetCount, ?cover])
           ..addColumns([_db.userEntity.name, _db.userEntity.id])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
           ..groupBy([_db.remoteAlbumEntity.id]);
@@ -136,6 +163,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
                 ownerId: row.read(_db.userEntity.id)!,
                 ownerName: row.read(_db.userEntity.name)!,
                 isShared: row.read(_db.remoteAlbumUserEntity.userId.count(distinct: true))! > 0,
+                cover: cover == null ? null : Value(row.read(cover)),
               ),
         )
         .getSingleOrNull();
@@ -379,6 +407,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
   }
 
   Stream<RemoteAlbum?> watchAlbum(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    final cover = _visibleCover(privateFilter);
     final query =
         _db.remoteAlbumEntity.select().join([
             leftOuterJoin(
@@ -405,7 +434,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             ),
           ])
           ..where(_db.remoteAlbumEntity.id.equals(albumId) & _db.remoteAlbumEntity.privateFilter(privateFilter))
-          ..addColumns([_db.userEntity.name, _db.userEntity.id])
+          ..addColumns([_db.userEntity.name, _db.userEntity.id, ?cover])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
           ..groupBy([_db.remoteAlbumEntity.id]);
 
@@ -416,6 +445,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             ownerId: row.read(_db.userEntity.id)!,
             ownerName: row.read(_db.userEntity.name)!,
             isShared: row.read(_db.remoteAlbumUserEntity.userId.count(distinct: true))! > 0,
+            cover: cover == null ? null : Value(row.read(cover)),
           );
 
       return album;
@@ -561,6 +591,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     }
 
     final assetCount = _db.remoteAssetEntity.id.count(distinct: true);
+    final cover = _visibleCover(privateFilter);
     final query =
         _db.remoteAlbumEntity.select().join([
             leftOuterJoin(
@@ -589,7 +620,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
             ),
           ])
           ..where(_db.remoteAlbumEntity.id.isIn(albumIds) & _db.remoteAlbumEntity.privateFilter(privateFilter))
-          ..addColumns([assetCount])
+          ..addColumns([assetCount, ?cover])
           ..addColumns([_db.remoteAlbumUserEntity.userId.count(distinct: true)])
           ..addColumns([_db.userEntity.name, _db.userEntity.id])
           ..groupBy([_db.remoteAlbumEntity.id]);
@@ -603,6 +634,7 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
                 ownerName: row.read(_db.userEntity.name) ?? '',
                 isShared: row.read(_db.remoteAlbumUserEntity.userId.count(distinct: true))! > 0,
                 assetCount: row.read(assetCount) ?? 0,
+                cover: cover == null ? null : Value(row.read(cover)),
               ),
         )
         .get();
@@ -610,7 +642,14 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
 }
 
 extension on RemoteAlbumEntityData {
-  RemoteAlbum toDto({int assetCount = 0, required String ownerName, required String ownerId, required bool isShared}) {
+  /// [cover] replaces the stored thumbnail when a view applies (null keeps it)
+  RemoteAlbum toDto({
+    int assetCount = 0,
+    required String ownerName,
+    required String ownerId,
+    required bool isShared,
+    Value<String?>? cover,
+  }) {
     return RemoteAlbum(
       id: id,
       name: name,
@@ -618,7 +657,7 @@ extension on RemoteAlbumEntityData {
       createdAt: createdAt,
       updatedAt: updatedAt,
       description: description,
-      thumbnailAssetId: thumbnailAssetId,
+      thumbnailAssetId: cover == null ? thumbnailAssetId : cover.value,
       isActivityEnabled: isActivityEnabled,
       order: order,
       assetCount: assetCount,
