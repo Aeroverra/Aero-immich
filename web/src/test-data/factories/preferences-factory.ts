@@ -76,4 +76,10 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
   stackActions: {
     mode: StackActionMode.Ask,
   },
+  cameraGroups: {
+    enabled: true,
+    copyTags: true,
+    keepTags: ['{immich-go}/*', 'Source/*', 'Takeout', 'takeout-*'],
+    reviewTags: ['Unreviewed'],
+  },
 });
