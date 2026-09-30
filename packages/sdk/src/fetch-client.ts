@@ -2529,6 +2529,8 @@ export type MetadataSearchDto = {
     encodedVideoPath?: string;
     /** Leave out assets in any of these albums */
     excludeAlbumIds?: string[];
+    /** Leave out assets that show any of these people */
+    excludePersonIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2678,6 +2680,8 @@ export type RandomSearchDto = {
     createdBefore?: string;
     /** Leave out assets in any of these albums */
     excludeAlbumIds?: string[];
+    /** Leave out assets that show any of these people */
+    excludePersonIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2765,6 +2769,8 @@ export type SmartSearchDto = {
     createdBefore?: string;
     /** Leave out assets in any of these albums */
     excludeAlbumIds?: string[];
+    /** Leave out assets that show any of these people */
+    excludePersonIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2858,6 +2864,8 @@ export type StatisticsSearchDto = {
     description?: string;
     /** Leave out assets in any of these albums */
     excludeAlbumIds?: string[];
+    /** Leave out assets that show any of these people */
+    excludePersonIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -7496,13 +7504,14 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludeTagIds, hasNamedFaces, hasPeople, hasUnnamedFaces, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, onlyPersonIds, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludePersonIds, excludeTagIds, hasNamedFaces, hasPeople, hasUnnamedFaces, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, onlyPersonIds, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
     createdAfter?: string;
     createdBefore?: string;
     excludeAlbumIds?: string[];
+    excludePersonIds?: string[];
     excludeTagIds?: string[];
     hasNamedFaces?: boolean;
     hasPeople?: boolean;
@@ -7550,6 +7559,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         createdAfter,
         createdBefore,
         excludeAlbumIds,
+        excludePersonIds,
         excludeTagIds,
         hasNamedFaces,
         hasPeople,
