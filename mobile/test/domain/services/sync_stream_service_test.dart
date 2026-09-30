@@ -634,6 +634,7 @@ void main() {
       oauth: false,
       oauthAutoLaunch: false,
       ocr: false,
+      faceAttributes: false,
       passwordLogin: true,
       realtimeTranscoding: false,
       reverseGeocoding: false,
