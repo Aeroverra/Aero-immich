@@ -14,6 +14,7 @@ import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart'
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
+import 'package:immich_mobile/repositories/asset_api.repository.dart';
 import 'package:immich_mobile/services/api.service.dart';
 import 'package:logging/logging.dart';
 import 'package:native_video_player/native_video_player.dart';
@@ -117,6 +118,7 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
           throw Exception('No file found for the video');
         }
 
+        _notifier.setSource(VideoPlaybackSource.device);
         return await VideoSource.init(
           path: CurrentPlatform.isAndroid ? file.uri.toString() : file.path,
           type: VideoSourceType.file,
@@ -139,6 +141,7 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
           throw Exception('No file found for the video');
         }
 
+        _notifier.setSource(VideoPlaybackSource.device);
         // Pass a file:// URI so Android's Uri.parse doesn't
         // interpret characters like '#' as fragment identifiers.
         return await VideoSource.init(
@@ -159,6 +162,12 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
       final String assetId = remoteAsset.livePhotoVideoId ?? remoteAsset.id;
       final String videoUrl = '$serverEndpoint/assets/$assetId/$postfixUrl';
 
+      if (isOriginalVideo) {
+        _notifier.setSource(VideoPlaybackSource.original);
+      } else if (!widget.asset.isMotionPhoto) {
+        unawaited(_loadPlaybackSource(remoteAsset.id));
+      }
+
       return await VideoSource.init(
         path: videoUrl,
         type: VideoSourceType.network,
@@ -167,6 +176,20 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
     } catch (error) {
       _log.severe('Error creating video source for asset ${videoAsset.name}: $error');
       return null;
+    }
+  }
+
+  /// video/playback serves the transcoded copy when the server has one, else the original
+  Future<void> _loadPlaybackSource(String assetId) async {
+    try {
+      final hasEncodedVideo = await ref.read(assetApiRepositoryProvider).hasEncodedVideo(assetId);
+      if (!mounted || hasEncodedVideo == null) {
+        return;
+      }
+
+      _notifier.setSource(hasEncodedVideo ? VideoPlaybackSource.transcoded : VideoPlaybackSource.original);
+    } catch (error) {
+      _log.warning('Could not tell whether ${widget.asset.name} has a transcoded copy: $error');
     }
   }
 
