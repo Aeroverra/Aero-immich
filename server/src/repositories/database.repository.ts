@@ -50,6 +50,7 @@ export async function getVectorExtension(runner: Kysely<DB>): Promise<VectorExte
 export const probes: Record<VectorIndex, number> = {
   [VectorIndex.Clip]: 1,
   [VectorIndex.Face]: 1,
+  [VectorIndex.ClipFrame]: 1,
 };
 
 @Injectable()
@@ -139,10 +140,15 @@ export class DatabaseRepository {
     await Promise.all([
       this.db.schema.dropIndex(VectorIndex.Clip).ifExists().execute(),
       this.db.schema.dropIndex(VectorIndex.Face).ifExists().execute(),
+      this.db.schema.dropIndex(VectorIndex.ClipFrame).ifExists().execute(),
     ]);
 
     await sql`ALTER EXTENSION ${sql.raw(extension)} UPDATE TO ${sql.lit(targetVersion)}`.execute(this.db);
-    await Promise.all([this.reindexVectors(VectorIndex.Clip), this.reindexVectors(VectorIndex.Face)]);
+    await Promise.all([
+      this.reindexVectors(VectorIndex.Clip),
+      this.reindexVectors(VectorIndex.Face),
+      this.reindexVectors(VectorIndex.ClipFrame),
+    ]);
   }
 
   async prewarm(index: VectorIndex): Promise<void> {
@@ -207,7 +213,6 @@ export class DatabaseRepository {
   }
 
   private async reindexVectors(indexName: VectorIndex, { lists }: { lists?: number } = {}): Promise<void> {
-    this.logger.log(`Reindexing ${indexName} (This may take a while, do not restart)`);
     const table = VECTOR_INDEX_TABLES[indexName];
     const vectorExtension = await getVectorExtension(this.db);
 
@@ -215,16 +220,22 @@ export class DatabaseRepository {
       columnName: string;
     }>`SELECT column_name as "columnName" FROM information_schema.columns WHERE table_name = ${table}`.execute(this.db);
     if (rows.length === 0) {
+      if (indexName === VectorIndex.ClipFrame) {
+        // created together with its index by the video frame analysis migration
+        this.logger.debug(`Table ${table} does not exist yet, skipping reindexing`);
+        return;
+      }
       this.logger.warn(
         `Table ${table} does not exist, skipping reindexing. This is only normal if this is a new Immich instance.`,
       );
       return;
     }
+    this.logger.log(`Reindexing ${indexName} (This may take a while, do not restart)`);
     const dimSize = await this.getDimensionSize(table);
     lists ||= this.targetListCount(await this.getRowCount(table));
     await this.db.transaction().execute(async (tx) => {
       await sql`DROP INDEX IF EXISTS ${sql.raw(indexName)}`.execute(tx);
-      if (table === 'smart_search') {
+      if (table === 'smart_search' || table === 'smart_search_frame') {
         await sql`ALTER TABLE ${sql.raw(table)} DROP CONSTRAINT IF EXISTS dim_size_constraint`.execute(tx);
       }
       if (rows.every((row) => row.columnName !== 'embedding')) {
@@ -348,10 +359,38 @@ export class DatabaseRepository {
     probes[VectorIndex.Clip] = 1;
 
     await sql`vacuum analyze ${sql.table('smart_search')}`.execute(this.db);
+
+    // frame embeddings share the CLIP model, but are only reset when their dimension really differs,
+    // so re-encoding thumbnails with the same model keeps the analyzed video frames
+    if ((await this.getDimensionSize('smart_search_frame')) !== dimSize) {
+      await this.db.transaction().execute(async (trx) => {
+        await this.resetVideoFrameEmbeddings(trx);
+        await sql`drop index if exists clip_frame_index`.execute(trx);
+        await trx.schema
+          .alterTable('smart_search_frame')
+          .alterColumn('embedding', (col) => col.setDataType(sql.raw(`vector(${dimSize})`)))
+          .execute();
+        await sql
+          .raw(vectorIndexQuery({ vectorExtension, table: 'smart_search_frame', indexName: VectorIndex.ClipFrame }))
+          .execute(trx);
+      });
+      probes[VectorIndex.ClipFrame] = 1;
+    }
   }
 
   async deleteAllSearchEmbeddings(): Promise<void> {
     await sql`truncate ${sql.table('smart_search')}`.execute(this.db);
+    await this.db.transaction().execute((trx) => this.resetVideoFrameEmbeddings(trx));
+  }
+
+  /** frame embeddings of another model are useless, so the videos have to be analyzed again */
+  private async resetVideoFrameEmbeddings(trx: Kysely<DB>) {
+    await sql`delete from ${sql.table('smart_search_frame')}`.execute(trx);
+    await trx
+      .updateTable('asset_job_status')
+      .set({ videoFramesAnalyzedAt: null })
+      .where('videoFramesAnalyzedAt', 'is not', null)
+      .execute();
   }
 
   private targetListCount(count: number) {
