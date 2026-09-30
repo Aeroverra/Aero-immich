@@ -7,6 +7,7 @@ import 'package:immich_mobile/data/db/main/table/remote/album.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
+import 'package:immich_mobile/domain/models/custom_view.model.dart' as model_view;
 import 'package:immich_mobile/domain/models/stack.model.dart' as model;
 import 'package:immich_mobile/infrastructure/repositories/sync_stream.repository.dart';
 import 'package:openapi/api.dart';
@@ -302,6 +303,133 @@ void main() {
 
       final row = await (db.stackEntity.select()..where((t) => t.id.equals('stack'))).getSingle();
       expect(row.source, model.StackSource.manual);
+    });
+  });
+
+  group('SyncStreamRepository - tags and views', () {
+    SyncTagV1 createTag(String id, {String? parentId, bool isHidden = false}) => SyncTagV1(
+      id: id,
+      ownerId: 'user-1',
+      value: parentId == null ? id : '$parentId/$id',
+      parentId: parentId,
+      color: null,
+      isHidden: isHidden,
+      createdAt: DateTime(2024, 1, 1),
+      updatedAt: DateTime(2024, 1, 1),
+    );
+
+    SyncViewV1 createView(String id, {bool isDefault = false}) => SyncViewV1(
+      id: id,
+      ownerId: 'user-1',
+      name: id,
+      order: 1,
+      isDefault: isDefault,
+      access: ViewAccess.locked,
+      includeAll: false,
+      includeUntagged: true,
+      privateAssets: ViewPrivateAssets.only,
+      createdAt: DateTime(2024, 1, 1),
+      updatedAt: DateTime(2024, 1, 1),
+    );
+
+    Future<void> seed() async {
+      await sut.updateUsersV1([_createUser()]);
+      await sut.updateAssetsV1([
+        _createAsset(id: 'asset-1', checksum: 'a1', fileName: 'a1.jpg'),
+        _createAsset(id: 'asset-2', checksum: 'a2', fileName: 'a2.jpg'),
+      ]);
+      // a child before its parent, as the stream may order them
+      await sut.updateTagsV1([
+        createTag('child', parentId: 'parent'),
+        createTag('parent', isHidden: true),
+        createTag('other'),
+      ]);
+      await sut.updateTagAssetsV1([
+        SyncTagAssetV1(tagId: 'child', assetId: 'asset-1'),
+        SyncTagAssetV1(tagId: 'other', assetId: 'asset-1'),
+        SyncTagAssetV1(tagId: 'other', assetId: 'asset-2'),
+        // a link that arrives twice or for an asset this client never got
+        SyncTagAssetV1(tagId: 'other', assetId: 'asset-2'),
+        SyncTagAssetV1(tagId: 'other', assetId: 'unknown'),
+      ]);
+      await sut.updateViewsV1([createView('view-1', isDefault: true), createView('view-2')]);
+      await sut.updateViewTagsV1([
+        SyncViewTagV1(viewId: 'view-1', tagId: 'parent', mode: ViewTagMode.exclude),
+        SyncViewTagV1(viewId: 'view-1', tagId: 'other', mode: ViewTagMode.include),
+        SyncViewTagV1(viewId: 'view-2', tagId: 'child', mode: ViewTagMode.include),
+      ]);
+    }
+
+    test('stores tags, links, views and rules', () async {
+      await seed();
+
+      final tags = await db.tagEntity.select().get();
+      expect(
+        {for (final tag in tags) tag.id: (tag.parentId, tag.isHidden)},
+        {'parent': (null, true), 'child': ('parent', false), 'other': (null, false)},
+      );
+      expect(await db.tagAssetEntity.select().get(), hasLength(4));
+
+      final views = await db.customViewRepository.getViews('user-1');
+      final view = views.firstWhere((view) => view.id == 'view-1');
+      expect(view.isDefault, isTrue);
+      expect(view.access, model_view.ViewAccess.locked);
+      expect(view.privateAssets, model_view.ViewPrivateAssets.only);
+      expect(view.includeTagIds, ['other']);
+      expect(view.excludeTagIds, ['parent']);
+
+      // a rule changing mode is updated in place
+      await sut.updateViewTagsV1([SyncViewTagV1(viewId: 'view-1', tagId: 'other', mode: ViewTagMode.exclude)]);
+      final updated = (await db.customViewRepository.getViews('user-1')).firstWhere((view) => view.id == 'view-1');
+      expect(updated.includeTagIds, isEmpty);
+      expect(updated.excludeTagIds, unorderedEquals(['parent', 'other']));
+    });
+
+    test('a tag delete cascades to child tags, links and view rules', () async {
+      await seed();
+
+      await sut.deleteTagsV1([SyncTagDeleteV1(tagId: 'parent')]);
+
+      expect((await db.tagEntity.select().get()).map((tag) => tag.id), ['other']);
+      expect((await db.tagAssetEntity.select().get()).map((link) => link.tagId), everyElement('other'));
+      final rules = await db.viewTagEntity.select().get();
+      expect(rules.map((rule) => (rule.viewId, rule.tagId)), [('view-1', 'other')]);
+    });
+
+    test('a view delete removes its rules, a rule and a link delete remove one row', () async {
+      await seed();
+
+      await sut.deleteViewsV1([SyncViewDeleteV1(viewId: 'view-1')]);
+      expect((await db.viewEntity.select().get()).map((view) => view.id), ['view-2']);
+      expect((await db.viewTagEntity.select().get()).map((rule) => rule.viewId), ['view-2']);
+
+      await sut.deleteViewTagsV1([SyncViewTagDeleteV1(viewId: 'view-2', tagId: 'child')]);
+      expect(await db.viewTagEntity.select().get(), isEmpty);
+
+      await sut.deleteTagAssetsV1([SyncTagAssetDeleteV1(tagId: 'other', assetId: 'asset-2')]);
+      final links = await db.tagAssetEntity.select().get();
+      expect(links.map((link) => (link.tagId, link.assetId)), isNot(contains(('other', 'asset-2'))));
+    });
+
+    test('an asset delete removes its tag links', () async {
+      await seed();
+
+      await sut.deleteAssetsV1([SyncAssetDeleteV1(assetId: 'asset-1')]);
+
+      final links = await db.tagAssetEntity.select().get();
+      expect(links.map((link) => link.assetId), isNot(contains('asset-1')));
+      expect(links.map((link) => link.assetId), contains('asset-2'));
+    });
+
+    test('reset clears tags and views', () async {
+      await seed();
+
+      await sut.reset();
+
+      expect(await db.tagEntity.select().get(), isEmpty);
+      expect(await db.tagAssetEntity.select().get(), isEmpty);
+      expect(await db.viewEntity.select().get(), isEmpty);
+      expect(await db.viewTagEntity.select().get(), isEmpty);
     });
   });
 
