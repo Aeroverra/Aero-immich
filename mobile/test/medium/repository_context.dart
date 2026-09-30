@@ -15,6 +15,7 @@ import 'package:immich_mobile/data/db/main/table/remote/album_asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/album_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/cloud_id.drift.dart';
+import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/auth_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/partner.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.drift.dart';
@@ -122,6 +123,7 @@ class MediumRepositoryContext {
     String? thumbHash,
     String? libraryId,
     DateTime? localDateTime,
+    bool? isPrivate,
   }) async {
     id ??= TestUtils.uuid();
     createdAt ??= TestUtils.date();
@@ -148,6 +150,20 @@ class MediumRepositoryContext {
             localDateTime: .new(localDateTime ?? createdAt.toLocal()),
             thumbHash: .new(TestUtils.uuid(thumbHash)),
             libraryId: .new(TestUtils.uuid(libraryId)),
+            isPrivate: .new(isPrivate ?? false),
+          ),
+        );
+  }
+
+  Future<void> newRemoteExif({required String assetId, String? city, double? latitude, double? longitude}) {
+    return db
+        .into(db.remoteExifEntity)
+        .insert(
+          RemoteExifEntityCompanion(
+            assetId: .new(assetId),
+            city: .new(city),
+            latitude: .new(latitude),
+            longitude: .new(longitude),
           ),
         );
   }
@@ -185,6 +201,7 @@ class MediumRepositoryContext {
     bool? isActivityEnabled,
     AlbumAssetOrder? order,
     String? thumbnailAssetId,
+    bool? isPrivate,
   }) async {
     id ??= TestUtils.uuid();
     final album = await db
@@ -199,6 +216,7 @@ class MediumRepositoryContext {
             isActivityEnabled: .new(isActivityEnabled ?? false),
             order: .new(order ?? .asc),
             thumbnailAssetId: .new(thumbnailAssetId),
+            isPrivate: .new(isPrivate ?? false),
           ),
         );
 

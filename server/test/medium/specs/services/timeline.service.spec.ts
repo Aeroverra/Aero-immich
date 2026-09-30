@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { AssetVisibility, SharedLinkType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
@@ -20,6 +20,18 @@ const setup = (db?: Kysely<DB>) => {
     real: [AssetRepository, AccessRepository, PartnerRepository],
     mock: [LoggingRepository],
   });
+};
+
+const newBucketAssets = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string) => {
+  const { asset: publicAsset } = await ctx.newAsset({ ownerId, localDateTime: new Date('1970-02-10') });
+  const { asset: privateAsset } = await ctx.newAsset({
+    ownerId,
+    localDateTime: new Date('1970-02-11'),
+    isPrivate: true,
+  });
+  await ctx.newExif({ assetId: publicAsset.id, make: 'Canon' });
+  await ctx.newExif({ assetId: privateAsset.id, make: 'Canon' });
+  return { publicAsset, privateAsset };
 };
 
 beforeAll(async () => {
@@ -136,6 +148,7 @@ describe(TimelineService.name, () => {
         id: [],
         visibility: [],
         isFavorite: [],
+        isPrivate: [],
         isImage: [],
         isTrashed: [],
         livePhotoVideoId: [],
@@ -248,5 +261,178 @@ describe(TimelineService.name, () => {
     const rawResponse = await sut.getTimeBucket(auth, { albumId: album.id, timeBucket: '1970-02-01', isTrashed: true });
     const response = JSON.parse(rawResponse);
     expect(response).not.toEqual(expect.objectContaining({ city: expect.any(Array), country: expect.any(Array) }));
+  });
+
+  describe('private mode', () => {
+    it('should exclude private assets from the buckets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      await expect(sut.getTimeBuckets(auth, {})).resolves.toEqual([{ count: 1, timeBucket: '1970-02-01' }]);
+    });
+
+    it('should include private assets in the buckets in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      await expect(sut.getTimeBuckets(auth, {})).resolves.toEqual([{ count: 2, timeBucket: '1970-02-01' }]);
+    });
+
+    it('should exclude private assets from a bucket outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset } = await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01' }));
+      expect(response).toEqual(expect.objectContaining({ id: [publicAsset.id], isPrivate: [false] }));
+    });
+
+    it('should include private assets in a bucket in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01' }));
+      expect(response).toEqual(
+        expect.objectContaining({ id: [privateAsset.id, publicAsset.id], isPrivate: [true, false] }),
+      );
+    });
+
+    it('should return only private assets when isPrivate is requested', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { privateAsset } = await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      await expect(sut.getTimeBuckets(auth, { isPrivate: true })).resolves.toEqual([
+        { count: 1, timeBucket: '1970-02-01' },
+      ]);
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01', isPrivate: true }));
+      expect(response).toEqual(expect.objectContaining({ id: [privateAsset.id], isPrivate: [true] }));
+    });
+
+    it('should require private mode for private buckets', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await newBucketAssets(ctx, user.id);
+      const auth = factory.auth({ user, session: { privateMode: false } });
+
+      await expect(sut.getTimeBuckets(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(sut.getTimeBucket(auth, { timeBucket: '1970-02-01', isPrivate: true })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it('should reject private buckets with partners', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user, session: { privateMode: true } });
+
+      const response = sut.getTimeBuckets(auth, {
+        isPrivate: true,
+        withPartners: true,
+        visibility: AssetVisibility.Timeline,
+      });
+      await expect(response).rejects.toBeInstanceOf(BadRequestException);
+      await expect(response).rejects.toThrow('withPartners is not supported for private assets');
+    });
+
+    it("should never return a partner's private asset", async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: partner.id, sharedWithId: user.id });
+      const { publicAsset } = await newBucketAssets(ctx, partner.id);
+
+      for (const privateMode of [false, true]) {
+        const auth = factory.auth({ user, session: { privateMode } });
+        const options = { withPartners: true, visibility: AssetVisibility.Timeline };
+
+        await expect(sut.getTimeBuckets(auth, options)).resolves.toEqual([{ count: 1, timeBucket: '1970-02-01' }]);
+        const response = JSON.parse(await sut.getTimeBucket(auth, { ...options, timeBucket: '1970-02-01' }));
+        expect(response).toEqual(expect.objectContaining({ id: [publicAsset.id] }));
+
+        await expect(sut.getTimeBuckets(auth, { userId: partner.id })).resolves.toEqual([
+          { count: 1, timeBucket: '1970-02-01' },
+        ]);
+      }
+    });
+
+    it('should hide private assets from the trash outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({
+        ownerId: user.id,
+        localDateTime: new Date('1970-02-12'),
+        deletedAt: new Date(),
+        isPrivate: true,
+      });
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getTimeBuckets(auth, { isTrashed: true })).resolves.toEqual([]);
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01', isTrashed: true }));
+      expect(response).toEqual(expect.objectContaining({ id: [] }));
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      await expect(sut.getTimeBuckets(privateAuth, { isTrashed: true })).resolves.toEqual([
+        { count: 1, timeBucket: '1970-02-01' },
+      ]);
+      const privateResponse = JSON.parse(
+        await sut.getTimeBucket(privateAuth, { timeBucket: '1970-02-01', isTrashed: true }),
+      );
+      expect(privateResponse).toEqual(expect.objectContaining({ id: [asset.id], isTrashed: [true] }));
+    });
+
+    it('should hide the buckets of a private album outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { publicAsset, privateAsset } = await newBucketAssets(ctx, user.id);
+      const { album } = await ctx.newAlbum({ ownerId: user.id }, [publicAsset.id, privateAsset.id]);
+      const { album: plainAlbum } = await ctx.newAlbum({ ownerId: user.id }, [publicAsset.id]);
+
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getTimeBuckets(auth, { albumId: album.id })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      await expect(sut.getTimeBucket(auth, { albumId: album.id, timeBucket: '1970-02-01' })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      // an album without private assets is unaffected
+      await expect(sut.getTimeBuckets(auth, { albumId: plainAlbum.id })).resolves.toEqual([
+        { count: 1, timeBucket: '1970-02-01' },
+      ]);
+
+      const privateAuth = factory.auth({ user, session: { privateMode: true } });
+      await expect(sut.getTimeBuckets(privateAuth, { albumId: album.id })).resolves.toEqual([
+        { count: 2, timeBucket: '1970-02-01' },
+      ]);
+      const response = JSON.parse(
+        await sut.getTimeBucket(privateAuth, { albumId: album.id, timeBucket: '1970-02-01' }),
+      );
+      expect(response.id.sort()).toEqual([publicAsset.id, privateAsset.id].sort());
+    });
+
+    it('should hide the buckets of a private album from a co-viewer outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { album, owner, sharedWith, asset } = await ctx.newSharedAlbum();
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      const { privateAsset } = await newBucketAssets(ctx, owner.id);
+      await ctx.newAlbumAsset({ albumId: album.id, assetId: privateAsset.id });
+
+      await expect(sut.getTimeBuckets(factory.auth({ user: sharedWith }), { albumId: album.id })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+      const buckets = await sut.getTimeBuckets(factory.auth({ user: sharedWith, session: { privateMode: true } }), {
+        albumId: album.id,
+      });
+      expect(buckets.reduce((sum, { count }) => sum + count, 0)).toBe(2);
+    });
   });
 });

@@ -32,6 +32,7 @@ import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
+import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
 import { EmailRepository } from 'src/repositories/email.repository';
 import { EventRepository } from 'src/repositories/event.repository';
@@ -189,7 +190,7 @@ export class MediumTestContext<S extends ClassConstructor<typeof BaseService> = 
       ...dto,
     };
 
-    const result = await this.get(StackRepository).create(stack, assetIds);
+    const result = await this.get(StackRepository).create(stack, assetIds, { privateMode: true, userId: dto.ownerId });
     return { stack: { ...stack, primaryAssetId: assetIds[0] }, result };
   }
 
@@ -504,6 +505,19 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
       return new key() as InstanceType<T>;
     }
 
+    case DownloadRepository: {
+      return new key(db) as InstanceType<T>;
+    }
+
+    case MapRepository: {
+      return new key(
+        new ConfigRepository(),
+        new SystemMetadataRepository(db),
+        LoggingRepository.create(),
+        db as unknown as ConstructorParameters<typeof MapRepository>[3],
+      ) as InstanceType<T>;
+    }
+
     case DatabaseRepository: {
       return new key(db, LoggingRepository.create(), new ConfigRepository()) as InstanceType<T>;
     }
@@ -634,6 +648,7 @@ const assetInsert = (asset: Partial<Insertable<AssetTable>> = {}) => {
     originalPath: '/path/to/something.jpg',
     ownerId: 'not-a-valid-uuid',
     isFavorite: false,
+    isPrivate: false,
     fileCreatedAt: now,
     fileModifiedAt: now,
     localDateTime: now,

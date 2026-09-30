@@ -55,7 +55,12 @@ SyncAssetV1 _createAsset({
   );
 }
 
-SyncAssetV2 _createAssetV2({required String id, required String checksum, required String fileName}) {
+SyncAssetV2 _createAssetV2({
+  required String id,
+  required String checksum,
+  required String fileName,
+  bool isPrivate = false,
+}) {
   return SyncAssetV2(
     id: id,
     checksum: checksum,
@@ -63,6 +68,7 @@ SyncAssetV2 _createAssetV2({required String id, required String checksum, requir
     type: AssetTypeEnum.IMAGE,
     ownerId: 'user-1',
     isFavorite: false,
+    isPrivate: isPrivate,
     fileCreatedAt: DateTime(2024, 1, 1),
     fileModifiedAt: DateTime(2024, 1, 1),
     createdAt: DateTime(2024, 1, 1),
@@ -213,6 +219,41 @@ void main() {
 
       expect(result.width, equals(existingWidth), reason: 'Width should remain as originally set');
       expect(result.height, equals(existingHeight), reason: 'Height should remain as originally set');
+    });
+  });
+
+  group('SyncStreamRepository - private mode fields', () {
+    test('updateAssetsV2 stores isPrivate from the payload and clears it again', () async {
+      await sut.updateUsersV1([_createUser()]);
+      final private = _createAssetV2(id: 'p', checksum: 'PPP', fileName: 'private.jpg', isPrivate: true);
+      await sut.updateAssetsV2([private]);
+
+      var row = await (db.remoteAssetEntity.select()..where((t) => t.id.equals(private.id))).getSingle();
+      expect(row.isPrivate, isTrue);
+
+      await sut.updateAssetsV2([_createAssetV2(id: 'p', checksum: 'PPP', fileName: 'private.jpg')]);
+      row = await (db.remoteAssetEntity.select()..where((t) => t.id.equals(private.id))).getSingle();
+      expect(row.isPrivate, isFalse);
+    });
+
+    test('updateAlbumsV2 stores isPrivate from the payload', () async {
+      await sut.updateUsersV1([_createUser()]);
+      await sut.updateAlbumsV2([
+        SyncAlbumV2(
+          id: 'album-1',
+          name: 'Private album',
+          description: '',
+          isActivityEnabled: true,
+          isPrivate: true,
+          order: AssetOrder.desc,
+          thumbnailAssetId: null,
+          createdAt: DateTime(2024, 1, 1),
+          updatedAt: DateTime(2024, 1, 1),
+        ),
+      ]);
+
+      final row = await (db.remoteAlbumEntity.select()..where((t) => t.id.equals('album-1'))).getSingle();
+      expect(row.isPrivate, isTrue);
     });
   });
 
