@@ -12,11 +12,15 @@ import { formatVideoPosition } from '$lib/utils/people-utils';
 
 const byTime = (a: VideoBookmarkResponseDto, b: VideoBookmarkResponseDto) => a.time - b.time;
 
+/** Quick nudges in a row become one save of the last position */
+const TIME_SAVE_DELAY_MS = 400;
+
 /** Bookmarks of the video open in the viewer, shared by the player (markers, shortcuts) and the info panel */
 class VideoBookmarkManager {
   assetId = $state<string>();
   bookmarks = $state<VideoBookmarkResponseDto[]>([]);
   #player: { assetId: string; getPosition: () => number } | undefined;
+  #timeSaves = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Lets the info panel bookmark the current position of the player showing the video. Returns the detach function. */
   attachPlayer(assetId: string, getPosition: () => number) {
@@ -91,7 +95,41 @@ class VideoBookmarkManager {
     }
   }
 
+  /** Moves a bookmark right away and saves the new position once the nudging stops */
+  setTime(id: string, time: number) {
+    const current = this.bookmarks.find((bookmark) => bookmark.id === id);
+    const next = Math.max(0, Math.round(time));
+    if (!current || current.time === next) {
+      return;
+    }
+
+    this.bookmarks = this.bookmarks.map((item) => (item.id === id ? { ...item, time: next } : item)).sort(byTime);
+    clearTimeout(this.#timeSaves.get(id));
+    this.#timeSaves.set(
+      id,
+      setTimeout(() => void this.#saveTime(id, next), TIME_SAVE_DELAY_MS),
+    );
+  }
+
+  async #saveTime(id: string, time: number) {
+    this.#timeSaves.delete(id);
+    try {
+      await updateVideoBookmark({ id, videoBookmarkUpdateDto: { time } });
+    } catch (error) {
+      const translate = await getFormatter();
+      handleError(error, translate('errors.unable_to_update_video_bookmark'));
+      // show what the server kept
+      const assetId = this.assetId;
+      if (assetId) {
+        this.assetId = undefined;
+        await this.load(assetId);
+      }
+    }
+  }
+
   async remove(id: string) {
+    clearTimeout(this.#timeSaves.get(id));
+    this.#timeSaves.delete(id);
     try {
       await deleteVideoBookmark({ id });
       this.bookmarks = this.bookmarks.filter((bookmark) => bookmark.id !== id);

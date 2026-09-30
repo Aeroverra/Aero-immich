@@ -91,6 +91,35 @@ describe('VideoBookmarkManager', () => {
     expect(videoBookmarkManager.bookmarks).toEqual([expect.objectContaining({ id: 'a', label: 'Cake' })]);
   });
 
+  it('moves a bookmark right away and saves quick moves once', async () => {
+    vi.useFakeTimers();
+    try {
+      sdkMock.getVideoBookmarks.mockResolvedValue([
+        newBookmark({ id: 'a', time: 10_000 }),
+        newBookmark({ id: 'b', time: 20_000 }),
+      ]);
+      sdkMock.updateVideoBookmark.mockResolvedValue(newBookmark({ id: 'a', time: 23_000 }));
+      await videoBookmarkManager.load('asset-1');
+
+      videoBookmarkManager.setTime('a', 11_000);
+      videoBookmarkManager.setTime('a', 23_000);
+
+      // re-sorted immediately, nothing sent yet
+      expect(videoBookmarkManager.bookmarks.map(({ id, time }) => `${id}@${time}`)).toEqual(['b@20000', 'a@23000']);
+      expect(sdkMock.updateVideoBookmark).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(sdkMock.updateVideoBookmark).toHaveBeenCalledTimes(1);
+      expect(sdkMock.updateVideoBookmark).toHaveBeenCalledWith({ id: 'a', videoBookmarkUpdateDto: { time: 23_000 } });
+
+      // never before the start
+      videoBookmarkManager.setTime('b', -5000);
+      expect(videoBookmarkManager.bookmarks[0]).toEqual(expect.objectContaining({ id: 'b', time: 0 }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('finds the next and the previous bookmark from a position', async () => {
     sdkMock.getVideoBookmarks.mockResolvedValue([
       newBookmark({ id: 'a', time: 10_000 }),
