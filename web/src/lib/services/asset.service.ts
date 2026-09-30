@@ -37,7 +37,9 @@ import {
   mdiTune,
 } from '@mdi/js';
 import type { MessageFormatter } from 'svelte-i18n';
+import { get } from 'svelte/store';
 import { goto } from '$app/navigation';
+import { tagPicker, tagPickerFocus } from '$lib/components/tags/tag-picker.svelte';
 import { ProjectionType } from '$lib/constants';
 import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
 import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
@@ -237,7 +239,23 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     title: $t('add_tag'),
     icon: mdiTagPlusOutline,
     $if: () => authManager.authenticated && authManager.preferences.tags.enabled,
-    onAction: async () => modalManager.show(AssetTagModal, { assetIds: await resolveAssetStackIds(asset) }),
+    onAction: async () => {
+      // the picker in the detail panel stays open from one asset to the next, the dialog is for the other cases
+      const canUsePanel =
+        isOwner &&
+        asset.hasMetadata &&
+        !authManager.isSharedLink &&
+        !assetViewerManager.isShowEditor &&
+        !assetViewerManager.isEditFacesPanelOpen &&
+        get(slideshowStore.slideshowState) === SlideshowState.None;
+      if (canUsePanel) {
+        assetViewerManager.openDetailPanel();
+        tagPicker.isOpen.current = true;
+        tagPickerFocus.requestedAt = Date.now();
+        return;
+      }
+      await modalManager.show(AssetTagModal, { assetIds: await resolveAssetStackIds(asset) });
+    },
     shortcuts: { key: 't' },
   };
 
