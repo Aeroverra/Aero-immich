@@ -323,7 +323,7 @@
                 {/if}
                 {#if face.isWholeAsset}
                   <span
-                    class="absolute inset-e-1 top-1 flex size-6 items-center justify-center rounded-full bg-black/70 text-white"
+                    class="absolute inset-s-1 bottom-1 flex size-6 items-center justify-center rounded-full bg-black/70 text-white"
                     title={$t('face_whole_asset')}
                     aria-label={$t('face_whole_asset')}
                     data-testid="face-whole-asset"
