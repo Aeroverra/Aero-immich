@@ -94,7 +94,7 @@ class ViewerBottomBar extends ConsumerWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (asset.isImage) OcrToggleButton(asset: asset),
-                          if (asset.isVideo) VideoControls(videoPlayerName: asset.id),
+                          if (asset.isVideo) VideoControls(videoPlayerName: asset.id, bookmarkAssetId: asset.remoteId),
                           if (!isReadonlyModeEnabled)
                             ImmichColorOverride(
                               color: Colors.white,
