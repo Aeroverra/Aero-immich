@@ -41,15 +41,16 @@ class _EditImagePageState extends ConsumerState<EditImagePage> with TickerProvid
     );
     final edits = <AssetEdit>[];
 
-    if (cropParameters.width != editorState.originalWidth || cropParameters.height != editorState.originalHeight) {
+    if (!editorState.rotateOnly &&
+        (cropParameters.width != editorState.originalWidth || cropParameters.height != editorState.originalHeight)) {
       edits.add(CropEdit(cropParameters));
     }
 
-    if (editorState.flipHorizontal) {
+    if (!editorState.rotateOnly && editorState.flipHorizontal) {
       edits.add(MirrorEdit(MirrorParameters(axis: MirrorAxis.horizontal)));
     }
 
-    if (editorState.flipVertical) {
+    if (!editorState.rotateOnly && editorState.flipVertical) {
       edits.add(MirrorEdit(MirrorParameters(axis: MirrorAxis.vertical)));
     }
 
@@ -247,6 +248,7 @@ class _TransformControls extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final editorNotifier = ref.watch(editorStateProvider.notifier);
+    final rotateOnly = ref.watch(editorStateProvider.select((state) => state.rotateOnly));
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -273,30 +275,40 @@ class _TransformControls extends ConsumerWidget {
                   ),
                 ],
               ),
-              Row(
-                children: [
-                  ImmichIconButton(
-                    icon: Icons.flip,
-                    variant: ImmichVariant.ghost,
-                    color: ImmichColor.secondary,
-                    onPressed: editorNotifier.flipHorizontally,
-                  ),
-                  const SizedBox(width: 8),
-                  Transform.rotate(
-                    angle: pi / 2,
-                    child: ImmichIconButton(
+              if (!rotateOnly)
+                Row(
+                  children: [
+                    ImmichIconButton(
                       icon: Icons.flip,
                       variant: ImmichVariant.ghost,
                       color: ImmichColor.secondary,
-                      onPressed: editorNotifier.flipVertically,
+                      onPressed: editorNotifier.flipHorizontally,
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    Transform.rotate(
+                      angle: pi / 2,
+                      child: ImmichIconButton(
+                        icon: Icons.flip,
+                        variant: ImmichVariant.ghost,
+                        color: ImmichColor.secondary,
+                        onPressed: editorNotifier.flipVertically,
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),
-        const _AspectRatioSelector(),
+        if (rotateOnly)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(context.t.editor_rotate_only_description, style: context.textTheme.bodyMedium),
+            ),
+          )
+        else
+          const _AspectRatioSelector(),
         const SizedBox(height: 32),
       ],
     );
@@ -436,7 +448,10 @@ class _EditorPreviewState extends ConsumerState<_EditorPreview> with TickerProvi
                 padding: const EdgeInsets.all(10),
                 width: (editorState.rotationAngle % 180 == 0) ? baseWidth : baseHeight,
                 height: (editorState.rotationAngle % 180 == 0) ? baseHeight : baseWidth,
-                child: CropImage(controller: cropController, image: widget.image, gridColor: Colors.white),
+                // no crop handles when the asset can only be rotated
+                child: editorState.rotateOnly
+                    ? Image(image: widget.image.image, fit: BoxFit.contain)
+                    : CropImage(controller: cropController, image: widget.image, gridColor: Colors.white),
               ),
             ),
           ),
