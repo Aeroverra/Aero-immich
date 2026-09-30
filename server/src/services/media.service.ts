@@ -168,6 +168,11 @@ export class MediaService extends BaseService {
       generated?.files ?? [],
     );
 
+    // before the new thumbhash, so a player that reloads for it gets the rotated video
+    if (asset.type === AssetType.Video) {
+      await this.generateEditedVideo(asset.id);
+    }
+
     let thumbhash: Buffer | undefined = generated?.thumbhash;
     if (!thumbhash && asset.type === AssetType.Video) {
       // back to the thumbhash of the unedited preview frame, if the video has one (the video of a live photo does not)
@@ -197,10 +202,6 @@ export class MediaService extends BaseService {
     const fullsizeDimensions =
       generated?.fullsizeDimensions ?? getOutputDimensions(asset.edits, getDimensions(asset.exifInfo!));
     await this.assetRepository.update({ id: asset.id, ...fullsizeDimensions });
-
-    if (asset.type === AssetType.Video) {
-      await this.generateEditedVideo(asset.id);
-    }
 
     return JobStatus.Success;
   }
