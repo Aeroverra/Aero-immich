@@ -19,6 +19,7 @@ import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
@@ -50,6 +51,10 @@ class PresentationContext {
   final ServiceMocks service;
   final RepositoryMocks repository;
 
+  /// The session's private mode state and whether the private folder is open, read when the widget is pumped
+  bool privateMode = false;
+  bool inPrivateView = false;
+
   List<Override> get overrides => [
     driftProvider.overrideWithValue(_mockDrift()),
     currentUserProvider.overrideWith((ref) => CurrentUserProvider(service.user.service)),
@@ -61,6 +66,8 @@ class PresentationContext {
     gCastServiceProvider.overrideWithValue(service.cast),
     serverInfoServiceProvider.overrideWithValue(service.serverInfo),
     inLockedViewProvider.overrideWithValue(false),
+    inPrivateViewProvider.overrideWithValue(inPrivateView),
+    isPrivateModeProvider.overrideWithValue(privateMode),
     assetMediaRepositoryProvider.overrideWithValue(repository.assetMedia.api),
   ];
 
