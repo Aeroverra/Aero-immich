@@ -1,9 +1,110 @@
 import { AssetTypeEnum } from '@immich/sdk';
-import { getAssetUrl, semverToName } from '$lib/utils';
+import { AbortError, getAssetUrl, semverToName, uploadRequest } from '$lib/utils';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { sharedLinkFactory } from '@test-data/factories/shared-link-factory';
 
+class FakeXhr {
+  static instances: FakeXhr[] = [];
+  method?: string;
+  url?: string;
+  responseType = '';
+  response: unknown;
+  status = 200;
+  readyState = 4;
+  statusText = 'OK';
+  sentBody: unknown;
+  requestHeaders: Record<string, string> = {};
+  aborted = false;
+  upload = { addEventListener: vi.fn() };
+  #listeners: Record<string, (event: unknown) => void> = {};
+
+  constructor() {
+    FakeXhr.instances.push(this);
+  }
+
+  addEventListener(type: string, handler: (event: unknown) => void) {
+    this.#listeners[type] = handler;
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.requestHeaders[name] = value;
+  }
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+
+  send(body: unknown) {
+    this.sentBody = body;
+  }
+
+  abort() {
+    this.aborted = true;
+    this.#listeners.abort?.({});
+  }
+
+  emitLoad(response: unknown, status = 200) {
+    this.status = status;
+    this.response = response;
+    this.#listeners.load?.({});
+  }
+}
+
 describe('utils', () => {
+  describe(uploadRequest.name, () => {
+    beforeEach(() => {
+      FakeXhr.instances = [];
+      vi.stubGlobal('XMLHttpRequest', FakeXhr as unknown as typeof XMLHttpRequest);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('sends custom headers and a Blob body', async () => {
+      const blob = new Blob(['chunk'], { type: 'application/octet-stream' });
+      const promise = uploadRequest({
+        url: '/takeouts/uploads/1',
+        method: 'PUT',
+        data: blob,
+        headers: { 'Content-Type': 'application/octet-stream', 'Upload-Offset': '10' },
+      });
+
+      const xhr = FakeXhr.instances[0];
+      expect(xhr.method).toBe('PUT');
+      expect(xhr.requestHeaders['Content-Type']).toBe('application/octet-stream');
+      expect(xhr.requestHeaders['Upload-Offset']).toBe('10');
+      expect(xhr.sentBody).toBe(blob);
+
+      xhr.emitLoad({ offset: 15 });
+      await expect(promise).resolves.toEqual({ data: { offset: 15 }, status: 200 });
+    });
+
+    it('rejects with AbortError when its signal aborts', async () => {
+      const controller = new AbortController();
+      const promise = uploadRequest({
+        url: '/takeouts/uploads/1',
+        method: 'PUT',
+        data: new Blob(['x']),
+        signal: controller.signal,
+      });
+
+      const xhr = FakeXhr.instances[0];
+      controller.abort();
+      expect(xhr.aborted).toBe(true);
+      await expect(promise).rejects.toBeInstanceOf(AbortError);
+    });
+
+    it('rejects immediately when the signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        uploadRequest({ url: '/x', method: 'PUT', data: new Blob(['x']), signal: controller.signal }),
+      ).rejects.toBeInstanceOf(AbortError);
+    });
+  });
+
   describe(getAssetUrl.name, () => {
     it('should return thumbnail URL for static images', () => {
       const asset = assetFactory.build({

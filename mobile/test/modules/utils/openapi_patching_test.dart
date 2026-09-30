@@ -67,7 +67,7 @@ void main() {
       expect(assetStack!.source_, StackSource.manual);
     });
 
-    test('reads queues from servers without face attributes, automatic stacks and video frame analysis', () {
+    test('reads queues from servers without face attributes, automatic stacks, video frame analysis and takeout', () {
       final queue = {
         'jobCounts': {'active': 1, 'completed': 0, 'delayed': 0, 'failed': 0, 'paused': 0, 'waiting': 2},
         'queueStatus': {'isActive': true, 'isPaused': false},
@@ -101,6 +101,7 @@ void main() {
       expect(queues!.faceAttributes.jobCounts.waiting, 0);
       expect(queues.autoStack.queueStatus.isActive, isFalse);
       expect(queues.videoFrameAnalysis.jobCounts.waiting, 0);
+      expect(queues.takeout.jobCounts.waiting, 0);
       expect(queues.smartSearch.jobCounts.waiting, 2);
     });
 
@@ -122,6 +123,17 @@ void main() {
       );
       expect(features, isNotNull);
       expect(features!.customViews.orElse(null), isFalse);
+    });
+
+    test('reads the admin config from servers without the takeout read settings', () {
+      final dynamic value = jsonDecode('{"trash": {"enabled": true, "days": 30}}');
+      upgradeDto(value, 'AdminConfigDto');
+      final takeout = AdminConfigTakeoutDto.fromJson(value['takeout']);
+      expect(takeout, isNotNull);
+      expect(takeout!.readers, 3);
+      expect(takeout.readaheadDepth, 4);
+      expect(takeout.throttleMBps, isNull);
+      expect(value['trash'], {'enabled': true, 'days': 30});
     });
 
     test('addDefault', () {
