@@ -42,9 +42,11 @@ class SharedLinkService {
     String? albumId,
     List<String>? assetIds,
     DateTime? expiresAt,
+    bool confirmPrivate = false,
   }) async {
     try {
       final type = albumId != null ? SharedLinkType.ALBUM : SharedLinkType.INDIVIDUAL;
+      final confirm = confirmPrivate ? const Optional<bool?>.present(true) : const Optional<bool?>.absent();
       SharedLinkCreateDto? dto;
       if (type == SharedLinkType.ALBUM) {
         dto = SharedLinkCreateDto(
@@ -57,6 +59,7 @@ class SharedLinkService {
           description: description == null ? const Optional.absent() : Optional.present(description),
           password: password == null ? const Optional.absent() : Optional.present(password),
           slug: slug == null ? const Optional.absent() : Optional.present(slug),
+          confirmPrivate: confirm,
         );
       } else if (assetIds != null) {
         dto = SharedLinkCreateDto(
@@ -69,6 +72,7 @@ class SharedLinkService {
           password: password == null ? const Optional.absent() : Optional.present(password),
           slug: slug == null ? const Optional.absent() : Optional.present(slug),
           assetIds: Optional.present(assetIds),
+          confirmPrivate: confirm,
         );
       }
 

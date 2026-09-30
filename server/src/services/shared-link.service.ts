@@ -73,6 +73,11 @@ export class SharedLinkService extends BaseService {
           throw new BadRequestException('Invalid albumId');
         }
         await this.requireAccess({ auth, permission: Permission.AlbumShare, ids: [dto.albumId] });
+
+        const album = await this.albumRepository.getById(dto.albumId, { withAssets: false });
+        if (album?.isPrivate && !dto.confirmPrivate) {
+          throw new BadRequestException('Shared link would expose private assets, confirmPrivate is required');
+        }
         break;
       }
 
@@ -82,6 +87,10 @@ export class SharedLinkService extends BaseService {
         }
 
         await this.requireAccess({ auth, permission: Permission.AssetShare, ids: dto.assetIds });
+
+        if (!dto.confirmPrivate && (await this.sharedLinkRepository.hasPrivateAssets(dto.assetIds))) {
+          throw new BadRequestException('Shared link would expose private assets, confirmPrivate is required');
+        }
 
         break;
       }

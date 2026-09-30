@@ -18,6 +18,7 @@ import { UserTable } from 'src/schema/tables/user.table';
 import { BaseService } from 'src/services/base.service';
 import { getCalendarHeatmap } from 'src/services/shared/user-methods';
 import { JobOf, UserMetadataItem } from 'src/types';
+import { toPrivateScope } from 'src/utils/access';
 import { ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
 import { findOrFail } from 'src/utils/misc';
@@ -50,7 +51,7 @@ export class UserService extends BaseService {
   }
 
   getCalendarHeatmap(auth: AuthDto, dto: CalendarHeatmapDto): Promise<CalendarHeatmapResponseDto> {
-    return getCalendarHeatmap(auth.user.id, dto, { asset: this.assetRepository });
+    return getCalendarHeatmap(auth.user.id, dto, { asset: this.assetRepository }, toPrivateScope(auth));
   }
 
   async updateMe({ user }: AuthDto, dto: UserUpdateMeDto): Promise<UserAdminResponseDto> {
