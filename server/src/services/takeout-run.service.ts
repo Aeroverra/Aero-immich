@@ -85,6 +85,7 @@ import {
   Gate,
   ImportPlan,
   LastReadAnalysis,
+  PlannedFile,
   UnreadablePart,
   analyzeExport,
   buildCatalog,
@@ -1793,6 +1794,9 @@ export class TakeoutRunService extends BaseService {
         nameCandidates.set(key, list);
       }
     }
+    // Go's name + time index also holds the assets uploaded earlier in the same run: of two new copies of one photo
+    // in this Takeout only the larger is uploaded, the smaller follows it (a server twin still comes first)
+    const largerCopyOf = largerCopiesInTakeout(plan.files);
 
     const seenChecksum = new Map<string, number>(); // hex -> seq of first plan row
     const rows: any[] = [];
@@ -1842,6 +1846,12 @@ export class TakeoutRunService extends BaseService {
             status = TakeoutRunFileStatus.Planned;
             assetId = match.assetId;
             reason = 'the server already has a larger version';
+          } else if (largerCopyOf.has(file.key)) {
+            // another copy of the larger file: processed after it, on its asset (seq === key)
+            action = TakeoutRunFileAction.AlreadyProcessed;
+            status = TakeoutRunFileStatus.Planned;
+            dependsOnSeq = largerCopyOf.get(file.key)!;
+            reason = LARGER_COPY_REASON;
           } else {
             action = TakeoutRunFileAction.Upload;
             status = TakeoutRunFileStatus.Planned;
@@ -1883,6 +1893,21 @@ export class TakeoutRunService extends BaseService {
         captureDate: file.data?.captureDate ? new Date(file.data.captureDate) : null,
       });
       seq++;
+    }
+
+    // a smaller copy adds its albums to the asset of its larger copy when it is processed; its tags and favorite go
+    // into the upload of the larger copy, which writes them before the metadata extraction of the new asset. A larger
+    // copy that the server already has follows the server rules, like its smaller copy (rows[seq].seq === seq).
+    for (const row of rows) {
+      if (row.reason !== LARGER_COPY_REASON) {
+        continue;
+      }
+      const larger = rows[row.dependsOnSeq];
+      if (larger?.action !== TakeoutRunFileAction.Upload || !larger.plan || !row.plan) {
+        continue;
+      }
+      larger.plan.tags = dedupeTags([...(larger.plan.tags ?? []), ...(row.plan.tags ?? [])]);
+      larger.plan.favorited = !!larger.plan.favorited || !!row.plan.favorited;
     }
     return rows;
   }
@@ -2738,9 +2763,67 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
 
 /** The reason of a server duplicate whose asset is in the trash: it never joins a stack (a trashed cover hides it) */
 const IN_TRASH_REASON = 'already on the server (in trash)';
+/** The reason of a smaller copy of a new file of this Takeout (same name and time, other bytes): it is not uploaded */
+const LARGER_COPY_REASON = 'a larger copy with the same name and time is in this Takeout';
 
 function nfcBase(name: string | null | undefined): string {
   return basename(name ?? '').normalize('NFC');
+}
+
+/**
+ * The name + time match of DEV 5 among the files of this Takeout, like Go's ShouldUpload whose index holds the assets
+ * uploaded earlier in the run. Google puts a smaller copy of a photo in an album folder ("Auto") next to the full copy
+ * in its year folder. Of the planned non-edited uploads with a Google capture time, files with the same name whose
+ * times are within `-5s <= smaller - larger < 5s` and whose bytes differ are copies of one photo: the largest stays an
+ * upload, every other one (and each exact copy of it under the same name) maps to the key of that largest file. An
+ * exact copy of the largest is left to the checksum rule. Same-name files further apart stay uploads.
+ */
+function largerCopiesInTakeout(files: PlannedFile[]): Map<number, number> {
+  const byName = new Map<string, PlannedFile[]>();
+  for (const file of files) {
+    if (file.action !== 'upload' || file.isEditedCopy || !file.checksum || !file.data?.captureDate) {
+      continue;
+    }
+    const name = nfcBase(file.onDiskName);
+    const list = byName.get(name) ?? [];
+    list.push(file);
+    byName.set(name, list);
+  }
+
+  const largerOf = new Map<number, number>();
+  for (const list of byName.values()) {
+    if (list.length < 2) {
+      continue;
+    }
+    // one entry per checksum, for its first file in plan order; the largest first (then plan order)
+    const byChecksum = new Map<string, { key: number; size: number; at: number; keys: number[] }>();
+    for (const file of list) {
+      const hex = file.checksum!.toString('hex');
+      const entry = byChecksum.get(hex);
+      if (entry) {
+        entry.keys.push(file.key);
+      } else {
+        const at = new Date(file.data!.captureDate!).getTime();
+        byChecksum.set(hex, { key: file.key, size: Number(file.size), at, keys: [file.key] });
+      }
+    }
+    const entries = byChecksum
+      .values()
+      .toArray()
+      .sort((a, b) => b.size - a.size || a.key - b.key);
+    const kept: typeof entries = [];
+    for (const entry of entries) {
+      const larger = kept.find((k) => entry.at - k.at >= -5000 && entry.at - k.at < 5000);
+      if (larger === undefined) {
+        kept.push(entry);
+        continue;
+      }
+      for (const key of entry.keys) {
+        largerOf.set(key, larger.key);
+      }
+    }
+  }
+  return largerOf;
 }
 
 /**

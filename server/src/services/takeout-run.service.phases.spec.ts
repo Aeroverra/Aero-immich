@@ -42,9 +42,9 @@ const KiB = 1024;
 const userId = 'user-1';
 const media = (name: string) => `Takeout/Google Photos/${name}`;
 const errno = (code: string) => Object.assign(new Error(code), { code });
-/** a Google supplemental-metadata JSON with its title and photoTakenTime (seconds) */
-const googleJson = (title: string, takenSeconds: number) =>
-  Buffer.from(JSON.stringify({ title, photoTakenTime: { timestamp: String(takenSeconds) } }));
+/** a Google supplemental-metadata JSON with its title, photoTakenTime (seconds) and other fields */
+const googleJson = (title: string, takenSeconds: number, extra: Record<string, unknown> = {}) =>
+  Buffer.from(JSON.stringify({ title, photoTakenTime: { timestamp: String(takenSeconds) }, ...extra }));
 const greyJpeg = (shade: number) =>
   sharp({ create: { width: 400, height: 400, channels: 3, background: { r: shade, g: shade, b: shade } } })
     .jpeg()
@@ -860,6 +860,213 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.assets).toHaveLength(1);
     // the album gets the better server asset
     expect(h.mocks.album.addAssetIds).toHaveBeenCalledWith('album-cruise', [server.id]);
+  });
+
+  describe('two new copies with the same name in this Takeout (name + time, like Go)', () => {
+    it('uploads only the larger copy, and the album of the smaller one gets its asset', async () => {
+      // family 2026-09-30 (Aeroverra export): Google put a smaller copy of each photo in the album "Auto" next to the
+      // full copy in "Photos from 2019", same name and photoTakenTime, other bytes. Neither was on the server, so both
+      // were uploaded (36 pairs). Go's name + time index holds the assets uploaded earlier in the run.
+      const h = await harness({ settings: { syncAlbums: true, peopleTags: true } });
+      const name = 'MVIMG_20190119_152431.jpg';
+      const taken = 1_547_929_471;
+      const small = await greyJpeg(120);
+      // the full copy: the photo followed by its motion clip
+      const full = Buffer.concat([await greyJpeg(121), randomBytesSeeded(4000, 82)]);
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([
+          { name: media('Auto/metadata.json'), data: Buffer.from('{"title":"Auto"}') },
+          { name: media(`Auto/${name}`), data: small },
+          {
+            name: media(`Auto/${name}.supplemental-metadata.json`),
+            data: googleJson(name, taken, { favorited: true, people: [{ name: 'Ann' }] }),
+          },
+          { name: media(`Photos from 2019/${name}`), data: full },
+          { name: media(`Photos from 2019/${name}.supplemental-metadata.json`), data: googleJson(name, taken) },
+        ]),
+      );
+      h.mocks.album.getAll.mockResolvedValue([]);
+      h.mocks.album.create.mockResolvedValue({ id: 'album-auto' } as any);
+      h.mocks.album.addAssetIds.mockResolvedValue();
+
+      const run = h.newRun();
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(1);
+      const [asset] = h.repo.assets;
+      expect(asset.checksum).toEqual(sha1(full));
+      const rows = h.files(run.id);
+      const larger = rows.find((f) => f.takeoutPath === media(`Photos from 2019/${name}`));
+      expect(larger).toMatchObject({
+        action: TakeoutRunFileAction.Upload,
+        status: TakeoutRunFileStatus.Done,
+        assetId: asset.id,
+      });
+      expect(rows.find((f) => f.takeoutPath === media(`Auto/${name}`))).toMatchObject({
+        action: TakeoutRunFileAction.AlreadyProcessed,
+        status: TakeoutRunFileStatus.Done,
+        reason: 'a larger copy with the same name and time is in this Takeout',
+        dependsOnSeq: larger.seq,
+        assetId: asset.id,
+      });
+      // the album, the people and the favorite of the smaller copy go to the uploaded larger copy
+      expect(h.mocks.album.addAssetIds).toHaveBeenCalledWith('album-auto', [asset.id]);
+      expect(larger.plan.tags).toContain('People/Ann');
+      expect(h.mocks.asset.create).toHaveBeenCalledWith(expect.objectContaining({ id: asset.id, isFavorite: true }));
+    });
+
+    it('keeps the server twin of the smaller copy first: the larger copy is uploaded as a larger version', async () => {
+      const h = await harness();
+      const name = 'MVIMG_20190119_152431.jpg';
+      const taken = 1_547_929_471;
+      const small = randomBytesSeeded(600, 87);
+      const full = randomBytesSeeded(900, 88);
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([
+          { name: media(`Auto/${name}`), data: small },
+          { name: media(`Auto/${name}.supplemental-metadata.json`), data: googleJson(name, taken) },
+          { name: media(`Photos from 2019/${name}`), data: full },
+          { name: media(`Photos from 2019/${name}.supplemental-metadata.json`), data: googleJson(name, taken) },
+        ]),
+      );
+      const server = h.repo.addAsset({
+        ownerId: userId,
+        checksum: sha1(small),
+        originalPath: `/upload/${name}`,
+        originalFileName: name,
+        fileSizeInByte: small.length,
+        capturedAt: new Date(taken * 1000),
+      });
+
+      const run = h.newRun();
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(2);
+      const rows = h.files(run.id);
+      expect(rows.find((f) => f.takeoutPath === media(`Auto/${name}`))).toMatchObject({
+        action: TakeoutRunFileAction.ServerDuplicate,
+        assetId: server.id,
+      });
+      expect(rows.find((f) => f.takeoutPath === media(`Photos from 2019/${name}`))).toMatchObject({
+        action: TakeoutRunFileAction.Upload,
+        status: TakeoutRunFileStatus.Done,
+        reason: 'server had a smaller version',
+        smallerAssetId: server.id,
+      });
+    });
+
+    it('puts the album of the smaller copy on the server asset of the larger copy, and uploads nothing', async () => {
+      // the server has the larger copy under another name, so the name + time check of the smaller copy finds nothing
+      const h = await harness({ settings: { syncAlbums: true, peopleTags: true } });
+      const name = 'MVIMG_20190119_152431.jpg';
+      const taken = 1_547_929_471;
+      const small = randomBytesSeeded(600, 89);
+      const full = randomBytesSeeded(900, 90);
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([
+          { name: media('Auto/metadata.json'), data: Buffer.from('{"title":"Auto"}') },
+          { name: media(`Auto/${name}`), data: small },
+          {
+            name: media(`Auto/${name}.supplemental-metadata.json`),
+            data: googleJson(name, taken, { people: [{ name: 'Ann' }] }),
+          },
+          { name: media(`Photos from 2019/${name}`), data: full },
+          { name: media(`Photos from 2019/${name}.supplemental-metadata.json`), data: googleJson(name, taken) },
+        ]),
+      );
+      const server = h.repo.addAsset({
+        ownerId: userId,
+        checksum: sha1(full),
+        originalPath: '/upload/renamed.jpg',
+        originalFileName: 'renamed.jpg',
+        fileSizeInByte: full.length,
+        capturedAt: new Date(taken * 1000),
+      });
+      h.mocks.album.getAll.mockResolvedValue([]);
+      h.mocks.album.create.mockResolvedValue({ id: 'album-auto' } as any);
+      h.mocks.album.addAssetIds.mockResolvedValue();
+
+      const run = h.newRun();
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(1);
+      const rows = h.files(run.id);
+      const larger = rows.find((f) => f.takeoutPath === media(`Photos from 2019/${name}`));
+      expect(larger).toMatchObject({ action: TakeoutRunFileAction.ServerDuplicate, assetId: server.id });
+      expect(rows.find((f) => f.takeoutPath === media(`Auto/${name}`))).toMatchObject({
+        action: TakeoutRunFileAction.AlreadyProcessed,
+        status: TakeoutRunFileStatus.Done,
+        dependsOnSeq: larger.seq,
+        assetId: server.id,
+      });
+      expect(h.mocks.album.addAssetIds).toHaveBeenCalledWith('album-auto', [server.id]);
+      // an asset that was on the server before gets no tags of a copy (tagServerDuplicates is off)
+      expect(larger.plan.tags ?? []).not.toContain('People/Ann');
+    });
+
+    it('uploads both when their capture times are an hour apart', async () => {
+      const h = await harness();
+      const taken = 1_547_929_471;
+      const first = randomBytesSeeded(900, 83);
+      const second = randomBytesSeeded(600, 84);
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([
+          { name: media('Photos from 2019/IMG_0259.JPG'), data: first },
+          {
+            name: media('Photos from 2019/IMG_0259.JPG.supplemental-metadata.json'),
+            data: googleJson('IMG_0259.JPG', taken),
+          },
+          { name: media('Trip/IMG_0259.JPG'), data: second },
+          {
+            name: media('Trip/IMG_0259.JPG.supplemental-metadata.json'),
+            data: googleJson('IMG_0259.JPG', taken + 3600),
+          },
+        ]),
+      );
+
+      const run = h.newRun();
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(2);
+      const uploads = h.files(run.id).filter((f) => f.takeoutPath.endsWith('/IMG_0259.JPG'));
+      expect(uploads).toHaveLength(2);
+      for (const row of uploads) {
+        expect(row).toMatchObject({ action: TakeoutRunFileAction.Upload, status: TakeoutRunFileStatus.Done });
+      }
+    });
+
+    it('uploads both edited copies with the same name and time, as before', async () => {
+      // the name + time match leaves edited copies alone, like the server check
+      const h = await harness();
+      const taken = 1_547_929_471;
+      const small = randomBytesSeeded(600, 85);
+      const large = randomBytesSeeded(900, 86);
+      await h.addPart(
+        'takeout-20260914T211500Z-1-001.tgz',
+        buildTarGz([
+          { name: media('Auto/IMG_0300-edited.JPG'), data: small },
+          { name: media('Auto/IMG_0300.JPG.supplemental-metadata.json'), data: googleJson('IMG_0300.JPG', taken) },
+          { name: media('Photos from 2019/IMG_0300-edited.JPG'), data: large },
+          {
+            name: media('Photos from 2019/IMG_0300.JPG.supplemental-metadata.json'),
+            data: googleJson('IMG_0300.JPG', taken),
+          },
+        ]),
+      );
+
+      const run = h.newRun();
+      expect(await h.execute(run)).toBe(JobStatus.Success);
+      expect(h.repo.assets).toHaveLength(2);
+      const edited = h.files(run.id).filter((f) => f.takeoutPath.endsWith('/IMG_0300-edited.JPG'));
+      expect(edited).toHaveLength(2);
+      for (const row of edited) {
+        expect(row).toMatchObject({
+          action: TakeoutRunFileAction.Upload,
+          status: TakeoutRunFileStatus.Done,
+          captureDate: new Date(taken * 1000),
+        });
+      }
+    });
   });
 
   it('turns a planned upload imported meanwhile by another client into a server duplicate', async () => {
