@@ -240,6 +240,22 @@ export class TagRepository {
     return new Set(results.map(({ assetId }) => assetId));
   }
 
+  /** the tags directly on each of [assetIds] */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @Chunked()
+  getAssetTags(assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db
+      .selectFrom('tag_asset')
+      .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+      .select(['tag_asset.assetId', 'tag.id', 'tag.value'])
+      .where('tag_asset.assetId', 'in', assetIds)
+      .execute();
+  }
+
   @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
   @Chunked({ paramIndex: 1 })
   async addAssetIds(tagId: string, assetIds: string[]): Promise<void> {

@@ -37,6 +37,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'stacks': StacksResponse(groupAuto: true).toJson(),
     'autoStack': AutoStackResponse(enabled: false).toJson(),
     'stackActions': StackActionsResponse(mode: StackActionMode.ask).toJson(),
+    'cameraGroups': CameraGroupsResponse(enabled: false, copyTags: false, keepTags: [], reviewTags: []).toJson(),
     'customViews': CustomViewsResponse(lockTrigger: LockTrigger.screenOff).toJson(),
   },
   'PrivateModeResponse': {'lockTrigger': LockTrigger.appPause.toJson()},
