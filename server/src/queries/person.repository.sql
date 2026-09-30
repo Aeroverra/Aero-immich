@@ -38,6 +38,24 @@ where
   "person_group"."id" in ($1)
 
 -- PersonRepository.deleteEmptyGroups
+delete from "asset_face"
+where
+  "asset_face"."isWholeAsset" = $1
+  and "asset_face"."personGroupId" in (
+    select
+      "person_group"."id"
+    from
+      "person_group"
+    where
+      not exists (
+        select
+          "person"."personGroupId"
+        from
+          "person"
+        where
+          "person"."personGroupId" = "person_group"."id"
+      )
+  )
 delete from "person_group"
 where
   not exists (
@@ -633,7 +651,8 @@ where
   and "asset_face"."deletedAt" is null
   and "asset_face"."isVisible" is true
 order by
-  "asset"."isPrivate" asc
+  "asset"."isPrivate" asc,
+  "asset_face"."isWholeAsset" asc
 
 -- PersonRepository.isCoverAssetPrivate
 select
@@ -758,6 +777,74 @@ select
 from
   "asset_job_status"
 
+-- PersonRepository.deleteAssetFaces
+delete from "asset_face"
+where
+  "asset_face"."id" in ($1)
+
+-- PersonRepository.deleteDuplicateWholeAssetFaces
+delete from "asset_face"
+where
+  "asset_face"."personGroupId" = $1
+  and "asset_face"."isWholeAsset" = $2
+  and exists (
+    select
+    from
+      "asset_face" as "other"
+    where
+      "other"."assetId" = "asset_face"."assetId"
+      and "other"."personGroupId" = "asset_face"."personGroupId"
+      and "other"."isWholeAsset" = $3
+      and "other"."deletedAt" is null
+      and "other"."id" < "asset_face"."id"
+  )
+
+-- PersonRepository.getAssetsForWholeAssetFaces
+select
+  "asset"."id",
+  "asset"."type",
+  "asset"."width",
+  "asset"."height",
+  "asset_exif"."exifImageWidth",
+  "asset_exif"."exifImageHeight",
+  "asset_exif"."orientation"
+from
+  "asset"
+  left join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+where
+  "asset"."id" in ($1)
+
+-- PersonRepository.getAssetCounts
+with
+  "presence" as (
+    select
+      "asset_face"."personGroupId",
+      "asset_face"."assetId",
+      bool_or(not "asset_face"."isWholeAsset") as "located"
+    from
+      "asset_face"
+      inner join "person" on "person"."personGroupId" = "asset_face"."personGroupId"
+      and "person"."ownerId" = $1
+    where
+      "asset_face"."assetId" = any ($2::uuid[])
+      and "asset_face"."deletedAt" is null
+      and "asset_face"."isVisible" is true
+    group by
+      "asset_face"."personGroupId",
+      "asset_face"."assetId"
+  )
+select
+  "presence"."personGroupId",
+  count(*) as "count",
+  count(*) filter (
+    where
+      "presence"."located" = $3
+  ) as "removableCount"
+from
+  "presence"
+group by
+  "presence"."personGroupId"
+
 -- PersonRepository.deleteAssetFace
 delete from "asset_face"
 where
@@ -781,6 +868,8 @@ where
   "asset_face"."assetId" = $2
   and "asset_face"."personGroupId" = $3
   and "asset_face"."deletedAt" is null
+order by
+  "asset_face"."isWholeAsset" asc
 
 -- PersonRepository.getForMergePerson
 select
