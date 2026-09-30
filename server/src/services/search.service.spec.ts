@@ -1,7 +1,7 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { mapAsset } from 'src/dtos/asset-response.dto';
 import { SearchSuggestionType } from 'src/dtos/search.dto';
-import { AssetVisibility } from 'src/enum';
+import { AssetType, AssetVisibility } from 'src/enum';
 import { SearchService } from 'src/services/search.service';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { AuthFactory } from 'test/factories/auth.factory';
@@ -276,7 +276,7 @@ describe(SearchService.name, () => {
       mocks.search.searchRandomV3.mockResolvedValue([]);
       await expect(sut.searchRandom(auth, { size: 250, filter: {} })).resolves.toEqual([]);
 
-      mocks.search.searchSmartV3.mockResolvedValue({ hasNextPage: false, items: [] });
+      mocks.search.searchSmartV3.mockResolvedValue({ hasNextPage: false, items: [], frameTimestamps: new Map() });
       mocks.machineLearning.encodeText.mockResolvedValue('[1, 2, 3]');
       await sut.searchSmart(auth, { size: 100, filter: {}, query: 'test' });
       expect(mocks.search.searchSmartV3).toHaveBeenCalledWith(
@@ -390,7 +390,7 @@ describe(SearchService.name, () => {
 
   describe('searchSmart', () => {
     beforeEach(() => {
-      mocks.search.searchSmart.mockResolvedValue({ hasNextPage: false, items: [] });
+      mocks.search.searchSmart.mockResolvedValue({ hasNextPage: false, items: [], frameTimestamps: new Map() });
       mocks.machineLearning.encodeText.mockResolvedValue('[1, 2, 3]');
     });
 
@@ -503,6 +503,48 @@ describe(SearchService.name, () => {
         'test',
         expect.objectContaining({ language: 'de' }),
       );
+    });
+
+    it('should say where in a video the search matched', async () => {
+      const video = AssetFactory.create({ type: AssetType.Video });
+      const photo = AssetFactory.create();
+      mocks.search.searchSmart.mockResolvedValue({
+        hasNextPage: false,
+        items: [getForAsset(video), getForAsset(photo)],
+        // positions of results outside this page are left out
+        frameTimestamps: new Map([
+          [video.id, 83_000],
+          [newUuid(), 5000],
+        ]),
+      });
+
+      const { assets } = await sut.searchSmart(authStub.user1, { size: 100, query: 'test' });
+
+      expect(assets.items.map(({ id }) => id)).toEqual([video.id, photo.id]);
+      expect(assets.matchedFrames).toEqual([{ assetId: video.id, frameTimestamp: 83_000 }]);
+    });
+
+    it('should say where in a video the search matched with the new request shape', async () => {
+      const video = AssetFactory.create({ type: AssetType.Video });
+      mocks.search.searchSmartV3.mockResolvedValue({
+        hasNextPage: false,
+        items: [getForAsset(video)],
+        frameTimestamps: new Map([[video.id, 1500]]),
+      });
+
+      const { assets } = await sut.searchSmart(authStub.user1, { size: 100, filter: {}, query: 'test' });
+
+      expect(assets.matchedFrames).toEqual([{ assetId: video.id, frameTimestamp: 1500 }]);
+    });
+  });
+
+  describe('searchMetadata', () => {
+    it('should not describe matched frames', async () => {
+      mocks.search.searchMetadata.mockResolvedValue({ hasNextPage: false, items: [] });
+
+      const { assets } = await sut.searchMetadata(authStub.user1, { size: 100 });
+
+      expect(assets).not.toHaveProperty('matchedFrames');
     });
   });
 });
