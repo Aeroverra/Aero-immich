@@ -190,24 +190,43 @@ select
   "asset"."thumbhash",
   "asset"."type",
   "asset"."width",
-  "asset"."height"
+  "asset"."height",
+  smart_search.embedding <=> $1 as "distance"
 from
   "asset"
   inner join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
   inner join "smart_search" on "asset"."id" = "smart_search"."assetId"
 where
-  "asset"."isPrivate" = $1
-  and "asset"."fileCreatedAt" >= $2
-  and "asset_exif"."lensModel" = $3
-  and "asset"."ownerId" = any ($4::uuid[])
-  and "asset"."isFavorite" = $5
+  "asset"."isPrivate" = $2
+  and "asset"."fileCreatedAt" >= $3
+  and "asset_exif"."lensModel" = $4
+  and "asset"."ownerId" = any ($5::uuid[])
+  and "asset"."isFavorite" = $6
   and "asset"."deletedAt" is null
 order by
-  smart_search.embedding <=> $6,
+  smart_search.embedding <=> $7,
   "asset"."id" asc
 limit
-  $7
-offset
+  $8
+set
+  local vchordrq.probes = 1
+select
+  "asset"."id",
+  smart_search_frame.embedding <=> $1 as "distance"
+from
+  "asset"
+  inner join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  inner join "smart_search_frame" on "asset"."id" = "smart_search_frame"."assetId"
+where
+  "asset"."isPrivate" = $2
+  and "asset"."fileCreatedAt" >= $3
+  and "asset_exif"."lensModel" = $4
+  and "asset"."ownerId" = any ($5::uuid[])
+  and "asset"."isFavorite" = $6
+  and "asset"."deletedAt" is null
+order by
+  smart_search_frame.embedding <=> $7
+limit
   $8
 commit
 
@@ -366,6 +385,16 @@ from
   inner join "cte" on "asset"."id" = "cte"."assetId"
 order by
   "asset_exif"."city"
+
+-- SearchRepository.getMinFaceDistance
+select
+  min(face_search.embedding <=> $1) as "distance"
+from
+  "asset_face"
+  inner join "face_search" on "face_search"."faceId" = "asset_face"."id"
+where
+  "asset_face"."personGroupId" = any ($2::uuid[])
+  and "asset_face"."deletedAt" is null
 
 -- SearchRepository.getCountries
 select distinct
@@ -1851,25 +1880,45 @@ select
   "asset"."thumbhash",
   "asset"."type",
   "asset"."width",
-  "asset"."height"
+  "asset"."height",
+  smart_search.embedding <=> $1 as "distance"
 from
   "asset"
   left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
   inner join "smart_search" on "asset"."id" = "smart_search"."assetId"
 where
-  "asset"."ownerId" = any ($1::uuid[])
+  "asset"."ownerId" = any ($2::uuid[])
   and (
-    "asset"."visibility" != $2
-    or "asset"."ownerId" = $3
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
   )
-  and "asset"."isPrivate" = $4
+  and "asset"."isPrivate" = $5
   and true
 order by
-  smart_search.embedding <=> $5,
+  smart_search.embedding <=> $6,
   "asset"."id" asc
 limit
-  $6
-offset
+  $7
+set
+  local vchordrq.probes = 1
+select
+  "asset"."id",
+  smart_search_frame.embedding <=> $1 as "distance"
+from
+  "asset"
+  left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  inner join "smart_search_frame" on "asset"."id" = "smart_search_frame"."assetId"
+where
+  "asset"."ownerId" = any ($2::uuid[])
+  and (
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
+  )
+  and "asset"."isPrivate" = $5
+  and true
+order by
+  smart_search_frame.embedding <=> $6
+limit
   $7
 commit
 
@@ -1906,28 +1955,51 @@ select
   "asset"."thumbhash",
   "asset"."type",
   "asset"."width",
-  "asset"."height"
+  "asset"."height",
+  smart_search.embedding <=> $1 as "distance"
 from
   "asset"
   left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
   inner join "smart_search" on "asset"."id" = "smart_search"."assetId"
 where
-  "asset"."ownerId" = any ($1::uuid[])
+  "asset"."ownerId" = any ($2::uuid[])
   and (
-    "asset"."visibility" != $2
-    or "asset"."ownerId" = $3
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
   )
-  and "asset"."isPrivate" = $4
+  and "asset"."isPrivate" = $5
   and (
-    "asset"."fileCreatedAt" < $5
-    and "asset"."fileCreatedAt" >= $6
+    "asset"."fileCreatedAt" < $6
+    and "asset"."fileCreatedAt" >= $7
   )
 order by
-  smart_search.embedding <=> $7,
+  smart_search.embedding <=> $8,
   "asset"."id" asc
 limit
-  $8
-offset
+  $9
+set
+  local vchordrq.probes = 1
+select
+  "asset"."id",
+  smart_search_frame.embedding <=> $1 as "distance"
+from
+  "asset"
+  left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  inner join "smart_search_frame" on "asset"."id" = "smart_search_frame"."assetId"
+where
+  "asset"."ownerId" = any ($2::uuid[])
+  and (
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
+  )
+  and "asset"."isPrivate" = $5
+  and (
+    "asset"."fileCreatedAt" < $6
+    and "asset"."fileCreatedAt" >= $7
+  )
+order by
+  smart_search_frame.embedding <=> $8
+limit
   $9
 commit
 
@@ -1964,25 +2036,45 @@ select
   "asset"."thumbhash",
   "asset"."type",
   "asset"."width",
-  "asset"."height"
+  "asset"."height",
+  smart_search.embedding <=> $1 as "distance"
 from
   "asset"
   left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
   inner join "smart_search" on "asset"."id" = "smart_search"."assetId"
 where
-  "asset"."ownerId" = any ($1::uuid[])
+  "asset"."ownerId" = any ($2::uuid[])
   and (
-    "asset"."visibility" != $2
-    or "asset"."ownerId" = $3
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
   )
-  and "asset"."isPrivate" = $4
+  and "asset"."isPrivate" = $5
   and true
 order by
-  smart_search.embedding <=> $5,
+  smart_search.embedding <=> $6,
   "asset"."id" asc
 limit
-  $6
-offset
+  $7
+set
+  local vchordrq.probes = 1
+select
+  "asset"."id",
+  smart_search_frame.embedding <=> $1 as "distance"
+from
+  "asset"
+  left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  inner join "smart_search_frame" on "asset"."id" = "smart_search_frame"."assetId"
+where
+  "asset"."ownerId" = any ($2::uuid[])
+  and (
+    "asset"."visibility" != $3
+    or "asset"."ownerId" = $4
+  )
+  and "asset"."isPrivate" = $5
+  and true
+order by
+  smart_search_frame.embedding <=> $6
+limit
   $7
 commit
 
