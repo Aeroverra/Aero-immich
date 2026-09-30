@@ -1,8 +1,9 @@
-import { deleteTag, updateTag, upsertTags, type TagUpdateDto } from '@immich/sdk';
+import { deleteTag, getCustomViews, updateTag, upsertTags, type TagUpdateDto } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
 import TagCreateModal from '$lib/modals/TagCreateModal.svelte';
 import TagEditModal from '$lib/modals/TagEditModal.svelte';
 import { handleError } from '$lib/utils/handle-error';
@@ -33,13 +34,17 @@ export const getTagActions = ($t: MessageFormatter, tag: TreeNode) => {
   return { Create, Update, Delete };
 };
 
-export const handleCreateTag = async (tagValue: string) => {
+export const handleCreateTag = async (tagValue: string, { isHidden = false }: { isHidden?: boolean } = {}) => {
   const $t = await getFormatter();
 
   try {
-    const [tag] = await upsertTags({ tagUpsertDto: { tags: [tagValue] } });
+    let [tag] = await upsertTags({ tagUpsertDto: { tags: [tagValue] } });
     if (!tag) {
       return;
+    }
+
+    if (isHidden && !tag.isHidden) {
+      tag = await updateTag({ id: tag.id, tagUpdateDto: { isHidden } });
     }
 
     toastManager.primary($t('tag_created', { values: { tag: tag.value } }));
@@ -78,9 +83,24 @@ const handleDeleteTag = async (tag: TreeNode) => {
     return;
   }
 
+  // a view rule on this tag (or a child, which is deleted with it) would silently disappear, so name those views
+  let views: string[] = [];
+  if (featureFlagsManager.value.customViews) {
+    try {
+      const response = await getCustomViews({ tagId });
+      views = response.map(({ name }) => name);
+    } catch {
+      // the list is only a warning
+    }
+  }
+
+  const prompt = $t('delete_tag_confirmation_prompt', { values: { tagName: tag.value } });
   const confirmed = await modalManager.showDialog({
     title: $t('delete_tag'),
-    prompt: $t('delete_tag_confirmation_prompt', { values: { tagName: tag.value } }),
+    prompt:
+      views.length > 0
+        ? `${prompt} ${$t('delete_tag_used_by_views', { values: { count: views.length, views: views.join(', ') } })}`
+        : prompt,
     confirmText: $t('delete'),
   });
 
