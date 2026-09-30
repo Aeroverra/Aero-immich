@@ -2532,6 +2532,12 @@ export type MetadataSearchDto = {
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
+    /** Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found */
+    hasNamedFaces?: boolean;
+    /** Filter assets with (true) or without (false) any visible face */
+    hasPeople?: boolean;
+    /** Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden */
+    hasUnnamedFaces?: boolean;
     /** Filter by asset ID */
     id?: string;
     /** Filter by encoded status */
@@ -2560,6 +2566,8 @@ export type MetadataSearchDto = {
     model?: string | null;
     /** Filter by OCR text content */
     ocr?: string;
+    /** With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too */
+    onlyPersonIds?: boolean;
     /** Sort order */
     order?: AssetOrder;
     orderBy?: SearchOrder;
@@ -2673,6 +2681,12 @@ export type RandomSearchDto = {
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
+    /** Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found */
+    hasNamedFaces?: boolean;
+    /** Filter assets with (true) or without (false) any visible face */
+    hasPeople?: boolean;
+    /** Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden */
+    hasUnnamedFaces?: boolean;
     /** Filter by encoded status */
     isEncoded?: boolean;
     /** Filter by favorite status */
@@ -2699,6 +2713,8 @@ export type RandomSearchDto = {
     model?: string | null;
     /** Filter by OCR text content */
     ocr?: string;
+    /** With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too */
+    onlyPersonIds?: boolean;
     /** Filter by person IDs */
     personIds?: string[];
     /** Filter by rating [1-5], or null for unrated */
@@ -2752,6 +2768,12 @@ export type SmartSearchDto = {
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
+    /** Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found */
+    hasNamedFaces?: boolean;
+    /** Filter assets with (true) or without (false) any visible face */
+    hasPeople?: boolean;
+    /** Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden */
+    hasUnnamedFaces?: boolean;
     /** Filter by encoded status */
     isEncoded?: boolean;
     /** Filter by favorite status */
@@ -2780,6 +2802,8 @@ export type SmartSearchDto = {
     model?: string | null;
     /** Filter by OCR text content */
     ocr?: string;
+    /** With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too */
+    onlyPersonIds?: boolean;
     /** Page number */
     page?: number;
     /** Filter by person IDs */
@@ -2837,6 +2861,12 @@ export type StatisticsSearchDto = {
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
+    /** Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found */
+    hasNamedFaces?: boolean;
+    /** Filter assets with (true) or without (false) any visible face */
+    hasPeople?: boolean;
+    /** Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden */
+    hasUnnamedFaces?: boolean;
     /** Filter by encoded status */
     isEncoded?: boolean;
     /** Filter by favorite status */
@@ -2863,6 +2893,8 @@ export type StatisticsSearchDto = {
     model?: string | null;
     /** Filter by OCR text content */
     ocr?: string;
+    /** With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too */
+    onlyPersonIds?: boolean;
     /** Filter by person IDs */
     personIds?: string[];
     /** Filter by rating [1-5], or null for unrated */
@@ -7464,7 +7496,7 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludeTagIds, hasNamedFaces, hasPeople, hasUnnamedFaces, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, onlyPersonIds, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
@@ -7472,6 +7504,9 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     createdBefore?: string;
     excludeAlbumIds?: string[];
     excludeTagIds?: string[];
+    hasNamedFaces?: boolean;
+    hasPeople?: boolean;
+    hasUnnamedFaces?: boolean;
     isEncoded?: boolean;
     isFavorite?: boolean;
     isMotion?: boolean;
@@ -7486,6 +7521,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     minFileSize?: number;
     model?: string | null;
     ocr?: string;
+    onlyPersonIds?: boolean;
     personIds?: string[];
     rating?: number | null;
     size?: number;
@@ -7515,6 +7551,9 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         createdBefore,
         excludeAlbumIds,
         excludeTagIds,
+        hasNamedFaces,
+        hasPeople,
+        hasUnnamedFaces,
         isEncoded,
         isFavorite,
         isMotion,
@@ -7529,6 +7568,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         minFileSize,
         model,
         ocr,
+        onlyPersonIds,
         personIds,
         rating,
         size,
