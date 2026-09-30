@@ -24,6 +24,13 @@ import {
 } from 'src/takeout/types';
 
 const ROTATE_ONLY_REASON = 'edited copy only rotates the original, the rotation is applied to the original in Immich';
+// the reasons of an unused asset JSON that is no orphan (catalog accountUnclaimedJsons)
+const SKIPPED_MEDIA_REASON: Record<string, string> = {
+  failedVideo: 'its media file is in the Takeout but not imported (failed video)',
+  unsupported: 'its media file is in the Takeout but not imported (unsupported type)',
+  useless: 'its media file is in the Takeout but not imported (useless file)',
+  banned: 'its media file is in the Takeout but not imported (banned name)',
+};
 
 interface PlanItem extends GroupItem {
   catalogIndex: number;
@@ -79,6 +86,14 @@ export async function planImport(
     f.fileKind = 'json';
     f.action = record.matched > 0 ? 'assetJson' : 'assetJsonUnused';
     f.jsonPath = record.path;
+    if (record.matched > 0) {
+      continue;
+    }
+    // unused but no orphan: its media file is left out on purpose (that row shows the JSON)
+    if (record.skippedMedia !== null) {
+      f.reason = SKIPPED_MEDIA_REASON[record.skippedMedia.action];
+      files[record.skippedMedia.catalogIndex].jsonPath ??= record.path;
+    }
   }
 
   const range: DateRange | null =

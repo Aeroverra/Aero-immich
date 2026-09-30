@@ -80,6 +80,8 @@ export interface AssetJsonRecord {
   meta: AssetMetadataFromJson;
   extra: Record<string, unknown> | null;
   matched: number;
+  /** claimed by no media file, but its media file is in the Takeout and left out on purpose (not an orphan) */
+  skippedMedia: { catalogIndex: number; path: string; action: PlanAction } | null;
 }
 
 export interface TakeoutCatalog {
@@ -96,6 +98,25 @@ interface DirCatalog {
   jsons: Map<string, AssetJsonRecord>; // by NFC base
   unMatched: Map<string, CatalogAsset>; // by NFC base
   matched: Map<string, CatalogAsset>;
+}
+
+// A media file the importer leaves out on purpose, for the JSONs no media file claimed: `skipped` is its action.
+interface DirFile {
+  catalogIndex: number;
+  base: string;
+  path: string;
+  skipped: PlanAction;
+}
+
+// Media files left out on purpose. A read error (kind 'other') is not one of them: that JSON stays an orphan.
+const SKIPPED_MEDIA_ACTIONS = new Set<PlanAction>(['failedVideo', 'unsupported', 'useless', 'banned']);
+
+// The strict matchers (exact names, Google's cuts included) tie a JSON to a file that is not imported; the loose ones
+// could tie the JSON of a missing photo to another file (MVIMG_x.jpg.supplemental-metadata.json to MVIMG_x.mp4).
+const STRICT_MATCHERS = MATCHERS.filter((matcher) => matcher.name === 'fastTrack' || matcher.name === 'normal');
+
+function strictMatch(jsonName: string, file: DirFile): boolean {
+  return STRICT_MATCHERS.some((matcher) => matcher.fn(jsonName, file.base));
 }
 
 function trackerKey(base: string, size: number): string {
@@ -148,6 +169,19 @@ function makeAsset(entry: CatalogAsset, md: GoogleMetadata | null): CatalogAsset
   return entry;
 }
 
+// The JSONs of a directory that no media file claimed but that are no orphans either: the JSON of a media file the
+// importer leaves out on purpose ('Failed Videos/VID_x.mp4.supplemental-metadata.json' next to
+// 'Failed Videos/VID_x.mp4', 'x.jfif.supplemental-metadata.json' next to the unsupported 'x.jfif').
+function accountUnclaimedJsons(cat: DirCatalog, skipped: DirFile[]): void {
+  const unclaimed = [...cat.jsons].filter(([, record]) => record.matched === 0);
+  for (const [jsonName, record] of unclaimed) {
+    const media = skipped.find((file) => strictMatch(jsonName, file));
+    if (media) {
+      record.skippedMedia = { catalogIndex: media.catalogIndex, path: media.path, action: media.skipped };
+    }
+  }
+}
+
 // Builds the archive catalog and solves the JSON <-> file puzzle, exactly like Go passOne + solvePuzzle.
 export async function buildCatalog(
   input: Iterable<CatalogInput> | AsyncIterable<CatalogInput>,
@@ -178,8 +212,16 @@ export async function buildCatalog(
     return cat;
   };
 
+  const skippedFiles = new Map<string, DirFile[]>();
   let catalogIndex = 0;
   const pushNonAsset = (input: CatalogInput, action: PlanAction, fileKind: PlannedFileKind, index: number) => {
+    if (input.kind !== 'json' && SKIPPED_MEDIA_ACTIONS.has(action) && fileKind !== 'other') {
+      const nfcPath = nfc(input.path);
+      const dir = pathDir(nfcPath);
+      const list = skippedFiles.get(dir) ?? [];
+      list.push({ catalogIndex: index, base: pathBase(nfcPath), path: input.path, skipped: action });
+      skippedFiles.set(dir, list);
+    }
     nonAssets.push({
       catalogIndex: index,
       path: input.path,
@@ -247,6 +289,7 @@ export async function buildCatalog(
           meta: asMetadata(md),
           extra: googlePhotosExtra(md),
           matched: 0,
+          skippedMedia: null,
         };
         getDir(dir).jsons.set(baseName, record);
         assetJsonRecords.push(record);
@@ -385,8 +428,11 @@ export async function buildCatalog(
     assetsByDir.set(dir, cat.matched.values().toArray());
   }
 
+  for (const dir of dirs) {
+    accountUnclaimedJsons(catalogs.get(dir)!, skippedFiles.get(dir) ?? []);
+  }
   for (const record of assetJsonRecords) {
-    if (record.matched === 0) {
+    if (record.matched === 0 && record.skippedMedia === null) {
       summary.jsonWithoutMedia.push(record.path);
     }
   }

@@ -99,6 +99,56 @@ describe('[DEV 1] matcher engine', () => {
   });
 });
 
+const skipped = (path: string, kind: CatalogInput['kind']): CatalogInput => ({ ...media(path), kind });
+
+async function orphans(inputs: CatalogInput[]): Promise<string[]> {
+  const catalog = await buildCatalog(inputs);
+  return catalog.summary.jsonWithoutMedia;
+}
+
+describe('JSONs that no media file claims', () => {
+  it('does not count the JSON of a failed video or of an unsupported file as an orphan', async () => {
+    // family exports: the media files are in the Takeout and left out on purpose
+    const failed = 'Takeout/Google Photos/Failed Videos/VID_20191220_162138.mp4';
+    const jfif = 'Takeout/Google Photos/Photos from 2019/2f31d892e412448ef338315d4da62a80.jfif';
+    const missing = 'Takeout/Google Photos/Photos from 2019/IMG_20190101_101010.jpg';
+    const inputs = [
+      media(failed),
+      json(`${failed}.supplemental-metadata.json`, 'VID_20191220_162138.mp4'),
+      skipped(jfif, 'unsupported'),
+      json(`${jfif}.supplemental-metadata.json`, '2f31d892e412448ef338315d4da62a80.jfif'),
+      json(`${missing}.supplemental-metadata.json`, 'IMG_20190101_101010.jpg'),
+    ];
+    expect(await orphans(inputs)).toEqual([`${missing}.supplemental-metadata.json`]);
+
+    const plan = await planImport(await buildCatalog(inputs), DEFAULT_TAKEOUT_SETTINGS, {
+      rotationProbe: () => Promise.resolve(0),
+    });
+    const row = (path: string) => plan.files.find((f) => f.takeoutPath === path)!;
+    expect(row(failed)).toMatchObject({ action: 'failedVideo', jsonPath: `${failed}.supplemental-metadata.json` });
+    expect(row(`${failed}.supplemental-metadata.json`)).toMatchObject({
+      action: 'assetJsonUnused',
+      reason: 'its media file is in the Takeout but not imported (failed video)',
+    });
+    expect(row(jfif)).toMatchObject({ action: 'unsupported', jsonPath: `${jfif}.supplemental-metadata.json` });
+    expect(row(`${jfif}.supplemental-metadata.json`)).toMatchObject({
+      action: 'assetJsonUnused',
+      reason: 'its media file is in the Takeout but not imported (unsupported type)',
+    });
+    expect(row(`${missing}.supplemental-metadata.json`)).toMatchObject({ action: 'assetJsonUnused', reason: null });
+  });
+
+  it('still counts the JSON of a missing photo that only a loose matcher ties to a skipped file', async () => {
+    const dir = 'Takeout/Google Photos/Photos from 2019';
+    expect(
+      await orphans([
+        skipped(`${dir}/MVIMG_20190509_114254.mp4`, 'useless'),
+        json(`${dir}/MVIMG_20190509_114254.jpg.supplemental-metadata.json`, 'MVIMG_20190509_114254.jpg'),
+      ]),
+    ).toEqual([`${dir}/MVIMG_20190509_114254.jpg.supplemental-metadata.json`]);
+  });
+});
+
 // Spec 6.1 #11: compact JSON keeps every field the parsers read.
 describe('compactGoogleJson round trip', () => {
   const fixtures: string[] = [

@@ -42,6 +42,9 @@ const KiB = 1024;
 const userId = 'user-1';
 const media = (name: string) => `Takeout/Google Photos/${name}`;
 const errno = (code: string) => Object.assign(new Error(code), { code });
+/** a Google supplemental-metadata JSON with its title and photoTakenTime (seconds) */
+const googleJson = (title: string, takenSeconds: number) =>
+  Buffer.from(JSON.stringify({ title, photoTakenTime: { timestamp: String(takenSeconds) } }));
 const greyJpeg = (shade: number) =>
   sharp({ create: { width: 400, height: 400, channels: 3, background: { r: shade, g: shade, b: shade } } })
     .jpeg()
@@ -1172,6 +1175,50 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     expect(h.repo.exports[0].analysis.lastRead).toMatchObject({
       indexMissingFiles: { count: 1, sample: [media(`${album}/never-exported.mp4`)] },
       notInIndex: 0,
+    });
+  });
+
+  it('counts no JSON of a media file left out on purpose as JSON without media', async () => {
+    // family exports: the JSONs of a failed video and of an unsupported .jfif made the export "incomplete"
+    const h = await harness();
+    const failed = 'Failed Videos/VID_20191220_162138.mp4';
+    const jfif = 'Photos from 2019/2f31d892e412448ef338315d4da62a80.jfif';
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media(failed), data: randomBytesSeeded(300, 91) },
+        {
+          name: media(`${failed}.supplemental-metadata.json`),
+          data: googleJson('VID_20191220_162138.mp4', 1_576_876_898),
+        },
+        { name: media(jfif), data: randomBytesSeeded(300, 92) },
+        {
+          name: media(`${jfif}.supplemental-metadata.json`),
+          data: googleJson('2f31d892e412448ef338315d4da62a80.jfif', 1_576_876_898),
+          pax: true,
+        },
+      ]),
+    );
+
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const analysis = h.repo.exports[0].analysis;
+    expect(analysis.jsonWithoutMedia).toEqual({ count: 0, sample: [] });
+    expect(analysis.reasons).not.toContain('orphan_json');
+    const rows = h.files(run.id);
+    const row = (path: string) => rows.find((r) => r.takeoutPath === media(path));
+    expect(row(failed)).toMatchObject({
+      action: 'failedVideo',
+      jsonPath: media(`${failed}.supplemental-metadata.json`),
+    });
+    expect(row(`${failed}.supplemental-metadata.json`)).toMatchObject({
+      action: 'assetJsonUnused',
+      reason: 'its media file is in the Takeout but not imported (failed video)',
+    });
+    expect(row(jfif)).toMatchObject({ action: 'unsupported', jsonPath: media(`${jfif}.supplemental-metadata.json`) });
+    expect(row(`${jfif}.supplemental-metadata.json`)).toMatchObject({
+      action: 'assetJsonUnused',
+      reason: 'its media file is in the Takeout but not imported (unsupported type)',
     });
   });
 
