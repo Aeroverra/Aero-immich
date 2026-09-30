@@ -23534,6 +23534,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "hasEncodedVideo": {
+            "description": "Whether a transcoded copy of the video exists. Video playback serves it instead of the original file.",
+            "type": "boolean"
+          },
           "hasMetadata": {
             "description": "Whether asset has metadata",
             "type": "boolean"
