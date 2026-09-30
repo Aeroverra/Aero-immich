@@ -54,6 +54,7 @@ select
           "asset"."deletedAt" is null
           and "asset"."stackId" = "stack"."id"
           and "asset"."visibility" in ('archive', 'timeline')
+          and "asset"."isPrivate" = $1
         order by
           "asset"."fileCreatedAt" asc
       ) as agg
@@ -61,7 +62,7 @@ select
 from
   "stack"
 where
-  "stack"."ownerId" = $1
+  "stack"."ownerId" = $2
 
 -- StackRepository.delete
 delete from "stack"
@@ -141,6 +142,7 @@ select
           "asset"."deletedAt" is null
           and "asset"."stackId" = "stack"."id"
           and "asset"."visibility" in ('archive', 'timeline')
+          and "asset"."isPrivate" = $1
         order by
           "asset"."fileCreatedAt" asc
       ) as agg
@@ -148,7 +150,7 @@ select
 from
   "stack"
 where
-  "id" = $1::uuid
+  "id" = $2::uuid
 
 -- StackRepository.getForAssetRemoval
 select
