@@ -1,5 +1,11 @@
 import { createZodDto } from 'nestjs-zod';
-import { AssetOrderSchema, DeletedReimportModeSchema, StackActionModeSchema, UserAvatarColorSchema } from 'src/enum';
+import {
+  AssetOrderSchema,
+  DeletedReimportModeSchema,
+  LockTriggerSchema,
+  StackActionModeSchema,
+  UserAvatarColorSchema,
+} from 'src/enum';
 import { UserPreferences } from 'src/types';
 import z from 'zod';
 
@@ -121,9 +127,17 @@ const PrivateModeUpdateSchema = z
     timeoutMinutes: z.int().min(1).max(1440).optional().describe('Minutes of inactivity before private mode turns off'),
     sidebarWeb: z.boolean().optional().describe('Whether the private page appears in the web sidebar'),
     includeInMemories: z.boolean().optional().describe('Whether private assets are included in generated memories'),
+    lockTrigger: LockTriggerSchema.optional(),
   })
   .optional()
   .meta({ id: 'PrivateModeUpdate' });
+
+const CustomViewsUpdateSchema = z
+  .object({
+    lockTrigger: LockTriggerSchema.optional(),
+  })
+  .optional()
+  .meta({ id: 'CustomViewsUpdate' });
 
 const AutoStackUpdateSchema = z
   .object({
@@ -166,6 +180,7 @@ const UserPreferencesUpdateSchema = z
     recentlyAdded: RecentlyAddedUpdateSchema,
     stacks: StacksUpdateSchema,
     privateMode: PrivateModeUpdateSchema,
+    customViews: CustomViewsUpdateSchema,
   })
   .meta({ id: 'UserPreferencesUpdateDto' });
 
@@ -265,8 +280,15 @@ const PrivateModeResponseSchema = z
     timeoutMinutes: z.int().describe('Minutes of inactivity before private mode turns off'),
     sidebarWeb: z.boolean().describe('Whether the private page appears in the web sidebar'),
     includeInMemories: z.boolean().describe('Whether private assets are included in generated memories'),
+    lockTrigger: LockTriggerSchema,
   })
   .meta({ id: 'PrivateModeResponse' });
+
+const CustomViewsResponseSchema = z
+  .object({
+    lockTrigger: LockTriggerSchema,
+  })
+  .meta({ id: 'CustomViewsResponse' });
 
 const AutoStackResponseSchema = z
   .object({
@@ -306,6 +328,7 @@ const UserPreferencesResponseSchema = z
     recentlyAdded: RecentlyAddedResponseSchema,
     stacks: StacksResponseSchema,
     privateMode: PrivateModeResponseSchema,
+    customViews: CustomViewsResponseSchema,
     autoStack: AutoStackResponseSchema,
     deletedReimport: DeletedReimportResponseSchema,
     stackActions: StackActionsResponseSchema,
