@@ -92,6 +92,15 @@ where
   and "album_asset"."updateId" <= $4
   and "album_asset"."updateId" > $5
   and "album_asset"."albumId" = $6
+  and "asset"."isPrivate" = $7
+  and "album_asset"."albumId" in (
+    select
+      "album"."id"
+    from
+      "album"
+    where
+      "album"."isPrivate" = $8
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -121,10 +130,12 @@ select
     when "asset"."ownerId" = $1 then "asset"."isFavorite"
     else $2
   end as "isFavorite",
-  "asset"."updateId"
+  "asset"."updateId",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "asset" as "asset"
   inner join "album_asset" on "album_asset"."assetId" = "asset"."id"
+  inner join "album" on "album"."id" = "album_asset"."albumId"
   inner join "album_user" on "album_user"."albumId" = "album_asset"."albumId"
 where
   "asset"."updateId" < $3
@@ -160,10 +171,12 @@ select
   case
     when "asset"."ownerId" = $1 then "asset"."isFavorite"
     else $2
-  end as "isFavorite"
+  end as "isFavorite",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "album_asset" as "album_asset"
   inner join "asset" on "asset"."id" = "album_asset"."assetId"
+  inner join "album" on "album"."id" = "album_asset"."albumId"
   inner join "album_user" on "album_user"."albumId" = "album_asset"."albumId"
 where
   "album_asset"."updateId" < $3
@@ -208,6 +221,22 @@ where
   and "album_asset"."updateId" <= $2
   and "album_asset"."updateId" > $3
   and "album_asset"."albumId" = $4
+  and "album_asset"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $5
+  )
+  and "album_asset"."albumId" in (
+    select
+      "album"."id"
+    from
+      "album"
+    where
+      "album"."isPrivate" = $6
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -238,16 +267,26 @@ select
   "asset_exif"."profileDescription",
   "asset_exif"."rating",
   "asset_exif"."fps",
-  "asset_exif"."updateId"
+  "asset_exif"."updateId",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "asset_exif" as "asset_exif"
   inner join "album_asset" on "album_asset"."assetId" = "asset_exif"."assetId"
+  inner join "album" on "album"."id" = "album_asset"."albumId"
   inner join "album_user" on "album_user"."albumId" = "album_asset"."albumId"
 where
   "asset_exif"."updateId" < $1
   and "asset_exif"."updateId" > $2
   and "album_asset"."updateId" <= $3
   and "album_user"."userId" = $4
+  and "asset_exif"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $5
+  )
 order by
   "asset_exif"."updateId" asc
 
@@ -278,7 +317,8 @@ select
   "asset_exif"."exposureTime",
   "asset_exif"."profileDescription",
   "asset_exif"."rating",
-  "asset_exif"."fps"
+  "asset_exif"."fps",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "album_asset" as "album_asset"
   inner join "asset_exif" on "asset_exif"."assetId" = "album_asset"."assetId"
@@ -288,6 +328,14 @@ where
   "album_asset"."updateId" < $1
   and "album_asset"."updateId" > $2
   and "album_user"."userId" = $3
+  and "album_asset"."assetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $4
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -303,6 +351,14 @@ where
   and "album_asset"."updateId" <= $2
   and "album_asset"."updateId" > $3
   and "album_asset"."albumId" = $4
+  and "album_asset"."albumId" in (
+    select
+      "album"."id"
+    from
+      "album"
+    where
+      "album"."isPrivate" = $5
+  )
 order by
   "album_asset"."updateId" asc
 
@@ -331,9 +387,11 @@ order by
 select
   "album_asset"."assetId" as "assetId",
   "album_asset"."albumId" as "albumId",
-  "album_asset"."updateId"
+  "album_asset"."updateId",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "album_asset" as "album_asset"
+  inner join "album" on "album"."id" = "album_asset"."albumId"
   inner join "album_user" on "album_user"."albumId" = "album_asset"."albumId"
 where
   "album_asset"."updateId" < $1
@@ -355,6 +413,14 @@ where
   and "album_user"."updateId" <= $2
   and "album_user"."updateId" > $3
   and "albumId" = $4
+  and "album_user"."albumId" in (
+    select
+      "album"."id"
+    from
+      "album"
+    where
+      "album"."isPrivate" = $5
+  )
 order by
   "album_user"."updateId" asc
 
@@ -384,9 +450,11 @@ select
   "album_user"."albumId" as "albumId",
   "album_user"."userId" as "userId",
   "album_user"."role",
-  "album_user"."updateId"
+  "album_user"."updateId",
+  "album"."isPrivate" as "isAlbumPrivate"
 from
   "album_user" as "album_user"
+  inner join "album" on "album"."id" = "album_user"."albumId"
 where
   "album_user"."updateId" < $1
   and "album_user"."updateId" > $2
@@ -487,6 +555,7 @@ where
       "asset"
     where
       "ownerId" = $3
+      and "isPrivate" = $4
   )
 order by
   "asset_exif"."updateId" asc
@@ -512,7 +581,8 @@ select
   "asset_edit"."sequence",
   "asset_edit"."action",
   "asset_edit"."parameters",
-  "asset_edit"."updateId"
+  "asset_edit"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "asset_edit" as "asset_edit"
   inner join "asset" on "asset"."id" = "asset_edit"."assetId"
@@ -551,10 +621,11 @@ select
   "sourceType",
   "isVisible",
   "asset_face"."deletedAt",
-  "asset_face"."updateId"
+  "asset_face"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "asset_face" as "asset_face"
-  left join "asset" on "asset"."id" = "asset_face"."assetId"
+  inner join "asset" on "asset"."id" = "asset_face"."assetId"
 where
   "asset_face"."updateId" < $1
   and "asset_face"."updateId" > $2
@@ -582,7 +653,8 @@ select
   "assetId",
   "key",
   "value",
-  "asset_metadata"."updateId"
+  "asset_metadata"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "asset_metadata" as "asset_metadata"
   inner join "asset" on "asset"."id" = "asset_metadata"."assetId"
@@ -624,7 +696,8 @@ select
   "asset_ocr"."boxScore",
   "asset_ocr"."textScore",
   "asset_ocr"."updateId",
-  "asset_ocr"."isVisible"
+  "asset_ocr"."isVisible",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "asset_ocr" as "asset_ocr"
   inner join "asset" on "asset"."id" = "asset_ocr"."assetId"
@@ -687,13 +760,23 @@ select
   "seenAt",
   "showAt",
   "hideAt",
-  "updateId"
+  "updateId",
+  exists (
+    select
+      "memory_asset"."assetId"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $1
+  ) as "isPrivate"
 from
   "memory" as "memory"
 where
-  "memory"."updateId" < $1
-  and "memory"."updateId" > $2
-  and "ownerId" = $3
+  "memory"."updateId" < $2
+  and "memory"."updateId" > $3
+  and "ownerId" = $4
 order by
   "memory"."updateId" asc
 
@@ -722,19 +805,29 @@ order by
 select
   "memoriesId" as "memoryId",
   "assetId" as "assetId",
-  "updateId"
+  "updateId",
+  exists (
+    select
+      "memory_asset"."assetId"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory_asset"."memoriesId"
+      and "asset"."isPrivate" = $1
+  ) as "isMemoryPrivate"
 from
   "memory_asset" as "memory_asset"
 where
-  "memory_asset"."updateId" < $1
-  and "memory_asset"."updateId" > $2
+  "memory_asset"."updateId" < $2
+  and "memory_asset"."updateId" > $3
   and "memoriesId" in (
     select
       "id"
     from
       "memory"
     where
-      "ownerId" = $3
+      "ownerId" = $4
   )
 order by
   "memory_asset"."updateId" asc
@@ -818,6 +911,7 @@ where
   and "asset"."updateId" <= $3
   and "asset"."updateId" > $4
   and "ownerId" = $5
+  and "asset"."isPrivate" = $6
 order by
   "asset"."updateId" asc
 
@@ -917,6 +1011,7 @@ where
   and "asset_exif"."updateId" <= $2
   and "asset_exif"."updateId" > $3
   and "asset"."ownerId" = $4
+  and "asset"."isPrivate" = $5
 order by
   "asset_exif"."updateId" asc
 
@@ -967,6 +1062,7 @@ where
         where
           "sharedWithId" = $3
       )
+      and "isPrivate" = $4
   )
 order by
   "asset_exif"."updateId" asc
@@ -1006,6 +1102,14 @@ where
   and "stack"."updateId" <= $2
   and "stack"."updateId" > $3
   and "ownerId" = $4
+  and "stack"."primaryAssetId" in (
+    select
+      "asset"."id"
+    from
+      "asset"
+    where
+      "asset"."isPrivate" = $5
+  )
 order by
   "stack"."updateId" asc
 
@@ -1016,13 +1120,15 @@ select
   "stack"."updatedAt",
   "stack"."primaryAssetId",
   "stack"."ownerId",
-  "updateId"
+  "stack"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "stack" as "stack"
+  inner join "asset" on "asset"."id" = "stack"."primaryAssetId"
 where
   "stack"."updateId" < $1
   and "stack"."updateId" > $2
-  and "ownerId" in (
+  and "stack"."ownerId" in (
     select
       "sharedById"
     from
@@ -1058,13 +1164,43 @@ select
   "isFavorite",
   "color",
   "updateId",
-  "faceAssetId"
+  "faceAssetId",
+  (
+    exists (
+      select
+        "asset_face"."id"
+      from
+        "asset_face"
+        inner join "asset" on "asset"."id" = "asset_face"."assetId"
+      where
+        "asset_face"."personGroupId" = "person"."personGroupId"
+        and "asset"."ownerId" = "person"."ownerId"
+        and "asset_face"."deletedAt" is null
+        and "asset_face"."isVisible" = $1
+        and "asset"."deletedAt" is null
+        and "asset"."isPrivate" = $2
+    )
+    and not exists (
+      select
+        "asset_face"."id"
+      from
+        "asset_face"
+        inner join "asset" on "asset"."id" = "asset_face"."assetId"
+      where
+        "asset_face"."personGroupId" = "person"."personGroupId"
+        and "asset"."ownerId" = "person"."ownerId"
+        and "asset_face"."deletedAt" is null
+        and "asset_face"."isVisible" = $3
+        and "asset"."deletedAt" is null
+        and "asset"."isPrivate" = $4
+    )
+  ) as "isPrivate"
 from
   "person" as "person"
 where
-  "person"."updateId" < $1
-  and "person"."updateId" > $2
-  and "ownerId" = $3
+  "person"."updateId" < $5
+  and "person"."updateId" > $6
+  and "ownerId" = $7
 order by
   "person"."updateId" asc
 
@@ -1088,13 +1224,15 @@ select
   "stack"."updatedAt",
   "stack"."primaryAssetId",
   "stack"."ownerId",
-  "updateId"
+  "stack"."updateId",
+  "asset"."isPrivate" as "isAssetPrivate"
 from
   "stack" as "stack"
+  inner join "asset" on "asset"."id" = "stack"."primaryAssetId"
 where
   "stack"."updateId" < $1
   and "stack"."updateId" > $2
-  and "ownerId" = $3
+  and "stack"."ownerId" = $3
 order by
   "stack"."updateId" asc
 
