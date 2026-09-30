@@ -11,6 +11,7 @@
   import { autoPlayVideo, lang, loopVideo as loopVideoPreference } from '$lib/stores/preferences.store';
   import { getAssetHlsSessionUrl, getAssetHlsUrl, getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
   import { formatVideoPosition } from '$lib/utils/people-utils';
+  import { formatVideoResolution, getVideoPlaybackSource } from '$lib/utils/video-playback-source';
   import { AssetMediaSize, AssetTypeEnum, type AssetResponseDto } from '@immich/sdk';
   import { Icon, LoadingSpinner, shortcuts } from '@immich/ui';
   import {
@@ -92,6 +93,35 @@
     return getAssetPlaybackUrl({ id: assetId, cacheKey });
   });
   const aspectRatio = $derived(asset.width && asset.height ? `${asset.width} / ${asset.height}` : undefined);
+  // shown over the controls so a transcoded copy can be told apart from the original file
+  const playbackSource = $derived(
+    getVideoPlaybackSource({
+      realtimeTranscoding: featureFlagsManager.value.realtimeTranscoding,
+      playOriginalVideo,
+      hasEncodedVideo: asset.hasEncodedVideo,
+    }),
+  );
+  const playbackSourceText = $derived.by(() => {
+    switch (playbackSource) {
+      case 'live': {
+        return { label: $t('video_source_live_transcode'), description: $t('video_source_live_transcode_description') };
+      }
+      case 'transcoded': {
+        return { label: $t('video_source_transcoded'), description: $t('video_source_transcoded_description') };
+      }
+      case 'original': {
+        return { label: $t('video_source_original'), description: $t('video_source_original_description') };
+      }
+      case undefined: {
+        return;
+      }
+    }
+  });
+  let playbackResolution = $state<string>();
+  const onVideoSizeChange = (event: Event) => {
+    const video = event.currentTarget as HTMLVideoElement;
+    playbackResolution = formatVideoResolution(video.videoWidth, video.videoHeight);
+  };
   let showVideo = $state(false);
   let hasFocused = $state(false);
   let activeSession: { assetId: string; id: string } | undefined;
@@ -246,6 +276,7 @@
   $effect(() => {
     // reactive on `assetFileUrl` changes
     hasLoadedMetadata = false;
+    playbackResolution = undefined;
     if (videoPlayer && assetFileUrl) {
       hasFocused = false;
       rebuildCount = 0;
@@ -482,7 +513,11 @@
             {...useSwipe(onSwipe)}
             class="h-full object-contain"
             oncanplay={(e: Event) => handleCanPlay(e.currentTarget as HTMLVideoElement)}
-            onloadedmetadata={() => (hasLoadedMetadata = true)}
+            onloadedmetadata={(e: Event) => {
+              hasLoadedMetadata = true;
+              onVideoSizeChange(e);
+            }}
+            onresize={onVideoSizeChange}
             ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
@@ -509,7 +544,11 @@
             {...useSwipe(onSwipe)}
             class="h-full object-contain"
             oncanplay={(e) => handleCanPlay(e.currentTarget)}
-            onloadedmetadata={() => (hasLoadedMetadata = true)}
+            onloadedmetadata={(e) => {
+              hasLoadedMetadata = true;
+              onVideoSizeChange(e);
+            }}
+            onresize={onVideoSizeChange}
             ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
@@ -551,6 +590,20 @@
         {/if}
 
         <div class="flex h-32 w-full flex-col justify-end bg-linear-to-b to-black/80 px-4">
+          {#if extendedControls && playbackSourceText}
+            <div class="flex justify-end px-2">
+              <span
+                class="rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white"
+                title={playbackSourceText.description}
+                data-testid="video-playback-source"
+              >
+                {playbackSourceText.label}
+                {#if playbackResolution}
+                  <span class="opacity-75">· {playbackResolution}</span>
+                {/if}
+              </span>
+            </div>
+          {/if}
           <media-control-bar part="bottom" class="flex h-10 w-full gap-2">
             <media-play-button class="shrink-0 rounded-full p-2 outline-none">
               <Icon slot="play" icon={mdiPlay} />
