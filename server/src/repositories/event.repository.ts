@@ -58,6 +58,8 @@ type EventMap = {
   AssetTrashAll: [{ assetIds: string[]; userId: string }];
   AssetDeleteAll: [{ assetIds: string[]; userId: string }];
   AssetRestoreAll: [{ assetIds: string[]; userId: string }];
+  /** the private flag of these assets changed; the albums holding them follow through a database trigger */
+  AssetPrivateUpdateAll: [{ assetIds: string[]; userId: string }];
 
   /** a worker receives a job and emits this event to run it */
   JobRun: [QueueName, JobItem];

@@ -8,6 +8,16 @@ from
 where
   "deletedAt" is null
   and "ownerId" = $1
+  and not exists (
+    select
+      $2 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $3
+  )
 
 -- MemoryRepository.statistics (date filter)
 select
@@ -25,6 +35,16 @@ where
   )
   and "deletedAt" is null
   and "ownerId" = $3
+  and not exists (
+    select
+      $4 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $5
+  )
 
 -- MemoryRepository.search
 select
@@ -42,16 +62,17 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
           and not exists (
             select
-              $1 as "one"
+              $2 as "one"
             from
               "asset_face"
               inner join "person" on "person"."personGroupId" = "asset_face"."personGroupId"
               and "person"."ownerId" = "asset"."ownerId"
             where
               "asset_face"."assetId" = "asset"."id"
-              and "person"."isHidden" = $2
+              and "person"."isHidden" = $3
           )
         order by
           "asset"."fileCreatedAt" asc
@@ -62,7 +83,17 @@ from
   "memory"
 where
   "deletedAt" is null
-  and "ownerId" = $3
+  and "ownerId" = $4
+  and not exists (
+    select
+      $5 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $6
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -83,16 +114,17 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
           and not exists (
             select
-              $1 as "one"
+              $2 as "one"
             from
               "asset_face"
               inner join "person" on "person"."personGroupId" = "asset_face"."personGroupId"
               and "person"."ownerId" = "asset"."ownerId"
             where
               "asset_face"."assetId" = "asset"."id"
-              and "person"."isHidden" = $2
+              and "person"."isHidden" = $3
           )
         order by
           "asset"."fileCreatedAt" asc
@@ -104,14 +136,24 @@ from
 where
   (
     "showAt" is null
-    or "showAt" <= $3
+    or "showAt" <= $4
   )
   and (
     "hideAt" is null
-    or "hideAt" >= $4
+    or "hideAt" >= $5
   )
   and "deletedAt" is null
-  and "ownerId" = $5
+  and "ownerId" = $6
+  and not exists (
+    select
+      $7 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $8
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -132,16 +174,17 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
           and not exists (
             select
-              $1 as "one"
+              $2 as "one"
             from
               "asset_face"
               inner join "person" on "person"."personGroupId" = "asset_face"."personGroupId"
               and "person"."ownerId" = "asset"."ownerId"
             where
               "asset_face"."assetId" = "asset"."id"
-              and "person"."isHidden" = $2
+              and "person"."isHidden" = $3
           )
         order by
           "asset"."fileCreatedAt" asc
@@ -151,9 +194,19 @@ select
 from
   "memory"
 where
-  "showAt" > $3
+  "showAt" > $4
   and "deletedAt" is null
-  and "ownerId" = $4
+  and "ownerId" = $5
+  and not exists (
+    select
+      $6 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $7
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -174,16 +227,17 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
           and not exists (
             select
-              $1 as "one"
+              $2 as "one"
             from
               "asset_face"
               inner join "person" on "person"."personGroupId" = "asset_face"."personGroupId"
               and "person"."ownerId" = "asset"."ownerId"
             where
               "asset_face"."assetId" = "asset"."id"
-              and "person"."isHidden" = $2
+              and "person"."isHidden" = $3
           )
         order by
           "asset"."fileCreatedAt" asc
@@ -195,10 +249,20 @@ from
 where
   (
     "showAt" is null
-    or "showAt" <= $3
+    or "showAt" <= $4
   )
   and "deletedAt" is null
-  and "ownerId" = $4
+  and "ownerId" = $5
+  and not exists (
+    select
+      $6 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $7
+  )
 order by
   "showAt" desc nulls last,
   "memoryAt" desc
@@ -220,6 +284,7 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
         order by
           "asset"."fileCreatedAt" asc
       ) as agg
@@ -227,8 +292,18 @@ select
 from
   "memory"
 where
-  "id" = $1
+  "id" = $2
   and "deletedAt" is null
+  and not exists (
+    select
+      $3 as "one"
+    from
+      "memory_asset"
+      inner join "asset" on "asset"."id" = "memory_asset"."assetId"
+    where
+      "memory_asset"."memoriesId" = "memory"."id"
+      and "asset"."isPrivate" = $4
+  )
 
 -- MemoryRepository.update
 update "memory"
@@ -253,6 +328,7 @@ select
           "memory_asset"."memoriesId" = "memory"."id"
           and "asset"."visibility" = 'timeline'
           and "asset"."deletedAt" is null
+          and "asset"."isPrivate" = $1
         order by
           "asset"."fileCreatedAt" asc
       ) as agg
@@ -260,7 +336,7 @@ select
 from
   "memory"
 where
-  "id" = $1
+  "id" = $2
   and "deletedAt" is null
 
 -- MemoryRepository.delete
