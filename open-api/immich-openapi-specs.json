@@ -17708,9 +17708,20 @@
     },
     "/views": {
       "get": {
-        "description": "Retrieve the views of the current user. Views with private access are only listed while private mode is unlocked.",
+        "description": "Retrieve the views of the current user. Views with private access are only listed while private mode is unlocked. With an asset ID, only the views that show that asset are returned, so a client can offer to switch when the active view hides it.",
         "operationId": "getCustomViews",
         "parameters": [
+          {
+            "name": "assetId",
+            "required": false,
+            "in": "query",
+            "description": "Only views that show this asset (the views to offer when the active view hides it). The asset must be readable apart from the active view",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
           {
             "name": "tagId",
             "required": false,
