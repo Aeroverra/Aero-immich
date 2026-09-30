@@ -2,6 +2,7 @@ import { Kysely } from 'kysely';
 import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
 import { factory } from 'test/small.factory';
@@ -296,5 +297,53 @@ describe(SyncRequestType.AssetEditsV1, () => {
 
     // Should not see partner's asset edits in own sync
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetEditsV1]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold the edits of a private asset and send them again once it is public and touched', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      await ctx
+        .get(AssetEditRepository)
+        .replaceAll(asset.id, [
+          { action: AssetEditAction.Crop, parameters: { x: 10, y: 20, width: 100, height: 200 } },
+        ]);
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AssetEditsV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AssetEditV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetEditsV1]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AssetEditsV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetEditV1,
+          data: expect.objectContaining({ assetId: asset.id, action: AssetEditAction.Crop }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetEditsV1]);
+    });
+
+    it('should carry the edits of a private asset for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      await ctx
+        .get(AssetEditRepository)
+        .replaceAll(asset.id, [
+          { action: AssetEditAction.Crop, parameters: { x: 10, y: 20, width: 100, height: 200 } },
+        ]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetEditsV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetEditV1,
+          data: expect.objectContaining({ assetId: asset.id, action: AssetEditAction.Crop }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
