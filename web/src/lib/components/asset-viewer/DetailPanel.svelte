@@ -33,6 +33,7 @@
   import OnEvents from '../OnEvents.svelte';
   import UserAvatar from '../shared-components/UserAvatar.svelte';
   import AlbumListItemDetails from './AlbumListItemDetails.svelte';
+  import DetailPanelBookmarks from '$lib/components/asset-viewer/DetailPanelBookmarks.svelte';
   import DetailPanelPeople from '$lib/components/asset-viewer/DetailPanelPeople.svelte';
   import { faceManager } from '$lib/stores/face.svelte';
 
@@ -153,6 +154,7 @@
 
     <DetailPanelDescription {asset} {isOwner} />
     <DetailPanelRating {asset} {isOwner} />
+    <DetailPanelBookmarks {asset} />
     <DetailPanelPeople {asset} {isOwner} {previousRoute} />
 
     <div class="p-4">
