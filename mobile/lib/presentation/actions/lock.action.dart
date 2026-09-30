@@ -8,6 +8,7 @@ import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/services/toast.service.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/confirm_dialog.dart';
 import 'package:logging/logging.dart';
 
@@ -54,7 +55,15 @@ class LockAction extends AssetActionBuilder {
       return;
     }
 
-    final (:shouldLock, :assetIds, :localIds) = state;
+    final (:shouldLock, assetIds: selectedIds, :localIds) = state;
+    final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+    final stacked = await resolveStackedAssets(context, ref, source, selected);
+    if (stacked == null || !context.mounted) {
+      return;
+    }
+
+    // the device copies of stacked assets stay where they are, like those of assets outside the selection
+    final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
     if (shouldLock && localIds.isNotEmpty) {
       final confirmed = await showDialog<bool>(
         context: context,

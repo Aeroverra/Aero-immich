@@ -7,6 +7,7 @@ import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 
 typedef _State = ({bool shouldArchive, List<String> assetIds});
 
@@ -47,7 +48,14 @@ class ArchiveAction extends AssetActionBuilder {
       return;
     }
 
-    final (:shouldArchive, :assetIds) = state;
+    final (:shouldArchive, assetIds: selectedIds) = state;
+    final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+    final stacked = await resolveStackedAssets(context, ref, source, selected);
+    if (stacked == null || !context.mounted) {
+      return;
+    }
+
+    final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
     final message = shouldArchive
         ? context.t.archive_action_prompt(count: assetIds.length)
         : context.t.unarchive_action_prompt(count: assetIds.length);
