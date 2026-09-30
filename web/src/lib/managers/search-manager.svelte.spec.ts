@@ -116,3 +116,22 @@ describe('SearchManager excluded tags', () => {
     expect(submittedQuery()).not.toHaveProperty('excludeTagIds');
   });
 });
+
+describe('SearchManager video length', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    searchManager.reset();
+  });
+
+  afterEach(() => {
+    searchManager.reset();
+  });
+
+  it('reads the length bounds from a query and submits them', async () => {
+    searchManager.setQuery({ minDuration: 30_000, maxDuration: 300_000 });
+
+    expect(searchManager.filter.minDuration).toBe(30_000);
+    await searchManager.submit();
+    expect(submittedQuery()).toMatchObject({ minDuration: 30_000, maxDuration: 300_000 });
+  });
+});
