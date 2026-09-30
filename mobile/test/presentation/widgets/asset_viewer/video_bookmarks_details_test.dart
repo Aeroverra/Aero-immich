@@ -150,6 +150,47 @@ void main() {
     verifyNever(controller.pause);
   });
 
+  testWidgets('edit dialog: +/- move by a second, typed times are checked, save returns time and name', (tester) async {
+    const bookmark = VideoBookmark(id: 'a', assetId: 'v', time: 95000, label: 'Best part');
+    final moves = <int>[];
+    ({int time, String label})? result;
+    await tester.pumpConsumerWidget(
+      Builder(
+        builder: (context) => TextButton(
+          onPressed: () async => result = await showDialog<({int time, String label})>(
+            context: context,
+            builder: (_) => EditVideoBookmarkDialog(bookmark: bookmark, maxTime: 150000, onTimeChanged: moves.add),
+          ),
+          child: const Text('open'),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    final timeField = find.widgetWithText(TextField, '1:35');
+    expect(timeField, findsOneWidget);
+    await tester.tap(find.byTooltip('One second later'));
+    await tester.tap(find.byTooltip('One second later'));
+    await tester.tap(find.byTooltip('One second earlier'));
+    await tester.pump();
+    expect(find.widgetWithText(TextField, '1:36'), findsOneWidget);
+    expect(moves, [96000, 97000, 96000]);
+
+    await tester.enterText(find.widgetWithText(TextField, '1:36'), 'abc');
+    await tester.tap(find.text('Save'));
+    await tester.pump();
+    expect(find.text('Type a time like 1:05 or 1:02:03.'), findsOneWidget);
+    expect(result, isNull);
+
+    // past the end of the video is capped at its length
+    await tester.enterText(find.widgetWithText(TextField, 'abc'), '9:00');
+    await tester.enterText(find.widgetWithText(TextField, 'Best part'), 'Candles');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(result, (time: 150000, label: 'Candles'));
+  });
+
   testWidgets('markers sit over the seek bar at the bookmarked share of the video', (tester) async {
     await tester.pumpConsumerWidget(
       const Center(

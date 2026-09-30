@@ -25,10 +25,12 @@ class VideoBookmarkApiRepository extends ApiRepository {
     return _toBookmark(response);
   }
 
-  Future<VideoBookmark> rename(String id, String label) async {
-    final response = await checkNull(
-      _api.updateVideoBookmark(id, VideoBookmarkUpdateDto(label: Optional.present(label))),
+  Future<VideoBookmark> update(String id, {int? time, String? label}) async {
+    final dto = VideoBookmarkUpdateDto(
+      time: time == null ? const Optional.absent() : Optional.present(time < 0 ? 0 : time),
+      label: label == null ? const Optional.absent() : Optional.present(label),
     );
+    final response = await checkNull(_api.updateVideoBookmark(id, dto));
     return _toBookmark(response);
   }
 
