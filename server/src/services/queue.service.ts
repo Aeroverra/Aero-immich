@@ -44,7 +44,7 @@ export class QueueService extends BaseService {
   @OnEvent({ name: 'ConfigInit' })
   async onConfigInit({ newConfig: config }: ArgOf<'ConfigInit'>) {
     if (this.worker === ImmichWorker.Microservices) {
-      this.updateConcurrency(config);
+      // the workers do not exist yet, onStartWorkers applies the concurrency when it creates them
       return;
     }
 
@@ -78,11 +78,16 @@ export class QueueService extends BaseService {
   @OnEvent({ name: 'AppBootstrap', priority: BootstrapEventPriority.JobService })
   onBootstrap() {
     this.jobRepository.setup(this.services);
-    if (this.worker === ImmichWorker.Microservices) {
-      this.jobRepository.startWorkers();
-    } else if (this.worker === ImmichWorker.Api) {
+    if (this.worker === ImmichWorker.Api) {
       this.jobRepository.watchWorkers();
     }
+  }
+
+  @OnEvent({ name: 'AppBootstrap', priority: BootstrapEventPriority.JobWorkers, workers: [ImmichWorker.Microservices] })
+  async onStartWorkers() {
+    const config = await this.getConfig({ withCache: true });
+    this.jobRepository.startWorkers();
+    this.updateConcurrency(config);
   }
 
   @OnEvent({ name: 'AppShutdown' })

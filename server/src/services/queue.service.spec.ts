@@ -1,7 +1,12 @@
 import { BadRequestException } from '@nestjs/common';
+import { ModuleRef, Reflector } from '@nestjs/core';
 import { defaults, SystemConfig } from 'src/dtos/config.dto';
 import { ImmichWorker, JobName, QueueCommand, QueueName } from 'src/enum';
+import { ConfigRepository } from 'src/repositories/config.repository';
+import { EventRepository } from 'src/repositories/event.repository';
+import { LoggingRepository } from 'src/repositories/logging.repository';
 import { QueueService } from 'src/services/queue.service';
+import { SystemConfigService } from 'src/services/system-config.service';
 import { factory } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
@@ -17,6 +22,51 @@ describe(QueueService.name, () => {
 
   it('should work', () => {
     expect(sut).toBeDefined();
+  });
+
+  describe('onBootstrap', () => {
+    it('should set up the queues without starting the workers', () => {
+      sut.onBootstrap();
+
+      expect(mocks.job.setup).toHaveBeenCalledOnce();
+      expect(mocks.job.startWorkers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('onStartWorkers', () => {
+    it('should start the workers with the configured concurrency', async () => {
+      await sut.onStartWorkers();
+
+      expect(mocks.job.startWorkers).toHaveBeenCalledOnce();
+      expect(mocks.job.setConcurrency).toHaveBeenCalledTimes(Object.values(QueueName).length);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.BackgroundTask, 5);
+      expect(mocks.job.startWorkers.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.job.setConcurrency.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('should not start the workers before machine learning is set up', async () => {
+      const services = new Map<unknown, unknown>([[QueueService, sut]]);
+      const moduleRef = { get: (token: unknown) => (token === Reflector ? new Reflector() : services.get(token)) };
+      const eventRepository = new EventRepository(
+        moduleRef as unknown as ModuleRef,
+        mocks.config as unknown as ConfigRepository,
+        mocks.logger as unknown as LoggingRepository,
+      );
+      const { sut: systemConfigService, mocks: systemConfigMocks } = newTestService(SystemConfigService, {
+        event: eventRepository,
+      });
+      services.set(SystemConfigService, systemConfigService);
+      eventRepository.setup({ services: [SystemConfigService, QueueService] });
+
+      await eventRepository.emit('AppBootstrap');
+
+      expect(systemConfigMocks.machineLearning.setup).toHaveBeenCalledOnce();
+      expect(mocks.job.startWorkers).toHaveBeenCalledOnce();
+      expect(systemConfigMocks.machineLearning.setup.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.job.startWorkers.mock.invocationCallOrder[0],
+      );
+    });
   });
 
   describe('onConfigUpdate', () => {
