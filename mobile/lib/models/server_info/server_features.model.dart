@@ -13,6 +13,9 @@ abstract class ServerFeatures with _$ServerFeatures {
     required bool passwordLogin,
     @Default(false) bool ocr,
     @Default(false) bool smartSearch,
+
+    /// Stacks know whether they were created manually or automatically
+    @Default(false) bool stackSource,
   }) = _ServerFeatures;
 
   factory ServerFeatures.fromDto(ServerFeaturesDto dto) => ServerFeatures(
@@ -22,5 +25,6 @@ abstract class ServerFeatures with _$ServerFeatures {
     passwordLogin: dto.passwordLogin,
     ocr: dto.ocr,
     smartSearch: dto.smartSearch,
+    stackSource: dto.stackSource.orElse(null) ?? false,
   );
 }

@@ -2,6 +2,7 @@ import { createZodDto } from 'nestjs-zod';
 import { Stack } from 'src/database';
 import { AssetResponseSchema, mapAsset } from 'src/dtos/asset-response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
+import { StackSourceSchema } from 'src/enum';
 import z from 'zod';
 
 const StackSearchSchema = z
@@ -27,6 +28,7 @@ const StackResponseSchema = z
     id: z.uuidv4().describe('Stack ID'),
     primaryAssetId: z.uuidv4().describe('Primary asset ID'),
     assets: z.array(AssetResponseSchema),
+    source: StackSourceSchema,
   })
   .describe('Stack response')
   .meta({ id: 'StackResponseDto' });
@@ -44,5 +46,6 @@ export const mapStack = (stack: Stack, { auth }: { auth?: AuthDto }) => {
     id: stack.id,
     primaryAssetId: stack.primaryAssetId,
     assets: [...primary, ...others].map((asset) => mapAsset(asset, { auth })),
+    source: stack.source,
   };
 };
