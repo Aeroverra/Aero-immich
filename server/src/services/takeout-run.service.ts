@@ -86,6 +86,7 @@ import {
   ImportPlan,
   LastReadAnalysis,
   PlannedFile,
+  TemplateVars,
   UnreadablePart,
   analyzeExport,
   buildCatalog,
@@ -2539,7 +2540,7 @@ export class TakeoutRunService extends BaseService {
    * caller writes the returned values into the pre-extraction sidecar as TagsList and releases the tags lock.
    */
   private async tagNewAsset(run: any, settings: any, assetId: string, plan: any): Promise<string[]> {
-    const vars = run.templateVars as { date: string; user: string; start: string };
+    const vars = run.templateVars as TemplateVars;
     const tags = dedupeTags([...(plan.tags ?? []), ...runTags(settings, vars)]);
     if (tags.length === 0) {
       return [];
@@ -2560,7 +2561,7 @@ export class TakeoutRunService extends BaseService {
     plan: any,
     _isUpload: boolean,
   ): Promise<boolean> {
-    const vars = run.templateVars as { date: string; user: string; start: string };
+    const vars = run.templateVars as TemplateVars;
     const tags = dedupeTags([...(plan.tags ?? []), ...runTags(settings, vars)]);
     if (tags.length === 0) {
       return false;

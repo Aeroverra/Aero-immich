@@ -3425,7 +3425,7 @@ export type TakeoutSettingsDto = {
     burst: TakeoutBurstMode;
     /** Stack bursts by time (500 ms grouper) */
     burstByTime: boolean;
-    /** Tags added to every imported asset; {date}, {user} and {start} are replaced */
+    /** Tags added to every imported asset; {date}, {user}, {email} and {start} are replaced */
     customTags: string[];
     /** Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD */
     dateRange: string | null;
@@ -3779,7 +3779,7 @@ export type TakeoutSettingsUpdateDto = {
     burst?: TakeoutBurstMode;
     /** Stack bursts by time (500 ms grouper) */
     burstByTime?: boolean;
-    /** Tags added to every imported asset; {date}, {user} and {start} are replaced */
+    /** Tags added to every imported asset; {date}, {user}, {email} and {start} are replaced */
     customTags?: string[];
     /** Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD */
     dateRange?: string | null;

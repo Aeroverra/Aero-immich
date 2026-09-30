@@ -127,7 +127,7 @@ const TakeoutSettingsSchema = z
     videoBoost: TakeoutVideoBoostModeSchema,
     customTags: z
       .array(z.string())
-      .describe('Tags added to every imported asset; {date}, {user} and {start} are replaced'),
+      .describe('Tags added to every imported asset; {date}, {user}, {email} and {start} are replaced'),
     sessionTag: z.boolean().describe('Add a tag for the run'),
     sessionTagTemplate: z.string().describe('Template of the run tag'),
     takeoutTag: z.boolean().describe('Tag each asset with the name of its archive'),

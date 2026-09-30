@@ -389,7 +389,10 @@ export interface TakeoutSettings {
 
 export interface TemplateVars {
   date: string;
+  /** the Google account name (before the @), else the Immich user name */
   user: string;
+  /** the Google account email, lowercased, else the Immich user name; absent on runs created before it existed */
+  email: string;
   start: string;
 }
 

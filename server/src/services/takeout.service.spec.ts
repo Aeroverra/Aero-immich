@@ -512,6 +512,28 @@ describe(`${TakeoutService.name} (single-pass)`, () => {
       expect(repo.runs.filter((r) => r.status === TakeoutRunStatus.Queued)).toHaveLength(1);
     });
 
+    it('stores {user} as the Google account name and {email} as the whole account email, lowercased', async () => {
+      // family: aeroverra@g.minecraft.technology and Aeroverra@Minecraft.Technology both tagged "aeroverra"
+      addPart();
+      repo.exports[0].accountEmail = 'Aeroverra@Minecraft.Technology';
+      const created = await sut.createRun(auth, exportId, { importAnyway: false });
+      expect(repo.runs.find((r) => r.id === created.id)!.templateVars).toMatchObject({
+        date: '2026-09-14',
+        user: 'Aeroverra',
+        email: 'aeroverra@minecraft.technology',
+      });
+    });
+
+    it('stores the Immich user name for {user} and {email} when the export has no account email', async () => {
+      addPart();
+      repo.exports[0].accountEmail = null;
+      const created = await sut.createRun(auth, exportId, { importAnyway: false });
+      expect(repo.runs.find((r) => r.id === created.id)!.templateVars).toMatchObject({
+        user: auth.user.name,
+        email: auth.user.name,
+      });
+    });
+
     it('only needs the free-space reserve, not the export size (F20)', async () => {
       addPart({ size: 900e9, prevSyncSize: 900e9 });
       mocks.storage.checkDiskUsage.mockResolvedValue({ available: 6 * 1024 ** 3, free: 0, total: 0 });

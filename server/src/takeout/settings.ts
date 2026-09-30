@@ -8,7 +8,7 @@ export const DEFAULT_TAKEOUT_SETTINGS: Readonly<TakeoutSettings> = Object.freeze
   burst: 'Stack',
   heicJpg: 'NoStack',
   videoBoost: 'Stack',
-  customTags: ['Source/Google Photos/{date} {user}'],
+  customTags: ['Source/Google Photos/{date} {email}'],
   sessionTag: true,
   sessionTagTemplate: '{immich-go}/{start}',
   takeoutTag: true,
@@ -86,11 +86,13 @@ export function validateSettings(value: Partial<TakeoutSettings>): string[] {
   return errors;
 }
 
-// Replaces the known placeholders; every other {...} is kept literally (0.4).
+// Replaces the known placeholders; every other {...} is kept literally (0.4). A run created before {email} existed
+// stored no email: its user stands in.
 export function renderTemplate(template: string, vars: TemplateVars): string {
   return template
     .replaceAll('{date}', () => vars.date)
     .replaceAll('{user}', () => vars.user)
+    .replaceAll('{email}', () => vars.email ?? vars.user)
     .replaceAll('{start}', () => vars.start);
 }
 

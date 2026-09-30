@@ -36647,7 +36647,7 @@
             "type": "boolean"
           },
           "customTags": {
-            "description": "Tags added to every imported asset; {date}, {user} and {start} are replaced",
+            "description": "Tags added to every imported asset; {date}, {user}, {email} and {start} are replaced",
             "items": {
               "type": "string"
             },
@@ -36765,7 +36765,7 @@
             "type": "boolean"
           },
           "customTags": {
-            "description": "Tags added to every imported asset; {date}, {user} and {start} are replaced",
+            "description": "Tags added to every imported asset; {date}, {user}, {email} and {start} are replaced",
             "items": {
               "type": "string"
             },

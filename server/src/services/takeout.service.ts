@@ -889,6 +889,9 @@ export class TakeoutService extends BaseService {
     const templateVars = {
       date: exp.exportedAt.toISOString().slice(0, 10),
       user: exp.accountEmail?.split('@', 1)[0] ?? auth.user.name,
+      // two Google accounts can share the name before the @ (aeroverra@g.minecraft.technology and
+      // Aeroverra@Minecraft.Technology): the whole address tells them apart
+      email: exp.accountEmail?.toLowerCase() ?? auth.user.name,
       // spec 0.4: run start in the home zone, `YYYY-MM-DD HH:mm:ss` (the immich-go session tag format)
       start: DateTime.now().setZone(settings.homeTimeZone).toFormat('yyyy-MM-dd HH:mm:ss'),
     };

@@ -13,7 +13,7 @@
     burst: TakeoutBurstMode.Stack,
     heicJpg: TakeoutHeicJpgMode.NoStack,
     videoBoost: TakeoutVideoBoostMode.Stack,
-    customTags: ['Source/Google Photos/{date} {user}'],
+    customTags: ['Source/Google Photos/{date} {email}'],
     sessionTag: true,
     sessionTagTemplate: '{immich-go}/{start}',
     takeoutTag: true,
@@ -121,7 +121,7 @@
           >{$t('add')}</Button
         >
       </div>
-      <Text size="tiny" color="muted">{'{date}'} · {'{user}'} · {'{start}'}</Text>
+      <Text size="tiny" color="muted">{'{date}'} · {'{user}'} · {'{email}'} · {'{start}'}</Text>
     </div>
   </Field>
 

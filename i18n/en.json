@@ -2562,7 +2562,7 @@
   "takeout_setting_burst_by_time_description": "Group photos taken within 500 ms into a burst.",
   "takeout_setting_burst_description": "What to do with photos Google grouped as a burst.",
   "takeout_setting_custom_tags": "Custom tags",
-  "takeout_setting_custom_tags_description": "Tags added to every imported asset. {date}, {user} and {start} are replaced.",
+  "takeout_setting_custom_tags_description": "Tags added to every imported asset. {date}, {user}, {email} and {start} are replaced: {user} is the Google account name before the @, {email} the whole Google account email.",
   "takeout_setting_date_range": "Date range",
   "takeout_setting_date_range_description": "Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD. Empty imports all.",
   "takeout_setting_google_photos_fields": "Save Google Photos fields as asset metadata",
