@@ -109,6 +109,19 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
     return query.map((row) => row.toDto()).get();
   }
 
+  /// The ids among [stackIds] of stacks that were created automatically
+  Future<Set<String>> getAutoStackIds(Iterable<String> stackIds) async {
+    if (stackIds.isEmpty) {
+      return const {};
+    }
+
+    final query = _db.stackEntity.selectOnly()
+      ..addColumns([_db.stackEntity.id])
+      ..where(_db.stackEntity.id.isIn(stackIds) & _db.stackEntity.source.equalsValue(StackSource.auto));
+    final rows = await query.get();
+    return rows.map((row) => row.read(_db.stackEntity.id)!).toSet();
+  }
+
   /// The assets of [stackIds] that are not in the trash, primary assets included.
   /// [includeAutoStacks] false leaves out stacks created automatically, for when those are shown as separate assets.
   Future<List<RemoteAsset>> getStackAssets(Iterable<String> stackIds, {bool includeAutoStacks = true}) {
