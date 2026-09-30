@@ -4,6 +4,7 @@ type VideoPlaybackSourceOptions = {
   realtimeTranscoding: boolean;
   playOriginalVideo: boolean;
   hasEncodedVideo?: boolean;
+  isEdited?: boolean;
 };
 
 /** the file the player gets: /video/playback serves the transcoded copy when there is one, else the original */
@@ -11,12 +12,14 @@ export const getVideoPlaybackSource = ({
   realtimeTranscoding,
   playOriginalVideo,
   hasEncodedVideo,
+  isEdited,
 }: VideoPlaybackSourceOptions): VideoPlaybackSource | undefined => {
   if (realtimeTranscoding) {
     return 'live';
   }
 
-  if (playOriginalVideo) {
+  // a rotated video plays its rotated copy even as original, which is made from the transcoded copy if there is one
+  if (playOriginalVideo && !(isEdited && hasEncodedVideo)) {
     return 'original';
   }
 
