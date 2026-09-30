@@ -2639,11 +2639,19 @@ export type SearchAlbumResponseDto = {
     /** Total number of matching albums */
     total: number;
 };
+export type SearchMatchedFrameResponseDto = {
+    /** Video asset ID */
+    assetId: string;
+    /** Position in milliseconds of the sampled video frame that matched best */
+    frameTimestamp: number;
+};
 export type SearchAssetResponseDto = {
     /** Number of assets in this page */
     count: number;
     facets: SearchFacetResponseDto[];
     items: AssetResponseDto[];
+    /** Smart search only: the videos of this page that matched on a sampled frame, with its position */
+    matchedFrames?: SearchMatchedFrameResponseDto[];
     /** Cursor for the next page of results */
     nextCursor: string | null;
     /** Next page token */
