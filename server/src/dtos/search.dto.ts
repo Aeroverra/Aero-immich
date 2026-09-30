@@ -75,6 +75,33 @@ const BaseSearchSchema = z.object({
     .describe('Only videos at most this long, in milliseconds')
     .meta(DEPRECATED_FLAT_FIELD),
   personIds: z.array(z.uuidv4()).optional().describe('Filter by person IDs').meta(DEPRECATED_FLAT_FIELD),
+  onlyPersonIds: z
+    .boolean()
+    .optional()
+    .describe(
+      'With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too',
+    )
+    .meta(DEPRECATED_FLAT_FIELD),
+  // the flat counterpart of filter.hasPeople
+  hasPeople: z
+    .boolean()
+    .optional()
+    .describe('Filter assets with (true) or without (false) any visible face')
+    .meta(DEPRECATED_FLAT_FIELD),
+  hasNamedFaces: z
+    .boolean()
+    .optional()
+    .describe(
+      'Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found',
+    )
+    .meta(DEPRECATED_FLAT_FIELD),
+  hasUnnamedFaces: z
+    .boolean()
+    .optional()
+    .describe(
+      'Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden',
+    )
+    .meta(DEPRECATED_FLAT_FIELD),
   tagIds: z.array(z.uuidv4()).nullish().describe('Filter by tag IDs').meta(DEPRECATED_FLAT_FIELD),
   // the flat counterpart of filter.tagIds.none, for clients that still send the flat shape (smart search pages)
   excludeTagIds: z
