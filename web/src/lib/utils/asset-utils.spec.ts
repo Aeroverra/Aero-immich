@@ -9,6 +9,7 @@ import {
   isGroupingAutoStacks,
   isStackGrouped,
   toggleArchive,
+  withoutShownStacks,
 } from './asset-utils';
 
 vi.mock('@immich/sdk', async (importOriginal) => {
@@ -144,5 +145,35 @@ describe('automatic stack grouping', () => {
 
     expect(isStackGrouped({ source: StackSource.Auto })).toBe(true);
     expect(isStackGrouped({ source: StackSource.Manual })).toBe(true);
+  });
+});
+
+describe('withoutShownStacks', () => {
+  afterEach(() => {
+    authManager.reset();
+  });
+
+  const boost = { id: 'boost', source: StackSource.Manual };
+  const burst = { id: 'burst', source: StackSource.Auto };
+  const asset = (id: string, stack?: { id: string; source: StackSource }) => ({ id, stack });
+
+  it('keeps the first asset of each stack, across pages', () => {
+    const page1 = withoutShownStacks([asset('video', boost), asset('plain'), asset('burst-1', burst)], []);
+    const page2 = withoutShownStacks([asset('boosted', boost), asset('burst-2', burst), asset('other')], page1);
+
+    expect(page1.map(({ id }) => id)).toEqual(['video', 'plain', 'burst-1']);
+    expect(page2.map(({ id }) => id)).toEqual(['other']);
+  });
+
+  it('keeps every photo of an automatic stack while those are not grouped', () => {
+    authManager.setUser(userAdminFactory.build());
+    authManager.setPreferences(preferencesFactory.build({ stacks: { groupAuto: false } }));
+
+    const results = withoutShownStacks(
+      [asset('video', boost), asset('boosted', boost), asset('burst-1', burst), asset('burst-2', burst)],
+      [],
+    );
+
+    expect(results.map(({ id }) => id)).toEqual(['video', 'burst-1', 'burst-2']);
   });
 });
