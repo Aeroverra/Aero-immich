@@ -2363,7 +2363,7 @@
   "stack_actions_remember": "Remember my choice",
   "stack_actions_remember_description": "You can change this later in the settings under Stacked items",
   "stack_camera_shots": "Stack files from one camera shot",
-  "stack_camera_shots_description": "When a file is uploaded, it is stacked with the other files your camera saved from the same shot, wherever they are in your library: Pixel Video Boost and Night Sight videos (the processed MAIN video on top), Pixel long exposure, portrait and RAW photos (the COVER on top) and bursts (the cover frame on top). Files you take out of a stack are not stacked again.",
+  "stack_camera_shots_description": "When a file is uploaded, it joins the other files your camera saved from the same shot, wherever they are in your library: Pixel Video Boost and Night Sight videos (the processed MAIN video on top), long exposure, portrait and RAW photos (the COVER on top) and bursts (the cover frame on top). Files you take out of a stack stay out.",
   "stack_duplicates": "Stack duplicates",
   "stack_selected_photos": "Stack selected photos",
   "stack_similar_photos_automatically": "Stack similar photos automatically",
