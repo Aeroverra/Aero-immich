@@ -14,6 +14,13 @@ class _CurrentTimestamp implements _Dynamic {
 
 const _now = _CurrentTimestamp();
 
+/// A queue that does not exist on the server: nothing queued, not running. Plain maps, because toJson keeps nested
+/// DTOs as objects that fromJson cannot read back.
+final _emptyQueue = <String, Object?>{
+  'jobCounts': {'active': 0, 'completed': 0, 'delayed': 0, 'failed': 0, 'paused': 0, 'waiting': 0},
+  'queueStatus': {'isActive': false, 'isPaused': false},
+};
+
 @visibleForTesting
 final Map<String, Map<String, Object?>> openApiPatches = {
   'UserPreferencesResponseDto': {
@@ -29,6 +36,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'recentlyAdded': RecentlyAddedResponse(sidebarWeb: false).toJson(),
     'stacks': StacksResponse(groupAuto: true).toJson(),
     'autoStack': AutoStackResponse(enabled: false).toJson(),
+    'stackActions': StackActionsResponse(mode: StackActionMode.ask).toJson(),
   },
   'ServerConfigDto': {
     'mapLightStyleUrl': 'https://tiles.immich.cloud/v1/style/light.json',
@@ -46,6 +54,27 @@ final Map<String, Map<String, Object?>> openApiPatches = {
   'StackResponseDto': {'source': 'manual'},
   'AssetStackResponseDto': {'source': 'manual'},
   'MemoriesResponse': {'duration': 5, 'sidebarWeb': false},
+  'AdminConfigJobDto': {'faceAttributes': AdminConfigJobSettingsDto(concurrency: 2).toJson()},
+  'AdminConfigMachineLearningDto': {
+    'faceAttributes': AdminConfigFaceAttributesDto(enabled: false, modelName: 'face_landmarker').toJson(),
+    'autoStack': AdminConfigAutoStackDto(
+      enabled: false,
+      maxAssets: 100,
+      maxDistance: 0.06,
+      maxFaceShift: 0.1,
+      maxFaceSizeChange: 0.25,
+      maxGapSeconds: 5,
+      maxSmileChange: 0.4,
+      maxSpanSeconds: 30,
+      maxYawChange: 15,
+    ).toJson(),
+  },
+  'AdminConfigNightlyTasksDto': {'autoStack': false},
+  'UserConfigMachineLearningDto': {
+    'faceAttributes': UserConfigFaceAttributesDto(enabled: false).toJson(),
+    'autoStack': UserConfigAutoStackDto(enabled: false).toJson(),
+  },
+  'QueuesResponseLegacyDto': {'faceAttributes': _emptyQueue, 'autoStack': _emptyQueue},
   'WorkflowResponseDto': {'logging': false},
 };
 
