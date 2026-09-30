@@ -1,6 +1,7 @@
 <script lang="ts">
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { handleError } from '$lib/utils/handle-error';
   import { getAlbumInfo, removeAssetFromAlbum, type AlbumResponseDto } from '@immich/sdk';
   import { IconButton, modalManager, toastManager } from '@immich/ui';
@@ -17,7 +18,10 @@
   let { album = $bindable(), onRemove, assetIds, menuItem = false }: Props = $props();
 
   const removeFromAlbum = async () => {
-    const ids = assetIds ?? assetMultiSelectManager.assets.map(({ id }) => id) ?? [];
+    const ids = assetIds ?? (await resolveStackSelection(assetMultiSelectManager.assets));
+    if (!ids) {
+      return;
+    }
 
     const isConfirmed = await modalManager.showDialog({
       prompt: $t('remove_assets_album_confirmation', { values: { count: ids.length } }),
