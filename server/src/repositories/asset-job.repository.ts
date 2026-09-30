@@ -338,7 +338,8 @@ export class AssetJobRepository {
                 .selectFrom('asset_file')
                 .select('asset_file.id')
                 .whereRef('asset_file.assetId', '=', 'asset.id')
-                .where('asset_file.type', '=', sql.lit(AssetFileType.EncodedVideo)),
+                .where('asset_file.type', '=', sql.lit(AssetFileType.EncodedVideo))
+                .where('asset_file.isEdited', '=', sql.lit(false)),
             ),
           ),
         ),

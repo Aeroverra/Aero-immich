@@ -39,7 +39,7 @@ import {
   VideoStreamInfo,
 } from 'src/types';
 import { getAssetFile, getDimensions } from 'src/utils/asset.util';
-import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
+import { checkFaceVisibility, checkOcrVisibility, getEditRotation, getVideoDisplayRotation } from 'src/utils/editor';
 import { BaseConfig, ThumbnailConfig, VideoFrameConfig } from 'src/utils/media';
 import { mimeTypes } from 'src/utils/mime-types';
 import { batched, clamp } from 'src/utils/misc';
@@ -55,6 +55,7 @@ interface UpsertFileOptions {
 }
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
+type VideoConversionAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForVideoConversion']>>>;
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -168,7 +169,16 @@ export class MediaService extends BaseService {
     );
 
     let thumbhash: Buffer | undefined = generated?.thumbhash;
-    if (!thumbhash) {
+    if (!thumbhash && asset.type === AssetType.Video) {
+      // back to the thumbhash of the unedited preview frame, if the video has one (the video of a live photo does not)
+      const preview = getAssetFile(asset.files, AssetFileType.Preview, { isEdited: false });
+      if (preview) {
+        thumbhash = await this.mediaRepository.generateThumbhash(preview.path, {
+          colorspace: config.image.colorspace,
+          processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+        });
+      }
+    } else if (!thumbhash) {
       const extractedImage = await this.extractOriginalImage(asset, config.image);
       const { info, data, colorspace } = extractedImage;
 
@@ -180,12 +190,17 @@ export class MediaService extends BaseService {
       });
     }
 
-    if (!asset.thumbhash || Buffer.compare(asset.thumbhash, thumbhash) !== 0) {
+    if (thumbhash && (!asset.thumbhash || Buffer.compare(asset.thumbhash, thumbhash) !== 0)) {
       await this.assetRepository.update({ id: asset.id, thumbhash });
     }
 
-    const fullsizeDimensions = generated?.fullsizeDimensions ?? getDimensions(asset.exifInfo!);
+    const fullsizeDimensions =
+      generated?.fullsizeDimensions ?? getOutputDimensions(asset.edits, getDimensions(asset.exifInfo!));
     await this.assetRepository.update({ id: asset.id, ...fullsizeDimensions });
+
+    if (asset.type === AssetType.Video) {
+      await this.generateEditedVideo(asset.id);
+    }
 
     return JobStatus.Success;
   }
@@ -217,7 +232,8 @@ export class MediaService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    const editedGenerated = await this.generateEditedThumbnails(asset, config);
+    const preview = generated.files.find((file) => file.type === AssetFileType.Preview);
+    const editedGenerated = await this.generateEditedThumbnails(asset, config, preview?.path);
     if (editedGenerated) {
       generated.files.push(...editedGenerated.files);
     }
@@ -581,6 +597,8 @@ export class MediaService extends BaseService {
         this.logger.log(`Transcoded video exists for asset ${asset.id}, but is no longer required. Deleting...`);
         await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [encodedVideo.path] } });
         await this.assetRepository.deleteFiles([encodedVideo]);
+        // the edited video was made from the transcoded one
+        await this.regenerateEditedVideo(asset.id);
       } else {
         this.logger.verbose(`Asset ${asset.id} does not require transcoding based on current policy, skipping`);
       }
@@ -634,8 +652,16 @@ export class MediaService extends BaseService {
       path: output,
       isEdited: false,
     });
+    await this.regenerateEditedVideo(asset.id);
 
     return JobStatus.Success;
+  }
+
+  private async regenerateEditedVideo(id: string) {
+    const edits = await this.assetEditRepository.getAll(id);
+    if (edits.length > 0) {
+      await this.generateEditedVideo(id);
+    }
   }
 
   private getTranscodeTarget(
@@ -823,7 +849,11 @@ export class MediaService extends BaseService {
     }
   }
 
-  private async generateEditedThumbnails(asset: ThumbnailAsset, config: SystemConfig) {
+  private async generateEditedThumbnails(asset: ThumbnailAsset, config: SystemConfig, previewPath?: string) {
+    if (asset.type === AssetType.Video) {
+      return asset.edits.length > 0 ? this.generateEditedVideoThumbnails(asset, config, previewPath) : undefined;
+    }
+
     if (asset.type !== AssetType.Image || (asset.files.length === 0 && asset.edits.length === 0)) {
       return;
     }
@@ -851,6 +881,125 @@ export class MediaService extends BaseService {
     await this.ocrRepository.updateOcrVisibilities(asset.id, ocrStatuses.visible, ocrStatuses.hidden);
 
     return generated;
+  }
+
+  /**
+   * Edited thumbnails of a video are its preview frame with the edits applied. Videos can only be rotated.
+   */
+  private async generateEditedVideoThumbnails(asset: ThumbnailAsset, { image }: SystemConfig, previewPath?: string) {
+    const source = previewPath ?? getAssetFile(asset.files, AssetFileType.Preview, { isEdited: false })?.path;
+    if (!source) {
+      // the video of a live photo has no thumbnails of its own
+      return;
+    }
+
+    const previewFormat = image.preview.format;
+    const thumbnailFormat = image.thumbnail.format;
+    const previewFile = this.getImageFile(asset, {
+      fileType: AssetFileType.Preview,
+      format: previewFormat,
+      isEdited: true,
+      isProgressive: !!image.preview.progressive && previewFormat !== ImageFormat.Webp,
+      isTransparent: false,
+    });
+    const thumbnailFile = this.getImageFile(asset, {
+      fileType: AssetFileType.Thumbnail,
+      format: thumbnailFormat,
+      isEdited: true,
+      isProgressive: !!image.thumbnail.progressive && thumbnailFormat !== ImageFormat.Webp,
+      isTransparent: false,
+    });
+    this.storageCore.ensureFolders(previewFile.path);
+
+    // the preview frame is already upright, so only the edits turn it
+    const { data, info, colorspace } = await this.decodeImage(source, { ...asset.exifInfo, orientation: null });
+    const baseOptions = { colorspace, processInvalidImages: false, raw: info, edits: asset.edits };
+    const [thumbhash] = await Promise.all([
+      this.mediaRepository.generateThumbhash(data, baseOptions),
+      this.mediaRepository.generateThumbnail(
+        data,
+        { ...image.thumbnail, ...baseOptions, format: thumbnailFormat },
+        thumbnailFile.path,
+      ),
+      this.mediaRepository.generateThumbnail(
+        data,
+        { ...image.preview, ...baseOptions, format: previewFormat },
+        previewFile.path,
+      ),
+    ]);
+
+    return {
+      files: [previewFile, thumbnailFile],
+      thumbhash: thumbhash as Buffer,
+      fullsizeDimensions: getOutputDimensions(asset.edits, getDimensions(asset.exifInfo)),
+    };
+  }
+
+  /**
+   * An edited video plays from its own file: the video that would play otherwise (the transcoded copy, else the
+   * original) with the rotation of the edits written to its display matrix. The streams are copied, not re-encoded.
+   */
+  private async generateEditedVideo(id: string) {
+    const asset = await this.assetJobRepository.getForVideoConversion(id);
+    if (!asset) {
+      return;
+    }
+
+    const rotation = getEditRotation(await this.assetEditRepository.getAll(id));
+    const editedVideo = getAssetFile(asset.files, AssetFileType.EncodedVideo, { isEdited: true });
+    if (rotation === 0) {
+      if (editedVideo) {
+        await this.assetRepository.deleteFiles([editedVideo]);
+        await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [editedVideo.path] } });
+      }
+      return;
+    }
+
+    const encodedVideo = getAssetFile(asset.files, AssetFileType.EncodedVideo, { isEdited: false });
+    const input = encodedVideo?.path ?? asset.originalPath;
+    const output = StorageCore.getEncodedVideoPath(asset, true);
+    // written next to the old file and renamed over it, so a player that has the old one open keeps working
+    const temporaryOutput = output.replace(/\.mp4$/, '.tmp.mp4');
+    this.storageCore.ensureFolders(output);
+
+    try {
+      const { videoStreams } = await this.mediaRepository.probe(input);
+      const displayRotation = getVideoDisplayRotation(videoStreams[0]?.rotation ?? 0, rotation);
+      await this.mediaRepository.transcode(input, temporaryOutput, {
+        inputOptions: ['-display_rotation', String(displayRotation)],
+        outputOptions: ['-map', '0:v:0', '-map', '0:a:0?', '-c', 'copy', '-movflags', 'faststart'],
+        twoPass: false,
+        progress: { frameCount: 0, percentInterval: 0 },
+      });
+    } catch (error: any) {
+      this.logger.warn(`Could not rotate video ${id} without re-encoding it, transcoding instead: ${error?.message}`);
+      await this.transcodeEditedVideo(asset, rotation, temporaryOutput);
+    }
+
+    await this.storageRepository.rename(temporaryOutput, output);
+    await this.assetRepository.upsertFile({
+      assetId: asset.id,
+      type: AssetFileType.EncodedVideo,
+      path: output,
+      isEdited: true,
+    });
+    this.logger.log(`Rotated video ${id} by ${rotation} degrees`);
+  }
+
+  private async transcodeEditedVideo(asset: VideoConversionAsset, rotation: number, output: string) {
+    const { ffmpeg } = await this.getConfig({ withCache: true });
+    const videoStream = {
+      ...asset.videoStream,
+      rotation: getVideoDisplayRotation(asset.videoStream.rotation, rotation),
+    };
+    // software encoding, as this only runs for sources that cannot be copied into an mp4
+    const command = BaseConfig.create(
+      { ...ffmpeg, accel: TranscodeHardwareAcceleration.Disabled },
+      this.videoInterfaces,
+    ).getCommand(TranscodeTarget.All, videoStream, asset.audioStream ?? undefined);
+    // ffmpeg turns the frames by the display matrix, so overriding it bakes the rotation in
+    command.inputOptions.push('-display_rotation', String(videoStream.rotation));
+    await this.mediaRepository.transcode(asset.originalPath, output, command);
   }
 
   private warnOnTransparencyLoss(isTransparent: boolean, format: ImageFormat, assetId: string) {
