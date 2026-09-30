@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
+import 'package:immich_mobile/widgets/settings/lock_trigger_setting.dart';
 import 'package:immich_mobile/widgets/settings/setting_group_title.dart';
 import 'package:immich_mobile/widgets/settings/setting_list_tile.dart';
 import 'package:logging/logging.dart';
@@ -50,6 +55,21 @@ class PrivateModeSetting extends ConsumerWidget {
       }
     }
 
+    Future<void> saveTrigger(LockTrigger trigger) async {
+      try {
+        await ref.read(updatePrivateModeLockTriggerProvider)(trigger);
+      } catch (error, stack) {
+        _log.warning('Failed to update when private mode locks again', error, stack);
+        if (context.mounted) {
+          ImmichToast.show(
+            context: context,
+            msg: context.t.errors.unable_to_update_settings,
+            toastType: ToastType.error,
+          );
+        }
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -63,6 +83,13 @@ class PrivateModeSetting extends ConsumerWidget {
             error: (_, _) => const Icon(Icons.error_outline),
           ),
           onTap: timeout.hasValue ? editTimeout : null,
+        ),
+        LockTriggerSetting(
+          title: context.t.private_mode_lock_trigger,
+          description: context.t.private_mode_lock_trigger_description,
+          icon: Icons.lock_clock,
+          trigger: ref.watch(privateModeLockTriggerProvider),
+          onChanged: (trigger) => unawaited(saveTrigger(trigger)),
         ),
       ],
     );
