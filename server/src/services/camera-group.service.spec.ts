@@ -1,4 +1,12 @@
-import { AssetType, AssetVisibility, JobName, JobStatus, StackSource, UserMetadataKey } from 'src/enum';
+import {
+  AssetType,
+  AssetVisibility,
+  JobName,
+  JobStatus,
+  StackSource,
+  StackUserEditAction,
+  UserMetadataKey,
+} from 'src/enum';
 import { CAMERA_GROUP_DELAY_MS, CameraGroupService } from 'src/services/camera-group.service';
 import { newTestService, ServiceMocks } from 'test/utils';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -153,15 +161,59 @@ describe(CameraGroupService.name, () => {
       expect(mocks.stack.create).not.toHaveBeenCalled();
     });
 
-    it('leaves files in two different stacks alone', async () => {
+    it('leaves files in two stacks alone when a stack holds other files', async () => {
       mockAsset('cover', COVER);
       mocks.stack.getCameraGroupCandidates.mockResolvedValue([
         candidate('cover', COVER, { stackId: 'a', stackPrimaryAssetId: 'cover', stackSource: StackSource.Manual }),
         candidate('main', MAIN, { stackId: 'b', stackPrimaryAssetId: 'main', stackSource: StackSource.Manual }),
       ]);
+      mocks.stack.getForUserEdit.mockResolvedValue([
+        { id: 'a', primaryAssetId: 'cover', source: StackSource.Manual, assets: [{ id: 'cover' }, { id: 'other' }] },
+        { id: 'b', primaryAssetId: 'main', source: StackSource.Manual, assets: [{ id: 'main' }] },
+      ]);
       await expect(sut.handleStackCameraGroup({ id: 'cover' })).resolves.toBe(JobStatus.Skipped);
+      expect(mocks.stack.getForUserEdit).toHaveBeenCalledWith({ stackIds: expect.arrayContaining(['a', 'b']) });
       expect(mocks.stack.create).not.toHaveBeenCalled();
       expect(mocks.asset.updateAll).not.toHaveBeenCalled();
+    });
+
+    it('merges the stacks an import left a burst in, with the cover frame on top', async () => {
+      const cover = '00000IMG_00000_BURST20190530194629_COVER.jpg';
+      mockAsset('cover', cover);
+      mocks.stack.getCameraGroupCandidates.mockResolvedValue([
+        candidate('cover', cover, { stackId: 'a', stackPrimaryAssetId: 'cover', stackSource: StackSource.Manual }),
+        candidate('frame-1', '00001IMG_00001_BURST20190530194629.jpg', {
+          stackId: 'b',
+          stackPrimaryAssetId: 'frame-1',
+          stackSource: StackSource.Manual,
+        }),
+        candidate('frame-2', '00002IMG_00002_BURST20190530194629.jpg', {
+          stackId: 'b',
+          stackPrimaryAssetId: 'frame-1',
+          stackSource: StackSource.Manual,
+        }),
+      ]);
+      mocks.stack.getForUserEdit.mockResolvedValue([
+        { id: 'a', primaryAssetId: 'cover', source: StackSource.Manual, assets: [{ id: 'cover' }] },
+        {
+          id: 'b',
+          primaryAssetId: 'frame-1',
+          source: StackSource.Manual,
+          assets: [{ id: 'frame-1' }, { id: 'frame-2' }],
+        },
+      ]);
+
+      await expect(sut.handleStackCameraGroup({ id: 'cover' })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.stack.create).toHaveBeenCalledWith(
+        { ownerId, source: StackSource.Manual },
+        ['cover', 'frame-1', 'frame-2'],
+        scope,
+      );
+      expect(mocks.event.emit).toHaveBeenCalledWith(
+        'StackUserEdit',
+        expect.objectContaining({ stackId: 'b', action: StackUserEditAction.Merge, targetStackId: 'stack-1' }),
+      );
     });
 
     it('adds a late burst cover on top of the stack of its frames', async () => {

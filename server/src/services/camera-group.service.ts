@@ -1,6 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { OnEvent, OnJob } from 'src/decorators';
-import { AssetType, AssetVisibility, DatabaseLock, JobName, JobStatus, QueueName, StackSource } from 'src/enum';
+import {
+  AssetType,
+  AssetVisibility,
+  DatabaseLock,
+  JobName,
+  JobStatus,
+  QueueName,
+  StackSource,
+  StackUserEditAction,
+} from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobOf } from 'src/types';
@@ -81,15 +90,26 @@ export class CameraGroupService extends BaseService {
         return JobStatus.Skipped;
       }
 
-      // files in different stacks, or in an automatic stack, were grouped by someone or something else: leave them
-      if (stackIds.size > 1 || ordered.some(({ stackSource }) => stackSource === StackSource.Auto)) {
-        this.logger.debug(`Not stacking ${file.key}: its files are already in other stacks`);
+      // files in an automatic stack were grouped by similarity: leave them
+      if (ordered.some(({ stackSource }) => stackSource === StackSource.Auto)) {
+        this.logger.debug(`Not stacking ${file.key}: its files are in an automatic stack`);
         return JobStatus.Skipped;
       }
 
-      const stackId = stackIds.size === 1 ? [...stackIds][0] : null;
-      if (stackId) {
-        await this.addToStack(asset.ownerId, stackId, ordered, unstacked);
+      if (stackIds.size > 1) {
+        // an import that groups files per folder can leave one shot in several stacks, such as a burst's cover frame
+        // on its own; those stacks become one when they hold nothing but files of this shot
+        const stacks = await this.stackRepository.getForUserEdit({ stackIds: [...stackIds] });
+        const shot = new Set(ordered.map(({ id }) => id));
+        if (
+          stacks.some(({ source, assets }) => source !== StackSource.Manual || assets.some(({ id }) => !shot.has(id)))
+        ) {
+          this.logger.debug(`Not stacking ${file.key}: its files are in stacks that hold other files`);
+          return JobStatus.Skipped;
+        }
+        await this.createStack(asset.ownerId, ordered, stacks);
+      } else if (stackIds.size === 1) {
+        await this.addToStack(asset.ownerId, [...stackIds][0], ordered, unstacked);
       } else {
         await this.createStack(asset.ownerId, ordered);
       }
@@ -107,7 +127,12 @@ export class CameraGroupService extends BaseService {
     });
   }
 
-  private async createStack(ownerId: string, ordered: Candidate[]) {
+  /** a new stack with the file that belongs on top first; [previous] stacks of the shot are merged into it */
+  private async createStack(
+    ownerId: string,
+    ordered: Candidate[],
+    previous: Array<{ id: string; source: StackSource; assets: { id: string }[] }> = [],
+  ) {
     const assetIds = ordered.map(({ id }) => id);
     const stack = await this.stackRepository.create({ ownerId, source: StackSource.Manual }, assetIds, {
       privateMode: true,
@@ -115,6 +140,16 @@ export class CameraGroupService extends BaseService {
     });
     await this.makeStackPrivate(ownerId, ordered);
     await this.eventRepository.emit('StackCreate', { stackId: stack.id, userId: ownerId });
+    for (const { id, source, assets } of previous) {
+      await this.eventRepository.emit('StackUserEdit', {
+        userId: ownerId,
+        stackId: id,
+        source,
+        action: StackUserEditAction.Merge,
+        assetIds: assets.map(({ id }) => id),
+        targetStackId: stack.id,
+      });
+    }
   }
 
   /** the new files join the stack; the file that belongs on top takes the top when it is one of them */

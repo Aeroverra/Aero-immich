@@ -153,6 +153,42 @@ describe(CameraGroupService.name, () => {
     });
   });
 
+  it('merges a burst cover left alone in its own stack by an import into the stack of its frames', async () => {
+    const { sut, ctx } = setup();
+    const { user } = await ctx.newUser();
+    const cover = await newFile(ctx, user.id, '00012IMG_00012_BURST20190108201915_COVER.jpg', { folder: 'Album' });
+    const frame1 = await newFile(ctx, user.id, '00001IMG_00001_BURST20190108201915.jpg');
+    const frame2 = await newFile(ctx, user.id, '00002IMG_00002_BURST20190108201915.jpg');
+    const { stack: coverStack } = await ctx.newStack({ ownerId: user.id }, [cover.id]);
+    const { stack: frameStack } = await ctx.newStack({ ownerId: user.id }, [frame1.id, frame2.id]);
+
+    await expect(sut.handleStackCameraGroup({ id: frame2.id })).resolves.toBe(JobStatus.Success);
+
+    const stack = await getStack(ctx, frame1.id);
+    expect(stack).toMatchObject({ primaryAssetId: cover.id, source: StackSource.Manual });
+    expect(stack?.members).toEqual([cover.id, frame1.id, frame2.id].toSorted());
+    const left = await ctx.database
+      .selectFrom('stack')
+      .select('id')
+      .where('id', 'in', [coverStack.id, frameStack.id])
+      .execute();
+    expect(left).toEqual([]);
+  });
+
+  it('does not merge a stack that holds files of another shot', async () => {
+    const { sut, ctx } = setup();
+    const { user } = await ctx.newUser();
+    const cover = await newFile(ctx, user.id, '00012IMG_00012_BURST20190108201915_COVER.jpg');
+    const other = await newFile(ctx, user.id, 'IMG_0001.jpg');
+    const frame = await newFile(ctx, user.id, '00001IMG_00001_BURST20190108201915.jpg');
+    const frame2 = await newFile(ctx, user.id, '00002IMG_00002_BURST20190108201915.jpg');
+    const { stack: mixed } = await ctx.newStack({ ownerId: user.id }, [cover.id, other.id]);
+    await ctx.newStack({ ownerId: user.id }, [frame.id, frame2.id]);
+
+    await expect(sut.handleStackCameraGroup({ id: frame.id })).resolves.toBe(JobStatus.Skipped);
+    await expect(getStack(ctx, cover.id)).resolves.toMatchObject({ id: mixed.id });
+  });
+
   it('stacks a long exposure photo set with the COVER on top and makes it private as a whole', async () => {
     const { sut, ctx } = setup();
     const { user } = await ctx.newUser();
