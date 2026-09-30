@@ -53,7 +53,8 @@
     ],
   };
 
-  let duplicates = $state(data.duplicates);
+  // writable: local edits stick until the load re-runs (e.g. private mode toggles) and hands over a fresh list
+  let duplicates = $derived(data.duplicates);
   let showMore = $state(false);
 
   const correctDuplicatesIndex = (index: number) => {
