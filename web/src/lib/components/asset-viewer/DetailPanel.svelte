@@ -3,6 +3,7 @@
   import DetailPanelDate from '$lib/components/asset-viewer/DetailPanelDate.svelte';
   import DetailPanelDescription from '$lib/components/asset-viewer/DetailPanelDescription.svelte';
   import DetailPanelLocation from '$lib/components/asset-viewer/DetailPanelLocation.svelte';
+  import DetailPanelMetadata from '$lib/components/asset-viewer/DetailPanelMetadata.svelte';
   import DetailPanelRating from '$lib/components/asset-viewer/DetailPanelStarRating.svelte';
   import DetailPanelTags from '$lib/components/asset-viewer/DetailPanelTags.svelte';
   import { timeToLoadTheMap } from '$lib/constants';
@@ -374,6 +375,10 @@
       </section>
     {/if}
   {/await}
+
+  {#if authManager.authenticated && !authManager.isSharedLink}
+    <DetailPanelMetadata {asset} {isOwner} />
+  {/if}
 
   {#if authManager.authenticated && authManager.preferences.tags.enabled}
     <section class="relative px-2 pb-12 dark:bg-immich-dark-bg dark:text-immich-dark-fg">
