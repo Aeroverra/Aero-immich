@@ -3,10 +3,8 @@
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { viewManager } from '$lib/managers/view-manager.svelte';
-  import PrivateModePinModal from '$lib/modals/PrivateModePinModal.svelte';
-  import { handleError } from '$lib/utils/handle-error';
+  import { switchCustomView } from '$lib/services/custom-view.service';
   import { ViewAccess, type CustomViewResponseDto } from '@immich/sdk';
-  import { modalManager } from '@immich/ui';
   import { mdiCheck, mdiEyeOutline, mdiFilterVariant, mdiLockOutline, mdiShieldLockOutline } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
@@ -33,21 +31,7 @@
       return;
     }
 
-    if (view && viewId && view.access === ViewAccess.Locked) {
-      // the PIN is asked on every switch to a locked view
-      await modalManager.show(PrivateModePinModal, {
-        title: $t('custom_view_switch_locked_title', { values: { name: view.name } }),
-        description: $t('custom_view_switch_locked_description'),
-        onPinCode: (pinCode: string) => viewManager.switch(viewId, pinCode),
-      });
-      return;
-    }
-
-    try {
-      await viewManager.switch(viewId);
-    } catch (error) {
-      handleError(error, $t('errors.unable_to_switch_custom_view'));
-    }
+    await switchCustomView(view);
   };
 </script>
 
