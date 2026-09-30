@@ -38,19 +38,27 @@ class VideoBookmarksNotifier extends AutoDisposeFamilyAsyncNotifier<List<VideoBo
     }
   }
 
-  Future<bool> rename(String id, String label) async {
-    final trimmed = label.trim();
+  /// Changes the position and/or the name (trimmed); sends only what changed.
+  Future<bool> edit(String id, {int? time, String? label}) async {
     final current = _current.where((bookmark) => bookmark.id == id).firstOrNull;
-    if (current == null || current.label == trimmed) {
+    if (current == null) {
+      return true;
+    }
+    final nextTime = time == null || time == current.time ? null : (time < 0 ? 0 : time);
+    final trimmed = label?.trim();
+    final nextLabel = trimmed == null || trimmed == current.label ? null : trimmed;
+    if (nextTime == null && nextLabel == null) {
       return true;
     }
 
     try {
-      final bookmark = await _repository.rename(id, trimmed);
-      state = AsyncData([for (final item in _current) item.id == id ? bookmark : item]);
+      final bookmark = await _repository.update(id, time: nextTime, label: nextLabel);
+      state = AsyncData(
+        [for (final item in _current) item.id == id ? bookmark : item]..sort((a, b) => a.time.compareTo(b.time)),
+      );
       return true;
     } catch (error, stack) {
-      _log.warning('Failed to rename video bookmark $id', error, stack);
+      _log.warning('Failed to edit video bookmark $id', error, stack);
       return false;
     }
   }

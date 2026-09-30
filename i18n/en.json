@@ -2808,6 +2808,7 @@
   "video_bookmark_later": "One second later",
   "video_bookmark_time": "Bookmark time",
   "video_bookmark_time_hint": "Type a time like 1:05 or 1:02:03. Arrow keys move it by a second, with Shift by a tenth.",
+  "video_bookmark_time_hint_mobile": "Type a time like 1:05 or 1:02:03.",
   "video_bookmark_untitled": "Untitled bookmark",
   "video_bookmarks": "Bookmarks",
   "video_hover_setting": "Play video thumbnail on hover",

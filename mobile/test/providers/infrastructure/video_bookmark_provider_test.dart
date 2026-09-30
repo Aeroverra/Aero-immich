@@ -65,17 +65,35 @@ void main() {
     expect(container.read(videoBookmarksProvider(_asset)).value, [_kickoff]);
   });
 
-  test('renames only when the name changed, trimmed', () async {
+  test('edits only what changed, name trimmed', () async {
     when(() => api.getAll(_asset)).thenAnswer((_) async => [_kickoff, _ending]);
-    when(() => api.rename('b', 'Credits')).thenAnswer((_) async => _ending.copyWith(label: 'Credits'));
+    when(
+      () => api.update('b', time: null, label: 'Credits'),
+    ).thenAnswer((_) async => _ending.copyWith(label: 'Credits'));
     await load();
     final notifier = container.read(videoBookmarksProvider(_asset).notifier);
 
-    expect(await notifier.rename('a', ' Kickoff '), isTrue);
-    expect(await notifier.rename('b', ' Credits '), isTrue);
+    expect(await notifier.edit('a', time: 12000, label: ' Kickoff '), isTrue);
+    expect(await notifier.edit('b', time: 131000, label: ' Credits '), isTrue);
 
-    verifyNever(() => api.rename('a', any()));
+    verifyNever(
+      () => api.update(
+        'a',
+        time: any(named: 'time'),
+        label: any(named: 'label'),
+      ),
+    );
     expect(container.read(videoBookmarksProvider(_asset)).value, [_kickoff, _ending.copyWith(label: 'Credits')]);
+  });
+
+  test('moves a bookmark and keeps the list in time order', () async {
+    when(() => api.getAll(_asset)).thenAnswer((_) async => [_kickoff, _ending]);
+    when(() => api.update('a', time: 140000, label: null)).thenAnswer((_) async => _kickoff.copyWith(time: 140000));
+    await load();
+
+    expect(await container.read(videoBookmarksProvider(_asset).notifier).edit('a', time: 140000), isTrue);
+
+    expect(container.read(videoBookmarksProvider(_asset)).value, [_ending, _kickoff.copyWith(time: 140000)]);
   });
 
   test('removes a bookmark', () async {
