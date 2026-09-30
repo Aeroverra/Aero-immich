@@ -82,6 +82,7 @@ import { SharedLinkAssetTable } from 'src/schema/tables/shared-link-asset.table'
 import { SharedLinkTable } from 'src/schema/tables/shared-link.table';
 import { SmartSearchTable } from 'src/schema/tables/smart-search.table';
 import { StackAuditTable } from 'src/schema/tables/stack-audit.table';
+import { StackAutoExclusionTable } from 'src/schema/tables/stack-auto-exclusion.table';
 import { StackTable } from 'src/schema/tables/stack.table';
 import { SessionSyncCheckpointTable } from 'src/schema/tables/sync-checkpoint.table';
 import { SystemMetadataTable } from 'src/schema/tables/system-metadata.table';
@@ -156,6 +157,7 @@ export class ImmichDatabase {
     SmartSearchTable,
     StackTable,
     StackAuditTable,
+    StackAutoExclusionTable,
     SessionSyncCheckpointTable,
     SystemMetadataTable,
     TagTable,
@@ -287,6 +289,7 @@ export interface DB {
 
   stack: StackTable;
   stack_audit: StackAuditTable;
+  stack_auto_exclusion: StackAutoExclusionTable;
 
   system_metadata: SystemMetadataTable;
 
