@@ -40,7 +40,6 @@ describe(CameraGroupService.name, () => {
     mocks.stack.update.mockResolvedValue({ id: 'stack-1', assets: [] } as any);
     mocks.tag.getAssetTags.mockResolvedValue([]);
     mocks.tag.upsertAssetIds.mockResolvedValue([]);
-    mocks.asset.getForUpdateTags.mockResolvedValue({ tags: [] } as any);
   });
 
   describe('onAssetMetadataExtracted', () => {
@@ -221,13 +220,12 @@ describe(CameraGroupService.name, () => {
         { assetId: 'cover', id: 'tag-source', value: 'Source/Google Photos/2026-09-07 88tontos' },
         { assetId: 'main', id: 'tag-unreviewed', value: 'Unreviewed' },
       ]);
-      mocks.asset.getForUpdateTags.mockResolvedValue({ tags: [{ value: 'People/Mom' }] } as any);
 
       await sut.handleStackCameraGroup({ id: 'main' });
 
       expect(mocks.tag.upsertAssetIds).toHaveBeenCalledWith([{ assetId: 'main', tagId: 'tag-mom' }]);
       expect(mocks.tag.removeAssetIds).toHaveBeenCalledWith('tag-unreviewed', ['main']);
-      expect(mocks.asset.upsertExif).toHaveBeenCalledTimes(1);
+      expect(mocks.event.emit).toHaveBeenCalledTimes(2);
       expect(mocks.event.emit).toHaveBeenCalledWith('AssetTag', { assetId: 'main', userId: ownerId });
     });
 

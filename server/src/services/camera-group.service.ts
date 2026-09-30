@@ -10,7 +10,6 @@ import {
   getCameraGroupTagChanges,
   orderCameraGroup,
 } from 'src/utils/camera-group';
-import { updateLockedColumns } from 'src/utils/database';
 import { getPreferences } from 'src/utils/preferences';
 
 /** how long a new file waits before its shot is stacked, so the other files uploaded with it are there too */
@@ -169,14 +168,10 @@ export class CameraGroupService extends BaseService {
       await this.tagRepository.removeAssetIds(tagId, [assetId]);
     }
 
+    // the tag repository keeps the tags in asset_exif (and their lock) in step, the events write the sidecars
     const tagged = new Set(add.map(({ assetId }) => assetId));
     const untagged = new Set(remove.map(({ assetId }) => assetId));
     for (const assetId of tagged.union(untagged)) {
-      const { tags } = await this.assetRepository.getForUpdateTags(assetId);
-      await this.assetRepository.upsertExif({
-        exif: updateLockedColumns({ assetId, tags: tags.map(({ value }) => value) }),
-        lockedPropertiesBehavior: 'append',
-      });
       await (tagged.has(assetId)
         ? this.eventRepository.emit('AssetTag', { assetId, userId: ownerId })
         : this.eventRepository.emit('AssetUntag', { assetId }));
