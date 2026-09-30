@@ -70,6 +70,9 @@ export interface SearchRelationOptions extends SearchOneToOneRelationOptions {
 export interface SearchDateOptions {
   createdBefore?: Date;
   createdAfter?: Date;
+  /** the Google Photos upload time for assets imported from Google Photos, else createdAt */
+  uploadedBefore?: Date;
+  uploadedAfter?: Date;
   takenBefore?: Date;
   takenAfter?: Date;
   trashedBefore?: Date;
@@ -117,6 +120,7 @@ export interface SearchTagOptions {
 
 export interface SearchAlbumOptions {
   albumIds?: string[];
+  excludeAlbumIds?: string[];
 }
 
 export interface SearchPrivateScopeOptions {
@@ -172,13 +176,14 @@ export interface AssetSearchBuilderV3Options {
 }
 
 export type SmartSearchOptions = SearchDateOptions &
-  SearchEmbeddingOptions &
+  Omit<SearchEmbeddingOptions, 'userIds'> &
   SearchExifOptions &
   SearchOneToOneRelationOptions &
   Omit<SearchStatusOptions, 'visibility'> &
   SearchUserIdOptions &
   SearchPeopleOptions &
   SearchTagOptions &
+  SearchAlbumOptions &
   SearchOcrOptions &
   SearchPrivateScopeOptions & { visibility?: AssetVisibility | 'not-locked'; viewingUserId?: string };
 
