@@ -42,6 +42,9 @@
   // Recently added
   let recentlyAddedSidebar = $state(authManager.preferences.recentlyAdded?.sidebarWeb ?? false);
 
+  // Stacks
+  let stacksGroupAuto = $state(authManager.preferences.stacks?.groupAuto ?? true);
+
   // Private page
   let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
   let privateTimeout = $state(authManager.preferences.privateMode?.timeoutMinutes ?? 30);
@@ -60,6 +63,7 @@
           tags: { enabled: tagsEnabled, sidebarWeb: tagsSidebar },
           cast: { gCastEnabled },
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
+          stacks: { groupAuto: stacksGroupAuto },
           privateMode: {
             sidebarWeb: privateSidebar,
             timeoutMinutes: privateTimeout,
@@ -195,6 +199,14 @@
           <div class="mt-4 flex flex-col gap-4 sm:ms-4">
             <Field label={$t('sidebar')} description={$t('sidebar_display_description')}>
               <Switch bind:checked={recentlyAddedSidebar} />
+            </Field>
+          </div>
+        </SettingAccordion>
+
+        <SettingAccordion key="stacks" title={$t('stacks')} subtitle={$t('stacks_feature_description')}>
+          <div class="mt-4 flex flex-col gap-4 sm:ms-4">
+            <Field label={$t('group_automatic_stacks')} description={$t('group_automatic_stacks_description')}>
+              <Switch bind:checked={stacksGroupAuto} />
             </Field>
           </div>
         </SettingAccordion>
