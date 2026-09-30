@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
 import { factory } from 'test/small.factory';
@@ -77,5 +78,42 @@ describe(SyncRequestType.AssetExifsV1, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetExifsV1]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold the exif of a private asset unless the client opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetExifsV1])).resolves.toEqual([
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetExifsV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetExifV1,
+          data: expect.objectContaining({ assetId: asset.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+
+    it('should send the exif again once the asset is public and its exif was touched', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      const assetRepo = ctx.get(AssetRepository);
+      await ctx.syncAckAll(auth, await ctx.syncStream(auth, [SyncRequestType.AssetExifsV1]));
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetExifsV1])).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetExifV1,
+          data: expect.objectContaining({ assetId: asset.id, make: 'Canon' }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
