@@ -3,6 +3,7 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import GeolocationPointPickerModal from '$lib/modals/GeolocationPointPickerModal.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { getOwnedAssetsWithWarning } from '$lib/utils/asset-utils';
   import { handleError } from '$lib/utils/handle-error';
   import { updateAssets } from '@immich/sdk';
@@ -17,12 +18,16 @@
   let { menuItem = false }: Props = $props();
 
   const onAction = async () => {
+    const ownedIds = new Set(getOwnedAssetsWithWarning(assetMultiSelectManager.assets, authManager.user));
+    const ids = await resolveStackSelection(assetMultiSelectManager.assets.filter(({ id }) => ownedIds.has(id)));
+    if (!ids) {
+      return;
+    }
+
     const point = await modalManager.show(GeolocationPointPickerModal, {});
     if (!point) {
       return;
     }
-
-    const ids = getOwnedAssetsWithWarning(assetMultiSelectManager.assets, authManager.user);
 
     try {
       await updateAssets({ assetBulkUpdateDto: { ids, latitude: point.lat, longitude: point.lng } });
