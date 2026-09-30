@@ -1,4 +1,4 @@
-import { updateAsset } from '@immich/sdk';
+import { AssetTypeEnum, getStack, StackSource, updateAsset } from '@immich/sdk';
 import { fireEvent, waitFor } from '@testing-library/svelte';
 import { getAnimateMock } from '$lib/__mocks__/animate.mock';
 import { getResizeObserverMock } from '$lib/__mocks__/resize-observer.mock';
@@ -32,8 +32,13 @@ vi.mock('@immich/sdk', async () => {
   return {
     ...sdk,
     updateAsset: vi.fn(),
+    getStack: vi.fn(),
   };
 });
+
+vi.mock('$lib/stores/face.svelte', () => ({
+  faceManager: { clear: vi.fn(), getAssetFaces: vi.fn(), data: [] },
+}));
 
 describe('AssetViewer', () => {
   beforeAll(() => {
@@ -75,5 +80,46 @@ describe('AssetViewer', () => {
       expect(updateAsset).toHaveBeenCalledWith({ id: asset.id, updateAssetDto: { isFavorite: true } }),
     );
     await waitFor(() => expect(getByLabelText('unfavorite')).toBeInTheDocument());
+  });
+
+  describe('stacks', () => {
+    const renderStacked = (source: StackSource, groupAuto: boolean) => {
+      const user = userAdminFactory.build();
+      authManager.setUser(user);
+      authManager.setPreferences(preferencesFactory.build({ stacks: { groupAuto } }));
+
+      // images only: the video player does not render in the test DOM
+      const asset = assetFactory.build({ ownerId: user.id, type: AssetTypeEnum.Image });
+      const other = assetFactory.build({ ownerId: user.id, type: AssetTypeEnum.Image });
+      asset.stack = { id: 'stack-id', primaryAssetId: asset.id, assetCount: 2, source };
+      vi.mocked(getStack).mockResolvedValue({
+        id: 'stack-id',
+        primaryAssetId: asset.id,
+        assets: [asset, other],
+        source,
+      });
+
+      return renderWithTooltips(AssetViewer, { cursor: { current: asset }, showNavigation: false, withStacked: true });
+    };
+
+    it('loads a manual stack while automatic stacks are shown individually', async () => {
+      renderStacked(StackSource.Manual, false);
+
+      await waitFor(() => expect(getStack).toHaveBeenCalledWith({ id: 'stack-id' }));
+    });
+
+    it('loads an automatic stack while automatic stacks are grouped', async () => {
+      renderStacked(StackSource.Auto, true);
+
+      await waitFor(() => expect(getStack).toHaveBeenCalledWith({ id: 'stack-id' }));
+    });
+
+    it('does not load an automatic stack while automatic stacks are shown individually', async () => {
+      const { container } = renderStacked(StackSource.Auto, false);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(getStack).not.toHaveBeenCalled();
+      expect(container.querySelector('#stack-slideshow')).toBeNull();
+    });
   });
 });
