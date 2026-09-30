@@ -160,6 +160,14 @@ abstract class SearchFilter with _$SearchFilter {
     // assets in any of these albums are left out
     List<String>? excludeAlbumIds,
     required Set<Person> people,
+    // with people picked: true = nobody else in the photo, false = someone else too; faces without a name count
+    bool? onlyPeople,
+    // true = photos with a face, false = without any (the picked people and other face options do not apply)
+    bool? hasPeople,
+    // true = someone named in the photo, false = nobody named, faces or not (the picked people do not apply)
+    bool? hasNamedFaces,
+    // true = a face nobody has named, false = no such face
+    bool? hasUnnamedFaces,
     required SearchLocationFilter location,
     required SearchCameraFilter camera,
     required SearchDateFilter date,
@@ -183,6 +191,9 @@ abstract class SearchFilter with _$SearchFilter {
         (albumIds ?? []).isEmpty &&
         (excludeAlbumIds ?? []).isEmpty &&
         people.isEmpty &&
+        hasPeople == null &&
+        hasNamedFaces == null &&
+        hasUnnamedFaces == null &&
         location.country == null &&
         location.state == null &&
         location.city == null &&
