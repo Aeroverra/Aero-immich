@@ -69,6 +69,8 @@ export type SearchFilter = {
   ocr?: string;
   queryType: 'smart' | 'metadata' | 'description' | 'fullPath' | 'ocr';
   personIds: SvelteSet<string>;
+  /** assets that show any of these people are left out */
+  excludePersonIds: SvelteSet<string>;
   /** with people picked: true = nobody else in the asset, false = someone else too; faces without a name count */
   onlyPersonIds?: boolean;
   /** true = assets with a face, false = without any (the picked people and other face options do not apply) */
