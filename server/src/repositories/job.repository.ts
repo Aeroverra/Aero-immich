@@ -272,6 +272,10 @@ export class JobRepository {
         // a delayed run waits for the rest of a burst; repeated triggers for the same asset collapse into one
         return item.data.delay ? { jobId: `${JobName.AutoStack}/${item.data.id}`, delay: item.data.delay } : null;
       }
+      case JobName.StackCameraGroup: {
+        // repeated triggers for the same file collapse into one run after the rest of its shot had time to arrive
+        return { jobId: `${JobName.StackCameraGroup}/${item.data.id}`, delay: item.data.delay };
+      }
       case JobName.StorageTemplateMigrationSingle: {
         return { jobId: item.data.id };
       }
