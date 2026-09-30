@@ -16043,6 +16043,1231 @@
         "x-immich-state": "Stable"
       }
     },
+    "/takeouts": {
+      "get": {
+        "description": "Synchronize the takeout folder of the current user and return its exports, uploads, other files and the active run.",
+        "operationId": "getTakeoutOverview",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutOverviewDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve takeouts",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/exports/{id}": {
+      "delete": {
+        "description": "Remove an export whose archives are gone, together with its runs, their reports and their staged files. Imported assets are kept.",
+        "operationId": "deleteTakeoutExport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Dismiss a takeout export",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.delete",
+        "x-immich-state": "Beta"
+      },
+      "get": {
+        "description": "Retrieve an export with its parts, its stored analysis and its runs.",
+        "operationId": "getTakeoutExport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutExportDetailDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a takeout export",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/exports/{id}/archives": {
+      "delete": {
+        "description": "Delete the archive files of an export from the takeout folder, and the staged files of its stopped runs. Runs and their reports are kept. Not possible while a run of the export is active.",
+        "operationId": "deleteTakeoutExportArchives",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Delete the archives of a takeout export",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.delete",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/exports/{id}/rescan": {
+      "post": {
+        "description": "Forget what the last run found in the parts that could not be read, so the next run reads them again. Nothing is read now. Not possible while a run of the export is active.",
+        "operationId": "rescanTakeoutExport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutExportDetailDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Read failed parts again",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/exports/{id}/runs": {
+      "post": {
+        "description": "Start importing an export. An export that is not complete needs importAnyway. A user can have one unfinished run at a time. The files staged by the previous failed or cancelled run of the export are reused; that run cannot be resumed afterwards.",
+        "operationId": "createTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoutRunCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Start a takeout import",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/larger-versions": {
+      "get": {
+        "description": "Retrieve files that were imported next to a smaller version of the same photo already on the server.",
+        "operationId": "getTakeoutLargerVersions",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/TakeoutLargerVersionFilter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TakeoutLargerVersionDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve larger versions",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/larger-versions/{id}/resolve": {
+      "post": {
+        "description": "Move the smaller version to the trash, or keep both versions.",
+        "operationId": "resolveTakeoutLargerVersion",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoutLargerVersionResolveDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutLargerVersionDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Resolve a larger version",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}": {
+      "get": {
+        "description": "Retrieve the status, settings and counters of a run.",
+        "operationId": "getTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}/cancel": {
+      "post": {
+        "description": "Cancel a running run: it stops and keeps its staged files for 7 days, so a new run does not read the archives again. On a failed run, or a cancelled run that still holds staged files, the staged files are discarded now.",
+        "operationId": "cancelTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Cancel a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}/files": {
+      "get": {
+        "description": "Retrieve one page of the per-file report of a run.",
+        "operationId": "getTakeoutRunFiles",
+        "parameters": [
+          {
+            "name": "action",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/TakeoutRunFileAction"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Page number, starting at 1",
+            "schema": {
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Only files whose archive path contains this text",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Number of files per page",
+            "schema": {
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/TakeoutRunFileStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunFilePageDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve the files of a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}/pause": {
+      "post": {
+        "description": "Pause a running run: reading stops at once with the archives kept open, the other steps stop at the next safe point. A paused run keeps its staged files and stays paused across a server restart until it is resumed or cancelled.",
+        "operationId": "pauseTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Pause a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}/report.csv": {
+      "get": {
+        "description": "Download the per-file report of a run as CSV.",
+        "operationId": "getTakeoutRunReport",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Download the report of a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/runs/{id}/resume": {
+      "post": {
+        "description": "Resume a paused run where it waits, or a failed or cancelled run from where it stopped, with its original plan. Files a cancel skipped are imported too. A run a newer run took over cannot be resumed.",
+        "operationId": "resumeTakeoutRun",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutRunDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Resume a takeout run",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/settings": {
+      "get": {
+        "description": "Retrieve the import settings of the current user, with defaults for unset values.",
+        "operationId": "getTakeoutSettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutSettingsDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve takeout settings",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      },
+      "put": {
+        "description": "Update the import settings of the current user. Runs keep the settings they started with.",
+        "operationId": "updateTakeoutSettings",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoutSettingsUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutSettingsDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update takeout settings",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.run",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/sync": {
+      "post": {
+        "description": "Look for new, changed and removed archives in the takeout folder of the current user.",
+        "operationId": "syncTakeouts",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutOverviewDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Synchronize the takeout folder",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/uploads": {
+      "post": {
+        "description": "Start a resumable upload of a takeout archive into the takeout folder, or return the existing upload of the same file.",
+        "operationId": "createTakeoutUpload",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeoutUploadCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutUploadDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Start a takeout upload",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.upload",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/takeouts/uploads/{id}": {
+      "delete": {
+        "description": "Cancel an upload and delete the partial file.",
+        "operationId": "deleteTakeoutUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Cancel a takeout upload",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.upload",
+        "x-immich-state": "Beta"
+      },
+      "get": {
+        "description": "Retrieve an upload, including the offset where the next chunk starts.",
+        "operationId": "getTakeoutUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutUploadDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a takeout upload",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.upload",
+        "x-immich-state": "Beta"
+      },
+      "put": {
+        "description": "Write the next chunk of an upload (at most 64 MiB). The archive is moved into the takeout folder when the last byte arrives.",
+        "operationId": "uploadTakeoutChunk",
+        "parameters": [
+          {
+            "name": "Upload-Offset",
+            "in": "header",
+            "description": "Byte offset of this chunk; must equal the current offset of the upload",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TakeoutUploadDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Upload a takeout chunk",
+        "tags": [
+          "Takeouts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "takeout.upload",
+        "x-immich-state": "Beta"
+      }
+    },
     "/timeline/bucket": {
       "get": {
         "description": "Retrieve a string of all asset ids in a given time bucket.",
@@ -18754,6 +19979,10 @@
       "description": "Endpoints to view, modify, and validate the system metadata, which includes information about things like admin onboarding status."
     },
     {
+      "name": "Takeouts",
+      "description": "Import Google Photos exports made with Google Takeout. Archives are read in place from the takeout folder of the user or uploaded in chunks."
+    },
+    {
       "name": "Tags",
       "description": "A tag is a user-defined label that can be applied to assets for organizational purposes. Tags can also be hierarchical, allowing for parent-child relationships between tags."
     },
@@ -19104,6 +20333,9 @@
           "storageTemplate": {
             "$ref": "#/components/schemas/AdminConfigStorageTemplateDto"
           },
+          "takeout": {
+            "$ref": "#/components/schemas/AdminConfigTakeoutDto"
+          },
           "templates": {
             "$ref": "#/components/schemas/AdminConfigTemplatesDto"
           },
@@ -19136,6 +20368,7 @@
           "reverseGeocoding",
           "server",
           "storageTemplate",
+          "takeout",
           "templates",
           "theme",
           "trash",
@@ -20166,6 +21399,36 @@
           "enabled",
           "hashVerificationEnabled",
           "template"
+        ],
+        "type": "object"
+      },
+      "AdminConfigTakeoutDto": {
+        "description": "Google Takeout import reading; changes apply to running imports within seconds",
+        "properties": {
+          "readaheadDepth": {
+            "description": "Reads in flight per part (application readahead)",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "readers": {
+            "description": "Parts of one Google Takeout import read in parallel",
+            "maximum": 4,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "throttleMBps": {
+            "description": "Read limit in MB/s for all Google Takeout imports together; 0 or null means unlimited",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "readaheadDepth",
+          "readers",
+          "throttleMBps"
         ],
         "type": "object"
       },
@@ -23788,7 +25051,10 @@
           "IntegrityChecksumFiles",
           "IntegrityChecksumFilesRefresh",
           "IntegrityDeleteReportType",
-          "IntegrityDeleteReports"
+          "IntegrityDeleteReports",
+          "TakeoutScanPart",
+          "TakeoutAnalyzeExport",
+          "TakeoutRun"
         ],
         "type": "string"
       },
@@ -26185,6 +27451,10 @@
           "view.read",
           "view.update",
           "view.delete",
+          "takeout.read",
+          "takeout.upload",
+          "takeout.run",
+          "takeout.delete",
           "queue.read",
           "queue.update",
           "queueJob.create",
@@ -26897,7 +28167,8 @@
           "workflow",
           "integrityCheck",
           "editor",
-          "videoFrameAnalysis"
+          "videoFrameAnalysis",
+          "takeout"
         ],
         "type": "string"
       },
@@ -27067,6 +28338,9 @@
           "storageTemplateMigration": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "takeout": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "thumbnailGeneration": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -27099,6 +28373,7 @@
           "sidecar",
           "smartSearch",
           "storageTemplateMigration",
+          "takeout",
           "thumbnailGeneration",
           "videoConversion",
           "videoFrameAnalysis",
@@ -33337,6 +34612,2369 @@
           }
         },
         "type": "object"
+      },
+      "TakeoutAnalysisDto": {
+        "properties": {
+          "corruptParts": {
+            "description": "Parts that could not be read, with the error",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "indexMissingFiles": {
+            "$ref": "#/components/schemas/TakeoutPathSampleDto",
+            "description": "Files listed in the index but missing from the parts"
+          },
+          "indexTotalBytes": {
+            "description": "Total size the index announces, in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "jsonWithoutMedia": {
+            "$ref": "#/components/schemas/TakeoutPathSampleDto",
+            "description": "Google JSON files that belong to no media file"
+          },
+          "lastPartMayBeMissing": {
+            "description": "Whether parts after the last one may exist (no index)",
+            "type": "boolean"
+          },
+          "lastReadAt": {
+            "description": "When the checks that need a read ran (the last run)",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "lastReadRunId": {
+            "description": "The run whose read produced those checks",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "listingChecked": {
+            "description": "Zip listings were cross-checked against the index before any read",
+            "type": "boolean"
+          },
+          "mediaWithoutJson": {
+            "$ref": "#/components/schemas/TakeoutPathSampleDto",
+            "description": "Media files without Google JSON"
+          },
+          "missingParts": {
+            "description": "Gaps in the part numbering",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutMissingPartDto"
+            },
+            "type": "array"
+          },
+          "notInIndex": {
+            "description": "Files in the parts that the index does not list (informational)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partsTotalBytes": {
+            "description": "Sum of the sizes of the media parts",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reasons": {
+            "description": "Why the export is not complete, as stable keys",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sizeCheck": {
+            "$ref": "#/components/schemas/TakeoutSizeCheck"
+          },
+          "smallParts": {
+            "description": "Parts smaller than the split size (informational)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "splitSize": {
+            "description": "Detected archive split size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "unreadableEntries": {
+            "description": "Zip entries the last run could not read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unreadableParts": {
+            "description": "Parts the last run could not read",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutUnreadablePartDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "corruptParts",
+          "indexMissingFiles",
+          "indexTotalBytes",
+          "jsonWithoutMedia",
+          "lastPartMayBeMissing",
+          "lastReadAt",
+          "lastReadRunId",
+          "listingChecked",
+          "mediaWithoutJson",
+          "missingParts",
+          "notInIndex",
+          "partsTotalBytes",
+          "reasons",
+          "sizeCheck",
+          "smallParts",
+          "splitSize",
+          "unreadableEntries",
+          "unreadableParts"
+        ],
+        "type": "object"
+      },
+      "TakeoutArchiveKind": {
+        "description": "Archive format of a takeout part",
+        "enum": [
+          "zip",
+          "tgz"
+        ],
+        "type": "string"
+      },
+      "TakeoutBurstMode": {
+        "description": "Handling of bursts",
+        "enum": [
+          "NoStack",
+          "Stack",
+          "StackKeepRaw",
+          "StackKeepJPEG"
+        ],
+        "type": "string"
+      },
+      "TakeoutBytesCountersDto": {
+        "properties": {
+          "done": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "total": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "done",
+          "total"
+        ],
+        "type": "object"
+      },
+      "TakeoutCompleteness": {
+        "description": "Whether every part of a Google Takeout export is present and readable",
+        "enum": [
+          "unknown",
+          "complete",
+          "uncertain",
+          "incomplete"
+        ],
+        "type": "string"
+      },
+      "TakeoutCountersDto": {
+        "properties": {
+          "bytes": {
+            "$ref": "#/components/schemas/TakeoutBytesCountersDto"
+          },
+          "discarded": {
+            "$ref": "#/components/schemas/TakeoutDiscardedCountersDto"
+          },
+          "matched": {
+            "$ref": "#/components/schemas/TakeoutMatchedCountersDto"
+          },
+          "result": {
+            "$ref": "#/components/schemas/TakeoutResultCountersDto"
+          },
+          "scanned": {
+            "$ref": "#/components/schemas/TakeoutScannedCountersDto"
+          }
+        },
+        "required": [
+          "bytes",
+          "discarded",
+          "matched",
+          "result",
+          "scanned"
+        ],
+        "type": "object"
+      },
+      "TakeoutDiscardedCountersDto": {
+        "properties": {
+          "duplicatedInDirectory": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "failedVideos": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "filteredArchived": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "filteredDateRange": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "filteredPartner": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "filteredTrashed": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "localDuplicates": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "missingFromArchive": {
+            "description": "Files the index lists but no readable part contains",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "notSelected": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "previouslyDeleted": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "rotateOnlyDropped": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unreadable": {
+            "description": "Parts and zip entries that could not be read",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "duplicatedInDirectory",
+          "failedVideos",
+          "filteredArchived",
+          "filteredDateRange",
+          "filteredPartner",
+          "filteredTrashed",
+          "localDuplicates",
+          "missingFromArchive",
+          "notSelected",
+          "previouslyDeleted",
+          "rotateOnlyDropped",
+          "unreadable"
+        ],
+        "type": "object"
+      },
+      "TakeoutExportDetailDto": {
+        "properties": {
+          "accountEmail": {
+            "description": "Google account of the export, from the index",
+            "nullable": true,
+            "type": "string"
+          },
+          "analysis": {
+            "$ref": "#/components/schemas/TakeoutAnalysisDto"
+          },
+          "archivesDeletedAt": {
+            "description": "When the archives were deleted",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "bytesScanned": {
+            "description": "Deprecated: bytes read from the parts by their last reads",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/TakeoutCompleteness"
+          },
+          "expectedPartCount": {
+            "description": "Number of parts the export should have: the parts found plus the gaps in their numbering",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exportKey": {
+            "description": "Timestamp of the first part, plus \"-<segment>\" when segmented",
+            "type": "string"
+          },
+          "exportedAt": {
+            "description": "Timestamp of the first part",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Export ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "indexFileCount": {
+            "description": "Number of files the index lists",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "indexTotalSize": {
+            "description": "Total size as the index prints it",
+            "nullable": true,
+            "type": "string"
+          },
+          "lastRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRunDto"
+              }
+            ],
+            "description": "The most recent run of the export",
+            "nullable": true
+          },
+          "partCount": {
+            "description": "Number of parts found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Parts of the export, the index part last",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutPartDto"
+            },
+            "type": "array"
+          },
+          "partsRead": {
+            "description": "Media parts that were read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutExportReadStatus"
+          },
+          "runs": {
+            "description": "Runs of the export, newest first",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutRunDto"
+            },
+            "type": "array"
+          },
+          "scanStatus": {
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "totalSize": {
+            "description": "Total size of the parts in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountEmail",
+          "analysis",
+          "archivesDeletedAt",
+          "bytesScanned",
+          "completeness",
+          "expectedPartCount",
+          "exportKey",
+          "exportedAt",
+          "id",
+          "indexFileCount",
+          "indexTotalSize",
+          "lastRun",
+          "partCount",
+          "parts",
+          "partsRead",
+          "readStatus",
+          "runs",
+          "scanStatus",
+          "totalSize"
+        ],
+        "type": "object"
+      },
+      "TakeoutExportDto": {
+        "properties": {
+          "accountEmail": {
+            "description": "Google account of the export, from the index",
+            "nullable": true,
+            "type": "string"
+          },
+          "archivesDeletedAt": {
+            "description": "When the archives were deleted",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "bytesScanned": {
+            "description": "Deprecated: bytes read from the parts by their last reads",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "completeness": {
+            "$ref": "#/components/schemas/TakeoutCompleteness"
+          },
+          "expectedPartCount": {
+            "description": "Number of parts the export should have: the parts found plus the gaps in their numbering",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exportKey": {
+            "description": "Timestamp of the first part, plus \"-<segment>\" when segmented",
+            "type": "string"
+          },
+          "exportedAt": {
+            "description": "Timestamp of the first part",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Export ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "indexFileCount": {
+            "description": "Number of files the index lists",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "indexTotalSize": {
+            "description": "Total size as the index prints it",
+            "nullable": true,
+            "type": "string"
+          },
+          "lastRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRunDto"
+              }
+            ],
+            "description": "The most recent run of the export",
+            "nullable": true
+          },
+          "partCount": {
+            "description": "Number of parts found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partsRead": {
+            "description": "Media parts that were read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutExportReadStatus"
+          },
+          "scanStatus": {
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "totalSize": {
+            "description": "Total size of the parts in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accountEmail",
+          "archivesDeletedAt",
+          "bytesScanned",
+          "completeness",
+          "expectedPartCount",
+          "exportKey",
+          "exportedAt",
+          "id",
+          "indexFileCount",
+          "indexTotalSize",
+          "lastRun",
+          "partCount",
+          "partsRead",
+          "readStatus",
+          "scanStatus",
+          "totalSize"
+        ],
+        "type": "object"
+      },
+      "TakeoutExportReadStatus": {
+        "description": "Read state of all parts of an export",
+        "enum": [
+          "notRead",
+          "partial",
+          "read",
+          "error"
+        ],
+        "type": "string"
+      },
+      "TakeoutFileKind": {
+        "description": "Kind of a file in a takeout run",
+        "enum": [
+          "image",
+          "video",
+          "json",
+          "sidecar",
+          "useless",
+          "unsupported",
+          "banned",
+          "other"
+        ],
+        "type": "string"
+      },
+      "TakeoutFolderDto": {
+        "properties": {
+          "hostPath": {
+            "description": "Folder path relative to UPLOAD_LOCATION, for example \"takeouts/<name>\"",
+            "type": "string"
+          },
+          "name": {
+            "description": "Folder name, chosen once when the folder was created",
+            "type": "string"
+          }
+        },
+        "required": [
+          "hostPath",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TakeoutGroupKind": {
+        "description": "Kind of the stack group of a file",
+        "enum": [
+          "none",
+          "burst",
+          "rawJpg",
+          "heicJpg",
+          "other",
+          "videoBoost"
+        ],
+        "type": "string"
+      },
+      "TakeoutHeicJpgMode": {
+        "description": "Handling of HEIC and JPEG pairs",
+        "enum": [
+          "NoStack",
+          "KeepHeic",
+          "KeepJPG",
+          "StackCoverHeic",
+          "StackCoverJPG"
+        ],
+        "type": "string"
+      },
+      "TakeoutLargerVersionAction": {
+        "description": "Move the smaller version to the trash, or keep both",
+        "enum": [
+          "deleteSmaller",
+          "keepBoth"
+        ],
+        "type": "string"
+      },
+      "TakeoutLargerVersionDto": {
+        "properties": {
+          "createdAt": {
+            "description": "When the larger version was imported",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Larger version ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "larger": {
+            "$ref": "#/components/schemas/AssetResponseDto",
+            "description": "The imported larger version, on top of the stack"
+          },
+          "resolvedAt": {
+            "description": "When the review was resolved",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "runId": {
+            "description": "Run that imported the larger version",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "smaller": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AssetResponseDto"
+              }
+            ],
+            "description": "The version that was already on the server; null once deleted",
+            "nullable": true
+          },
+          "status": {
+            "$ref": "#/components/schemas/TakeoutLargerVersionStatus"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "larger",
+          "resolvedAt",
+          "runId",
+          "smaller",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TakeoutLargerVersionFilter": {
+        "description": "Only pending or only resolved reviews",
+        "enum": [
+          "pending",
+          "resolved"
+        ],
+        "type": "string"
+      },
+      "TakeoutLargerVersionResolveDto": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TakeoutLargerVersionAction"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "TakeoutLargerVersionStatus": {
+        "description": "Review state of a larger version",
+        "enum": [
+          "pending",
+          "deletedSmaller",
+          "keptBoth"
+        ],
+        "type": "string"
+      },
+      "TakeoutMatchedCountersDto": {
+        "properties": {
+          "edited": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "fastTrack": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "forgottenDuplicates": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "missingMetadata": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "normal": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "edited",
+          "fastTrack",
+          "forgottenDuplicates",
+          "missingMetadata",
+          "normal"
+        ],
+        "type": "object"
+      },
+      "TakeoutMatcher": {
+        "description": "Rule that paired a file with its Google JSON",
+        "enum": [
+          "fastTrack",
+          "normal",
+          "forgottenDuplicates",
+          "edited"
+        ],
+        "type": "string"
+      },
+      "TakeoutMissingPartDto": {
+        "properties": {
+          "expectedName": {
+            "description": "Expected file name; the real file may carry a different timestamp than its neighbours",
+            "type": "string"
+          },
+          "partNumber": {
+            "description": "Missing part number",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "segment": {
+            "description": "Segment number, null for exports without segments",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expectedName",
+          "partNumber",
+          "segment"
+        ],
+        "type": "object"
+      },
+      "TakeoutOnErrors": {
+        "description": "Whether a takeout run stops at the first error",
+        "enum": [
+          "continue",
+          "stop"
+        ],
+        "type": "string"
+      },
+      "TakeoutOtherFileDto": {
+        "properties": {
+          "name": {
+            "description": "File name",
+            "type": "string"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size"
+        ],
+        "type": "object"
+      },
+      "TakeoutOverviewDto": {
+        "properties": {
+          "activeRun": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRunDto"
+              }
+            ],
+            "description": "The run that is not finished yet",
+            "nullable": true
+          },
+          "exports": {
+            "description": "Exports found in the folder, newest first",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutExportDto"
+            },
+            "type": "array"
+          },
+          "folder": {
+            "$ref": "#/components/schemas/TakeoutFolderDto"
+          },
+          "orphanIndexFiles": {
+            "description": "Index archives that belong to no export",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutOtherFileDto"
+            },
+            "type": "array"
+          },
+          "otherFiles": {
+            "description": "Files in the folder that are not takeout archives",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutOtherFileDto"
+            },
+            "type": "array"
+          },
+          "pendingLargerVersions": {
+            "description": "Number of larger versions waiting for review",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "uploads": {
+            "description": "Uploads in progress",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutUploadDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "activeRun",
+          "exports",
+          "folder",
+          "orphanIndexFiles",
+          "otherFiles",
+          "pendingLargerVersions",
+          "uploads"
+        ],
+        "type": "object"
+      },
+      "TakeoutPartDto": {
+        "properties": {
+          "bytesRead": {
+            "description": "Bytes read from the file by the last run that read it, all passes included",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytesScanned": {
+            "description": "Deprecated: same as bytesRead",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "entryCount": {
+            "description": "Number of files in the part, once it was read completely",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "id": {
+            "description": "Part ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "isIndex": {
+            "description": "Whether this is the index archive (archive_browser.html)",
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TakeoutArchiveKind"
+          },
+          "lastReadRunId": {
+            "description": "The run that read the part last",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "mtime": {
+            "description": "File modification time",
+            "format": "date-time",
+            "type": "string"
+          },
+          "partNumber": {
+            "description": "Part number NNN",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "readError": {
+            "description": "Why the part could not be read",
+            "nullable": true,
+            "type": "string"
+          },
+          "readErrorOffset": {
+            "description": "Compressed byte offset where reading failed, comparable with the file size",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "readStatus": {
+            "$ref": "#/components/schemas/TakeoutPartReadStatus"
+          },
+          "scanError": {
+            "description": "Deprecated: same as readError",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "scanStatus": {
+            "$ref": "#/components/schemas/TakeoutScanStatus",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "segment": {
+            "description": "Segment number N of \"-N-NNN\" names, null for \"-NNN\" names",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytesRead",
+          "bytesScanned",
+          "entryCount",
+          "fileName",
+          "id",
+          "isIndex",
+          "kind",
+          "lastReadRunId",
+          "mtime",
+          "partNumber",
+          "readError",
+          "readErrorOffset",
+          "readStatus",
+          "scanError",
+          "scanStatus",
+          "segment",
+          "size"
+        ],
+        "type": "object"
+      },
+      "TakeoutPartReadStatus": {
+        "description": "Read state of a takeout part",
+        "enum": [
+          "notRead",
+          "reading",
+          "partial",
+          "read",
+          "error",
+          "missing"
+        ],
+        "type": "string"
+      },
+      "TakeoutPathSampleDto": {
+        "properties": {
+          "count": {
+            "description": "Number of paths",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sample": {
+            "description": "The first paths (at most 200)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "sample"
+        ],
+        "type": "object"
+      },
+      "TakeoutRawJpgMode": {
+        "description": "Handling of RAW and JPEG pairs",
+        "enum": [
+          "NoStack",
+          "KeepRaw",
+          "KeepJPG",
+          "StackCoverRaw",
+          "StackCoverJPG"
+        ],
+        "type": "string"
+      },
+      "TakeoutResultCountersDto": {
+        "properties": {
+          "albumAdds": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "albumsCreated": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "alreadyProcessed": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "betterOnServer": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "errors": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "largerUploaded": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "metadataSaved": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "rotationsApplied": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "rotationsQueued": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "serverDuplicates": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "stacked": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tagged": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "toUpload": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "uploaded": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "zoneAssumed": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "albumAdds",
+          "albumsCreated",
+          "alreadyProcessed",
+          "betterOnServer",
+          "errors",
+          "largerUploaded",
+          "metadataSaved",
+          "rotationsApplied",
+          "rotationsQueued",
+          "serverDuplicates",
+          "stacked",
+          "tagged",
+          "toUpload",
+          "uploaded",
+          "zoneAssumed"
+        ],
+        "type": "object"
+      },
+      "TakeoutRotationState": {
+        "description": "State of the rotation taken from a rotate-only edited copy",
+        "enum": [
+          "pending",
+          "applied",
+          "skippedHasEdits",
+          "skippedNotEditable"
+        ],
+        "type": "string"
+      },
+      "TakeoutRunCreateDto": {
+        "properties": {
+          "importAnyway": {
+            "default": false,
+            "description": "Start although the export is not complete",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "TakeoutRunDto": {
+        "properties": {
+          "archiveBytesRead": {
+            "description": "Bytes of archives the reading phase covered so far (never goes back)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "archiveBytesTotal": {
+            "description": "Bytes of archives the reading phase covers",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytesDone": {
+            "description": "Bytes of media imported",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytesTotal": {
+            "description": "Bytes of media to import",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "counters": {
+            "$ref": "#/components/schemas/TakeoutCountersDto"
+          },
+          "createdAt": {
+            "description": "When the run was created",
+            "format": "date-time",
+            "type": "string"
+          },
+          "currentFile": {
+            "description": "Archive path of the file being processed",
+            "nullable": true,
+            "type": "string"
+          },
+          "error": {
+            "description": "Why the run failed",
+            "nullable": true,
+            "type": "string"
+          },
+          "exportId": {
+            "description": "Export ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "finishedAt": {
+            "description": "When the run finished",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "hasStaging": {
+            "description": "Staged files are held for this run (a failed or cancelled run can be discarded)",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "Run ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "importAnyway": {
+            "description": "Whether the run was started although the export is not complete",
+            "type": "boolean"
+          },
+          "pausedAt": {
+            "description": "When the run was paused (null unless it is paused)",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "pausedFrom": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRunStatus"
+              }
+            ],
+            "description": "The status the run was paused in; Resume continues there (null unless it is paused)",
+            "nullable": true
+          },
+          "readStats": {
+            "$ref": "#/components/schemas/TakeoutRunReadStatsDto"
+          },
+          "settings": {
+            "$ref": "#/components/schemas/TakeoutSettingsDto"
+          },
+          "startedAt": {
+            "description": "When the run started",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TakeoutRunStatus"
+          },
+          "supersededBy": {
+            "description": "The newer run that took over the staged files of this run",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "archiveBytesRead",
+          "archiveBytesTotal",
+          "bytesDone",
+          "bytesTotal",
+          "counters",
+          "createdAt",
+          "currentFile",
+          "error",
+          "exportId",
+          "finishedAt",
+          "hasStaging",
+          "id",
+          "importAnyway",
+          "pausedAt",
+          "pausedFrom",
+          "readStats",
+          "settings",
+          "startedAt",
+          "status",
+          "supersededBy"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunFileAction": {
+        "description": "What a takeout run does with a file",
+        "enum": [
+          "upload",
+          "localDuplicate",
+          "duplicatedInDirectory",
+          "rotateOnlyDropped",
+          "notSelected",
+          "filteredPartner",
+          "filteredTrashed",
+          "filteredArchived",
+          "filteredDateRange",
+          "missingMetadata",
+          "failedVideo",
+          "useless",
+          "unsupported",
+          "banned",
+          "sidecarXmp",
+          "albumJson",
+          "assetJsonUnused",
+          "unknownJson",
+          "immichGoJson",
+          "serverDuplicate",
+          "betterOnServer",
+          "alreadyProcessed",
+          "previouslyDeletedSkipped",
+          "partUnreadable",
+          "missingFromArchive"
+        ],
+        "type": "string"
+      },
+      "TakeoutRunFileDto": {
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/TakeoutRunFileAction"
+          },
+          "albums": {
+            "description": "Albums the asset was added to",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "assetId": {
+            "description": "Asset created for the file or found on the server",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "captureDate": {
+            "description": "Capture time from Google",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "error": {
+            "description": "Error message",
+            "nullable": true,
+            "type": "string"
+          },
+          "fallbacks": {
+            "description": "Fallbacks applied to the file, such as zoneAssumed",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "fileKind": {
+            "$ref": "#/components/schemas/TakeoutFileKind"
+          },
+          "groupIndex": {
+            "description": "Stack group of the file",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "groupKind": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutGroupKind"
+              }
+            ],
+            "nullable": true
+          },
+          "id": {
+            "description": "File ID",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "isCover": {
+            "description": "Whether the file is the cover of its stack",
+            "type": "boolean"
+          },
+          "jsonPath": {
+            "description": "Archive path of the matched Google JSON",
+            "nullable": true,
+            "type": "string"
+          },
+          "matcher": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutMatcher"
+              }
+            ],
+            "nullable": true
+          },
+          "originalFileName": {
+            "description": "File name used for the asset",
+            "nullable": true,
+            "type": "string"
+          },
+          "partName": {
+            "description": "Archive file name",
+            "nullable": true,
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why the file got its action",
+            "nullable": true,
+            "type": "string"
+          },
+          "rotation": {
+            "description": "Rotation in degrees taken from a rotate-only edited copy",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "rotationState": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutRotationState"
+              }
+            ],
+            "nullable": true
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TakeoutRunFileStatus"
+          },
+          "tags": {
+            "description": "Tags of the asset",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "takeoutPath": {
+            "description": "Full archive path",
+            "type": "string"
+          },
+          "zone": {
+            "description": "Time zone of the capture time",
+            "nullable": true,
+            "type": "string"
+          },
+          "zoneSource": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TakeoutZoneSource"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "required": [
+          "action",
+          "albums",
+          "assetId",
+          "captureDate",
+          "error",
+          "fallbacks",
+          "fileKind",
+          "groupIndex",
+          "groupKind",
+          "id",
+          "isCover",
+          "jsonPath",
+          "matcher",
+          "originalFileName",
+          "partName",
+          "reason",
+          "rotation",
+          "rotationState",
+          "size",
+          "status",
+          "tags",
+          "takeoutPath",
+          "zone",
+          "zoneSource"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunFilePageDto": {
+        "properties": {
+          "hasNextPage": {
+            "description": "Whether there are more pages",
+            "type": "boolean"
+          },
+          "items": {
+            "description": "Files of this page",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutRunFileDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Number of files matching the query",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hasNextPage",
+          "items",
+          "total"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunFileStatus": {
+        "description": "Progress of a file in a takeout run",
+        "enum": [
+          "planned",
+          "written",
+          "created",
+          "done",
+          "skipped",
+          "error"
+        ],
+        "type": "string"
+      },
+      "TakeoutRunPartStatsDto": {
+        "properties": {
+          "bytesRead": {
+            "description": "Bytes read from the file by this run, all passes included",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "bytesSkipped": {
+            "description": "Bytes jumped over (zip gaps)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "deferred": {
+            "description": "Files hashed only, fetched later if the plan needs them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "duplicates": {
+            "description": "Files already on the server or already staged",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entries": {
+            "description": "Files found in the part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entryErrors": {
+            "description": "Zip entries that could not be read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "description": "Why the part could not be read",
+            "nullable": true,
+            "type": "string"
+          },
+          "errorOffset": {
+            "description": "Compressed byte offset of the failure",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "fetchBytesRead": {
+            "description": "Bytes read again to fetch entries the plan needed",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "finishedAt": {
+            "description": "When this run finished the part",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "media": {
+            "description": "Photos and videos found in the part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "partId": {
+            "description": "Part ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "passes": {
+            "description": "How many times this run started reading the part (1 when nothing went wrong)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pausedMs": {
+            "description": "Milliseconds the part spent paused (a paused run, or fewer readers); not counted in its read speed",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "position": {
+            "description": "Covered file offset of the current pass",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "staged": {
+            "description": "Files written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedBytes": {
+            "description": "Bytes written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "startedAt": {
+            "description": "When this run started reading the part",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TakeoutRunPartStatus"
+          },
+          "transportRetries": {
+            "description": "Reads retried in place after a transport error",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bytesRead",
+          "bytesSkipped",
+          "deferred",
+          "duplicates",
+          "entries",
+          "entryErrors",
+          "error",
+          "errorOffset",
+          "fetchBytesRead",
+          "fileName",
+          "finishedAt",
+          "media",
+          "partId",
+          "passes",
+          "pausedMs",
+          "position",
+          "size",
+          "staged",
+          "stagedBytes",
+          "startedAt",
+          "status",
+          "transportRetries"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunPartStatus": {
+        "description": "What a run did with a part: read it, found it in the cache, or could not read it",
+        "enum": [
+          "pending",
+          "cached",
+          "reading",
+          "paused",
+          "read",
+          "error",
+          "missing"
+        ],
+        "type": "string"
+      },
+      "TakeoutRunReadStatsDto": {
+        "properties": {
+          "crossDevice": {
+            "description": "Staging is on another disk than the library, so finishing copies files",
+            "type": "boolean"
+          },
+          "deferredBytes": {
+            "description": "Bytes of the deferred files",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "deferredFiles": {
+            "description": "Files hashed only, fetched later if the plan needs them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "directoryBytesRead": {
+            "description": "Zip central directory bytes read for the sampling set",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "discardedStagedBytes": {
+            "description": "Bytes of the staged files the plan did not use",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "discardedStagedFiles": {
+            "description": "Staged files the plan did not use",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "etaSeconds": {
+            "description": "Estimated seconds until reading or fetching is done",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "fetchBytesRead": {
+            "description": "Archive bytes the fetch step read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fetchBytesTotal": {
+            "description": "Archive bytes the fetch step expects to read",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fetchFiles": {
+            "description": "Files read again because the plan needed them",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "filesFound": {
+            "description": "Files found in the parts read by this run",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "jsonFound": {
+            "description": "Google JSON files found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "localDuplicatesSkipped": {
+            "description": "Files whose content was already staged, not written again",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "mediaFound": {
+            "description": "Photos and videos found",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "parts": {
+            "description": "Per part, in part order",
+            "items": {
+              "$ref": "#/components/schemas/TakeoutRunPartStatsDto"
+            },
+            "type": "array"
+          },
+          "pausedMs": {
+            "description": "Milliseconds the run spent in pauses that ended (a current pause counts from pausedAt)",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readahead": {
+            "description": "Reads in flight per part",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "readers": {
+            "description": "Parts read in parallel",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sampleBackfillFiles": {
+            "description": "Images sampled after the read for the rotation check",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "serverDuplicatesSkipped": {
+            "description": "Files already on the server, not written",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedBytes": {
+            "description": "Bytes written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagedFiles": {
+            "description": "Files written to staging",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagingBytes": {
+            "description": "Bytes held in staging by a failed or cancelled run",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stagingExpiresAt": {
+            "description": "When the staging of a failed or cancelled run is removed",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "transportRetries": {
+            "description": "Reads retried in place after a transport error",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wastedWriteBytes": {
+            "description": "Bytes written and then discarded",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "wastedWriteFiles": {
+            "description": "Files written and then discarded because their content was present",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "crossDevice",
+          "deferredBytes",
+          "deferredFiles",
+          "directoryBytesRead",
+          "discardedStagedBytes",
+          "discardedStagedFiles",
+          "etaSeconds",
+          "fetchBytesRead",
+          "fetchBytesTotal",
+          "fetchFiles",
+          "filesFound",
+          "jsonFound",
+          "localDuplicatesSkipped",
+          "mediaFound",
+          "parts",
+          "pausedMs",
+          "readahead",
+          "readers",
+          "sampleBackfillFiles",
+          "serverDuplicatesSkipped",
+          "stagedBytes",
+          "stagedFiles",
+          "stagingBytes",
+          "stagingExpiresAt",
+          "transportRetries",
+          "wastedWriteBytes",
+          "wastedWriteFiles"
+        ],
+        "type": "object"
+      },
+      "TakeoutRunStatus": {
+        "description": "Takeout import run status",
+        "enum": [
+          "queued",
+          "reading",
+          "planning",
+          "fetching",
+          "importing",
+          "finishing",
+          "paused",
+          "completed",
+          "failed",
+          "cancelling",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "TakeoutScanStatus": {
+        "description": "Deprecated: scan state of a takeout part or export, derived from the read state",
+        "enum": [
+          "pending",
+          "scanning",
+          "scanned",
+          "error",
+          "missing"
+        ],
+        "type": "string"
+      },
+      "TakeoutScannedCountersDto": {
+        "properties": {
+          "albumJsons": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "assetJsons": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "banned": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "files": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "images": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "sidecars": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unknownJsons": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unsupported": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "useless": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "videos": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "albumJsons",
+          "assetJsons",
+          "banned",
+          "files",
+          "images",
+          "sidecars",
+          "unknownJsons",
+          "unsupported",
+          "useless",
+          "videos"
+        ],
+        "type": "object"
+      },
+      "TakeoutSettingsDto": {
+        "properties": {
+          "applyRotation": {
+            "description": "Apply rotations from rotate-only edited copies",
+            "type": "boolean"
+          },
+          "burst": {
+            "$ref": "#/components/schemas/TakeoutBurstMode"
+          },
+          "burstByTime": {
+            "description": "Stack bursts by time (500 ms grouper)",
+            "type": "boolean"
+          },
+          "customTags": {
+            "description": "Tags added to every imported asset; {date}, {user} and {start} are replaced",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "dateRange": {
+            "description": "Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD",
+            "nullable": true,
+            "type": "string"
+          },
+          "googlePhotosFields": {
+            "description": "Save Google Photos fields as asset metadata",
+            "type": "boolean"
+          },
+          "heicJpg": {
+            "$ref": "#/components/schemas/TakeoutHeicJpgMode"
+          },
+          "homeTimeZone": {
+            "description": "IANA time zone used when a file has no time zone of its own",
+            "type": "string"
+          },
+          "includeArchived": {
+            "description": "Import archived photos",
+            "type": "boolean"
+          },
+          "includePartner": {
+            "description": "Import photos shared by a partner",
+            "type": "boolean"
+          },
+          "includeTrashed": {
+            "description": "Import photos that were in the Google Photos trash",
+            "type": "boolean"
+          },
+          "includeUnmatched": {
+            "description": "Import files without Google metadata",
+            "type": "boolean"
+          },
+          "onErrors": {
+            "$ref": "#/components/schemas/TakeoutOnErrors"
+          },
+          "peopleTags": {
+            "description": "Tag people named by Google as People/<name>",
+            "type": "boolean"
+          },
+          "rawJpg": {
+            "$ref": "#/components/schemas/TakeoutRawJpgMode"
+          },
+          "sessionTag": {
+            "description": "Add a tag for the run",
+            "type": "boolean"
+          },
+          "sessionTagTemplate": {
+            "description": "Template of the run tag",
+            "type": "string"
+          },
+          "stopAfterErrors": {
+            "description": "With onErrors continue: stop after this many errors, 0 never stops",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "syncAlbums": {
+            "description": "Add assets to the albums of the export",
+            "type": "boolean"
+          },
+          "tagServerDuplicates": {
+            "description": "Tag photos that are already on the server",
+            "type": "boolean"
+          },
+          "takeoutTag": {
+            "description": "Tag each asset with the name of its archive",
+            "type": "boolean"
+          },
+          "videoBoost": {
+            "$ref": "#/components/schemas/TakeoutVideoBoostMode"
+          }
+        },
+        "required": [
+          "applyRotation",
+          "burst",
+          "burstByTime",
+          "customTags",
+          "dateRange",
+          "googlePhotosFields",
+          "heicJpg",
+          "homeTimeZone",
+          "includeArchived",
+          "includePartner",
+          "includeTrashed",
+          "includeUnmatched",
+          "onErrors",
+          "peopleTags",
+          "rawJpg",
+          "sessionTag",
+          "sessionTagTemplate",
+          "stopAfterErrors",
+          "syncAlbums",
+          "tagServerDuplicates",
+          "takeoutTag",
+          "videoBoost"
+        ],
+        "type": "object"
+      },
+      "TakeoutSettingsUpdateDto": {
+        "properties": {
+          "applyRotation": {
+            "description": "Apply rotations from rotate-only edited copies",
+            "type": "boolean"
+          },
+          "burst": {
+            "$ref": "#/components/schemas/TakeoutBurstMode"
+          },
+          "burstByTime": {
+            "description": "Stack bursts by time (500 ms grouper)",
+            "type": "boolean"
+          },
+          "customTags": {
+            "description": "Tags added to every imported asset; {date}, {user} and {start} are replaced",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "dateRange": {
+            "description": "Only import files taken in this range: YYYY, YYYY-MM, YYYY-MM-DD or YYYY-MM-DD,YYYY-MM-DD",
+            "nullable": true,
+            "type": "string"
+          },
+          "googlePhotosFields": {
+            "description": "Save Google Photos fields as asset metadata",
+            "type": "boolean"
+          },
+          "heicJpg": {
+            "$ref": "#/components/schemas/TakeoutHeicJpgMode"
+          },
+          "homeTimeZone": {
+            "description": "IANA time zone used when a file has no time zone of its own",
+            "type": "string"
+          },
+          "includeArchived": {
+            "description": "Import archived photos",
+            "type": "boolean"
+          },
+          "includePartner": {
+            "description": "Import photos shared by a partner",
+            "type": "boolean"
+          },
+          "includeTrashed": {
+            "description": "Import photos that were in the Google Photos trash",
+            "type": "boolean"
+          },
+          "includeUnmatched": {
+            "description": "Import files without Google metadata",
+            "type": "boolean"
+          },
+          "onErrors": {
+            "$ref": "#/components/schemas/TakeoutOnErrors"
+          },
+          "peopleTags": {
+            "description": "Tag people named by Google as People/<name>",
+            "type": "boolean"
+          },
+          "rawJpg": {
+            "$ref": "#/components/schemas/TakeoutRawJpgMode"
+          },
+          "sessionTag": {
+            "description": "Add a tag for the run",
+            "type": "boolean"
+          },
+          "sessionTagTemplate": {
+            "description": "Template of the run tag",
+            "type": "string"
+          },
+          "stopAfterErrors": {
+            "description": "With onErrors continue: stop after this many errors, 0 never stops",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "syncAlbums": {
+            "description": "Add assets to the albums of the export",
+            "type": "boolean"
+          },
+          "tagServerDuplicates": {
+            "description": "Tag photos that are already on the server",
+            "type": "boolean"
+          },
+          "takeoutTag": {
+            "description": "Tag each asset with the name of its archive",
+            "type": "boolean"
+          },
+          "videoBoost": {
+            "$ref": "#/components/schemas/TakeoutVideoBoostMode"
+          }
+        },
+        "type": "object"
+      },
+      "TakeoutSizeCheck": {
+        "description": "Size of the parts compared with the total the index announces",
+        "enum": [
+          "ok",
+          "low",
+          "short",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "TakeoutUnreadablePartDto": {
+        "properties": {
+          "error": {
+            "description": "Why the part could not be read",
+            "type": "string"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Compressed byte offset of the failure",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
+          "size": {
+            "description": "File size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "error",
+          "fileName",
+          "offset",
+          "size"
+        ],
+        "type": "object"
+      },
+      "TakeoutUploadCreateDto": {
+        "properties": {
+          "fileName": {
+            "description": "Archive file name, for example takeout-20260914T211500Z-1-001.tgz",
+            "minLength": 1,
+            "type": "string"
+          },
+          "size": {
+            "description": "Total size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fileName",
+          "size"
+        ],
+        "type": "object"
+      },
+      "TakeoutUploadDto": {
+        "properties": {
+          "chunkSize": {
+            "description": "Preferred chunk size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "fileName": {
+            "description": "Archive file name",
+            "type": "string"
+          },
+          "id": {
+            "description": "Upload ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Bytes received so far; the next chunk starts here",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "size": {
+            "description": "Total size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stale": {
+            "description": "Whether no chunk arrived for 7 days",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chunkSize",
+          "fileName",
+          "id",
+          "offset",
+          "size",
+          "stale"
+        ],
+        "type": "object"
+      },
+      "TakeoutVideoBoostMode": {
+        "description": "Handling of Pixel video boost pairs",
+        "enum": [
+          "NoStack",
+          "Stack",
+          "KeepMain"
+        ],
+        "type": "string"
+      },
+      "TakeoutZoneSource": {
+        "description": "Where the time zone of a file came from",
+        "enum": [
+          "fileOffset",
+          "device",
+          "derivedOffset",
+          "google",
+          "screenshot",
+          "gps",
+          "home",
+          "exif",
+          "filename"
+        ],
+        "type": "string"
       },
       "TemplateDto": {
         "properties": {
