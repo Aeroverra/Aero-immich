@@ -387,6 +387,16 @@ export class AssetService extends BaseService {
       }
     }
 
+    // remember uploaded files so a later upload of the same file can be recognised
+    if (!asset.libraryId && asset.visibility !== AssetVisibility.Hidden) {
+      await this.assetDeletedChecksumRepository.upsert({
+        ownerId: asset.ownerId,
+        checksum: asset.checksum,
+        assetId: asset.id,
+        originalFileName: asset.originalFileName,
+      });
+    }
+
     await this.assetRepository.remove(asset);
     if (!asset.libraryId) {
       await this.userRepository.updateUsage(asset.ownerId, -(asset.exifInfo?.fileSizeInByte || 0));
