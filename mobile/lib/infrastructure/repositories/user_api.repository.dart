@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart';
 import 'package:immich_mobile/data/server/api_repository.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
+import 'package:immich_mobile/domain/models/user_metadata.model.dart' as domain;
 import 'package:immich_mobile/infrastructure/utils/user.converter.dart';
 import 'package:openapi/api.dart';
 
@@ -43,4 +44,35 @@ class UserApiRepository extends ApiRepository {
     final dto = await checkNull(_api.searchUsers());
     return dto.map(UserConverter.fromSimpleUserDto).toList();
   }
+
+  Future<domain.DeletedReimportMode> getDeletedReimportMode() async {
+    final dto = await checkNull(_api.getMyPreferences());
+    return switch (dto.deletedReimport.mode) {
+      DeletedReimportMode.trash => domain.DeletedReimportMode.trash,
+      DeletedReimportMode.skip => domain.DeletedReimportMode.skip,
+      DeletedReimportMode.album => domain.DeletedReimportMode.album,
+    };
+  }
+
+  Future<void> setDeletedReimportMode(domain.DeletedReimportMode mode) async {
+    final apiMode = switch (mode) {
+      domain.DeletedReimportMode.trash => DeletedReimportMode.trash,
+      domain.DeletedReimportMode.skip => DeletedReimportMode.skip,
+      domain.DeletedReimportMode.album => DeletedReimportMode.album,
+    };
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(
+          deletedReimport: Optional.present(DeletedReimportUpdate(mode: Optional.present(apiMode))),
+        ),
+      ),
+    );
+  }
+
+  Future<int> getDeletedChecksumCount() async {
+    final dto = await checkNull(_api.getMyDeletedChecksumStatistics());
+    return dto.count;
+  }
+
+  Future<void> forgetDeletedChecksums() => _api.deleteMyDeletedChecksums();
 }
