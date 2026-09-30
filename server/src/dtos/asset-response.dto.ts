@@ -15,6 +15,7 @@ import {
   AssetVisibility,
   AssetVisibilitySchema,
   ChecksumAlgorithm,
+  StackSourceSchema,
 } from 'src/enum';
 import { MaybeDehydrated } from 'src/types';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
@@ -55,6 +56,7 @@ const AssetStackResponseSchema = z
     id: z.uuidv4().describe('Stack ID'),
     primaryAssetId: z.uuidv4().describe('Primary asset ID'),
     assetCount: z.int().min(0).describe('Number of assets in stack'),
+    source: StackSourceSchema,
   })
   .meta({ id: 'AssetStackResponseDto' });
 
@@ -189,6 +191,7 @@ const mapStack = (entity: { stack?: Stack | null }) => {
     id: entity.stack.id,
     primaryAssetId: entity.stack.primaryAssetId,
     assetCount: entity.stack.assetCount ?? entity.stack.assets.length + 1,
+    source: entity.stack.source,
   };
 };
 
