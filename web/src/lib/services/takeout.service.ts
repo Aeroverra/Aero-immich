@@ -25,6 +25,7 @@ import {
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
 import { mdiDeleteOutline, mdiPlay, mdiRefresh, mdiTrashCanOutline } from '@mdi/js';
+import { DateTime } from 'luxon';
 import type { MessageFormatter } from 'svelte-i18n';
 import { getByteUnitString } from '$lib/utils/byte-units';
 import { getServerErrorMessage, handleError } from '$lib/utils/handle-error';
@@ -211,6 +212,37 @@ export const completenessColor = (
     }
     default: {
       return 'secondary';
+    }
+  }
+};
+
+/**
+ * The import state of an export, apart from its archive completeness: nothing while a run is active (the card shows
+ * its progress), else whether and when the last run imported it
+ */
+export const importStatusLabel = (
+  $t: MessageFormatter,
+  lastRun: TakeoutRunDto | null | undefined,
+  locale?: string,
+): string | undefined => {
+  if (!lastRun) {
+    return $t('takeout_import_status_none');
+  }
+  switch (lastRun.status) {
+    case TakeoutRunStatus.Completed: {
+      const date = DateTime.fromISO(lastRun.finishedAt ?? lastRun.createdAt).toLocaleString(DateTime.DATE_MED, {
+        locale,
+      });
+      return $t('takeout_import_status_imported', { values: { date } });
+    }
+    case TakeoutRunStatus.Failed: {
+      return $t('takeout_import_status_failed');
+    }
+    case TakeoutRunStatus.Cancelled: {
+      return $t('takeout_import_status_cancelled');
+    }
+    default: {
+      return undefined;
     }
   }
 };

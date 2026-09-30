@@ -12,6 +12,7 @@
     handlePauseRun,
     handleResumeRun,
     handleRunImport,
+    importStatusLabel,
     progressFraction,
     runMainProgress,
     runPhaseLabel,
@@ -39,6 +40,7 @@
   let runProgress = $derived(activeRun ? runMainProgress(activeRun) : undefined);
   let paused = $derived(!!activeRun && takeoutRunPaused(activeRun.status));
   let pausable = $derived(!!activeRun && takeoutRunPausable(activeRun.status));
+  let importStatus = $derived(activeRun ? undefined : importStatusLabel($t, exp.lastRun, $locale));
   let busy = $state(false);
 
   const togglePause = async () => {
@@ -91,6 +93,10 @@
       </Text>
       <Text size="small" color="muted">{getByteUnitString(exp.totalSize, $locale)}</Text>
     </div>
+
+    {#if importStatus}
+      <Text size="small" class="mt-1 block" data-testid="export-card-import-status">{importStatus}</Text>
+    {/if}
 
     {#if activeRun}
       <div class="mt-2" data-testid="export-card-run">

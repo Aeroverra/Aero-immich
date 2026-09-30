@@ -40,7 +40,7 @@ describe('TakeoutExportCard component', () => {
   it('offers Run import for a complete export without an active run', () => {
     render(TakeoutExportCard, { exp: takeoutExportFactory.build({ completeness: TakeoutCompleteness.Complete }) });
 
-    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.getByText('Archive complete')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run import' })).toBeEnabled();
   });
 
@@ -78,6 +78,36 @@ describe('TakeoutExportCard component', () => {
     const run = within(screen.getByTestId('export-card-run'));
     expect(run.getByText('Planning')).toBeInTheDocument();
     expect(run.queryByText(/\//)).not.toBeInTheDocument();
+  });
+
+  it('keeps the archive state apart from the import state (family: Complete read as imported)', () => {
+    render(TakeoutExportCard, {
+      exp: takeoutExportFactory.build({ completeness: TakeoutCompleteness.Complete, lastRun: null }),
+    });
+
+    expect(screen.getByText('Archive complete')).toBeInTheDocument();
+    expect(screen.getByTestId('export-card-import-status')).toHaveTextContent('Not imported yet');
+  });
+
+  it('says when the export was imported, and that a last import failed', () => {
+    const done = takeoutRunFactory.build({
+      status: TakeoutRunStatus.Completed,
+      finishedAt: '2026-09-29T22:07:25.000Z',
+    });
+    const { unmount } = render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun: done }) });
+    expect(screen.getByTestId('export-card-import-status')).toHaveTextContent(/^Imported Sep \d+, 2026$/);
+    unmount();
+
+    const failed = takeoutRunFactory.build({ status: TakeoutRunStatus.Failed });
+    render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun: failed }) });
+    expect(screen.getByTestId('export-card-import-status')).toHaveTextContent('Last import failed');
+  });
+
+  it('shows no import state while a run is active', () => {
+    const lastRun = takeoutRunFactory.build({ status: TakeoutRunStatus.Importing });
+    render(TakeoutExportCard, { exp: takeoutExportFactory.build({ lastRun }) });
+
+    expect(screen.queryByTestId('export-card-import-status')).not.toBeInTheDocument();
   });
 
   it('shows nothing about a finished run', () => {

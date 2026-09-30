@@ -14,6 +14,7 @@
     analysisReasonLabel,
     completenessColor,
     completenessLabel,
+    importStatusLabel,
     handleDeleteExportArchives,
     handleRescanExport,
     handleRunImport,
@@ -36,6 +37,7 @@
   let complete = $derived(detail.completeness === TakeoutCompleteness.Complete);
   let checking = $derived(takeoutExportChecking(detail));
   let hasActiveRun = $derived(!!detail.lastRun && takeoutRunActive(detail.lastRun.status));
+  let importStatus = $derived(hasActiveRun ? undefined : importStatusLabel($t, detail.lastRun, $locale));
 
   const refresh = async () => {
     detail = await getTakeoutExport({ id: detail.id });
@@ -148,6 +150,7 @@
               })}</Text
             >
             {#if detail.accountEmail}<Text size="small" color="muted" class="block">{detail.accountEmail}</Text>{/if}
+            {#if importStatus}<Text size="small" class="block">{importStatus}</Text>{/if}
           </div>
           <Badge color={completenessColor(detail.completeness)}
             >{checking ? $t('takeout_checking_parts') : completenessLabel($t, detail.completeness)}</Badge
