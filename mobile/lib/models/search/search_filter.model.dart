@@ -110,8 +110,12 @@ abstract class SearchRatingFilter with _$SearchRatingFilter {
 
 @freezed
 abstract class SearchDisplayFilters with _$SearchDisplayFilters {
-  const factory SearchDisplayFilters({required bool isNotInAlbum, required bool isArchive, required bool isFavorite}) =
-      _SearchDisplayFilters;
+  const factory SearchDisplayFilters({
+    required bool isNotInAlbum,
+    required bool isArchive,
+    required bool isFavorite,
+    required bool hasNoTags,
+  }) = _SearchDisplayFilters;
 }
 
 /// Which private assets a search returns; only meaningful while the session's private mode is on
@@ -168,6 +172,7 @@ abstract class SearchFilter with _$SearchFilter {
         display.isNotInAlbum == false &&
         display.isArchive == false &&
         display.isFavorite == false &&
+        display.hasNoTags == false &&
         rating.rating.isNone &&
         mediaType == AssetType.other &&
         private == SearchPrivateFilter.all;
