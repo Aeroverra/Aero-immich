@@ -120,6 +120,26 @@ describe('crossCheckIndex', () => {
     expect(crossCheckIndex(indexFiles, archiveKeys)).toEqual({ missing: indexFiles.slice(1), notInIndex: 0 });
   });
 
+  it('counts the album extras that the index lists under album folders and the part holds at the root as present', () => {
+    // family exports: the index lists the extras under each album folder, the part holds one copy at the root
+    const root = 'Takeout/Google Photos';
+    const extras = ['shared_album_comments.json', 'user-generated-memory-titles.json', 'remember-list.json'];
+    const indexFiles = [
+      ...extras.map((name) => `${root}/Thursday in Concord/${name}`),
+      `${root}/Trip/shared_album_comments.json`,
+      `${root}/Trip/print-subscriptions.json`,
+      `${root}/Trip/metadata.json`,
+      `${root}/Trip/IMG_0001.jpg`,
+    ];
+    const archiveKeys = new Set([...extras.map((name) => `${root}/${name}`), `${root}/metadata.json`]);
+
+    expect(crossCheckIndex(indexFiles, archiveKeys)).toEqual({
+      // an extras name found nowhere, a name that is not an album extra and a media file are still missing
+      missing: [`${root}/Trip/print-subscriptions.json`, `${root}/Trip/metadata.json`, `${root}/Trip/IMG_0001.jpg`],
+      notInIndex: 1,
+    });
+  });
+
   it('never takes a longer name, another extension or a listed file for a shortened one', () => {
     const indexFiles = ['a/photo_2022.jpg', 'a/clip_2022_long_name.mp4', 'a/clip_2022.mp4'];
     const archiveKeys = new Set(['a/photo_2022_edited.jpg', 'a/clip_2022.mov', 'a/clip_2022.mp4']);
@@ -207,6 +227,15 @@ describe('analyzeExport', () => {
   it('finds the names Google shortened in the zip listings before any read (family export)', () => {
     const files = SHORTENED.map((s) => s.listed);
     const listingPaths = new Set(SHORTENED.map((s) => pathKey(s.stored)));
+    const a = analyzeExport(input([zipPart(1, GiB)], { index: index(files), indexTotalBytes: GiB, listingPaths }));
+    expect(a.indexMissingFiles).toEqual({ count: 0, sample: [] });
+    expect(a.notInIndex).toBe(0);
+    expect(a.completeness).toBe('complete');
+  });
+
+  it('finds album extras at the root of the zip listings before any read', () => {
+    const files = ['Takeout/Google Photos/Thursday in Concord/shared_album_comments.json'];
+    const listingPaths = new Set([pathKey('Takeout/Google Photos/shared_album_comments.json')]);
     const a = analyzeExport(input([zipPart(1, GiB)], { index: index(files), indexTotalBytes: GiB, listingPaths }));
     expect(a.indexMissingFiles).toEqual({ count: 0, sample: [] });
     expect(a.notInIndex).toBe(0);

@@ -1140,6 +1140,41 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     });
   });
 
+  it('reports no album extras that the index lists under the album and the part holds at the root', async () => {
+    // family exports: archive_browser.html lists 'Thursday in Concord/shared_album_comments.json' and the other
+    // extras of the album, the part holds them once at the Google Photos root
+    const h = await harness();
+    const album = 'Thursday in Concord';
+    const extras = ['shared_album_comments.json', 'user-generated-memory-titles.json', 'remember-list.json'];
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        ...extras.map((name) => ({ name: media(name), data: Buffer.from('{}') })),
+        { name: media(`${album}/metadata.json`), data: Buffer.from(JSON.stringify({ title: album })) },
+        { name: media(`${album}/a.mp4`), data: randomBytesSeeded(300, 90) },
+      ]),
+    );
+    await h.repo.updateExport(h.exportId, {
+      analysis: {
+        indexFiles: [
+          ...extras.map((name) => media(`${album}/${name}`)),
+          media(`${album}/metadata.json`),
+          media(`${album}/a.mp4`),
+          media(`${album}/never-exported.mp4`),
+        ],
+      },
+    });
+
+    const run = h.newRun({ importAnyway: true });
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const missing = h.files(run.id).filter((r) => r.action === TakeoutRunFileAction.MissingFromArchive);
+    expect(missing.map((r) => r.takeoutPath)).toEqual([media(`${album}/never-exported.mp4`)]);
+    expect(h.repo.exports[0].analysis.lastRead).toMatchObject({
+      indexMissingFiles: { count: 1, sample: [media(`${album}/never-exported.mp4`)] },
+      notInIndex: 0,
+    });
+  });
+
   it('marks a part missing at reading start, deletes its entries and plans without it', async () => {
     const h = await harness();
     await h.addPart(

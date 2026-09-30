@@ -42,11 +42,24 @@ function shortenedKey(dir: string, extension: string, stem: string): string {
   return [dir, extension, extension === '.json' ? stem.replace(/\.+$/, '') : stem].join('\u{0}');
 }
 
+// The album extras of Google Photos. The index lists them under the album folder they belong to
+// ('Takeout/Google Photos/Thursday in Concord/shared_album_comments.json') while the archive stores them once, at the
+// Google Photos root ('Takeout/Google Photos/shared_album_comments.json'). An explicit list of the names seen in real
+// Takeouts (and in immich-go's fake Takeout), not a rule for every JSON.
+const ALBUM_EXTRAS_NAMES: ReadonlySet<string> = new Set([
+  'print-subscriptions.json',
+  'remember-list.json',
+  'shared_album_comments.json',
+  'user-generated-memory-titles.json',
+]);
+
 /**
  * The index cross-check, by pathKey: the index paths no archive path matches, and the number of archive paths the
  * index does not list. An index path also counts as present when an unlisted archive path of the same directory is
  * a shortened copy of its name: same extension, a shorter name, and a stem that starts the stem of the index name.
- * Each archive path stands in for one index path only, the longest candidate first.
+ * Each archive path stands in for one index path only, the longest candidate first. An album extras file of the
+ * index (ALBUM_EXTRAS_NAMES) is present when the parts hold a file of its name in any directory, and those files
+ * count as listed in the index.
  */
 export function crossCheckIndex(
   indexFiles: string[],
@@ -62,11 +75,27 @@ export function crossCheckIndex(
     }
   }
 
+  const extras = new Map<string, string[]>();
+  for (const key of archiveKeys) {
+    const { base } = splitPath(key);
+    if (ALBUM_EXTRAS_NAMES.has(base)) {
+      extras.set(base, [...(extras.get(base) ?? []), key]);
+    }
+  }
+  const listedExtras = new Set<string>();
+  const notFound = unmatched.filter(({ key }) => {
+    const copies = extras.get(splitPath(key).base);
+    for (const copy of copies ?? []) {
+      listedExtras.add(copy);
+    }
+    return copies === undefined;
+  });
+
   let notInIndex = 0;
   const unlisted = new Map<string, string[]>();
   const unlistedDirs = new Set<string>();
   for (const key of archiveKeys) {
-    if (indexKeys.has(key)) {
+    if (indexKeys.has(key) || listedExtras.has(key)) {
       continue;
     }
     notInIndex++;
@@ -83,7 +112,7 @@ export function crossCheckIndex(
   }
 
   const missing: string[] = [];
-  for (const { path, key } of unmatched) {
+  for (const { path, key } of notFound) {
     const { dir, base } = splitPath(key);
     const extension = ext(base);
     const stem = base.slice(0, base.length - extension.length);
