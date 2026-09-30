@@ -22,7 +22,7 @@ class ReadOnlyModeNotifier extends Notifier<bool> {
     state = value;
 
     if (value && isLoggedIn) {
-      unawaited(ref.read(appRouterProvider).navigate(const MainTimelineRoute()));
+      unawaited(ref.read(appRouterProvider).navigate(MainTimelineRoute()));
     }
   }
 
