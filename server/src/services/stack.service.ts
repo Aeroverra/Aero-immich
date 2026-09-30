@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { StackCreateDto, StackResponseDto, StackSearchDto, StackUpdateDto, mapStack } from 'src/dtos/stack.dto';
-import { Permission } from 'src/enum';
+import { Permission, StackSource, StackUserEditAction } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { toPrivateScope } from 'src/utils/access';
 import { findOrFail } from 'src/utils/misc';
@@ -30,6 +30,7 @@ export class StackService extends BaseService {
   async create(auth: AuthDto, dto: StackCreateDto): Promise<StackResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: dto.assetIds });
 
+    const previousStacks = await this.stackRepository.getForUserEdit({ assetIds: dto.assetIds });
     const stack = await this.stackRepository.create({ ownerId: auth.user.id }, dto.assetIds, toPrivateScope(auth));
 
     // a stack is never half private: one private member makes every member private
@@ -45,6 +46,23 @@ export class StackService extends BaseService {
     }
 
     await this.eventRepository.emit('StackCreate', { stackId: stack.id, userId: auth.user.id });
+
+    // a stack whose primary asset was passed moves into the new stack as a whole, any other stack only loses the
+    // assets that were passed
+    for (const previous of previousStacks) {
+      const memberIds = previous.assets.map(({ id }) => id);
+      const assetIds = dto.assetIds.includes(previous.primaryAssetId)
+        ? memberIds
+        : memberIds.filter((id) => dto.assetIds.includes(id));
+      await this.eventRepository.emit('StackUserEdit', {
+        userId: auth.user.id,
+        stackId: previous.id,
+        source: previous.source,
+        action: StackUserEditAction.Merge,
+        assetIds,
+        targetStackId: stack.id,
+      });
+    }
 
     return mapStack(stack, { auth });
   }
@@ -70,19 +88,33 @@ export class StackService extends BaseService {
 
     await this.eventRepository.emit('StackUpdate', { stackId: id, userId: auth.user.id });
 
+    if (dto.primaryAssetId && dto.primaryAssetId !== stack.primaryAssetId) {
+      await this.eventRepository.emit('StackUserEdit', {
+        userId: auth.user.id,
+        stackId: id,
+        source: stack.source,
+        action: StackUserEditAction.UpdatePrimary,
+        assetIds: [dto.primaryAssetId],
+      });
+    }
+
     return mapStack(updatedStack, { auth });
   }
 
   async delete(auth: AuthDto, id: string): Promise<void> {
     await this.requireAccess({ auth, permission: Permission.StackDelete, ids: [id] });
+    const stacks = await this.stackRepository.getForUserEdit({ stackIds: [id] });
     await this.stackRepository.delete(id);
     await this.eventRepository.emit('StackDelete', { stackId: id, userId: auth.user.id });
+    await this.emitDeleted(auth, stacks);
   }
 
   async deleteAll(auth: AuthDto, dto: BulkIdsDto): Promise<void> {
     await this.requireAccess({ auth, permission: Permission.StackDelete, ids: dto.ids });
+    const stacks = await this.stackRepository.getForUserEdit({ stackIds: dto.ids });
     await this.stackRepository.deleteAll(dto.ids);
     await this.eventRepository.emit('StackDeleteAll', { stackIds: dto.ids, userId: auth.user.id });
+    await this.emitDeleted(auth, stacks);
   }
 
   async removeAsset(auth: AuthDto, dto: UUIDAssetIDParamDto): Promise<void> {
@@ -101,6 +133,28 @@ export class StackService extends BaseService {
 
     await this.assetRepository.update({ id: assetId, stackId: null });
     await this.eventRepository.emit('StackUpdate', { stackId, userId: auth.user.id });
+    await this.eventRepository.emit('StackUserEdit', {
+      userId: auth.user.id,
+      stackId,
+      source: stack.source!,
+      action: StackUserEditAction.RemoveAssets,
+      assetIds: [assetId],
+    });
+  }
+
+  private async emitDeleted(
+    auth: AuthDto,
+    stacks: Array<{ id: string; source: StackSource; assets: { id: string }[] }>,
+  ) {
+    for (const stack of stacks) {
+      await this.eventRepository.emit('StackUserEdit', {
+        userId: auth.user.id,
+        stackId: stack.id,
+        source: stack.source,
+        action: StackUserEditAction.Delete,
+        assetIds: stack.assets.map(({ id }) => id),
+      });
+    }
   }
 
   private findOrFail(id: string, auth: AuthDto) {

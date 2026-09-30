@@ -4,7 +4,7 @@ import '../table/local/asset.dart';
 import '../table/local/album.dart';
 import '../table/local/album_asset.dart';
 
-mergedAsset(:private_mode AS BOOLEAN, :current_user_id AS TEXT):
+mergedAsset(:private_mode AS BOOLEAN, :current_user_id AS TEXT, :group_auto_stacks AS BOOLEAN):
 SELECT
 	rae.id as remote_id,
 	(SELECT lae.id FROM local_asset_entity lae WHERE lae.checksum = rae.checksum LIMIT 1) as local_id,
@@ -21,7 +21,7 @@ SELECT
 	rae.owner_id,
 	rae.live_photo_video_id,
 	0 as orientation,
-	rae.stack_id,
+	CASE WHEN se.source = 1 AND NOT :group_auto_stacks THEN NULL ELSE rae.stack_id END as stack_id, -- 1 = auto
 	NULL as i_cloud_id,
 	NULL as latitude,
 	NULL as longitude,
@@ -41,6 +41,7 @@ WHERE
 	AND (
 		rae.stack_id IS NULL
 		OR rae.id = se.primary_asset_id
+		OR (se.source = 1 AND NOT :group_auto_stacks) -- 1 = auto
 	)
 	AND (
 		rae.is_private = 0
@@ -92,7 +93,7 @@ AND NOT EXISTS (
 ORDER BY created_at DESC
 LIMIT $limit;
 
-mergedBucket(:group_by AS INTEGER, :private_mode AS BOOLEAN, :current_user_id AS TEXT):
+mergedBucket(:group_by AS INTEGER, :private_mode AS BOOLEAN, :current_user_id AS TEXT, :group_auto_stacks AS BOOLEAN):
 SELECT
 	COUNT(*) as asset_count,
 	bucket_date
@@ -120,6 +121,7 @@ FROM
 		AND (
 			rae.stack_id IS NULL
 			OR rae.id = se.primary_asset_id
+			OR (se.source = 1 AND NOT :group_auto_stacks) -- 1 = auto
 		)
 		AND (
 			rae.is_private = 0
