@@ -29,8 +29,19 @@ class SearchState {
   final int? nextPage;
   final bool isLoading;
 
-  const SearchState({this.assets = const [], this.nextPage = 1, this.isLoading = false});
+  /// Where smart search matched in the videos of [assets] that matched on a sampled frame: the position of that frame
+  /// in milliseconds, by remote id
+  final Map<String, int> matchedFrames;
+
+  const SearchState({this.assets = const [], this.nextPage = 1, this.isLoading = false, this.matchedFrames = const {}});
 }
+
+/// Where smart search matched in a video of the current results, by its remote id. Null when the video matched on its
+/// thumbnail or is not in the results.
+final searchVideoMatchProvider = Provider.autoDispose.family<Duration?, String>((ref, remoteId) {
+  final frameTimestamp = ref.watch(paginatedSearchProvider.select((state) => state.matchedFrames[remoteId]));
+  return frameTimestamp == null ? null : Duration(milliseconds: frameTimestamp);
+});
 
 final paginatedSearchProvider = StateNotifierProvider<PaginatedSearchNotifier, SearchState>(
   (ref) => PaginatedSearchNotifier(
@@ -56,7 +67,12 @@ class PaginatedSearchNotifier extends StateNotifier<SearchState> {
       return;
     }
 
-    state = SearchState(assets: state.assets, nextPage: state.nextPage, isLoading: true);
+    state = SearchState(
+      assets: state.assets,
+      nextPage: state.nextPage,
+      isLoading: true,
+      matchedFrames: state.matchedFrames,
+    );
 
     final result = await _searchService.search(
       filter,
@@ -69,12 +85,16 @@ class PaginatedSearchNotifier extends StateNotifier<SearchState> {
     );
 
     if (result == null) {
-      state = SearchState(assets: state.assets, nextPage: state.nextPage);
+      state = SearchState(assets: state.assets, nextPage: state.nextPage, matchedFrames: state.matchedFrames);
       return;
     }
 
     final assets = [...state.assets, ...result.assets];
-    state = SearchState(assets: assets, nextPage: result.nextPage);
+    state = SearchState(
+      assets: assets,
+      nextPage: result.nextPage,
+      matchedFrames: {...state.matchedFrames, ...result.matchedFrames},
+    );
 
     _assetCountController.add(assets.length);
   }
