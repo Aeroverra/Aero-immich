@@ -42,6 +42,8 @@ export class FaceAttributeRepository {
             ])
             .whereRef('asset_face.assetId', '=', 'asset.id')
             .where('asset_face.deletedAt', 'is', null)
+            // faces found in other video frames are not visible in the preview these attributes are measured on
+            .where('asset_face.frameTimestamp', 'is', null)
             .orderBy('asset_face.id'),
         ).as('faces'),
       ])
@@ -81,6 +83,7 @@ export class FaceAttributeRepository {
                 .leftJoin('asset_face_attribute', 'asset_face_attribute.faceId', 'asset_face.id')
                 .whereRef('asset_face.assetId', '=', 'asset.id')
                 .where('asset_face.deletedAt', 'is', null)
+                .where('asset_face.frameTimestamp', 'is', null)
                 .where('asset_face_attribute.faceId', 'is', null),
             ),
           ]),
