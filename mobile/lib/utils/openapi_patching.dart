@@ -28,6 +28,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'albums': {'defaultAssetOrder': 'desc'},
     'recentlyAdded': RecentlyAddedResponse(sidebarWeb: false).toJson(),
     'stacks': StacksResponse(groupAuto: true).toJson(),
+    'autoStack': AutoStackResponse(enabled: false).toJson(),
   },
   'ServerConfigDto': {
     'mapLightStyleUrl': 'https://tiles.immich.cloud/v1/style/light.json',
