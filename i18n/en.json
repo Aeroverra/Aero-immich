@@ -1090,6 +1090,7 @@
   "editor_orientation": "Orientation",
   "editor_reset_all_changes": "Reset changes",
   "editor_rotate_left": "Rotate 90° counterclockwise",
+  "editor_rotate_only_description": "Videos and motion photos can only be rotated.",
   "editor_rotate_right": "Rotate 90° clockwise",
   "email": "Email",
   "email_notifications": "Email notifications",

@@ -69,7 +69,10 @@ class RemoteAsset extends BaseAsset {
   String get heroTag => '${localId ?? checksum}_$id';
 
   @override
-  bool get isEditable => isImage && !isMotionPhoto && !isAnimatedImage;
+  bool get isEditable => (isImage && !isAnimatedImage) || isVideo;
+
+  /// Players turn a video (and the video of a motion photo) by its rotation metadata, so these can only be rotated
+  bool get isRotateOnly => isVideo || isMotionPhoto;
 
   bool get isTrashed => deletedAt != null;
 
