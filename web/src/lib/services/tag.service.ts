@@ -75,6 +75,80 @@ export const handleUpdateTag = async (tag: TreeNode, dto: TagUpdateDto) => {
   }
 };
 
+/** The parts of a tag path the user typed, without stray slashes or spaces around them */
+export const parseTagPath = (path: string) =>
+  path
+    .split('/')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+const isInSubtree = (tag: TreeNode, path: string) => path === tag.path || path.startsWith(`${tag.path}/`);
+
+/**
+ * Saves the edit dialog, where the name field takes a full path: a different parent path moves the tag (and its
+ * children) under that parent, creating the parent tags that do not exist yet, and a plain name keeps it where it is.
+ */
+export const handleUpdateTagPath = async (
+  tag: TreeNode,
+  path: string,
+  dto: Omit<TagUpdateDto, 'name' | 'parentId'> = {},
+) => {
+  const $t = await getFormatter();
+
+  const parts = parseTagPath(path);
+  const name = parts.at(-1);
+  if (!name) {
+    toastManager.danger($t('errors.tag_name_required'));
+    return;
+  }
+
+  const parentPath = parts.slice(0, -1).join('/');
+  if (parentPath === (tag.parent?.path ?? '')) {
+    return handleUpdateTag(tag, { ...dto, name });
+  }
+
+  if (isInSubtree(tag, parentPath)) {
+    toastManager.danger($t('errors.tag_move_into_itself'));
+    return;
+  }
+
+  let parentId: string | null = null;
+  if (parentPath) {
+    try {
+      const [parent] = await upsertTags({ tagUpsertDto: { tags: [parentPath] } });
+      parentId = parent.id;
+    } catch (error) {
+      handleError(error, $t('errors.something_went_wrong'));
+      return;
+    }
+  }
+
+  return handleUpdateTag(tag, { ...dto, name, parentId });
+};
+
+/** Moves a tag dragged in the tag tree under [target], or to the top level for the tree root, after a confirmation */
+export const handleMoveTag = async (tag: TreeNode, target: TreeNode) => {
+  const $t = await getFormatter();
+
+  if (target.path === (tag.parent?.path ?? '') || isInSubtree(tag, target.path)) {
+    return;
+  }
+
+  const confirmed = await modalManager.showDialog({
+    title: target.path
+      ? $t('tag_move_confirm', { values: { tag: tag.value, parent: target.path } })
+      : $t('tag_move_to_top_level_confirm', { values: { tag: tag.value } }),
+    prompt: $t('tag_move_confirm_description'),
+    confirmText: $t('move_to'),
+    confirmColor: 'primary',
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  return handleUpdateTagPath(tag, target.path ? `${target.path}/${tag.value}` : tag.value);
+};
+
 const handleDeleteTag = async (tag: TreeNode) => {
   const $t = await getFormatter();
 
