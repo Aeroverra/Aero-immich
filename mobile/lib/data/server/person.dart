@@ -21,20 +21,38 @@ class PersonApiRepository extends ApiRepository {
     return _toPerson(response);
   }
 
-  /// Adds the person to the videos among [assetIds] with a whole-frame face. Returns the assets that got the person
-  /// and the photos the server left out (their faces are drawn on the photo instead).
-  Future<({List<String> added, List<String> photos})> addToAssets(String id, List<String> assetIds) async {
+  /// Adds the person to [assetIds] without a face box. Returns the assets that got the person; the others already
+  /// had them, or could not be changed.
+  Future<List<String>> addToAssets(String id, List<String> assetIds) async {
     final results = await _api.addPersonToAssets(id, BulkIdsDto(ids: assetIds)) ?? const <BulkIdResponseDto>[];
+    return [
+      for (final result in results)
+        if (result.success) result.id,
+    ];
+  }
+
+  /// Takes the person off [assetIds]. Returns the assets they were removed from, and the ones they stay on because
+  /// their face was found in the picture (those change in the face editor).
+  Future<({List<String> removed, List<String> kept})> removeFromAssets(String id, List<String> assetIds) async {
+    final results = await _api.removePersonFromAssets(id, BulkIdsDto(ids: assetIds)) ?? const <BulkIdResponseDto>[];
     return (
-      added: [
+      removed: [
         for (final result in results)
           if (result.success) result.id,
       ],
-      photos: [
+      kept: [
         for (final result in results)
           if (result.error.orElse(null) == BulkIdErrorReason.validation) result.id,
       ],
     );
+  }
+
+  /// For every person on any of [assetIds]: how many of them they are on, and on how many a removal takes them off
+  Future<Map<String, ({int count, int removable})>> getAssetCounts(List<String> assetIds) async {
+    final counts =
+        await _api.getPersonAssetCounts(PersonAssetCountsDto(assetIds: assetIds)) ??
+        const <PersonAssetCountResponseDto>[];
+    return {for (final count in counts) count.personId: (count: count.count, removable: count.removableCount)};
   }
 
   static Person _toPerson(PersonResponseDto dto) =>
