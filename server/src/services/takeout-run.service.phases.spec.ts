@@ -1222,6 +1222,43 @@ describe('TakeoutRunService phases (single-pass design 17.2.3)', () => {
     });
   });
 
+  it('counts no spare numbered JSON of an imported photo as JSON without media', async () => {
+    // family export: 'MVIMG_20190509_114254.jpg.supplemental-metadata(1).json' next to the JSON of the photo, which
+    // was imported with that JSON, and no 'MVIMG_20190509_114254(1).jpg'
+    const h = await harness();
+    const photo = 'Photos from 2019/MVIMG_20190509_114254.jpg';
+    await h.addPart(
+      'takeout-20260914T211500Z-1-001.tgz',
+      buildTarGz([
+        { name: media(photo), data: await greyJpeg(120) },
+        {
+          name: media(`${photo}.supplemental-metadata.json`),
+          data: googleJson('MVIMG_20190509_114254.jpg', 1_557_395_000),
+        },
+        {
+          name: media(`${photo}.supplemental-metadata(1).json`),
+          data: googleJson('MVIMG_20190509_114254.jpg', 1_557_395_000),
+        },
+      ]),
+    );
+
+    const run = h.newRun();
+    expect(await h.execute(run)).toBe(JobStatus.Success);
+    const analysis = h.repo.exports[0].analysis;
+    expect(analysis.jsonWithoutMedia).toEqual({ count: 0, sample: [] });
+    expect(analysis.reasons).not.toContain('orphan_json');
+    const rows = h.files(run.id);
+    expect(rows.find((r) => r.takeoutPath === media(photo))).toMatchObject({
+      action: TakeoutRunFileAction.Upload,
+      status: TakeoutRunFileStatus.Done,
+      jsonPath: media(`${photo}.supplemental-metadata.json`),
+    });
+    expect(rows.find((r) => r.takeoutPath === media(`${photo}.supplemental-metadata(1).json`))).toMatchObject({
+      action: 'assetJsonUnused',
+      reason: 'a spare numbered copy of the JSON that has its media file',
+    });
+  });
+
   it('marks a part missing at reading start, deletes its entries and plans without it', async () => {
     const h = await harness();
     await h.addPart(

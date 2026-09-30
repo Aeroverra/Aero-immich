@@ -82,6 +82,8 @@ export interface AssetJsonRecord {
   matched: number;
   /** claimed by no media file, but its media file is in the Takeout and left out on purpose (not an orphan) */
   skippedMedia: { catalogIndex: number; path: string; action: PlanAction } | null;
+  /** claimed by no media file, but a numbered spare of this JSON of its directory, which has its media (not an orphan) */
+  spareOf: string | null;
 }
 
 export interface TakeoutCatalog {
@@ -100,12 +102,13 @@ interface DirCatalog {
   matched: Map<string, CatalogAsset>;
 }
 
-// A media file the importer leaves out on purpose, for the JSONs no media file claimed: `skipped` is its action.
+// A non-JSON file of a directory, for the JSONs no media file claimed: `skipped` is the action of a media file the
+// importer leaves out on purpose, null for any other file.
 interface DirFile {
   catalogIndex: number;
   base: string;
   path: string;
-  skipped: PlanAction;
+  skipped: PlanAction | null;
 }
 
 // Media files left out on purpose. A read error (kind 'other') is not one of them: that JSON stays an orphan.
@@ -169,15 +172,32 @@ function makeAsset(entry: CatalogAsset, md: GoogleMetadata | null): CatalogAsset
   return entry;
 }
 
-// The JSONs of a directory that no media file claimed but that are no orphans either: the JSON of a media file the
-// importer leaves out on purpose ('Failed Videos/VID_x.mp4.supplemental-metadata.json' next to
-// 'Failed Videos/VID_x.mp4', 'x.jfif.supplemental-metadata.json' next to the unsupported 'x.jfif').
-function accountUnclaimedJsons(cat: DirCatalog, skipped: DirFile[]): void {
+// The JSONs of a directory that no media file claimed but that are no orphans either:
+// - the JSON of a media file the importer leaves out on purpose ('Failed Videos/VID_x.mp4.supplemental-metadata.json'
+//   next to 'Failed Videos/VID_x.mp4', 'x.jfif.supplemental-metadata.json' next to the unsupported 'x.jfif');
+// - a numbered spare 'X.jpg.supplemental-metadata(1).json' next to 'X.jpg.supplemental-metadata.json', when that JSON
+//   has its media and no file 'X(1).jpg' is there for the numbered one (Google writes such spares next to -edited
+//   copies). A file 'X(1).jpg' still takes 'X.jpg.supplemental-metadata(1).json' in the puzzle as before.
+function accountUnclaimedJsons(cat: DirCatalog, files: DirFile[]): void {
   const unclaimed = [...cat.jsons].filter(([, record]) => record.matched === 0);
+  const skipped = files.filter((file): file is DirFile & { skipped: PlanAction } => file.skipped !== null);
   for (const [jsonName, record] of unclaimed) {
     const media = skipped.find((file) => strictMatch(jsonName, file));
     if (media) {
       record.skippedMedia = { catalogIndex: media.catalogIndex, path: media.path, action: media.skipped };
+    }
+  }
+  for (const [jsonName, record] of unclaimed) {
+    const numbered = /^(.*)\(\d+\)(\.json)$/i.exec(jsonName);
+    if (record.skippedMedia !== null || !numbered) {
+      continue;
+    }
+    const sibling = cat.jsons.get(numbered[1] + numbered[2]);
+    if (!sibling || (sibling.matched === 0 && sibling.skippedMedia === null)) {
+      continue;
+    }
+    if (files.every((file) => !strictMatch(jsonName, file))) {
+      record.spareOf = sibling.path;
     }
   }
 }
@@ -212,15 +232,19 @@ export async function buildCatalog(
     return cat;
   };
 
-  const skippedFiles = new Map<string, DirFile[]>();
+  const dirFiles = new Map<string, DirFile[]>();
+  const addDirFile = (input: CatalogInput, index: number, skipped: PlanAction | null) => {
+    const nfcPath = nfc(input.path);
+    const dir = pathDir(nfcPath);
+    const list = dirFiles.get(dir) ?? [];
+    list.push({ catalogIndex: index, base: pathBase(nfcPath), path: input.path, skipped });
+    dirFiles.set(dir, list);
+  };
+
   let catalogIndex = 0;
   const pushNonAsset = (input: CatalogInput, action: PlanAction, fileKind: PlannedFileKind, index: number) => {
-    if (input.kind !== 'json' && SKIPPED_MEDIA_ACTIONS.has(action) && fileKind !== 'other') {
-      const nfcPath = nfc(input.path);
-      const dir = pathDir(nfcPath);
-      const list = skippedFiles.get(dir) ?? [];
-      list.push({ catalogIndex: index, base: pathBase(nfcPath), path: input.path, skipped: action });
-      skippedFiles.set(dir, list);
+    if (input.kind !== 'json') {
+      addDirFile(input, index, SKIPPED_MEDIA_ACTIONS.has(action) && fileKind !== 'other' ? action : null);
     }
     nonAssets.push({
       catalogIndex: index,
@@ -290,6 +314,7 @@ export async function buildCatalog(
           extra: googlePhotosExtra(md),
           matched: 0,
           skippedMedia: null,
+          spareOf: null,
         };
         getDir(dir).jsons.set(baseName, record);
         assetJsonRecords.push(record);
@@ -352,6 +377,7 @@ export async function buildCatalog(
       trackerKey: key,
     };
     cat.unMatched.set(baseName, asset);
+    addDirFile(item, index, null);
 
     if (++counter % 1000 === 0) {
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -429,10 +455,10 @@ export async function buildCatalog(
   }
 
   for (const dir of dirs) {
-    accountUnclaimedJsons(catalogs.get(dir)!, skippedFiles.get(dir) ?? []);
+    accountUnclaimedJsons(catalogs.get(dir)!, dirFiles.get(dir) ?? []);
   }
   for (const record of assetJsonRecords) {
-    if (record.matched === 0 && record.skippedMedia === null) {
+    if (record.matched === 0 && record.skippedMedia === null && record.spareOf === null) {
       summary.jsonWithoutMedia.push(record.path);
     }
   }

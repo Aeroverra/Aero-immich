@@ -31,6 +31,7 @@ const SKIPPED_MEDIA_REASON: Record<string, string> = {
   useless: 'its media file is in the Takeout but not imported (useless file)',
   banned: 'its media file is in the Takeout but not imported (banned name)',
 };
+const SPARE_JSON_REASON = 'a spare numbered copy of the JSON that has its media file';
 
 interface PlanItem extends GroupItem {
   catalogIndex: number;
@@ -89,10 +90,12 @@ export async function planImport(
     if (record.matched > 0) {
       continue;
     }
-    // unused but no orphan: its media file is left out on purpose (that row shows the JSON)
+    // unused but no orphan: its media file is left out on purpose (that row shows the JSON), or it is a spare copy
     if (record.skippedMedia !== null) {
       f.reason = SKIPPED_MEDIA_REASON[record.skippedMedia.action];
       files[record.skippedMedia.catalogIndex].jsonPath ??= record.path;
+    } else if (record.spareOf !== null) {
+      f.reason = SPARE_JSON_REASON;
     }
   }
 

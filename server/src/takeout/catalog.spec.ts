@@ -147,6 +147,67 @@ describe('JSONs that no media file claims', () => {
       ]),
     ).toEqual([`${dir}/MVIMG_20190509_114254.jpg.supplemental-metadata.json`]);
   });
+
+  it('does not count a numbered spare of a JSON that has its media as an orphan', async () => {
+    // family export: 'X.jpg.supplemental-metadata(1).json' next to the JSON of 'X.jpg', and no 'X(1).jpg'
+    const dir = 'Takeout/Google Photos/Photos from 2019';
+    const received = 'received_394369767875204';
+    const inputs = [
+      media(`${dir}/MVIMG_20190509_114254.jpg`),
+      json(`${dir}/MVIMG_20190509_114254.jpg.supplemental-metadata.json`, 'MVIMG_20190509_114254.jpg'),
+      json(`${dir}/MVIMG_20190509_114254.jpg.supplemental-metadata(1).json`, 'MVIMG_20190509_114254.jpg'),
+      // Google's cut names, next to an edited copy (retro-fix listing of the family Takeouts)
+      media(`${dir}/${received}.jpeg`),
+      media(`${dir}/${received}-edited.jpeg`),
+      json(`${dir}/${received}.jpeg.supplemental-met.json`, `${received}.jpeg`),
+      json(`${dir}/${received}.jpeg.supplemental-met(1).json`, `${received}.jpeg`),
+    ];
+    expect(await orphans(inputs)).toEqual([]);
+
+    const plan = await planImport(await buildCatalog(inputs), DEFAULT_TAKEOUT_SETTINGS, {
+      rotationProbe: () => Promise.resolve(0),
+    });
+    const spare = 'a spare numbered copy of the JSON that has its media file';
+    expect(
+      plan.files.filter((f) => f.action === 'assetJsonUnused').map((f) => [f.takeoutPath.split('/').pop(), f.reason]),
+    ).toEqual([
+      ['MVIMG_20190509_114254.jpg.supplemental-metadata(1).json', spare],
+      [`${received}.jpeg.supplemental-met(1).json`, spare],
+    ]);
+  });
+
+  it('still gives X(1).jpg its numbered JSON, and counts a numbered JSON without a sibling or with a file as an orphan', async () => {
+    const dir = 'd';
+    const catalog = await buildCatalog([
+      media(`${dir}/IMG_1.jpg`),
+      media(`${dir}/IMG_1(1).jpg`),
+      json(`${dir}/IMG_1.jpg.supplemental-metadata.json`, 'IMG_1.jpg'),
+      json(`${dir}/IMG_1.jpg.supplemental-metadata(1).json`, 'IMG_1.jpg'),
+      // no unnumbered sibling
+      json(`${dir}/IMG_2.jpg.supplemental-metadata(1).json`, 'IMG_2.jpg'),
+      // 'IMG_3(1).jpg' is there but its old-style JSON claims it first: the numbered JSON is no spare
+      media(`${dir}/IMG_3.jpg`),
+      media(`${dir}/IMG_3(1).jpg`),
+      json(`${dir}/IMG_3(1).jpg.json`, 'IMG_3(1).jpg'),
+      json(`${dir}/IMG_3.jpg.supplemental-metadata.json`, 'IMG_3.jpg'),
+      json(`${dir}/IMG_3.jpg.supplemental-metadata(1).json`, 'IMG_3.jpg'),
+      // the unnumbered sibling is an orphan itself
+      json(`${dir}/IMG_4.jpg.supplemental-metadata.json`, 'IMG_4.jpg'),
+      json(`${dir}/IMG_4.jpg.supplemental-metadata(1).json`, 'IMG_4.jpg'),
+    ]);
+    const assets = new Map(catalog.assetsByDir.get(dir)!.map((asset) => [asset.base, asset]));
+    expect(assets.get('IMG_1(1).jpg')).toMatchObject({
+      jsonPath: `${dir}/IMG_1.jpg.supplemental-metadata(1).json`,
+      matcher: 'normal',
+    });
+    expect(assets.get('IMG_1.jpg')?.jsonPath).toBe(`${dir}/IMG_1.jpg.supplemental-metadata.json`);
+    expect(catalog.summary.jsonWithoutMedia).toEqual([
+      `${dir}/IMG_2.jpg.supplemental-metadata(1).json`,
+      `${dir}/IMG_3.jpg.supplemental-metadata(1).json`,
+      `${dir}/IMG_4.jpg.supplemental-metadata.json`,
+      `${dir}/IMG_4.jpg.supplemental-metadata(1).json`,
+    ]);
+  });
 });
 
 // Spec 6.1 #11: compact JSON keeps every field the parsers read.
