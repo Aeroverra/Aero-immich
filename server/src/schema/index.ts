@@ -123,6 +123,7 @@ import {
 import { ViewAuditTable } from 'src/schema/tables/view-audit.table';
 import { ViewTagAuditTable } from 'src/schema/tables/view-tag-audit.table';
 import { ViewTagTable } from 'src/schema/tables/view-tag.table';
+import { VideoBookmarkTable } from 'src/schema/tables/video-bookmark.table';
 import { ViewTable } from 'src/schema/tables/view.table';
 import { WorkflowLogTable } from 'src/schema/tables/workflow-log.table';
 import { WorkflowStepTable } from 'src/schema/tables/workflow-step.table';
@@ -208,6 +209,7 @@ export class ImmichDatabase {
     VideoStreamSessionTable,
     VideoStreamVariantTable,
     VideoStreamSegmentTable,
+    VideoBookmarkTable,
     ViewTable,
     ViewAuditTable,
     ViewTagTable,
@@ -373,6 +375,7 @@ export interface DB {
   video_stream_variant: VideoStreamVariantTable;
   video_stream_segment: VideoStreamSegmentTable;
 
+  video_bookmark: VideoBookmarkTable;
   view: ViewTable;
   view_audit: ViewAuditTable;
   view_tag: ViewTagTable;
