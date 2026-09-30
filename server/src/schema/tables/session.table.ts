@@ -10,6 +10,7 @@ import {
 } from '@immich/sql-tools';
 import { UpdatedAtTrigger, UpdateIdColumn } from 'src/decorators';
 import { UserTable } from 'src/schema/tables/user.table';
+import { ViewTable } from 'src/schema/tables/view.table';
 
 @Table({ name: 'session' })
 @UpdatedAtTrigger('session_updatedAt')
@@ -55,6 +56,14 @@ export class SessionTable {
 
   @Column({ type: 'timestamp with time zone', nullable: true })
   privateModeExpiresAt!: Timestamp | null;
+
+  /** the view the session switched to; null means the owner's default view */
+  @ForeignKeyColumn(() => ViewTable, { onUpdate: 'CASCADE', onDelete: 'SET NULL', nullable: true })
+  viewId!: string | null;
+
+  /** a switched view falls back to the default after the private mode timeout, like private mode itself */
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  viewExpiresAt!: Timestamp | null;
 
   @Column({ nullable: true, index: true })
   oauthSid!: string | null;

@@ -6,6 +6,8 @@ select
   "expiresAt",
   "pinExpiresAt",
   "privateModeExpiresAt",
+  "viewId",
+  "viewExpiresAt",
   "oauthBearerToken"
 from
   "session"
@@ -26,6 +28,8 @@ select
   "session"."updatedAt",
   "session"."pinExpiresAt",
   "session"."privateModeExpiresAt",
+  "session"."viewId",
+  "session"."viewExpiresAt",
   "session"."appVersion",
   (
     select
@@ -45,14 +49,100 @@ select
           "user"."id" = "session"."userId"
           and "user"."deletedAt" is null
       ) as obj
-  ) as "user"
+  ) as "user",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "view"."id",
+          "view"."ownerId",
+          "view"."access",
+          "view"."includeAll",
+          "view"."includeUntagged",
+          "view"."privateAssets",
+          coalesce(
+            (
+              select
+                array_agg("view_tag"."tagId") as "ids"
+              from
+                "view_tag"
+              where
+                "view_tag"."viewId" = "view"."id"
+                and "view_tag"."mode" = 'include'
+            ),
+            '{}'
+          ) as "includeTagIds",
+          coalesce(
+            (
+              select
+                array_agg("view_tag"."tagId") as "ids"
+              from
+                "view_tag"
+              where
+                "view_tag"."viewId" = "view"."id"
+                and "view_tag"."mode" = 'exclude'
+            ),
+            '{}'
+          ) as "excludeTagIds"
+        from
+          "view"
+        where
+          "view"."id" = "session"."viewId"
+          and "view"."ownerId" = "session"."userId"
+      ) as obj
+  ) as "view",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "view"."id",
+          "view"."ownerId",
+          "view"."access",
+          "view"."includeAll",
+          "view"."includeUntagged",
+          "view"."privateAssets",
+          coalesce(
+            (
+              select
+                array_agg("view_tag"."tagId") as "ids"
+              from
+                "view_tag"
+              where
+                "view_tag"."viewId" = "view"."id"
+                and "view_tag"."mode" = 'include'
+            ),
+            '{}'
+          ) as "includeTagIds",
+          coalesce(
+            (
+              select
+                array_agg("view_tag"."tagId") as "ids"
+              from
+                "view_tag"
+              where
+                "view_tag"."viewId" = "view"."id"
+                and "view_tag"."mode" = 'exclude'
+            ),
+            '{}'
+          ) as "excludeTagIds"
+        from
+          "view"
+        where
+          "view"."ownerId" = "session"."userId"
+          and "view"."isDefault" = $1
+      ) as obj
+  ) as "defaultView"
 from
   "session"
 where
-  "session"."token" = $1
+  "session"."token" = $2
   and (
     "session"."expiresAt" is null
-    or "session"."expiresAt" > $2
+    or "session"."expiresAt" > $3
   )
 
 -- SessionRepository.getByUserId
@@ -87,9 +177,11 @@ where
 update "session"
 set
   "pinExpiresAt" = $1,
-  "privateModeExpiresAt" = $2
+  "privateModeExpiresAt" = $2,
+  "viewId" = $3,
+  "viewExpiresAt" = $4
 where
-  "userId" = $3
+  "userId" = $5
 
 -- SessionRepository.resetSyncProgress
 begin

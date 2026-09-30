@@ -3,7 +3,7 @@
   import { SettingInputFieldType } from '$lib/constants';
   import { handleUpdateTag } from '$lib/services/tag.service';
   import type { TreeNode } from '$lib/utils/tree-utils';
-  import { FormModal, Text } from '@immich/ui';
+  import { Field, FormModal, Switch, Text } from '@immich/ui';
   import { mdiTag } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
@@ -16,11 +16,12 @@
 
   let tagColor = $state(tag.color ?? '');
   let tagName = $state(tag.value ?? '');
+  let isHidden = $state(tag.isHidden ?? false);
   let tagPath = $state(tag.path ?? '');
   const tagPathDisplay = $state(tagPath.endsWith(tagName) ? tagPath.slice(0, -tagName.length) : tagPath);
 
   const onSubmit = async () => {
-    const success = await handleUpdateTag(tag, { color: tagColor || null, name: tagName });
+    const success = await handleUpdateTag(tag, { color: tagColor || null, name: tagName, isHidden });
     if (success) {
       onClose();
     }
@@ -33,4 +34,7 @@
   {#if tagPathDisplay !== ''}
     <Text size="small">{$t('tag_full_path', { values: { tag: tagPathDisplay } })}{tagName}</Text>
   {/if}
+  <Field label={$t('tag_hidden')} description={$t('tag_hidden_description')} class="mt-4">
+    <Switch bind:checked={isHidden} data-testid="tag-hidden" />
+  </Field>
 </FormModal>

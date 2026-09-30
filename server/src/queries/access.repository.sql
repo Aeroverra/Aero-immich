@@ -304,6 +304,15 @@ from
 where
   "tag"."id" in ($1)
   and "tag"."userId" = $2
+  and not exists (
+    select
+    from
+      "tag_closure"
+      inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+    where
+      "tag_closure"."id_descendant" = "tag"."id"
+      and "hidden_tag"."isHidden" = $3
+  )
 
 -- AccessRepository.timeline.checkPartnerAccess
 select
@@ -313,6 +322,15 @@ from
 where
   "partner"."sharedById" in ($1)
   and "partner"."sharedWithId" = $2
+
+-- AccessRepository.view.checkOwnerAccess
+select
+  "view"."id"
+from
+  "view"
+where
+  "view"."id" in ($1)
+  and "view"."ownerId" = $2
 
 -- AccessRepository.workflow.checkOwnerAccess
 select
