@@ -14,6 +14,8 @@ export enum AssetAction {
   SET_VISIBILITY_TIMELINE = 'set-visibility-timeline',
   SET_PERSON_FEATURED_PHOTO = 'set-person-featured-photo',
   RATING = 'rating',
+  SET_PRIVATE = 'set-private',
+  UNSET_PRIVATE = 'unset-private',
 }
 
 export type SharedLinkTab = 'all' | 'album' | 'individual';

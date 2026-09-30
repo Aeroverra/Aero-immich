@@ -2,6 +2,8 @@ import { Kysely } from 'kysely';
 import { randomBytes } from 'node:crypto';
 import { SharedLinkType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
+import { AlbumRepository } from 'src/repositories/album.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { SharedLinkAssetRepository } from 'src/repositories/shared-link-asset.repository';
@@ -18,7 +20,14 @@ let defaultDatabase: Kysely<DB>;
 const setup = (db?: Kysely<DB>) => {
   return newMediumService(SharedLinkService, {
     database: db || defaultDatabase,
-    real: [AccessRepository, DatabaseRepository, SharedLinkRepository, SharedLinkAssetRepository],
+    real: [
+      AccessRepository,
+      AlbumRepository,
+      CryptoRepository,
+      DatabaseRepository,
+      SharedLinkRepository,
+      SharedLinkAssetRepository,
+    ],
     mock: [LoggingRepository, StorageRepository],
   });
 };
@@ -623,5 +632,51 @@ describe(SharedLinkService.name, () => {
     });
 
     await expect(sut.getMine({ user, sharedLink }, [])).resolves.toHaveProperty('assets', []);
+  });
+
+  describe('private mode', () => {
+    it('should require confirmPrivate when an album link would expose private assets', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user, session: { privateMode: true } });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+      const { album } = await ctx.newAlbum({ ownerId: user.id }, [hidden.id]);
+
+      await expect(sut.create(auth, { type: SharedLinkType.Album, albumId: album.id })).rejects.toThrow(
+        'Shared link would expose private assets, confirmPrivate is required',
+      );
+
+      const link = await sut.create(auth, { type: SharedLinkType.Album, albumId: album.id, confirmPrivate: true });
+      // the link shows everything the owner put behind it, private assets included
+      await expect(sut.get(auth, link.id)).resolves.toMatchObject({
+        album: expect.objectContaining({ id: album.id, assetCount: 1 }),
+      });
+    });
+
+    it('should require confirmPrivate when an individual link would expose private assets', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user, session: { privateMode: true } });
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.newExif({ assetId: plain.id, make: 'Canon' });
+      await ctx.newExif({ assetId: hidden.id, make: 'Canon' });
+
+      await expect(
+        sut.create(auth, { type: SharedLinkType.Individual, assetIds: [plain.id, hidden.id] }),
+      ).rejects.toThrow('Shared link would expose private assets, confirmPrivate is required');
+      await expect(sut.create(auth, { type: SharedLinkType.Individual, assetIds: [plain.id] })).resolves.toMatchObject({
+        type: SharedLinkType.Individual,
+      });
+
+      const link = await sut.create(auth, {
+        type: SharedLinkType.Individual,
+        assetIds: [plain.id, hidden.id],
+        confirmPrivate: true,
+      });
+      const result = await sut.get(auth, link.id);
+      expect(result.assets.map(({ id }) => id).sort()).toEqual([plain.id, hidden.id].sort());
+    });
   });
 });
