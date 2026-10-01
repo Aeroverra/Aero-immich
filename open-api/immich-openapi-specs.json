@@ -16860,6 +16860,81 @@
         "x-immich-state": "Stable"
       }
     },
+    "/users/me/deleted-checksums": {
+      "delete": {
+        "description": "Forget every remembered permanently deleted file of the current user, so uploads of those files are stored like any other file again.",
+        "operationId": "deleteMyDeletedChecksums",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Forget my deleted checksums",
+        "tags": [
+          "Users"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "deletedChecksum.delete"
+      }
+    },
+    "/users/me/deleted-checksums/statistics": {
+      "get": {
+        "description": "Retrieve how many permanently deleted files are remembered for the current user.",
+        "operationId": "getMyDeletedChecksumStatistics",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedChecksumStatisticsResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get my deleted checksum statistics",
+        "tags": [
+          "Users"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "deletedChecksum.read"
+      }
+    },
     "/users/me/license": {
       "delete": {
         "description": "Delete the registered product key for the current user.",
@@ -22048,6 +22123,56 @@
         },
         "type": "object"
       },
+      "DeletedChecksumStatisticsResponseDto": {
+        "properties": {
+          "count": {
+            "description": "Number of remembered checksums of permanently deleted files",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "type": "object"
+      },
+      "DeletedReimportMode": {
+        "description": "How an upload of a previously deleted file is handled",
+        "enum": [
+          "trash",
+          "skip",
+          "album"
+        ],
+        "type": "string"
+      },
+      "DeletedReimportResponse": {
+        "properties": {
+          "albumId": {
+            "description": "The \"Previously deleted\" album re-uploads are added to in album mode, once it exists",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DeletedReimportMode"
+          }
+        },
+        "required": [
+          "albumId",
+          "mode"
+        ],
+        "type": "object"
+      },
+      "DeletedReimportUpdate": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/DeletedReimportMode"
+          }
+        },
+        "type": "object"
+      },
       "DownloadArchiveDto": {
         "properties": {
           "archiveName": {
@@ -22757,6 +22882,7 @@
           "NotifyUserSignup",
           "NotifyAlbumInvite",
           "NotifyAlbumUpdate",
+          "NotifyDeletedReimport",
           "UserDelete",
           "UserDeleteCheck",
           "UserSyncUsage",
@@ -25070,6 +25196,8 @@
           "adminConfig.read",
           "adminConfig.update",
           "userConfig.read",
+          "deletedChecksum.read",
+          "deletedChecksum.delete",
           "duplicate.read",
           "duplicate.delete",
           "face.create",
@@ -33054,6 +33182,9 @@
           "cast": {
             "$ref": "#/components/schemas/CastResponse"
           },
+          "deletedReimport": {
+            "$ref": "#/components/schemas/DeletedReimportResponse"
+          },
           "download": {
             "$ref": "#/components/schemas/DownloadResponse"
           },
@@ -33091,6 +33222,7 @@
         "required": [
           "albums",
           "cast",
+          "deletedReimport",
           "download",
           "emailNotifications",
           "folders",
@@ -33115,6 +33247,9 @@
           },
           "cast": {
             "$ref": "#/components/schemas/CastUpdate"
+          },
+          "deletedReimport": {
+            "$ref": "#/components/schemas/DeletedReimportUpdate"
           },
           "download": {
             "$ref": "#/components/schemas/DownloadUpdate"
