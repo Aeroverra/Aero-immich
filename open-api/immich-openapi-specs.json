@@ -11812,6 +11812,81 @@
             }
           },
           {
+            "name": "hasNamedFaces",
+            "required": false,
+            "in": "query",
+            "description": "Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "hasPeople",
+            "required": false,
+            "in": "query",
+            "description": "Filter assets with (true) or without (false) any visible face",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "hasUnnamedFaces",
+            "required": false,
+            "in": "query",
+            "description": "Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "isEncoded",
             "required": false,
             "in": "query",
@@ -12155,6 +12230,31 @@
             "deprecated": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "onlyPersonIds",
+            "required": false,
+            "in": "query",
+            "description": "With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -26701,6 +26801,66 @@
               }
             ]
           },
+          "hasNamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasPeople": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) any visible face",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasUnnamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "id": {
             "deprecated": true,
             "description": "Filter by asset ID",
@@ -26977,6 +27137,26 @@
             "deprecated": true,
             "description": "Filter by OCR text content",
             "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "onlyPersonIds": {
+            "deprecated": true,
+            "description": "With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too",
+            "type": "boolean",
             "x-immich-history": [
               {
                 "version": "v1",
@@ -29429,6 +29609,66 @@
               }
             ]
           },
+          "hasNamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasPeople": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) any visible face",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasUnnamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "isEncoded": {
             "deprecated": true,
             "description": "Filter by encoded status",
@@ -29683,6 +29923,26 @@
             "deprecated": true,
             "description": "Filter by OCR text content",
             "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "onlyPersonIds": {
+            "deprecated": true,
+            "description": "With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too",
+            "type": "boolean",
             "x-immich-history": [
               {
                 "version": "v1",
@@ -31811,6 +32071,66 @@
               }
             ]
           },
+          "hasNamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasPeople": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) any visible face",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasUnnamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "isEncoded": {
             "deprecated": true,
             "description": "Filter by encoded status",
@@ -32069,6 +32389,26 @@
             "deprecated": true,
             "description": "Filter by OCR text content",
             "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "onlyPersonIds": {
+            "deprecated": true,
+            "description": "With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too",
+            "type": "boolean",
             "x-immich-history": [
               {
                 "version": "v1",
@@ -32800,6 +33140,66 @@
               }
             ]
           },
+          "hasNamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face of a person with a name, whether or not other faces were found",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasPeople": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) any visible face",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "hasUnnamedFaces": {
+            "deprecated": true,
+            "description": "Filter assets with (true) or without (false) a visible face that has no person or whose person has no name and is not hidden",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "isEncoded": {
             "deprecated": true,
             "description": "Filter by encoded status",
@@ -33054,6 +33454,26 @@
             "deprecated": true,
             "description": "Filter by OCR text content",
             "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "onlyPersonIds": {
+            "deprecated": true,
+            "description": "With personIds: true leaves out assets that show anyone else (faces without a person included), false keeps only assets that show someone else too",
+            "type": "boolean",
             "x-immich-history": [
               {
                 "version": "v1",

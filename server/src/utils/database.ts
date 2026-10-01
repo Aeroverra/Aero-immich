@@ -515,6 +515,62 @@ export function hasPeople<O>(qb: SelectQueryBuilder<DB, 'asset', O>, personGroup
   );
 }
 
+const visibleAssetFaces = (eb: ExpressionBuilder<DB, 'asset'>) =>
+  eb
+    .selectFrom('asset_face')
+    .whereRef('asset_face.assetId', '=', 'asset.id')
+    .where('asset_face.deletedAt', 'is', null)
+    .where('asset_face.isVisible', 'is', true);
+
+/**
+ * Keeps the assets where [personGroupIds] are the only ones (only = true), or where someone else is
+ * there too (only = false). Faces without a person count as someone else.
+ */
+export function withOnlyPeople<O>(qb: SelectQueryBuilder<DB, 'asset', O>, personGroupIds: string[], only: boolean) {
+  return qb.where((eb) => {
+    const someoneElse = eb.exists(
+      visibleAssetFaces(eb).where((eb) =>
+        eb.or([
+          eb('asset_face.personGroupId', 'is', null),
+          eb.not(eb('asset_face.personGroupId', '=', anyUuid(personGroupIds))),
+        ]),
+      ),
+    );
+    return only ? eb.not(someoneElse) : someoneElse;
+  });
+}
+
+/** The searching user's version of a face's person (else the asset owner's), like the faces the search returns */
+const faceOwnPerson = (eb: ExpressionBuilder<DB, 'asset' | 'asset_face'>, viewingUserId?: string) =>
+  eb
+    .selectFrom('person')
+    .whereRef('person.personGroupId', '=', 'asset_face.personGroupId')
+    .$if(!viewingUserId, (qb) => qb.whereRef('person.ownerId', '=', 'asset.ownerId'))
+    .$if(!!viewingUserId, (qb) => qb.where('person.ownerId', '=', asUuid(viewingUserId!)));
+
+/** Visible faces of a person with a name */
+function namedFaces(eb: ExpressionBuilder<DB, 'asset'>, viewingUserId?: string) {
+  return visibleAssetFaces(eb).where((eb) =>
+    eb.exists(faceOwnPerson(eb, viewingUserId).where('person.name', '!=', '')),
+  );
+}
+
+/**
+ * Visible faces nobody has put a name to: no person, or a person without a name. A hidden person
+ * was set aside on purpose, so its faces do not count.
+ */
+function unnamedFaces(eb: ExpressionBuilder<DB, 'asset'>, viewingUserId?: string) {
+  return visibleAssetFaces(eb).where((eb) =>
+    eb.not(
+      eb.exists(
+        faceOwnPerson(eb, viewingUserId).where((eb) =>
+          eb.or([eb('person.name', '!=', ''), eb('person.isHidden', '=', true)]),
+        ),
+      ),
+    ),
+  );
+}
+
 export function inSharedAlbum(eb: ExpressionBuilder<DB, 'asset'>, userId: string) {
   return eb.exists(
     eb
@@ -739,6 +795,27 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
       )
       .$if(!!options.excludeTagIds && options.excludeTagIds.length > 0, (qb) => withoutTags(qb, options.excludeTagIds!))
       .$if(!!options.personIds && options.personIds.length > 0, (qb) => hasPeople(qb, options.personIds!))
+      .$if(options.onlyPersonIds !== undefined && !!options.personIds && options.personIds.length > 0, (qb) =>
+        withOnlyPeople(qb, options.personIds!, options.onlyPersonIds!),
+      )
+      .$if(options.hasPeople !== undefined, (qb) =>
+        qb.where((eb) => {
+          const exists = eb.exists(visibleAssetFaces(eb));
+          return options.hasPeople ? exists : eb.not(exists);
+        }),
+      )
+      .$if(options.hasNamedFaces !== undefined, (qb) =>
+        qb.where((eb) => {
+          const exists = eb.exists(namedFaces(eb, options.viewingUserId));
+          return options.hasNamedFaces ? exists : eb.not(exists);
+        }),
+      )
+      .$if(options.hasUnnamedFaces !== undefined, (qb) =>
+        qb.where((eb) => {
+          const exists = eb.exists(unnamedFaces(eb, options.viewingUserId));
+          return options.hasUnnamedFaces ? exists : eb.not(exists);
+        }),
+      )
       .$if(!!options.createdBefore, (qb) => qb.where('asset.createdAt', '<=', options.createdBefore!))
       .$if(!!options.createdAfter, (qb) => qb.where('asset.createdAt', '>=', options.createdAfter!))
       .$if(!!options.uploadedBefore, (qb) =>
