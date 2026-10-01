@@ -1,6 +1,6 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
-import { AssetVisibility, SharedLinkType } from 'src/enum';
+import { AssetVisibility, SharedLinkType, StackSource } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -32,6 +32,21 @@ const newBucketAssets = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: st
   await ctx.newExif({ assetId: publicAsset.id, make: 'Canon' });
   await ctx.newExif({ assetId: privateAsset.id, make: 'Canon' });
   return { publicAsset, privateAsset };
+};
+
+const newStackedAssets = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string) => {
+  const assets = [];
+  for (let day = 1; day <= 5; day++) {
+    const { asset } = await ctx.newAsset({ ownerId, localDateTime: new Date(`1970-02-0${day}`) });
+    await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+    assets.push(asset);
+  }
+
+  const [manualPrimary, manualChild, autoPrimary, autoChild, single] = assets;
+  const { stack: manual } = await ctx.newStack({ ownerId }, [manualPrimary.id, manualChild.id]);
+  const { stack: auto } = await ctx.newStack({ ownerId, source: StackSource.Auto }, [autoPrimary.id, autoChild.id]);
+
+  return { manual, auto, manualPrimary, manualChild, autoPrimary, autoChild, single };
 };
 
 beforeAll(async () => {
@@ -433,6 +448,54 @@ describe(TimelineService.name, () => {
         albumId: album.id,
       });
       expect(buckets.reduce((sum, { count }) => sum + count, 0)).toBe(2);
+    });
+  });
+
+  describe('automatic stacks', () => {
+    it('should collapse manual and automatic stacks by default', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { manual, auto, manualPrimary, autoPrimary, single } = await newStackedAssets(ctx, user.id);
+      const auth = factory.auth({ user });
+
+      await expect(sut.getTimeBuckets(auth, { withStacked: true })).resolves.toEqual([
+        { count: 3, timeBucket: '1970-02-01' },
+      ]);
+
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01', withStacked: true }));
+      expect(response.id).toEqual([single.id, autoPrimary.id, manualPrimary.id]);
+      expect(response.stack).toEqual([null, [auto.id, '2'], [manual.id, '2']]);
+    });
+
+    it('should list the assets of automatic stacks individually when withAutoStacked is false', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { manual, manualPrimary, autoPrimary, autoChild, single } = await newStackedAssets(ctx, user.id);
+      const auth = factory.auth({ user });
+
+      await expect(sut.getTimeBuckets(auth, { withStacked: true, withAutoStacked: false })).resolves.toEqual([
+        { count: 4, timeBucket: '1970-02-01' },
+      ]);
+
+      const response = JSON.parse(
+        await sut.getTimeBucket(auth, { timeBucket: '1970-02-01', withStacked: true, withAutoStacked: false }),
+      );
+      expect(response.id).toEqual([single.id, autoChild.id, autoPrimary.id, manualPrimary.id]);
+      expect(response.stack).toEqual([null, null, null, [manual.id, '2']]);
+    });
+
+    it('should ignore withAutoStacked without withStacked', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await newStackedAssets(ctx, user.id);
+      const auth = factory.auth({ user });
+
+      await expect(sut.getTimeBuckets(auth, { withAutoStacked: false })).resolves.toEqual([
+        { count: 5, timeBucket: '1970-02-01' },
+      ]);
+      const response = JSON.parse(await sut.getTimeBucket(auth, { timeBucket: '1970-02-01', withAutoStacked: false }));
+      expect(response.id).toHaveLength(5);
+      expect(response).not.toHaveProperty('stack');
     });
   });
 });
