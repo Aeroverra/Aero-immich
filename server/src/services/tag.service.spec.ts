@@ -4,6 +4,7 @@ import { JobStatus } from 'src/enum';
 import { TagService } from 'src/services/tag.service';
 import { authStub } from 'test/fixtures/auth.stub';
 import { tagResponseStub, tagStub } from 'test/fixtures/tag.stub';
+import { newUuidV7 } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
 describe(TagService.name, () => {
@@ -24,7 +25,7 @@ describe(TagService.name, () => {
     it('should return all tags for a user', async () => {
       mocks.tag.getAll.mockResolvedValue([tagStub.tag]);
       await expect(sut.getAll(authStub.admin)).resolves.toEqual([tagResponseStub.tag1]);
-      expect(mocks.tag.getAll).toHaveBeenCalledWith(authStub.admin.user.id);
+      expect(mocks.tag.getAll).toHaveBeenCalledWith(authStub.admin.user.id, { withHidden: false });
     });
   });
 
@@ -204,12 +205,12 @@ describe(TagService.name, () => {
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1', 'asset-2', 'asset-3']));
       mocks.asset.getForUpdateTags.mockResolvedValue({ tags: [{ value: 'tag-1' }, { value: 'tag-2' }] });
       mocks.tag.upsertAssetIds.mockResolvedValue([
-        { tagId: 'tag-1', assetId: 'asset-1' },
-        { tagId: 'tag-1', assetId: 'asset-2' },
-        { tagId: 'tag-1', assetId: 'asset-3' },
-        { tagId: 'tag-2', assetId: 'asset-1' },
-        { tagId: 'tag-2', assetId: 'asset-2' },
-        { tagId: 'tag-2', assetId: 'asset-3' },
+        { tagId: 'tag-1', assetId: 'asset-1', updateId: newUuidV7() },
+        { tagId: 'tag-1', assetId: 'asset-2', updateId: newUuidV7() },
+        { tagId: 'tag-1', assetId: 'asset-3', updateId: newUuidV7() },
+        { tagId: 'tag-2', assetId: 'asset-1', updateId: newUuidV7() },
+        { tagId: 'tag-2', assetId: 'asset-2', updateId: newUuidV7() },
+        { tagId: 'tag-2', assetId: 'asset-3', updateId: newUuidV7() },
       ]);
       await expect(
         sut.bulkTagAssets(authStub.admin, { tagIds: ['tag-1', 'tag-2'], assetIds: ['asset-1', 'asset-2', 'asset-3'] }),
