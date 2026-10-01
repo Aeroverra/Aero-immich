@@ -174,17 +174,17 @@ class _TagActionsSheetState extends ConsumerState<TagActionsSheet> {
 
   Future<void> _rename() async {
     final t = context.t;
-    final name = await showDialog<String>(
+    final path = await showDialog<String>(
       context: context,
-      builder: (_) => _RenameTagDialog(name: _tag.name),
+      builder: (_) => _RenameTagDialog(tag: _tag),
     );
-    if (name == null || name == _tag.name || !mounted) {
+    if (path == null || path == _tag.value || !mounted) {
       return;
     }
 
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final renamed = await _run(() => ref.read(taggingServiceProvider).renameTag(_tag, name));
+      final renamed = await _run(() => ref.read(taggingServiceProvider).updateTagPath(_tag, path));
       if (renamed != null && mounted) {
         setState(() => _tag = renamed);
         _snack(messenger, t.tag_renamed(tag: renamed.value));
@@ -318,17 +318,18 @@ class _TagActionsSheetState extends ConsumerState<TagActionsSheet> {
   }
 }
 
+/// Edits the full path of the tag, so it renames by changing the last part and moves by typing another parent
 class _RenameTagDialog extends StatefulWidget {
-  final String name;
+  final TagEntry tag;
 
-  const _RenameTagDialog({required this.name});
+  const _RenameTagDialog({required this.tag});
 
   @override
   State<_RenameTagDialog> createState() => _RenameTagDialogState();
 }
 
 class _RenameTagDialogState extends State<_RenameTagDialog> {
-  late final _controller = TextEditingController(text: widget.name);
+  late final _controller = TextEditingController(text: widget.tag.value);
   String? _error;
 
   @override
@@ -338,12 +339,16 @@ class _RenameTagDialogState extends State<_RenameTagDialog> {
   }
 
   void _submit() {
-    final name = _controller.text.trim();
-    if (name.isEmpty || name.contains('/')) {
-      setState(() => _error = context.t.tag_name_invalid);
+    final parts = parseTagPath(_controller.text);
+    if (parts.isEmpty) {
+      setState(() => _error = context.t.errors.tag_name_required);
       return;
     }
-    Navigator.of(context).pop(name);
+    if (isInTagSubtree(widget.tag, parts.sublist(0, parts.length - 1).join('/'))) {
+      setState(() => _error = context.t.errors.tag_move_into_itself);
+      return;
+    }
+    Navigator.of(context).pop(parts.join('/'));
   }
 
   @override
@@ -354,7 +359,13 @@ class _RenameTagDialogState extends State<_RenameTagDialog> {
         key: const Key('tag-rename-field'),
         controller: _controller,
         autofocus: true,
-        decoration: InputDecoration(errorText: _error),
+        decoration: InputDecoration(
+          labelText: context.t.tag_path,
+          helperText: context.t.tag_path_description,
+          helperMaxLines: 3,
+          errorText: _error,
+          errorMaxLines: 2,
+        ),
         onSubmitted: (_) => _submit(),
       ),
       actions: [
