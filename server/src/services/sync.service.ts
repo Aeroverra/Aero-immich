@@ -180,7 +180,7 @@ export class SyncService extends BaseService {
     }
 
     const { nowId } = await this.syncCheckpointRepository.getNow();
-    const options: SyncQueryOptions = { nowId, userId: auth.user.id };
+    const options: SyncQueryOptions = { nowId, userId: auth.user.id, includePrivate: dto.includePrivate ?? false };
 
     const handlers: Record<SyncRequestType, () => Promise<void>> = {
       // deprecated handlers
@@ -321,8 +321,39 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AssetV2;
     const upserts = this.syncRepository.asset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, data)) {
+        await this.withholdPrivate(response, { type: deleteType, data: { assetId: data.id } }, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data) });
     }
+  }
+
+  /** true when the stream should not carry this row because it is private and the client did not opt in */
+  private isWithheldPrivate(options: SyncQueryOptions, row: { isPrivate: boolean }) {
+    return !options.includePrivate && row.isPrivate;
+  }
+
+  /**
+   * Move the checkpoint of an upsert stream past a row that was withheld from the client, so it is not scanned again
+   * on the next sync. Nothing is deleted: the client never held the row, or drops it through a cascade.
+   */
+  private skipPrivate(response: Writable, upsertType: SyncEntityType, updateId: string) {
+    return send(response, { type: SyncEntityType.SyncAckV1, data: {}, ackType: upsertType, ids: [updateId] });
+  }
+
+  /**
+   * Replace a withheld private row with a delete (so a client that already holds the row drops it) and move the
+   * upsert checkpoint past the row. The delete carries the row's updateId, which is time-ordered like the audit ids.
+   */
+  private async withholdPrivate<T extends keyof SyncItem>(
+    response: Writable,
+    deletion: { type: T; data: SyncItem[T] },
+    upsertType: SyncEntityType,
+    updateId: string,
+  ) {
+    await send(response, { type: deletion.type, ids: [updateId], data: deletion.data });
+    await this.skipPrivate(response, upsertType, updateId);
   }
 
   private syncPartnerAssetsV1(): Promise<void> {
@@ -386,6 +417,10 @@ export class SyncService extends BaseService {
 
     const upserts = this.syncRepository.partnerAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, data)) {
+        await this.withholdPrivate(response, { type: deleteType, data: { assetId: data.id } }, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data: mapSyncAssetV2(data) });
     }
   }
@@ -408,7 +443,11 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AssetEditV1;
     const upserts = this.syncRepository.assetEdit.getUpserts({ ...options, ack: checkpointMap[upsertType] });
 
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -473,6 +512,10 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AlbumV1;
     const upserts = this.syncRepository.album.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, data)) {
+        await this.withholdPrivate(response, { type: deleteType, data: { albumId: data.id } }, upsertType, updateId);
+        continue;
+      }
       const albumUsers = await this.syncRepository.album.getAlbumUsers(data.id);
       await send(response, {
         type: upsertType,
@@ -493,6 +536,11 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AlbumV2;
     const upserts = this.syncRepository.album.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, data)) {
+        // the client drops the album and, through its cascade, every link it holds for it
+        await this.withholdPrivate(response, { type: deleteType, data: { albumId: data.id } }, upsertType, updateId);
+        continue;
+      }
       // TODO: return null instead of '' in v4
       await send(response, {
         type: upsertType,
@@ -552,7 +600,11 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.albumUser.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAlbumPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -614,14 +666,27 @@ export class SyncService extends BaseService {
         { ...options, ack: updateCheckpoint },
         createCheckpoint,
       );
-      for await (const { updateId, ...data } of updates) {
+      for await (const { updateId, isAlbumPrivate, ...data } of updates) {
+        if (this.isWithheldPrivate(options, data)) {
+          await this.withholdPrivate(
+            response,
+            { type: SyncEntityType.AssetDeleteV1, data: { assetId: data.id } },
+            updateType,
+            updateId,
+          );
+          continue;
+        }
+        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+          await this.skipPrivate(response, updateType, updateId);
+          continue;
+        }
         await send(response, { type: updateType, ids: [updateId], data: mapSyncAssetV2(data) });
       }
     }
 
     const creates = this.syncRepository.albumAsset.getCreates({ ...options, ack: createCheckpoint });
     let isFirst = true;
-    for await (const { updateId, ...data } of creates) {
+    for await (const { updateId, isAlbumPrivate, ...data } of creates) {
       if (isFirst) {
         await send(response, {
           type: SyncEntityType.SyncAckV1,
@@ -630,6 +695,11 @@ export class SyncService extends BaseService {
           ids: [options.nowId],
         });
         isFirst = false;
+      }
+      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate || isAlbumPrivate })) {
+        // never delivered, so nothing to delete; just move the checkpoint past it
+        await this.skipPrivate(response, createType, updateId);
+        continue;
       }
       await send(response, { type: createType, ids: [updateId], data: mapSyncAssetV2(data) });
     }
@@ -685,14 +755,18 @@ export class SyncService extends BaseService {
         { ...options, ack: upsertCheckpoint },
         createCheckpoint,
       );
-      for await (const { updateId, ...data } of updates) {
+      for await (const { updateId, isAlbumPrivate, ...data } of updates) {
+        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+          await this.skipPrivate(response, updateType, updateId);
+          continue;
+        }
         await send(response, { type: updateType, ids: [updateId], data });
       }
     }
 
     const creates = this.syncRepository.albumAssetExif.getCreates({ ...options, ack: createCheckpoint });
     let isFirst = true;
-    for await (const { updateId, ...data } of creates) {
+    for await (const { updateId, isAlbumPrivate, ...data } of creates) {
       if (isFirst) {
         await send(response, {
           type: SyncEntityType.SyncAckV1,
@@ -701,6 +775,10 @@ export class SyncService extends BaseService {
           ids: [options.nowId],
         });
         isFirst = false;
+      }
+      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+        await this.skipPrivate(response, createType, updateId);
+        continue;
       }
       await send(response, { type: createType, ids: [updateId], data });
     }
@@ -756,7 +834,11 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.albumToAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAlbumPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -770,7 +852,12 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.MemoryV1;
     const upserts = this.syncRepository.memory.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate })) {
+        // a memory holding any private asset is private as a whole; the client drops it and its links
+        await this.withholdPrivate(response, { type: deleteType, data: { memoryId: data.id } }, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -784,7 +871,11 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.MemoryToAssetV1;
     const upserts = this.syncRepository.memoryToAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isMemoryPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isMemoryPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -798,7 +889,11 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.StackV1;
     const upserts = this.syncRepository.stack.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -857,7 +952,11 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.partnerStack.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -871,7 +970,12 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.PersonV1;
     const upserts = this.syncRepository.person.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate })) {
+        // every visible face of this person sits on a private asset, so the person does not exist for this client
+        await this.withholdPrivate(response, { type: deleteType, data: { personId: data.id } }, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -891,7 +995,11 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.AssetFaceV2;
     const upserts = this.syncRepository.assetFace.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -934,7 +1042,11 @@ export class SyncService extends BaseService {
       auth.user.id,
     );
 
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
@@ -961,7 +1073,11 @@ export class SyncService extends BaseService {
       auth.user.id,
     );
 
-    for await (const { updateId, ...data } of upserts) {
+    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }
