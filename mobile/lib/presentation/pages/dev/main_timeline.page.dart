@@ -12,7 +12,12 @@ import 'package:immich_mobile/widgets/common/immich_sliver_app_bar.dart';
 
 @RoutePage()
 class MainTimelinePage extends ConsumerStatefulWidget {
-  const MainTimelinePage({super.key});
+  const MainTimelinePage({super.key, this.scrollToDate});
+
+  /// Set when the page is pushed on top of the tab shell by "view in timeline". The timeline opens at
+  /// this date and gets a back button, so the page the jump came from (for example the search results)
+  /// is a single pop away, exactly as the user left it. The Photos tab never sets it.
+  final DateTime? scrollToDate;
 
   @override
   ConsumerState<MainTimelinePage> createState() => _MainTimelinePageState();
@@ -44,15 +49,20 @@ class _MainTimelinePageState extends ConsumerState<MainTimelinePage> {
   Widget build(BuildContext context) {
     final hasMemories = ref.watch(memoryLaneProvider.select((state) => state.value?.isNotEmpty ?? false));
     return Timeline(
-      appBar: const ImmichSliverAppBar(
+      // The page passes exactly one appBar: anything a feature wants in the top bar goes into this
+      // call, as an entry in actions or in the leading slot. A feature that passes its own second
+      // appBar argument instead merges into main without a conflict and only fails to compile there.
+      appBar: ImmichSliverAppBar(
         floating: true,
         pinned: false,
         snap: false,
-        actions: [CustomViewSwitcherButton(), GroupAutoStacksButton()],
+        actions: const [CustomViewSwitcherButton(), GroupAutoStacksButton()],
+        leading: widget.scrollToDate == null ? null : const BackButton(),
       ),
       topSliverWidget: const SliverToBoxAdapter(child: MemoryLane()),
       topSliverWidgetHeight: hasMemories ? 200 : 0,
       showStorageIndicator: true,
+      initialScrollDate: widget.scrollToDate,
     );
   }
 }
