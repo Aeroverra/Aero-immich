@@ -21,6 +21,7 @@ describe('getCustomFieldGroups', () => {
           addedByOtherUser: true,
           peopleRemovedReasons: ['NOT_IN_PHOTO', 'SOMETHING_NEW'],
           url: 'https://photos.google.com/photo/abc',
+          account: 'someone@example.com',
           people: [],
         }),
       ],
@@ -29,6 +30,7 @@ describe('getCustomFieldGroups', () => {
 
     expect(group.title).toBe('Google Photos');
     expect(group.rows).toEqual([
+      { label: 'asset_metadata_account', value: ['someone@example.com'] },
       { label: 'asset_metadata_views', value: ['158'] },
       { label: 'asset_metadata_device', value: ['asset_metadata_device_ios_phone'] },
       { label: 'asset_metadata_altitude', value: ['asset_metadata_altitude_value {"altitude":-15.9}'] },
@@ -68,5 +70,22 @@ describe('getGooglePhotosUrl', () => {
       'https://photos.google.com/photo/a',
     );
     expect(getGooglePhotosUrl([item('google-photos', { url: 'https://example.com/a' })])).toBeUndefined();
+  });
+
+  it('opens the link in the account that exported the photo', () => {
+    expect(
+      getGooglePhotosUrl([
+        item('google-photos', {
+          url: 'https://photos.google.com/photo/a',
+          account: 'aeroverra@g.minecraft.technology',
+        }),
+      ]),
+    ).toBe('https://photos.google.com/photo/a?authuser=aeroverra%40g.minecraft.technology');
+  });
+
+  it('ignores an account that is not an email', () => {
+    expect(
+      getGooglePhotosUrl([item('google-photos', { url: 'https://photos.google.com/photo/a', account: 'Aeroverra' })]),
+    ).toBe('https://photos.google.com/photo/a');
   });
 });
