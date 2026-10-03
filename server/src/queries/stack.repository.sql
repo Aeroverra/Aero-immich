@@ -64,10 +64,25 @@ from
 where
   "stack"."ownerId" = $2
 
--- StackRepository.delete
-delete from "stack"
+-- StackRepository.getSummaries
+select
+  "stack"."id",
+  "stack"."primaryAssetId",
+  "stack"."ownerId",
+  "stack"."source",
+  (
+    select
+      count(*)::int as "count"
+    from
+      "asset"
+    where
+      "asset"."stackId" = "stack"."id"
+      and "asset"."deletedAt" is null
+  ) as "assetCount"
+from
+  "stack"
 where
-  "id" = $1::uuid
+  "stack"."id" = any ($1::uuid[])
 
 -- StackRepository.getById
 select

@@ -14,6 +14,7 @@
   import NotificationSettings from './NotificationSettings.svelte';
   import ServerSettings from './ServerSettings.svelte';
   import StorageTemplateSettings from '$lib/components/admin-settings/StorageTemplateSettings.svelte';
+  import TakeoutSettings from './TakeoutSettings.svelte';
   import ThemeSettings from './ThemeSettings.svelte';
   import TrashSettings from './TrashSettings.svelte';
   import UserSettings from './UserSettings.svelte';
@@ -34,6 +35,7 @@
     mdiFileCheckOutline,
     mdiFileDocumentOutline,
     mdiFolderOutline,
+    mdiFolderZipOutline,
     mdiImageOutline,
     mdiLockOutline,
     mdiMapMarkerOutline,
@@ -160,6 +162,13 @@
       subtitle: $t('admin.storage_template_settings_description'),
       key: 'storage-template',
       icon: mdiFolderOutline,
+    },
+    {
+      component: TakeoutSettings,
+      title: $t('admin.takeout_settings'),
+      subtitle: $t('admin.takeout_settings_description'),
+      key: 'takeout',
+      icon: mdiFolderZipOutline,
     },
     {
       component: ThemeSettings,
