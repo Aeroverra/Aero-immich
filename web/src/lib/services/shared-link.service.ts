@@ -64,8 +64,22 @@ export const asUrl = (sharedLink: SharedLinkResponseDto) => {
   return new URL(path, serverConfigManager.value.externalDomain || location.origin).href;
 };
 
-export const handleCreateSharedLink = async (dto: SharedLinkCreateDto) => {
+export const handleCreateSharedLink = async (dto: SharedLinkCreateDto, options?: { hasPrivate?: boolean }) => {
   const $t = await getFormatter();
+
+  if (options?.hasPrivate) {
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: dto.albumId ? $t('share_private_album_confirmation') : $t('share_private_assets_confirmation'),
+      confirmText: $t('create_link'),
+    });
+
+    if (!confirmed) {
+      return false;
+    }
+
+    dto = { ...dto, confirmPrivate: true };
+  }
 
   try {
     let sharedLink = await createSharedLink({ sharedLinkCreateDto: dto });
