@@ -45,10 +45,14 @@ class TimelineFactory {
   final SettingsRepository _settingsRepository;
   final PrivateModeFilter privateFilter;
 
+  /// Whether automatic stacks are collapsed in the main timeline, from the server-side stacks.groupAuto preference
+  final bool groupAutoStacks;
+
   const TimelineFactory({
     required this._timelineRepository,
     required this._settingsRepository,
     this.privateFilter = PrivateModeFilter.off,
+    this.groupAutoStacks = true,
   });
 
   GroupAssetsBy get groupBy {
@@ -57,8 +61,9 @@ class TimelineFactory {
     return group == GroupAssetsBy.auto ? GroupAssetsBy.day : group;
   }
 
-  TimelineService main(List<String> timelineUsers) =>
-      TimelineService(_timelineRepository.main(timelineUsers, groupBy, privateFilter: privateFilter));
+  TimelineService main(List<String> timelineUsers) => TimelineService(
+    _timelineRepository.main(timelineUsers, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
   TimelineService localAlbum({required String albumId}) =>
       TimelineService(_timelineRepository.localAlbum(albumId, groupBy));
