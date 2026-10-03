@@ -590,6 +590,7 @@
   "asset_list_settings_subtitle": "Photo grid layout settings",
   "asset_list_settings_title": "Photo Grid",
   "asset_metadata": "Custom fields",
+  "asset_metadata_account": "Google account",
   "asset_metadata_added_by_other_user": "Added by someone else",
   "asset_metadata_altitude": "Altitude",
   "asset_metadata_altitude_value": "{altitude} m",
