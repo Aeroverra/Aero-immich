@@ -2897,6 +2897,8 @@
   "video_hover_setting": "Play video thumbnail on hover",
   "video_hover_setting_description": "Play video thumbnail when mouse is hovering over item. Even when disabled, playback can be started by hovering over the play icon.",
   "video_quality": "Video quality",
+  "video_search_match": "Match at {time}",
+  "video_search_match_description": "Jump to the moment that matched your search",
   "video_source_live_transcode": "Live transcode",
   "video_source_live_transcode_description": "Transcoded on the fly while it plays",
   "video_source_on_device": "On device",
