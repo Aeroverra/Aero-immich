@@ -124,7 +124,7 @@ List<AssetMetadataGroup> getAssetMetadataGroups(
     .toList();
 
 /// The Google Photos link, opened in the account that exported it: the photo id only exists in that account, and
-/// Google otherwise uses the browser's default one. authuser takes the email; /u/<n>/ depends on the sign-in order.
+/// Google otherwise uses the browser's default one. authuser takes the email; `/u/<n>/` depends on the sign-in order.
 String? getGooglePhotosUrl(Iterable<AssetMetadataEntry> entries) {
   for (final entry in entries) {
     if (entry.key == kGooglePhotosMetadataKey) {
