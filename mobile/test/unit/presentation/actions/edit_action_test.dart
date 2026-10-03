@@ -98,9 +98,22 @@ void main() {
     });
 
     testWidgets('is hidden for a non-editable asset', (tester) async {
-      await pumpEditAsset(tester, {owned(type: .video)});
+      // an animated image
+      await pumpEditAsset(tester, {owned().copyWith(durationMs: 1200)});
 
       expect(find.byType(ImmichIconButton), findsNothing);
+    });
+
+    testWidgets('offers to rotate an owned video', (tester) async {
+      await pumpEditAsset(tester, {owned(type: .video)});
+
+      expect(find.byType(ImmichIconButton), findsOneWidget);
+    });
+
+    testWidgets('offers to rotate an owned motion photo', (tester) async {
+      await pumpEditAsset(tester, {owned().copyWith(livePhotoVideoId: 'motion-video-id')});
+
+      expect(find.byType(ImmichIconButton), findsOneWidget);
     });
 
     testWidgets('reads the edits and exif for the asset it is about to open', (tester) async {
