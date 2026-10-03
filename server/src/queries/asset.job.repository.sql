@@ -449,6 +449,8 @@ where
 select
   "asset"."id",
   "asset"."visibility",
+  "asset"."width",
+  "asset"."height",
   to_json("asset_exif") as "exifInfo",
   (
     select
@@ -463,6 +465,20 @@ select
           "asset_face"."assetId" = "asset"."id"
       ) as agg
   ) as "faces",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "asset_edit"."action",
+          "asset_edit"."parameters"
+        from
+          "asset_edit"
+        where
+          "asset_edit"."assetId" = "asset"."id"
+      ) as agg
+  ) as "edits",
   (
     select
       to_json(obj)

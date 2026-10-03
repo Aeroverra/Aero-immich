@@ -233,9 +233,10 @@ export class AssetJobRepository {
   getForDetectFacesJob(id: string) {
     return this.db
       .selectFrom('asset')
-      .select(['asset.id', 'asset.visibility'])
+      .select(['asset.id', 'asset.visibility', 'asset.width', 'asset.height'])
       .$call(withExifInner)
       .select((eb) => withFaces(eb, true, true))
+      .select(withEdits)
       .select((eb) =>
         jsonObjectFrom(
           eb
