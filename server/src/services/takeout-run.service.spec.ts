@@ -1,3 +1,4 @@
+import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
   AlbumUserRole,
   AssetMetadataKey,
@@ -565,8 +566,10 @@ describe(TakeoutRunService.name, () => {
 
       await (sut as any).phaseRotateFaces(run(), settings(), [original, copy]);
 
-      // rotation edit applied to the original
-      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('asset-orig', expect.any(Array));
+      // rotation edit applied to the original, clockwise like the detected angle
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('asset-orig', [
+        { action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+      ]);
       // face detection queued + awaited on the original
       expect(mocks.job.run).toHaveBeenCalledWith({
         name: JobName.AssetDetectFaces,
