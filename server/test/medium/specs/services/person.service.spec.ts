@@ -1,4 +1,3 @@
-import { NotFoundException } from '@nestjs/common';
 import { Kysely, sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
