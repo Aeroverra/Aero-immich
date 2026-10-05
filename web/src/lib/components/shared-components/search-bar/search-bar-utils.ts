@@ -1,9 +1,10 @@
-import { getAllPeople, type PersonResponseDto, type TagResponseDto } from '@immich/sdk';
+import { getAllPeople, type AlbumResponseDto, type PersonResponseDto, type TagResponseDto } from '@immich/sdk';
 import { DateTime } from 'luxon';
 import { t } from 'svelte-i18n';
 import type { SvelteSet } from 'svelte/reactivity';
 import { get } from 'svelte/store';
 import { MediaType } from '$lib/constants';
+import type { SearchDateFilter } from '$lib/types';
 import { handleError } from '$lib/utils/handle-error';
 
 export enum SearchDatePreset {
@@ -72,6 +73,23 @@ export const getSearchDateTitle = (
       return;
     }
   }
+};
+
+/** The Date filter title: the taken range, then the upload range */
+export const getSearchDateFilterTitle = (date: SearchDateFilter) => {
+  const $t = get(t);
+  const taken = getSearchDateTitle(
+    getSearchDatePreset(date.takenAfter, date.takenBefore),
+    date.takenAfter,
+    date.takenBefore,
+  );
+  const uploaded = getSearchDateTitle(
+    getSearchDatePreset(date.uploadedAfter, date.uploadedBefore),
+    date.uploadedAfter,
+    date.uploadedBefore,
+  );
+  const titles = [taken, uploaded && $t('search_uploaded_range', { values: { range: uploaded } })];
+  return titles.filter(Boolean).join(' · ') || undefined;
 };
 
 export const getSearchTypeTitle = (type: string) => {
@@ -224,6 +242,30 @@ export const getSearchTagsTitle = (
 
   const without = title(excluded);
   return title(selected) ?? (without ? $t('search_without_tag', { values: { tag: without } }) : undefined);
+};
+
+export const getSearchAlbumsTitle = (
+  albums: AlbumResponseDto[],
+  selected: ReadonlySet<string>,
+  excluded: ReadonlySet<string> = new Set(),
+) => {
+  const $t = get(t);
+
+  const title = (ids: ReadonlySet<string>) => {
+    const id = ids.values().next().value;
+    const album = id ? albums.find((album) => album.id === id)?.albumName : undefined;
+    if (album === undefined) {
+      return undefined;
+    }
+    return ids.size === 1 ? album : $t('search_album_plus_more_albums', { values: { album, count: ids.size - 1 } });
+  };
+
+  const without = title(excluded);
+  return (
+    [title(selected), without && $t('search_not_in_album', { values: { album: without } })]
+      .filter(Boolean)
+      .join(' · ') || undefined
+  );
 };
 
 export const isPopoverContent = (event: FocusEvent): boolean => {
