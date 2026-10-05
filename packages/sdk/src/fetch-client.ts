@@ -1042,6 +1042,15 @@ export type AlbumsAddAssetsResponseDto = {
     /** Operation success */
     success: boolean;
 };
+export type AlbumsForAssetsDto = {
+    /** Asset IDs to look up */
+    assetIds: string[];
+};
+export type AlbumForAssetsResponseDto = {
+    album: AlbumResponseDto;
+    /** The requested asset IDs this album contains */
+    assetIds: string[];
+};
 export type AlbumStatisticsResponseDto = {
     /** Number of non-shared albums */
     notShared: number;
@@ -5375,6 +5384,21 @@ export function addAssetsToAlbums({ albumsAddAssetsDto }: {
         ...opts,
         method: "PUT",
         body: albumsAddAssetsDto
+    })));
+}
+/**
+ * List albums containing assets
+ */
+export function getAlbumsForAssets({ albumsForAssetsDto }: {
+    albumsForAssetsDto: AlbumsForAssetsDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AlbumForAssetsResponseDto[];
+    }>("/albums/for-assets", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: albumsForAssetsDto
     })));
 }
 /**
