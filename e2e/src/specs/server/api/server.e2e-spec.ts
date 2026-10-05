@@ -103,6 +103,7 @@ describe('/server', () => {
         importFaces: false,
         oauth: false,
         oauthAutoLaunch: false,
+        customViews: true,
         ocr: false,
         faceAttributes: false,
         passwordLogin: true,
