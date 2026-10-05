@@ -1598,6 +1598,11 @@ describe(MediaService.name, () => {
         personGroupId: person.personGroupId,
         thumbnailPath: expect.any(String),
       });
+      // stand-ins cut while the old feature photo was hidden are dropped with it
+      expect(mocks.storage.unlinkDir).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(String.raw`[/\\]\.${person.personGroupId}$`)),
+        { recursive: true, force: true },
+      );
     });
 
     it('should crop a face found in another frame of a video from that frame', async () => {

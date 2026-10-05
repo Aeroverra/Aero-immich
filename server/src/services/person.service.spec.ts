@@ -1,8 +1,19 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { OutputInfo } from 'sharp';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import { mapFaces, mapPerson } from 'src/dtos/person.dto';
-import { AssetFileType, AssetType, CacheControl, JobName, JobStatus, SourceType, SystemMetadataKey } from 'src/enum';
+import {
+  AssetFileType,
+  AssetType,
+  CacheControl,
+  JobName,
+  JobStatus,
+  SourceType,
+  SystemMetadataKey,
+  ViewAccess,
+  ViewPrivateAssets,
+} from 'src/enum';
 import { PersonService } from 'src/services/person.service';
 import { ImmichFileResponse } from 'src/utils/file';
 import { AssetFaceFactory } from 'test/factories/asset-face.factory';
@@ -181,15 +192,23 @@ describe(PersonService.name, () => {
       expect(mocks.access.person.checkOwnerAccess).toHaveBeenCalledWith(auth.user.id, new Set(['unknown']));
     });
 
-    it('should throw an error when person has no thumbnail', async () => {
+    it('should serve a placeholder when person has no thumbnail', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ thumbnailPath: '' });
 
       mocks.person.getByGroupId.mockResolvedValue(person);
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
-      await expect(sut.getThumbnail(auth, person.personGroupId)).rejects.toBeInstanceOf(NotFoundException);
-      expect(mocks.storage.createReadStream).not.toHaveBeenCalled();
-      expect(mocks.access.person.checkOwnerAccess).toHaveBeenCalledWith(auth.user.id, new Set([person.personGroupId]));
+      const response = await sut.getThumbnail(auth, person.personGroupId);
+
+      expect(response.path).toMatch(new RegExp(String.raw`[/\\]\.${person.personGroupId}[/\\]placeholder\.jpeg$`));
+      expect(response.cacheControl).toBe(CacheControl.PrivateWithoutCache);
+      expect(mocks.media.generateThumbnail).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        expect.objectContaining({ raw: { width: 250, height: 250, channels: 3 } }),
+        `${response.path}.random-uuid.tmp`,
+      );
+      expect(mocks.storage.rename).toHaveBeenCalledWith(`${response.path}.random-uuid.tmp`, response.path);
+      expect(mocks.person.getVisibleFaceForThumbnail).not.toHaveBeenCalled();
     });
 
     it('should serve the thumbnail', async () => {
@@ -206,6 +225,241 @@ describe(PersonService.name, () => {
         }),
       );
       expect(mocks.access.person.checkOwnerAccess).toHaveBeenCalledWith(auth.user.id, new Set([person.personGroupId]));
+    });
+
+    describe('when the feature photo is hidden', () => {
+      const visibleFace = {
+        id: 'face-1',
+        updatedAt: new Date('2026-10-01T00:00:00.000Z'),
+        x1: 100,
+        y1: 100,
+        x2: 200,
+        y2: 200,
+        oldWidth: 1000,
+        oldHeight: 1000,
+        type: AssetType.Image,
+        originalPath: '/data/library/photo.jpg',
+        previewPath: '/data/thumbs/photo-preview.jpeg',
+        exifOrientation: null,
+        frameTimestamp: null,
+        videoStream: null,
+      };
+
+      const hiddenView = {
+        id: 'view-1',
+        ownerId: 'user-1',
+        access: ViewAccess.Open,
+        includeAll: true,
+        includeUntagged: false,
+        includeTagIds: [],
+        excludeTagIds: ['tag-nsfw'],
+        privateAssets: ViewPrivateAssets.Unlocked,
+      };
+
+      beforeEach(() => {
+        mocks.media.decodeImage.mockResolvedValue({
+          data: Buffer.from(''),
+          info: { width: 1000, height: 1000, channels: 3 } as OutputInfo,
+        });
+      });
+
+      it('should cut the best visible face outside private mode', async () => {
+        const auth = AuthFactory.from().session().build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(visibleFace);
+        mocks.storage.readdir.mockResolvedValue(['face-1-1.jpeg', 'face-2-5.jpeg', 'placeholder.jpeg']);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId);
+
+        expect(response.path).toMatch(
+          new RegExp(String.raw`[/\\]\.${person.personGroupId}[/\\]face-1-${visibleFace.updatedAt.getTime()}\.jpeg$`),
+        );
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledWith(
+          { ownerId: auth.user.id, personGroupId: person.personGroupId },
+          { privateMode: false, userId: auth.user.id },
+        );
+        expect(mocks.media.decodeImage).toHaveBeenCalledWith(visibleFace.originalPath, expect.any(Object));
+        expect(mocks.media.generateThumbnail).toHaveBeenCalledWith(
+          expect.any(Buffer),
+          expect.objectContaining({
+            size: 250,
+            edits: [{ action: AssetEditAction.Crop, parameters: { x: 95, y: 95, width: 110, height: 110 } }],
+          }),
+          `${response.path}.random-uuid.tmp`,
+        );
+        expect(mocks.storage.rename).toHaveBeenCalledWith(`${response.path}.random-uuid.tmp`, response.path);
+        // the earlier cut of the same face goes, other faces and the placeholder stay
+        expect(mocks.storage.unlink).toHaveBeenCalledTimes(1);
+        expect(mocks.storage.unlink).toHaveBeenCalledWith(expect.stringMatching(/face-1-1\.jpeg$/));
+      });
+
+      it('should cut the face from its frame for a video frame face', async () => {
+        const auth = AuthFactory.from().session().build();
+        const person = PersonFactory.create();
+        const videoStream = {
+          index: 0,
+          height: 1080,
+          width: 1920,
+          rotation: 0,
+          codecName: 'h264',
+          profile: null,
+          level: null,
+          frameCount: 100,
+          frameRate: 30,
+          timeBase: 1 / 30,
+          bitrate: 0,
+          pixelFormat: 'yuv420p',
+          colorPrimaries: null,
+          colorSpace: null,
+          colorTransfer: null,
+          dvProfile: null,
+          dvLevel: null,
+          dvBlSignalCompatibilityId: null,
+          bitsPerSample: null,
+        } as any;
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue({
+          ...visibleFace,
+          type: AssetType.Video,
+          frameTimestamp: 12.5,
+          videoStream,
+        });
+        mocks.media.extractVideoFrame.mockResolvedValue(Buffer.from('frame'));
+        mocks.storage.readdir.mockResolvedValue([]);
+
+        await sut.getThumbnail(auth, person.personGroupId);
+
+        expect(mocks.media.extractVideoFrame).toHaveBeenCalledWith(visibleFace.originalPath, expect.any(Object));
+        expect(mocks.media.decodeImage).toHaveBeenCalledWith(Buffer.from('frame'), expect.any(Object));
+      });
+
+      it('should use the face on the asset it is shown with', async () => {
+        const auth = AuthFactory.from().session({ view: hiddenView }).build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(false);
+        mocks.person.isCoverAssetInView.mockResolvedValue(false);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(visibleFace);
+        mocks.storage.readdir.mockResolvedValue([]);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' });
+
+        expect(response.path).toMatch(/face-1-\d+\.jpeg$/);
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledTimes(1);
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledWith(
+          { ownerId: auth.user.id, personGroupId: person.personGroupId },
+          { privateMode: false, userId: auth.user.id, view: hiddenView },
+          'asset-1',
+        );
+      });
+
+      it('should fall back to any visible face when the person is not visible on the asset', async () => {
+        const auth = AuthFactory.from().session({ view: hiddenView }).build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+        mocks.person.isCoverAssetInView.mockResolvedValue(false);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValueOnce(undefined).mockResolvedValueOnce(visibleFace);
+        mocks.storage.readdir.mockResolvedValue([]);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' });
+
+        expect(response.path).toMatch(/face-1-\d+\.jpeg$/);
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledTimes(2);
+      });
+
+      it('should require access to the asset it is shown with', async () => {
+        const auth = AuthFactory.from().session({ view: hiddenView }).build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set());
+        mocks.person.isCoverAssetInView.mockResolvedValue(false);
+
+        await expect(sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' })).rejects.toBeInstanceOf(
+          BadRequestException,
+        );
+        expect(mocks.person.getVisibleFaceForThumbnail).not.toHaveBeenCalled();
+      });
+
+      it('should serve a cut from the cache without cutting again', async () => {
+        const auth = AuthFactory.from().session().build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(visibleFace);
+        mocks.storage.checkFileExists.mockResolvedValue(true);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId);
+
+        expect(response.path).toMatch(/face-1-\d+\.jpeg$/);
+        expect(mocks.media.generateThumbnail).not.toHaveBeenCalled();
+        expect(mocks.storage.rename).not.toHaveBeenCalled();
+      });
+
+      it('should serve a placeholder when no face is visible', async () => {
+        const auth = AuthFactory.from().session().build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(undefined);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId);
+
+        expect(response.path).toMatch(/placeholder\.jpeg$/);
+        expect(response.path).not.toBe(person.thumbnailPath);
+      });
+
+      it('should serve the feature photo in private mode', async () => {
+        const auth = AuthFactory.from().session({ privateMode: true }).build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+
+        const response = await sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' });
+
+        expect(response.path).toBe(person.thumbnailPath);
+        expect(mocks.person.getVisibleFaceForThumbnail).not.toHaveBeenCalled();
+        expect(mocks.access.asset.checkOwnerAccess).not.toHaveBeenCalled();
+      });
+
+      it('should not cut the same face twice at once', async () => {
+        const auth = AuthFactory.from().session().build();
+        const person = PersonFactory.create();
+
+        mocks.person.getByGroupId.mockResolvedValue(person);
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.person.isCoverAssetPrivate.mockResolvedValue(true);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(visibleFace);
+        mocks.storage.readdir.mockResolvedValue([]);
+
+        const [first, second] = await Promise.all([
+          sut.getThumbnail(auth, person.personGroupId),
+          sut.getThumbnail(auth, person.personGroupId),
+        ]);
+
+        expect(first.path).toBe(second.path);
+        expect(mocks.media.generateThumbnail).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
@@ -1029,6 +1283,10 @@ describe(PersonService.name, () => {
       expect(mocks.person.delete).toHaveBeenCalledWith([person.personGroupId], undefined);
       expect(mocks.person.deleteEmptyGroups).toHaveBeenCalledWith();
       expect(mocks.storage.unlink).toHaveBeenCalledWith(person.thumbnailPath);
+      expect(mocks.storage.unlinkDir).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(String.raw`[/\\]\.${person.personGroupId}$`)),
+        { recursive: true, force: true },
+      );
     });
   });
 

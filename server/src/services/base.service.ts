@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Insertable } from 'kysely';
 import sanitize from 'sanitize-filename';
-import { SALT_ROUNDS } from 'src/constants';
+import { FACE_THUMBNAIL_SIZE, SALT_ROUNDS } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
 import { UserAdmin } from 'src/database';
 import { SystemConfig } from 'src/dtos/config.dto';
+import { AssetEditAction } from 'src/dtos/editing.dto';
+import { AssetType, ImageFormat } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
@@ -61,15 +63,34 @@ import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
-import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
+import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { UserTable } from 'src/schema/tables/user.table';
-import { ClassConstructor } from 'src/types';
+import { ClassConstructor, GenerateThumbnailOptions, VideoStreamInfo } from 'src/types';
 import { AccessRequest, checkAccess, requireAccess } from 'src/utils/access';
 import { getConfig, updateConfig } from 'src/utils/config';
+import { VideoFrameConfig } from 'src/utils/media';
+import { mimeTypes } from 'src/utils/mime-types';
+import { clamp } from 'src/utils/misc';
+
+/** A face and the asset it is on, as needed to cut the face out for a person thumbnail */
+export type FaceThumbnailData = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  oldWidth: number;
+  oldHeight: number;
+  type: AssetType;
+  originalPath: string;
+  previewPath: string | null;
+  exifOrientation: string | null;
+  frameTimestamp: number | null;
+  videoStream: VideoStreamInfo | null;
+};
 
 export const BASE_SERVICE_DEPENDENCIES = [
   LoggingRepository,
@@ -322,6 +343,98 @@ export class BaseService {
     if (!(await this.isSetupAvailable())) {
       throw new BadRequestException('Admin setup is not available');
     }
+  }
+
+  /**
+   * Cuts a face out of its asset into a square person thumbnail at `outputPath`: from the frame the face was found in
+   * for a video frame face, from the preview for any other video face, and from the original (or the preview embedded
+   * in a raw file) for a photo. False when a video face has no preview to cut from.
+   */
+  protected async generateFaceThumbnail(face: FaceThumbnailData, outputPath: string): Promise<boolean> {
+    const { image, ffmpeg } = await this.getConfig({ withCache: true });
+    const { x1, y1, x2, y2, oldWidth, oldHeight, exifOrientation, previewPath, originalPath } = face;
+    let inputImage: string | Buffer;
+    if (face.type === AssetType.Video && face.frameTimestamp !== null && face.videoStream) {
+      // the face was found in another frame than the preview, so crop it from that frame
+      const frameConfig = VideoFrameConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
+      inputImage = await this.mediaRepository.extractVideoFrame(
+        originalPath,
+        frameConfig.getFrameCommand(face.frameTimestamp, face.videoStream),
+      );
+    } else if (face.type === AssetType.Video) {
+      if (!previewPath) {
+        return false;
+      }
+      inputImage = previewPath;
+    } else if (image.extractEmbedded && mimeTypes.isRaw(originalPath)) {
+      const extracted = await this.mediaRepository.extract(originalPath);
+      const extractedSize = extracted ? await this.mediaRepository.getImageMetadata(extracted.buffer) : undefined;
+      const useExtracted =
+        extracted && extractedSize && Math.min(extractedSize.width, extractedSize.height) >= image.preview.size;
+      inputImage = useExtracted ? extracted.buffer : originalPath;
+    } else {
+      inputImage = originalPath;
+    }
+
+    const { data: decodedImage, info } = await this.mediaRepository.decodeImage(inputImage, {
+      colorspace: image.colorspace,
+      processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+      // if this is an extracted image, it may not have orientation metadata
+      orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
+    });
+
+    this.storageCore.ensureFolders(outputPath);
+
+    // face bounding boxes can spill outside the image dimensions
+    const clampedX1 = clamp(x1, 0, oldWidth);
+    const clampedY1 = clamp(y1, 0, oldHeight);
+    const clampedX2 = clamp(x2, 0, oldWidth);
+    const clampedY2 = clamp(y2, 0, oldHeight);
+
+    const widthScale = info.width / oldWidth;
+    const heightScale = info.height / oldHeight;
+
+    const halfWidth = (widthScale * (clampedX2 - clampedX1)) / 2;
+    const halfHeight = (heightScale * (clampedY2 - clampedY1)) / 2;
+
+    const middleX = Math.round(widthScale * clampedX1 + halfWidth);
+    const middleY = Math.round(heightScale * clampedY1 + halfHeight);
+
+    // zoom out 10%
+    const targetHalfSize = Math.floor(Math.max(halfWidth, halfHeight) * 1.1);
+
+    // get the longest distance from the center of the image without overflowing
+    const newHalfSize = Math.min(
+      middleX - Math.max(0, middleX - targetHalfSize),
+      middleY - Math.max(0, middleY - targetHalfSize),
+      Math.min(info.width - 1, middleX + targetHalfSize) - middleX,
+      Math.min(info.height - 1, middleY + targetHalfSize) - middleY,
+    );
+
+    const thumbnailOptions: GenerateThumbnailOptions = {
+      colorspace: image.colorspace,
+      format: ImageFormat.Jpeg,
+      raw: info,
+      quality: image.thumbnail.quality,
+      progressive: false,
+      processInvalidImages: false,
+      size: FACE_THUMBNAIL_SIZE,
+      edits: [
+        {
+          action: AssetEditAction.Crop,
+          parameters: {
+            x: middleX - newHalfSize,
+            y: middleY - newHalfSize,
+            width: newHalfSize * 2,
+            height: newHalfSize * 2,
+          },
+        },
+      ],
+    };
+
+    await this.mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, outputPath);
+
+    return true;
   }
 
   async createUser(dto: Omit<Insertable<UserTable>, 'clusterGroupId'> & { email: string }): Promise<UserAdmin> {

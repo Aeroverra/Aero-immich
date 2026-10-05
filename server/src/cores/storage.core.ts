@@ -121,6 +121,15 @@ export class StorageCore {
     return StorageCore.getNestedPath(StorageFolder.Thumbnails, person.ownerId, `${person.personGroupId}.jpeg`);
   }
 
+  /**
+   * Stand-in thumbnails for a person whose feature photo the caller may not see (faces cut from other assets, the
+   * placeholder) are cached in a folder next to the person's thumbnail, so dropping the folder drops all of them. The
+   * folder is a dot folder: the cache rebuilds itself on demand, so the untracked file check does not list it
+   */
+  static getPersonFallbackFolder(person: PersonThumbnailPathEntity) {
+    return join(dirname(StorageCore.getPersonThumbnailPath(person)), `.${person.personGroupId}`);
+  }
+
   static getImagePath(asset: ThumbnailPathEntity, { fileType, format, isEdited }: ImagePathOptions) {
     return StorageCore.getNestedPath(
       StorageFolder.Thumbnails,
