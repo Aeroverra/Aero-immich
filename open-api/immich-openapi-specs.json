@@ -18522,6 +18522,81 @@
         ],
         "type": "object"
       },
+      "AdminConfigAutoStackDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "maxAssets": {
+            "description": "Maximum number of photos in an automatic stack",
+            "maximum": 100,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "maxDistance": {
+            "description": "Maximum smart search distance between any two photos of an automatic stack",
+            "format": "double",
+            "maximum": 0.2,
+            "minimum": 0.001,
+            "type": "number"
+          },
+          "maxFaceShift": {
+            "description": "Maximum movement of the largest face between two photos, as a fraction of the image",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxFaceSizeChange": {
+            "description": "Maximum relative change in size of the largest face between two photos",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxGapSeconds": {
+            "description": "Maximum time between two consecutive photos of an automatic stack, in seconds",
+            "format": "double",
+            "maximum": 60,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxSmileChange": {
+            "description": "Maximum change in the smile score (0-1) of the largest face between two photos",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxSpanSeconds": {
+            "description": "Maximum time between the first and the last photo of an automatic stack, in seconds",
+            "format": "double",
+            "maximum": 600,
+            "minimum": 0,
+            "type": "number"
+          },
+          "maxYawChange": {
+            "description": "Maximum change in head yaw of the largest face between two photos, in degrees",
+            "format": "double",
+            "maximum": 180,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "maxAssets",
+          "maxDistance",
+          "maxFaceShift",
+          "maxFaceSizeChange",
+          "maxGapSeconds",
+          "maxSmileChange",
+          "maxSpanSeconds",
+          "maxYawChange"
+        ],
+        "type": "object"
+      },
       "AdminConfigBackupsDto": {
         "properties": {
           "database": {
@@ -19242,6 +19317,9 @@
       },
       "AdminConfigMachineLearningDto": {
         "properties": {
+          "autoStack": {
+            "$ref": "#/components/schemas/AdminConfigAutoStackDto"
+          },
           "availabilityChecks": {
             "$ref": "#/components/schemas/AdminConfigMachineLearningAvailabilityChecksDto"
           },
@@ -19274,6 +19352,7 @@
           }
         },
         "required": [
+          "autoStack",
           "availabilityChecks",
           "clip",
           "duplicateDetection",
@@ -19338,6 +19417,10 @@
       },
       "AdminConfigNightlyTasksDto": {
         "properties": {
+          "autoStack": {
+            "description": "Automatic stacks for new photos that were not evaluated yet",
+            "type": "boolean"
+          },
           "clusterNewFaces": {
             "description": "Cluster new faces",
             "type": "boolean"
@@ -19365,6 +19448,7 @@
           }
         },
         "required": [
+          "autoStack",
           "clusterNewFaces",
           "databaseCleanup",
           "generateMemories",
@@ -21600,6 +21684,27 @@
         ],
         "type": "object"
       },
+      "AutoStackResponse": {
+        "properties": {
+          "enabled": {
+            "description": "Whether similar photos taken close together are stacked automatically",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "AutoStackUpdate": {
+        "properties": {
+          "enabled": {
+            "description": "Whether similar photos taken close together are stacked automatically",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
       "AvatarUpdate": {
         "properties": {
           "color": {
@@ -22910,6 +23015,8 @@
           "AssetFileMigration",
           "AssetGenerateThumbnailsQueueAll",
           "AssetGenerateThumbnails",
+          "AutoStackQueueAll",
+          "AutoStack",
           "AuditTableCleanup",
           "DatabaseBackup",
           "FacialRecognitionQueueAll",
@@ -26036,6 +26143,7 @@
           "facialRecognition",
           "smartSearch",
           "duplicateDetection",
+          "autoStack",
           "backgroundTask",
           "storageTemplateMigration",
           "migration",
@@ -26164,6 +26272,9 @@
       },
       "QueuesResponseLegacyDto": {
         "properties": {
+          "autoStack": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "backgroundTask": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -26226,6 +26337,7 @@
           }
         },
         "required": [
+          "autoStack",
           "backgroundTask",
           "backupDatabase",
           "duplicateDetection",
@@ -32932,6 +33044,18 @@
         ],
         "type": "string"
       },
+      "UserConfigAutoStackDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UserConfigClipDto": {
         "properties": {
           "enabled": {
@@ -33125,6 +33249,9 @@
       },
       "UserConfigMachineLearningDto": {
         "properties": {
+          "autoStack": {
+            "$ref": "#/components/schemas/UserConfigAutoStackDto"
+          },
           "clip": {
             "$ref": "#/components/schemas/UserConfigClipDto"
           },
@@ -33146,6 +33273,7 @@
           }
         },
         "required": [
+          "autoStack",
           "clip",
           "duplicateDetection",
           "enabled",
@@ -33344,6 +33472,9 @@
           "albums": {
             "$ref": "#/components/schemas/AlbumsResponse"
           },
+          "autoStack": {
+            "$ref": "#/components/schemas/AutoStackResponse"
+          },
           "cast": {
             "$ref": "#/components/schemas/CastResponse"
           },
@@ -33389,6 +33520,7 @@
         },
         "required": [
           "albums",
+          "autoStack",
           "cast",
           "deletedReimport",
           "download",
@@ -33410,6 +33542,9 @@
         "properties": {
           "albums": {
             "$ref": "#/components/schemas/AlbumsUpdate"
+          },
+          "autoStack": {
+            "$ref": "#/components/schemas/AutoStackUpdate"
           },
           "avatar": {
             "$ref": "#/components/schemas/AvatarUpdate"
