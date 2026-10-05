@@ -52,6 +52,19 @@ const TagBulkAssetsSchema = z
   })
   .meta({ id: 'TagBulkAssetsDto' });
 
+const TagAssetCountsSchema = z
+  .object({
+    assetIds: z.array(z.uuidv4()).min(1).describe('Asset IDs'),
+  })
+  .meta({ id: 'TagAssetCountsDto' });
+
+const TagAssetCountResponseSchema = z
+  .object({
+    tagId: z.uuidv4().describe('Tag ID'),
+    count: z.int().describe('How many of the assets carry the tag itself (a child tag does not count)'),
+  })
+  .meta({ id: 'TagAssetCountResponseDto' });
+
 const TagBulkAssetsResponseSchema = z
   .object({
     count: z.int().describe('Number of assets tagged'),
@@ -80,6 +93,8 @@ export class TagUpdateDto extends createZodDto(TagUpdateSchema) {}
 export class TagUpsertDto extends createZodDto(TagUpsertSchema) {}
 export class TagBulkAssetsDto extends createZodDto(TagBulkAssetsSchema) {}
 export class TagBulkAssetsResponseDto extends createZodDto(TagBulkAssetsResponseSchema) {}
+export class TagAssetCountsDto extends createZodDto(TagAssetCountsSchema) {}
+export class TagAssetCountResponseDto extends createZodDto(TagAssetCountResponseSchema) {}
 export class TagResponseDto extends createZodDto(TagResponseSchema) {}
 
 export function mapTag(entity: MaybeDehydrated<Tag>): TagResponseDto {
