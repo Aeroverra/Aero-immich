@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { MemoryRepository } from 'src/repositories/memory.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
@@ -111,5 +112,79 @@ describe(SyncEntityType.MemoryV1, () => {
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.MemoriesV1]);
     await memoryRepo.delete(memory.id);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.MemoriesV1]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should keep sending a memory that holds no private asset', async () => {
+      const { auth, user, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const { memory } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: asset.id });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.MemoriesV1])).resolves.toEqual([
+        expect.objectContaining({ type: SyncEntityType.MemoryV1, data: expect.objectContaining({ id: memory.id }) }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+
+    it('should replace a memory with a delete once it holds a private asset, and send it again once the asset is public', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const { memory } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: asset.id });
+      await ctx.syncAckAll(auth, await ctx.syncStream(auth, [SyncRequestType.MemoriesV1]));
+
+      await assetRepo.updateAll([asset.id], { isPrivate: true });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const hidden = await ctx.syncStream(auth, [SyncRequestType.MemoriesV1]);
+      expect(hidden).toEqual([
+        {
+          ack: expect.stringContaining(SyncEntityType.MemoryDeleteV1),
+          data: { memoryId: memory.id },
+          type: SyncEntityType.MemoryDeleteV1,
+        },
+        expect.objectContaining({
+          type: SyncEntityType.SyncAckV1,
+          ack: expect.stringContaining(SyncEntityType.MemoryV1),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, hidden);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.MemoriesV1]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.MemoriesV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({ type: SyncEntityType.MemoryV1, data: expect.objectContaining({ id: memory.id }) }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.MemoriesV1]);
+    });
+
+    it('should never send a memory holding a private asset to a client that did not opt in', async () => {
+      const { auth, user, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { memory } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: asset.id });
+
+      const response = await ctx.syncStream(auth, [SyncRequestType.MemoriesV1]);
+      expect(response.map(({ type }) => type)).not.toContain(SyncEntityType.MemoryV1);
+      await ctx.syncAckAll(auth, response);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.MemoriesV1]);
+    });
+
+    it('should carry a memory holding a private asset for a client that opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { memory } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: memory.id, assetId: asset.id });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.MemoriesV1], false, true)).resolves.toEqual([
+        expect.objectContaining({ type: SyncEntityType.MemoryV1, data: expect.objectContaining({ id: memory.id }) }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
