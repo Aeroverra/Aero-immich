@@ -21,6 +21,7 @@ export class SessionFactory {
       isPendingSyncReset: false,
       parentId: null,
       pinExpiresAt: null,
+      privateModeExpiresAt: null,
       token: Buffer.from('abc123'),
       updateId: newUuidV7(),
       updatedAt: newDate(),
