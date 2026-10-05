@@ -75,6 +75,12 @@ const BaseSearchSchema = z.object({
     .describe('Only videos at most this long, in milliseconds')
     .meta(DEPRECATED_FLAT_FIELD),
   personIds: z.array(z.uuidv4()).optional().describe('Filter by person IDs').meta(DEPRECATED_FLAT_FIELD),
+  // the flat counterpart of filter.personIds.none
+  excludePersonIds: z
+    .array(z.uuidv4())
+    .optional()
+    .describe('Leave out assets that show any of these people')
+    .meta(DEPRECATED_FLAT_FIELD),
   onlyPersonIds: z
     .boolean()
     .optional()
