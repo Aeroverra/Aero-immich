@@ -245,6 +245,18 @@
     return keyMap[key] || key;
   }
 
+  // the face filters are one side or the other, their label says which
+  function getFaceFilterLabel(key: keyof SearchTerms, value: unknown) {
+    const sides: Partial<Record<keyof SearchTerms, [string, string]>> = {
+      onlyPersonIds: [$t('search_filter_only_people'), $t('search_filter_with_others')],
+      hasPeople: [$t('search_filter_with_people'), $t('search_filter_no_people')],
+      hasNamedFaces: [$t('search_filter_with_named_people'), $t('search_filter_no_named_people')],
+      hasUnnamedFaces: [$t('search_filter_with_unnamed_faces'), $t('search_filter_no_unnamed_faces')],
+    };
+    const labels = sides[key];
+    return labels && typeof value === 'boolean' ? labels[value ? 0 : 1] : undefined;
+  }
+
   async function getPersonName(personIds: string[]) {
     const personNames = await Promise.all(
       personIds.map(async (personId) => {
@@ -296,6 +308,10 @@
 
   function removeFilter(key: keyof SearchTerms) {
     delete terms[key];
+    // only these people means nothing without people
+    if (key === 'personIds') {
+      delete terms.onlyPersonIds;
+    }
     assetMultiSelectManager.clear();
     void goto(Route.search(terms));
     searchManager.setQuery(terms);
@@ -313,16 +329,17 @@
     <div class="flex w-full flex-wrap place-content-center place-items-center gap-2.5 sm:gap-3">
       {#each searchTermKeys as searchKey (searchKey)}
         {@const value = terms[searchKey]}
+        {@const faceLabel = getFaceFilterLabel(searchKey, value)}
         <div
           class="inline-flex max-w-full items-center rounded-full bg-primary/10 py-1 ps-1 pe-1 text-xs text-primary ring-1 ring-primary/15 transition-shadow hover:ring-primary/25 dark:bg-immich-dark-primary/15 dark:text-immich-dark-primary dark:ring-immich-dark-primary/20 dark:hover:ring-immich-dark-primary/30"
         >
           <span
             class="shrink-0 rounded-full bg-primary px-3 py-1.5 font-medium text-light dark:bg-immich-dark-primary dark:text-immich-dark-gray"
           >
-            {getHumanReadableSearchKey(searchKey as keyof SearchTerms)}
+            {faceLabel ?? getHumanReadableSearchKey(searchKey as keyof SearchTerms)}
           </span>
 
-          {#if value !== true || searchKey === 'isPrivate'}
+          {#if (value !== true && !faceLabel) || searchKey === 'isPrivate'}
             <span class="max-w-[min(36rem,55vw)] min-w-0 truncate px-3 py-1.5 text-immich-fg dark:text-immich-dark-fg">
               {#if searchKey === 'isPrivate'}
                 {value ? $t('search_private_only') : $t('search_private_exclude')}
