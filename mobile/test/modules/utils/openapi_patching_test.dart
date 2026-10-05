@@ -65,7 +65,7 @@ void main() {
       expect(assetStack!.source_, StackSource.manual);
     });
 
-    test('reads queues from servers without face attributes and automatic stacks', () {
+    test('reads queues from servers without face attributes, automatic stacks and video frame analysis', () {
       final queue = {
         'jobCounts': {'active': 1, 'completed': 0, 'delayed': 0, 'failed': 0, 'paused': 0, 'waiting': 2},
         'queueStatus': {'isActive': true, 'isPaused': false},
@@ -98,6 +98,7 @@ void main() {
       expect(queues, isNotNull);
       expect(queues!.faceAttributes.jobCounts.waiting, 0);
       expect(queues.autoStack.queueStatus.isActive, isFalse);
+      expect(queues.videoFrameAnalysis.jobCounts.waiting, 0);
       expect(queues.smartSearch.jobCounts.waiting, 2);
     });
 
