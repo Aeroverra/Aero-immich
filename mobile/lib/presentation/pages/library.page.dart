@@ -191,7 +191,11 @@ class _PeopleCollectionCard extends ConsumerWidget {
                       children: people.take(4).map((person) {
                         return CircleAvatar(
                           backgroundImage: RemoteImageProvider(
-                            url: getFaceThumbnailUrl(person.id, updatedAt: person.updatedAt),
+                            url: getFaceThumbnailUrl(
+                              person.id,
+                              updatedAt: person.updatedAt,
+                              scope: ref.watch(personThumbnailScopeProvider),
+                            ),
                           ),
                         );
                       }).toList(),
