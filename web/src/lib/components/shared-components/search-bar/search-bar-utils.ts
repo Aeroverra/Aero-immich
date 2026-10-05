@@ -164,20 +164,24 @@ export const getSearchPeopleTitle = (people: PersonResponseDto[], selected: Svel
   return $t('people_count', { values: { count: selected.size } });
 };
 
-export const getSearchTagsTitle = (tags: TagResponseDto[], selected: SvelteSet<string>) => {
+export const getSearchTagsTitle = (
+  tags: TagResponseDto[],
+  selected: SvelteSet<string>,
+  excluded: ReadonlySet<string> = new Set(),
+) => {
   const $t = get(t);
 
-  const id = selected.values().next().value;
-  if (!id) {
-    return undefined;
-  }
+  const title = (ids: ReadonlySet<string>) => {
+    const id = ids.values().next().value;
+    const tag = id ? tags.find((t) => t.id === id)?.name : undefined;
+    if (!tag) {
+      return undefined;
+    }
+    return ids.size === 1 ? tag : $t('tag_plus_more_tags', { values: { tag, count: ids.size - 1 } });
+  };
 
-  const tag = tags.find((t) => t.id === id)?.name;
-  if (!tag) {
-    return undefined;
-  }
-
-  return selected.size === 1 ? tag : $t('tag_plus_more_tags', { values: { tag, count: selected.size - 1 } });
+  const without = title(excluded);
+  return title(selected) ?? (without ? $t('search_without_tag', { values: { tag: without } }) : undefined);
 };
 
 export const isPopoverContent = (event: FocusEvent): boolean => {
