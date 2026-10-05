@@ -9,6 +9,37 @@ class UserMetadataRepository extends DatabaseAccessor<Drift> {
 
   Drift get _db => attachedDatabase;
 
+  /// The stackActions.mode preference synced from the server, ask until it is known
+  Future<StackActionMode> getStackActionMode(String userId) async {
+    final metadata = await getUserMetadata(userId);
+    for (final item in metadata) {
+      if (item.preferences case final preferences?) {
+        return preferences.stackActionMode;
+      }
+    }
+    return StackActionMode.ask;
+  }
+
+  /// Applies a stackActions.mode change the server accepted, so the choice holds before the next sync
+  Future<void> setStackActionMode(String userId, StackActionMode mode) async {
+    await _db.transaction(() async {
+      final query = _db.userMetadataEntity.select()
+        ..where((e) => e.userId.equals(userId) & e.key.equalsValue(UserMetadataKey.preferences));
+      final current = await query.getSingleOrNull();
+      final value = <String, Object?>{...?current?.value};
+      value['stackActions'] = <String, Object?>{
+        ...?(value['stackActions'] as Map<String, Object?>?),
+        'mode': mode.name,
+      };
+
+      await _db
+          .into(_db.userMetadataEntity)
+          .insertOnConflictUpdate(
+            UserMetadataEntityCompanion.insert(userId: userId, key: UserMetadataKey.preferences, value: value),
+          );
+    });
+  }
+
   Future<List<UserMetadata>> getUserMetadata(String userId) {
     final query = _db.userMetadataEntity.select()..where((e) => e.userId.equals(userId));
 
