@@ -21,6 +21,7 @@ import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
 import {
   asUuid,
   dummy,
+  isViewUnrestricted,
   PrivateScope,
   withDefaultVisibility,
   withPrivateAlbumScope,
@@ -33,6 +34,10 @@ export interface AlbumAssetCount {
   startDate: Date | null;
   endDate: Date | null;
   lastModifiedAssetTimestamp: Date | null;
+  /** only while a view hides assets: whether the album cover passes the view */
+  hasThumbnail?: boolean;
+  /** only while a view hides assets: the newest asset that passes the view, a replacement cover */
+  firstAssetId?: string | null;
 }
 
 export interface AlbumListOptions {
@@ -222,6 +227,14 @@ export class AlbumRepository {
         // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
         .select((eb) => eb.fn.max('asset.updatedAt').as('lastModifiedAssetTimestamp'))
         .select((eb) => sql<number>`${eb.fn.count('asset.id')}::int`.as('assetCount'))
+        .$if(!isViewUnrestricted(scope.view), (qb) =>
+          qb
+            .innerJoin('album', 'album.id', 'album_asset.albumId')
+            .select(sql<boolean>`bool_or("asset"."id" = "album"."albumThumbnailAssetId")`.as('hasThumbnail'))
+            .select(
+              sql<string | null>`(array_agg("asset"."id" order by "asset"."fileCreatedAt" desc))[1]`.as('firstAssetId'),
+            ),
+        )
         .where('album_asset.albumId', 'in', ids)
         .where('asset.deletedAt', 'is', null)
         .groupBy('album_asset.albumId')
