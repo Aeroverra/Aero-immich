@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
   AlbumUserRole,
@@ -11,6 +12,7 @@ import {
   UserMetadataKey,
 } from 'src/enum';
 import { TakeoutRunService } from 'src/services/takeout-run.service';
+import { computeImageSample, detectRotationFromSamples } from 'src/takeout/image-sample';
 import { authStub } from 'test/fixtures/auth.stub';
 import { newTestService, ServiceMocks } from 'test/utils';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -530,6 +532,54 @@ describe(TakeoutRunService.name, () => {
       expect(mocks.stack.create).not.toHaveBeenCalled();
       expect((sut as any).stackPending(members, members)).toBe(false);
     });
+  });
+
+  describe("a detected rotation, saved as an edit and rendered like the media repository, gives Google's copy", () => {
+    // family 2026-10-05: 90 and 270 degree rotations were saved as 360 - angle and showed upside down
+    const W = 120;
+    const H = 80;
+    // asymmetric pattern: a bright block in the top left corner and a horizontal gradient
+    const raw = Buffer.alloc(W * H * 3);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const v = x < W / 3 && y < H / 3 ? 255 : Math.floor((x * 200) / W);
+        raw.fill(v, (y * W + x) * 3, (y * W + x) * 3 + 3);
+      }
+    }
+    const image = () => sharp(raw, { raw: { width: W, height: H, channels: 3 } });
+    const sampleOf = async (png: Buffer) => {
+      const result = await computeImageSample(png);
+      if ('skipped' in result) {
+        throw new Error(result.skipped);
+      }
+      return result;
+    };
+
+    for (const googleAngle of [90, 180, 270]) {
+      it(`Google turned the photo ${googleAngle} degrees clockwise`, async () => {
+        const original = await sampleOf(await image().png().toBuffer());
+        const googleCopy = await sampleOf(await image().rotate(googleAngle).png().toBuffer());
+        const detected = detectRotationFromSamples(original, googleCopy);
+        expect(detected).toBe(googleAngle);
+
+        mocks.asset.getById.mockResolvedValue({
+          type: 'IMAGE',
+          originalPath: '/x/a.jpg',
+          exifInfo: { exifImageWidth: W, exifImageHeight: H },
+          edits: [],
+        } as any);
+        mocks.assetEdit.replaceAll.mockResolvedValue(undefined as any);
+        await (sut as any).applyRotationNow('asset-a', detected);
+
+        const [, edits] = mocks.assetEdit.replaceAll.mock.calls[0] as any;
+        expect(edits).toHaveLength(1);
+        expect(edits[0].action).toBe(AssetEditAction.Rotate);
+        // a rotate edit is rendered with sharp.rotate(angle) (media.repository), which turns clockwise
+        const rendered = await sampleOf(await image().rotate(edits[0].parameters.angle).png().toBuffer());
+        expect(detectRotationFromSamples(original, rendered)).toBe(googleAngle);
+        expect(detectRotationFromSamples(googleCopy, rendered)).toBe(0);
+      });
+    }
   });
 
   describe('phaseRotateFaces: section 11 D1 rotate-only face reconciliation', () => {
