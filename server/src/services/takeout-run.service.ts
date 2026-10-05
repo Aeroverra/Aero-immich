@@ -2678,8 +2678,9 @@ export class TakeoutRunService extends BaseService {
     if (a.edits && a.edits.length > 0) {
       return TakeoutRotationState.SkippedHasEdits;
     }
+    // the detected angle turns the original into Google's edited copy clockwise, the same direction as a rotate edit
     await this.assetEditRepository.replaceAll(assetId, [
-      { action: AssetEditAction.Rotate, parameters: { angle: (360 - angle) % 360 } } as any,
+      { action: AssetEditAction.Rotate, parameters: { angle: angle % 360 } } as any,
     ]);
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id: assetId } });
     return TakeoutRotationState.Applied;
