@@ -4,6 +4,7 @@ import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.widget.dart';
+import 'package:immich_mobile/presentation/actions/add_people.action.dart';
 import 'package:immich_mobile/presentation/actions/archive.action.dart';
 import 'package:immich_mobile/presentation/actions/asset_debug.action.dart';
 import 'package:immich_mobile/presentation/actions/delete.action.dart';
@@ -105,6 +106,7 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
         .new(action: FavoriteAction(source: .timeline)),
         .new(action: ArchiveAction(source: .timeline)),
         .new(action: TagAction(source: .timeline)),
+        .new(action: AddPeopleAction(source: .timeline)),
         .new(action: EditDateTimeAction(source: .timeline)),
         .new(action: EditLocationAction(source: .timeline)),
         .new(action: LockAction(source: .timeline)),
