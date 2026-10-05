@@ -131,6 +131,8 @@ export class AssetService extends BaseService {
 
     if (rest.isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate: rest.isPrivate });
+      // clients that did not opt in to private assets never received the related rows; bump them so they sync when the asset comes back
+      await this.assetRepository.touchPrivateRelations([id, ...stackMemberIds]);
       await this.eventRepository.emit('AssetPrivateUpdateAll', {
         assetIds: [id, ...stackMemberIds],
         userId: auth.user.id,
@@ -206,6 +208,8 @@ export class AssetService extends BaseService {
 
     if (isPrivate !== undefined) {
       await this.assetRepository.updateAll(stackMemberIds, { isPrivate });
+      // clients that did not opt in to private assets never received the related rows; bump them so they sync when the asset comes back
+      await this.assetRepository.touchPrivateRelations([...ids, ...stackMemberIds]);
       await this.eventRepository.emit('AssetPrivateUpdateAll', {
         assetIds: [...ids, ...stackMemberIds],
         userId: auth.user.id,
