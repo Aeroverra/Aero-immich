@@ -231,7 +231,12 @@ describe('private mode', () => {
   describe('PUT /users/me/preferences (privateMode)', () => {
     it('should default to 30 minutes, the sidebar link and no private memories', async () => {
       const preferences = await getMyPreferences(asAuth(user2.accessToken));
-      expect(preferences.privateMode).toEqual({ timeoutMinutes: 30, sidebarWeb: true, includeInMemories: false });
+      expect(preferences.privateMode).toEqual({
+        timeoutMinutes: 30,
+        sidebarWeb: true,
+        includeInMemories: false,
+        lockTrigger: 'appPause',
+      });
     });
 
     it('should round trip includeInMemories', async () => {
