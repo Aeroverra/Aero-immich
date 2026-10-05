@@ -49,6 +49,7 @@ import { AssetFaceTable } from 'src/schema/tables/asset-face.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import { BaseService } from 'src/services/base.service';
+import { generateFaceThumbnail } from 'src/services/media.service';
 import type { JobItem, JobOf } from 'src/types';
 import { getActiveView, isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getDimensions } from 'src/utils/asset.util';
@@ -261,7 +262,9 @@ export class PersonService extends BaseService {
       const facePrefix = `${face.id}-`;
       const facePath = join(fallbackFolder, `${facePrefix}${new Date(face.updatedAt).getTime()}.jpeg`);
       const isCut = await this.cutFallbackOnce(facePath, async (temporaryPath) => {
-        if (!(await this.generateFaceThumbnail(face, temporaryPath))) {
+        const config = await this.getConfig({ withCache: true });
+        const repositories = { mediaRepository: this.mediaRepository, storageCore: this.storageCore };
+        if (!(await generateFaceThumbnail(repositories, config, face, temporaryPath))) {
           return false;
         }
 

@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { FACE_THUMBNAIL_SIZE } from 'src/constants';
 import { ImagePathOptions, StorageCore, ThumbnailPathEntity } from 'src/cores/storage.core';
 import { AssetFile } from 'src/database';
 import { OnEvent, OnJob } from 'src/decorators';
 import { ConfigFFmpegDto, SystemConfig } from 'src/dtos/config.dto';
-import { AssetEditAction } from 'src/dtos/editing.dto';
+import { AssetEditAction, CropParameters } from 'src/dtos/editing.dto';
 import {
   AssetFileType,
   AssetType,
@@ -24,10 +25,14 @@ import {
   VideoContainer,
 } from 'src/enum';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
+import { BoundingBox } from 'src/repositories/machine-learning.repository';
+import { MediaRepository } from 'src/repositories/media.repository';
 import { BaseService } from 'src/services/base.service';
 import {
   AudioStreamInfo,
   DecodeToBufferOptions,
+  GenerateThumbnailOptions,
+  ImageDimensions,
   JobItem,
   JobOf,
   VideoFormat,
@@ -36,9 +41,9 @@ import {
 } from 'src/types';
 import { getAssetFile, getDimensions } from 'src/utils/asset.util';
 import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
-import { BaseConfig, ThumbnailConfig } from 'src/utils/media';
+import { BaseConfig, ThumbnailConfig, VideoFrameConfig } from 'src/utils/media';
 import { mimeTypes } from 'src/utils/mime-types';
-import { batched } from 'src/utils/misc';
+import { batched, clamp } from 'src/utils/misc';
 import { getOutputDimensions } from 'src/utils/transform';
 
 interface UpsertFileOptions {
@@ -51,6 +56,129 @@ interface UpsertFileOptions {
 }
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
+
+/** A face and the asset it is on, as needed to cut the face out for a person thumbnail */
+export type FaceThumbnailData = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  oldWidth: number;
+  oldHeight: number;
+  type: AssetType;
+  originalPath: string;
+  previewPath: string | null;
+  exifOrientation: string | null;
+  frameTimestamp: number | null;
+  videoStream: VideoStreamInfo | null;
+};
+
+const getFaceCrop = (
+  dims: { old: ImageDimensions; new: ImageDimensions },
+  { x1, y1, x2, y2 }: BoundingBox,
+): CropParameters => {
+  // face bounding boxes can spill outside the image dimensions
+  const clampedX1 = clamp(x1, 0, dims.old.width);
+  const clampedY1 = clamp(y1, 0, dims.old.height);
+  const clampedX2 = clamp(x2, 0, dims.old.width);
+  const clampedY2 = clamp(y2, 0, dims.old.height);
+
+  const widthScale = dims.new.width / dims.old.width;
+  const heightScale = dims.new.height / dims.old.height;
+
+  const halfWidth = (widthScale * (clampedX2 - clampedX1)) / 2;
+  const halfHeight = (heightScale * (clampedY2 - clampedY1)) / 2;
+
+  const middleX = Math.round(widthScale * clampedX1 + halfWidth);
+  const middleY = Math.round(heightScale * clampedY1 + halfHeight);
+
+  // zoom out 10%
+  const targetHalfSize = Math.floor(Math.max(halfWidth, halfHeight) * 1.1);
+
+  // get the longest distance from the center of the image without overflowing
+  const newHalfSize = Math.min(
+    middleX - Math.max(0, middleX - targetHalfSize),
+    middleY - Math.max(0, middleY - targetHalfSize),
+    Math.min(dims.new.width - 1, middleX + targetHalfSize) - middleX,
+    Math.min(dims.new.height - 1, middleY + targetHalfSize) - middleY,
+  );
+
+  return {
+    x: middleX - newHalfSize,
+    y: middleY - newHalfSize,
+    width: newHalfSize * 2,
+    height: newHalfSize * 2,
+  };
+};
+
+/**
+ * Cuts a face out of its asset into a square person thumbnail at `outputPath`: from the frame the face was found in
+ * for a video frame face, from the preview for any other video face, and from the original (or the preview embedded
+ * in a raw file) for a photo. Shared by the feature photo job and the stand-ins the person thumbnail endpoint cuts on
+ * demand. False when a video face has no preview to cut from.
+ */
+export const generateFaceThumbnail = async (
+  { mediaRepository, storageCore }: { mediaRepository: MediaRepository; storageCore: StorageCore },
+  { image, ffmpeg }: SystemConfig,
+  face: FaceThumbnailData,
+  outputPath: string,
+): Promise<boolean> => {
+  const { x1, y1, x2, y2, oldWidth, oldHeight, exifOrientation, previewPath, originalPath } = face;
+  let inputImage: string | Buffer;
+  if (face.type === AssetType.Video && face.frameTimestamp !== null && face.videoStream) {
+    // the face was found in another frame than the preview, so crop it from that frame
+    const frameConfig = VideoFrameConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
+    inputImage = await mediaRepository.extractVideoFrame(
+      originalPath,
+      frameConfig.getFrameCommand(face.frameTimestamp, face.videoStream),
+    );
+  } else if (face.type === AssetType.Video) {
+    if (!previewPath) {
+      return false;
+    }
+    inputImage = previewPath;
+  } else if (image.extractEmbedded && mimeTypes.isRaw(originalPath)) {
+    // the embedded preview is used only when it is at least as big as a preview
+    const extracted = await mediaRepository.extract(originalPath);
+    const extractedSize = extracted ? await mediaRepository.getImageMetadata(extracted.buffer) : undefined;
+    const isBigEnough = !!extractedSize && Math.min(extractedSize.width, extractedSize.height) >= image.preview.size;
+    inputImage = extracted && isBigEnough ? extracted.buffer : originalPath;
+  } else {
+    inputImage = originalPath;
+  }
+
+  const { data: decodedImage, info } = await mediaRepository.decodeImage(inputImage, {
+    colorspace: image.colorspace,
+    processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+    // if this is an extracted image, it may not have orientation metadata
+    orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
+  });
+
+  storageCore.ensureFolders(outputPath);
+
+  const thumbnailOptions: GenerateThumbnailOptions = {
+    colorspace: image.colorspace,
+    format: ImageFormat.Jpeg,
+    raw: info,
+    quality: image.thumbnail.quality,
+    progressive: false,
+    processInvalidImages: false,
+    size: FACE_THUMBNAIL_SIZE,
+    edits: [
+      {
+        action: AssetEditAction.Crop,
+        parameters: getFaceCrop(
+          { old: { width: oldWidth, height: oldHeight }, new: { width: info.width, height: info.height } },
+          { x1, y1, x2, y2 },
+        ),
+      },
+    ],
+  };
+
+  await mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, outputPath);
+
+  return true;
+};
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -397,7 +525,9 @@ export class MediaService extends BaseService {
     }
 
     const thumbnailPath = StorageCore.getPersonThumbnailPath({ ownerId, personGroupId });
-    if (!(await this.generateFaceThumbnail(data, thumbnailPath))) {
+    const config = await this.getConfig({ withCache: true });
+    const repositories = { mediaRepository: this.mediaRepository, storageCore: this.storageCore };
+    if (!(await generateFaceThumbnail(repositories, config, data, thumbnailPath))) {
       this.logger.error(`Could not generate person thumbnail for video ${personGroupId}: missing preview path`);
       return JobStatus.Failed;
     }
