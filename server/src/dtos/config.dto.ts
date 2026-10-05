@@ -58,6 +58,24 @@ const cronExpressionSchema = z
   })
   .describe('Cron expression');
 
+const clampInt = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+/**
+ * The takeout read settings default to the environment variables that set them before they became settings
+ * (IMMICH_TAKEOUT_READERS, IMMICH_TAKEOUT_READ_THROTTLE_MBPS, IMMICH_TAKEOUT_READAHEAD), kept in range
+ */
+export function takeoutReadDefaults(env: Record<string, string | undefined> = process.env) {
+  const int = (name: string): number | undefined => {
+    const value = Math.trunc(Number(env[name] ?? ''));
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  };
+  return {
+    readers: clampInt(int('IMMICH_TAKEOUT_READERS') ?? 3, 1, 4),
+    throttleMBps: int('IMMICH_TAKEOUT_READ_THROTTLE_MBPS') ?? null,
+    readaheadDepth: clampInt(int('IMMICH_TAKEOUT_READAHEAD') ?? 4, 1, 8),
+  };
+}
+
 const emptyOrUrl = (error: string) =>
   z.string().refine((url) => url.length === 0 || z.url().safeParse(url).success, { error });
 
@@ -464,6 +482,18 @@ const AdminConfigSchemaWithVisibility = z
           .meta({ id: 'AdminConfigTemplateEmailsDto' }),
       })
       .meta({ id: 'AdminConfigTemplatesDto' }),
+    takeout: z
+      .object({
+        readers: z.int().min(1).max(4).describe('Parts of one Google Takeout import read in parallel'),
+        throttleMBps: z
+          .int()
+          .min(0)
+          .nullable()
+          .describe('Read limit in MB/s for all Google Takeout imports together; 0 or null means unlimited'),
+        readaheadDepth: z.int().min(1).max(8).describe('Reads in flight per part (application readahead)'),
+      })
+      .describe('Google Takeout import reading; changes apply to running imports within seconds')
+      .meta({ id: 'AdminConfigTakeoutDto' }),
     server: z
       .object({
         externalDomain: emptyOrUrl('External domain must be an empty string or a valid URL')
@@ -834,6 +864,7 @@ export const defaults = Object.freeze<SystemConfig>({
       enabled: false,
     },
   },
+  takeout: takeoutReadDefaults(),
   server: {
     externalDomain: '',
     loginPageMessage: '',
