@@ -1,4 +1,4 @@
-import { getAllAlbums, removeAssetFromAlbum, type AlbumResponseDto } from '@immich/sdk';
+import { getAlbumsForAssets, removeAssetFromAlbum, type AlbumForAssetsResponseDto } from '@immich/sdk';
 import { modalManager } from '@immich/ui';
 import PrivateAlbumsModal from '$lib/modals/PrivateAlbumsModal.svelte';
 import { handleError } from '$lib/utils/handle-error';
@@ -14,29 +14,22 @@ export type PrivateAlbumsChoice = 'keep' | 'remove';
 export const handleMarkPrivateAlbums = async (assetIds: string[]) => {
   const $t = await getFormatter();
 
-  const albums = new Map<string, { album: AlbumResponseDto; assetIds: string[] }>();
+  let albums: AlbumForAssetsResponseDto[];
   try {
-    for (const assetId of assetIds) {
-      for (const album of await getAllAlbums({ assetId })) {
-        if (album.isPrivate) {
-          continue;
-        }
-        const entry = albums.get(album.id) ?? { album, assetIds: [] };
-        entry.assetIds.push(assetId);
-        albums.set(album.id, entry);
-      }
-    }
+    // one request for the whole selection, each album comes with the selected assets it holds
+    const found = await getAlbumsForAssets({ albumsForAssetsDto: { assetIds } });
+    albums = found.filter(({ album }) => !album.isPrivate);
   } catch (error) {
     handleError(error, $t('error_loading_albums'));
     return false;
   }
 
-  if (albums.size === 0) {
+  if (albums.length === 0) {
     return true;
   }
 
   const choice = await modalManager.show(PrivateAlbumsModal, {
-    albums: [...albums.values()].map(({ album }) => album),
+    albums: albums.map(({ album }) => album),
   });
   if (!choice) {
     return false;
@@ -44,7 +37,7 @@ export const handleMarkPrivateAlbums = async (assetIds: string[]) => {
 
   if (choice === 'remove') {
     try {
-      for (const { album, assetIds: ids } of albums.values()) {
+      for (const { album, assetIds: ids } of albums) {
         await removeAssetFromAlbum({ id: album.id, bulkIdsDto: { ids } });
       }
     } catch (error) {
