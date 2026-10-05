@@ -47,6 +47,9 @@ export type SearchCameraFilter = {
 export type SearchDateFilter = {
   takenBefore?: DateTime;
   takenAfter?: DateTime;
+  /** upload date: the Google Photos upload time for Google Photos imports, else when the asset reached Immich */
+  uploadedBefore?: DateTime;
+  uploadedAfter?: DateTime;
 };
 
 export type SearchDisplayFilters = {
@@ -69,6 +72,10 @@ export type SearchFilter = {
   tagIds: SvelteSet<string> | null;
   /** assets with any of these tags (or their child tags) are left out */
   excludeTagIds: SvelteSet<string>;
+  /** only assets in all of these albums */
+  albumIds: SvelteSet<string>;
+  /** assets in any of these albums are left out */
+  excludeAlbumIds: SvelteSet<string>;
   location: SearchLocationFilter;
   queryAssetId?: string;
   camera: SearchCameraFilter;
