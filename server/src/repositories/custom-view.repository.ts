@@ -55,6 +55,17 @@ export class CustomViewRepository {
       .executeTakeFirst();
   }
 
+  @GenerateSql({ params: [DummyValue.UUID, dummyViewFilter] })
+  async isAssetInView(assetId: string, view: ViewFilter) {
+    const asset = await this.db
+      .selectFrom('asset')
+      .select('asset.id')
+      .where('asset.id', '=', asUuid(assetId))
+      .where((eb) => viewAssetPredicate(eb, view))
+      .executeTakeFirst();
+    return !!asset;
+  }
+
   create(view: Insertable<ViewTable>, tags: CustomViewTags) {
     return this.db.transaction().execute(async (tx) => {
       if (view.isDefault) {
