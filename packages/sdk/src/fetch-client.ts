@@ -7310,13 +7310,16 @@ export function getPersonStatistics({ id }: {
 /**
  * Get person thumbnail
  */
-export function getPersonThumbnail({ id }: {
+export function getPersonThumbnail({ assetId, id }: {
+    assetId?: string;
     id: string;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchBlob<{
         status: 200;
         data: Blob;
-    }>(`/people/${encodeURIComponent(id)}/thumbnail`, {
+    }>(`/people/${encodeURIComponent(id)}/thumbnail${QS.query(QS.explode({
+        assetId
+    }))}`, {
         ...opts
     }));
 }

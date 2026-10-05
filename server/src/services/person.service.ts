@@ -237,7 +237,7 @@ export class PersonService extends BaseService {
     }
 
     // stand-ins vary with private mode and the active view; PrivateWithoutCache makes clients revalidate every time
-    const fallbackFolder = StorageCore.getPersonFallbackFolder({ ownerId, personGroupId });
+    const fallbackFolder = StorageCore.getPersonFallbackFolder(person);
     let face;
     if (isCoverHidden && dto.assetId) {
       // shown next to an asset (its people list): the person's face on that asset, which the caller is looking at

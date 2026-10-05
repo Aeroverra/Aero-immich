@@ -405,10 +405,13 @@ export class MediaService extends BaseService {
     await this.personRepository.update({ ownerId, personGroupId, thumbnailPath });
 
     // stand-ins were cut because the old feature photo was hidden from someone; the next request cuts them again if needed
-    await this.storageRepository.unlinkDir(StorageCore.getPersonFallbackFolder({ ownerId, personGroupId }), {
-      recursive: true,
-      force: true,
-    });
+    await this.storageRepository.unlinkDir(
+      StorageCore.getPersonFallbackFolder({ ownerId, personGroupId, thumbnailPath }),
+      {
+        recursive: true,
+        force: true,
+      },
+    );
 
     return JobStatus.Success;
   }

@@ -71,6 +71,7 @@ describe(PersonService.name, () => {
       const { person } = await ctx.newPerson({ ownerId: user.id });
       const auth = factory.auth({ user });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       await expect(personRepo.getByGroupId(person)).resolves.toEqual(
         expect.objectContaining({ personGroupId: person.personGroupId }),
@@ -99,6 +100,7 @@ describe(PersonService.name, () => {
       const { person: person2 } = await ctx.newPerson({ ownerId: user.id });
       const auth = factory.auth({ user });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       await expect(
         sut.deleteAll(auth, { ids: [person1.personGroupId, person2.personGroupId] }),
@@ -192,6 +194,7 @@ describe(PersonService.name, () => {
       const { sut, ctx } = setup();
       const jobRepo = ctx.getMock(JobRepository);
       ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlinkDir.mockResolvedValue();
       jobRepo.waitForQueueCompletion.mockResolvedValue();
       jobRepo.getJobCounts.mockResolvedValue({ active: 0, waiting: 0, completed: 0, delayed: 0, failed: 0, paused: 0 });
       jobRepo.queueAll.mockResolvedValue();
@@ -223,6 +226,7 @@ describe(PersonService.name, () => {
       const { sut, ctx } = setup();
       const jobRepo = ctx.getMock(JobRepository);
       ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlinkDir.mockResolvedValue();
       jobRepo.waitForQueueCompletion.mockResolvedValue();
       jobRepo.getJobCounts.mockResolvedValue({ active: 0, waiting: 0, completed: 0, delayed: 0, failed: 0, paused: 0 });
       jobRepo.queueAll.mockResolvedValue();
@@ -274,6 +278,7 @@ describe(PersonService.name, () => {
       const { asset } = await ctx.newAsset({ ownerId: user2.id });
       await ctx.newAssetFace({ assetId: asset.id, personGroupId: person2.personGroupId });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       const auth = factory.auth({ user: user1 });
 
@@ -305,6 +310,7 @@ describe(PersonService.name, () => {
         name: 'Person 2',
       });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       const auth = factory.auth({ user: user1 });
 
@@ -338,6 +344,7 @@ describe(PersonService.name, () => {
         birthDate: DateTime.now().minus({ years: 2 }).toJSDate(),
       });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       const auth = factory.auth({ user: user1 });
 
@@ -367,6 +374,7 @@ describe(PersonService.name, () => {
       const { asset } = await ctx.newAsset({ ownerId: user2.id });
       await ctx.newAssetFace({ assetId: asset.id, personGroupId: person2.personGroupId });
       storageMock.unlink.mockResolvedValue();
+      storageMock.unlinkDir.mockResolvedValue();
 
       const auth = factory.auth({ user: user1 });
 
@@ -1393,6 +1401,7 @@ describe(PersonService.name, () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlinkDir.mockResolvedValue();
       const { user } = await ctx.newUser();
       const auth = factory.auth({ user });
       const { asset: marked } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
@@ -1414,6 +1423,7 @@ describe(PersonService.name, () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlinkDir.mockResolvedValue();
       const { user } = await ctx.newUser();
       const auth = factory.auth({ user });
       const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
@@ -1481,9 +1491,15 @@ describe(PersonService.name, () => {
         .get(PersonRepository)
         .update({ ownerId: user.id, personGroupId: person.personGroupId, faceAssetId: assetFace.id });
 
-      await expect(sut.getThumbnail(factory.auth({ user }), person.personGroupId)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      // the placeholder was cut before
+      ctx.getMock(StorageRepository).checkFileExists.mockResolvedValue(true);
+
+      // outside private mode the cut is never served: no other face is visible, so the placeholder is
+      await expect(sut.getThumbnail(factory.auth({ user }), person.personGroupId)).resolves.toMatchObject({
+        path: expect.stringMatching(
+          new RegExp(String.raw`thumbs[/\\]\.${person.personGroupId}[/\\]placeholder\.jpeg$`),
+        ),
+      });
       await expect(
         sut.getThumbnail(factory.auth({ user, session: { privateMode: true } }), person.personGroupId),
       ).resolves.toMatchObject({ path: '/data/thumbs/person.jpeg' });
