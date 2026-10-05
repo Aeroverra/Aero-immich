@@ -239,9 +239,13 @@ export class PersonService extends BaseService {
     // stand-ins vary with private mode and the active view; PrivateWithoutCache makes clients revalidate every time
     const fallbackFolder = StorageCore.getPersonFallbackFolder(person);
     let face;
-    if (isCoverHidden && dto.assetId) {
-      // shown next to an asset (its people list): the person's face on that asset, which the caller is looking at
-      await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [dto.assetId] });
+    // shown next to an asset (its people list): the person's face on that asset, which the caller is looking at; an
+    // asset the caller may not read is ignored like any other hidden asset, so the tile still gets a stand-in
+    const readableAssetIds =
+      isCoverHidden && dto.assetId
+        ? await this.checkAccess({ auth, permission: Permission.AssetRead, ids: [dto.assetId] })
+        : new Set<string>();
+    if (dto.assetId && readableAssetIds.has(dto.assetId)) {
       face = await this.personRepository.getVisibleFaceForThumbnail(
         { ownerId, personGroupId },
         toPrivateScope(auth),

@@ -380,7 +380,7 @@ describe(PersonService.name, () => {
         expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledTimes(2);
       });
 
-      it('should require access to the asset it is shown with', async () => {
+      it('should ignore an asset the caller may not read', async () => {
         const auth = AuthFactory.from().session({ view: hiddenView }).build();
         const person = PersonFactory.create();
 
@@ -388,11 +388,17 @@ describe(PersonService.name, () => {
         mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
         mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set());
         mocks.person.isCoverAssetInView.mockResolvedValue(false);
+        mocks.person.getVisibleFaceForThumbnail.mockResolvedValue(visibleFace);
+        mocks.storage.readdir.mockResolvedValue([]);
 
-        await expect(sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' })).rejects.toBeInstanceOf(
-          BadRequestException,
+        const response = await sut.getThumbnail(auth, person.personGroupId, { assetId: 'asset-1' });
+
+        expect(response.path).toMatch(/face-1-\d+\.jpeg$/);
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledTimes(1);
+        expect(mocks.person.getVisibleFaceForThumbnail).toHaveBeenCalledWith(
+          { ownerId: auth.user.id, personGroupId: person.personGroupId },
+          { privateMode: false, userId: auth.user.id, view: hiddenView },
         );
-        expect(mocks.person.getVisibleFaceForThumbnail).not.toHaveBeenCalled();
       });
 
       it('should serve a cut from the cache without cutting again', async () => {
