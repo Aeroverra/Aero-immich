@@ -48,6 +48,7 @@ abstract class Preferences with _$Preferences {
     @Default(AvatarColor.primary) AvatarColor userAvatarColor,
     @Default(true) bool showSupportBadge,
     @Default(3) int minimumFaces,
+    @Default(true) bool groupAutoStacks,
   }) = _Preferences;
 
   factory Preferences.fromMap(Map<String, Object?> map) {
@@ -64,6 +65,7 @@ abstract class Preferences with _$Preferences {
       ),
       showSupportBadge: (map["purchase"] as Map<String, Object?>?)?["showSupportBadge"] as bool? ?? true,
       minimumFaces: (map["people"] as Map<String, Object?>?)?["minimumFaces"] as int? ?? 3,
+      groupAutoStacks: (map["stacks"] as Map<String, Object?>?)?["groupAuto"] as bool? ?? true,
     );
   }
 }
