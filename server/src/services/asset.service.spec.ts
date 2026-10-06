@@ -1,7 +1,7 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { DateTime } from 'luxon';
 import { AssetJobName, AssetStatsResponseDto } from 'src/dtos/asset.dto';
-import { AssetEditAction } from 'src/dtos/editing.dto';
+import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
 import { AssetFileType, AssetMetadataKey, AssetStatus, AssetType, AssetVisibility, JobName, JobStatus } from 'src/enum';
 import { AssetStats } from 'src/repositories/asset.repository';
 import { AssetService } from 'src/services/asset.service';
@@ -24,6 +24,17 @@ const statResponse: AssetStatsResponseDto = {
   videos: 23,
   total: 33,
 };
+
+const forEdit = (dto: { type: AssetType; livePhotoVideoId?: string | null }) => ({
+  type: dto.type,
+  livePhotoVideoId: dto.livePhotoVideoId ?? null,
+  originalPath: dto.type === AssetType.Video ? '/original/video.mov' : '/original/photo.jpg',
+  originalFileName: dto.type === AssetType.Video ? 'video.mov' : 'photo.jpg',
+  exifImageWidth: 1920,
+  exifImageHeight: 1080,
+  orientation: '1',
+  projectionType: null,
+});
 
 describe(AssetService.name, () => {
   let sut: AssetService;
@@ -1028,6 +1039,89 @@ describe(AssetService.name, () => {
       ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(mocks.assetEdit.replaceAll).not.toHaveBeenCalled();
+    });
+
+    const rotate90 = { action: AssetEditAction.Rotate, parameters: { angle: 90 } } as const;
+
+    it('should rotate a video', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['video-1']));
+      mocks.asset.getForEdit.mockResolvedValue(forEdit({ type: AssetType.Video }));
+      mocks.assetEdit.replaceAll.mockResolvedValue([{ id: 'edit-1', ...rotate90 }]);
+
+      await expect(sut.editAsset(authStub.admin, 'video-1', { edits: [rotate90] })).resolves.toEqual({
+        assetId: 'video-1',
+        edits: [{ id: 'edit-1', ...rotate90 }],
+      });
+
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('video-1', [rotate90]);
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetEditThumbnailGeneration,
+        data: { id: 'video-1' },
+      });
+    });
+
+    it('should only rotate a video', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['video-1']));
+      mocks.asset.getForEdit.mockResolvedValue(forEdit({ type: AssetType.Video }));
+
+      await expect(
+        sut.editAsset(authStub.admin, 'video-1', {
+          edits: [{ action: AssetEditAction.Mirror, parameters: { axis: MirrorAxis.Horizontal } }],
+        }),
+      ).rejects.toThrow('Videos can only be rotated');
+      await expect(
+        sut.editAsset(authStub.admin, 'video-1', {
+          edits: [{ action: AssetEditAction.Crop, parameters: { x: 0, y: 0, width: 100, height: 100 } }],
+        }),
+      ).rejects.toThrow('Videos can only be rotated');
+
+      expect(mocks.assetEdit.replaceAll).not.toHaveBeenCalled();
+    });
+
+    it('should rotate the video of a live photo with the photo', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['photo-1']));
+      mocks.asset.getForEdit.mockResolvedValue(forEdit({ type: AssetType.Image, livePhotoVideoId: 'motion-1' }));
+      mocks.assetEdit.replaceAll.mockResolvedValue([{ id: 'edit-1', ...rotate90 }]);
+
+      await sut.editAsset(authStub.admin, 'photo-1', { edits: [rotate90] });
+
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('photo-1', [rotate90]);
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('motion-1', [rotate90]);
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetEditThumbnailGeneration,
+        data: { id: 'motion-1' },
+      });
+    });
+
+    it('should only rotate a live photo', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['photo-1']));
+      mocks.asset.getForEdit.mockResolvedValue(forEdit({ type: AssetType.Image, livePhotoVideoId: 'motion-1' }));
+
+      await expect(
+        sut.editAsset(authStub.admin, 'photo-1', {
+          edits: [{ action: AssetEditAction.Crop, parameters: { x: 0, y: 0, width: 100, height: 100 } }],
+        }),
+      ).rejects.toThrow('Live photos can only be rotated');
+
+      expect(mocks.assetEdit.replaceAll).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeAssetEdits', () => {
+    it('should remove the edits of the video of a live photo too', async () => {
+      const asset = AssetFactory.create({ livePhotoVideoId: 'motion-1' });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.assetEdit.replaceAll.mockResolvedValue([]);
+
+      await sut.removeAssetEdits(authStub.admin, asset.id);
+
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith(asset.id, []);
+      expect(mocks.assetEdit.replaceAll).toHaveBeenCalledWith('motion-1', []);
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetEditThumbnailGeneration,
+        data: { id: 'motion-1' },
+      });
     });
   });
 

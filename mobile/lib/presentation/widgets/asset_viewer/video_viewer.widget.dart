@@ -158,11 +158,15 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
       }
 
       final isOriginalVideo = ref.read(appConfigProvider).viewer.loadOriginalVideo;
-      final String postfixUrl = isOriginalVideo ? 'original' : 'video/playback';
+      // the original of a rotated video is its rotated copy
+      final String postfixUrl = isOriginalVideo
+          ? (remoteAsset.isEdited ? 'original?edited=true' : 'original')
+          : 'video/playback';
       final String assetId = remoteAsset.livePhotoVideoId ?? remoteAsset.id;
       final String videoUrl = '$serverEndpoint/assets/$assetId/$postfixUrl';
 
-      if (isOriginalVideo) {
+      // the rotated copy of a video is made from its transcoded copy when there is one
+      if (isOriginalVideo && !remoteAsset.isEdited) {
         _notifier.setSource(VideoPlaybackSource.original);
       } else if (!widget.asset.isMotionPhoto) {
         unawaited(_loadPlaybackSource(remoteAsset.id));
@@ -194,7 +198,8 @@ class _NativeVideoViewerState extends ConsumerState<NativeVideoViewer> with Widg
   }
 
   Future<LocalAsset?> _localPlaybackAsset(BaseAsset baseAsset) async {
-    if (!baseAsset.hasLocal) {
+    // a rotated video (or motion photo) plays its rotated copy from the server
+    if (!baseAsset.hasLocal || baseAsset.isEdited) {
       return null;
     }
 
