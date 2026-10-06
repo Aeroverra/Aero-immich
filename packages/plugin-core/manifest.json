@@ -292,7 +292,13 @@
       "steps": [
         {
           "method": "immich-plugin-core#assetLocationFilter",
-          "config": { "region": { "city": "Vancouver", "state": "British Columbia", "country": "Canada" } }
+          "config": {
+            "region": {
+              "city": "Vancouver",
+              "state": "British Columbia",
+              "country": "Canada"
+            }
+          }
         },
         {
           "method": "immich-plugin-core#assetAddToAlbums",
@@ -792,6 +798,47 @@
             }
           }
         }
+      },
+      "uiHints": ["Filter"]
+    },
+    {
+      "name": "assetFilterGroup",
+      "title": "Filter group",
+      "description": "Let assets through when any, all or none of the filters in the group match, for example to combine several rules in one workflow. Groups can hold other groups",
+      "types": ["AssetV1"],
+      "schema": {
+        "type": "object",
+        "uiHint": {
+          "type": "FilterGroup"
+        },
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Match",
+            "description": "Whether any, all or none of the filters must match",
+            "enum": ["any", "all", "none"],
+            "default": "any"
+          },
+          "filters": {
+            "type": "object",
+            "array": true,
+            "title": "Filters",
+            "description": "Filters of this plugin, each with its method (immich-plugin-core#methodName) and configuration",
+            "properties": {
+              "method": {
+                "type": "string",
+                "title": "Method",
+                "description": "Filter method (pluginName#methodName)"
+              },
+              "config": {
+                "type": "object",
+                "title": "Configuration",
+                "description": "Configuration of the filter"
+              }
+            }
+          }
+        },
+        "required": ["mode", "filters"]
       },
       "uiHints": ["Filter"]
     },
