@@ -93,6 +93,20 @@ void main() {
     });
   });
 
+  group('video length', () {
+    test('sends the bounds that are set and leaves the others out', () async {
+      await repo.search(filter.copyWith(minDuration: 30000), 1);
+      await repo.search(filter.copyWith(context: 'sunset', minDuration: 30000, maxDuration: 300000), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.minDuration, const Optional<int?>.present(30000));
+      expect(metadata.maxDuration.isPresent, isFalse);
+      final smart = sentSmart();
+      expect(smart.minDuration, const Optional<int?>.present(30000));
+      expect(smart.maxDuration, const Optional<int?>.present(300000));
+    });
+  });
+
   group('smart search', () {
     final smartFilter = filter.copyWith(context: 'sunset');
 
