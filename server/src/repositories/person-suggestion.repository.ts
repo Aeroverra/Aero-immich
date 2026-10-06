@@ -510,15 +510,20 @@ export class PersonSuggestionRepository {
           .on('candidate.ownerId', '=', ownerId),
       )
       .leftJoin('asset_face as face', 'face.id', 'person_suggestion.faceId')
+      .leftJoin('person as facePerson', (join) =>
+        join.onRef('facePerson.personGroupId', '=', 'face.personGroupId').on('facePerson.ownerId', '=', ownerId),
+      )
       .where('person_suggestion.ownerId', '=', ownerId)
       .where('person_suggestion.status', '=', PersonSuggestionStatus.Pending)
       .where('target.isHidden', '=', false)
       .where((eb) =>
         eb.or([
           eb.and([eb('candidate.isHidden', '=', false), eb('candidate.name', '=', '')]),
-          // a face that is not with the target yet (the job only asks about faces without a person)
+          // a face without a person, or with an unnamed one (questions created through the API); a face that went to
+          // a named person in the meantime has its answer
           eb.and([
             eb('face.id', 'is not', null),
+            eb.or([eb('face.personGroupId', 'is', null), eb('facePerson.name', '=', '')]),
             eb.or([
               eb('face.personGroupId', 'is', null),
               eb('face.personGroupId', '!=', eb.ref('person_suggestion.targetPersonGroupId')),
@@ -841,6 +846,17 @@ export class PersonSuggestionRepository {
       .executeTakeFirst();
 
     return !!row;
+  }
+
+  /** The other open questions about a face: once it is answered to be someone, they are moot */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async deleteOpenForFace(faceId: string, exceptId: string) {
+    await this.db
+      .deleteFrom('person_suggestion')
+      .where('faceId', '=', faceId)
+      .where('id', '!=', exceptId)
+      .where('status', 'in', [PersonSuggestionStatus.Pending, PersonSuggestionStatus.Skipped])
+      .execute();
   }
 
   /** Every face of a person on the owner's assets, whatever its state: what a merge of the person moves */

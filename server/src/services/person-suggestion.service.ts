@@ -620,6 +620,7 @@ export class PersonSuggestionService extends BaseService {
       });
 
       await this.personRepository.reassignFace(face.id, targetPersonGroupId);
+      await this.personSuggestionRepository.deleteOpenForFace(face.id, suggestion.id);
       if (target.faceAssetId === null) {
         await this.setFeatureFace(ownerId, targetPersonGroupId);
       }

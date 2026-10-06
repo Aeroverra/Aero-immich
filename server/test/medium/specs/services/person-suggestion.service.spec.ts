@@ -603,6 +603,30 @@ describe(PersonSuggestionService.name, () => {
     });
   });
 
+  describe('a face asked about with two look-alikes', () => {
+    it('should not be asked about the other one once it is answered', async () => {
+      const { sut, ctx } = setup();
+      const random = newRandom(21);
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const sue = await seedPerson(ctx, user.id, random, { name: 'Sue', identity: randomDirection(random), faces: 2 });
+      const sis = await seedPerson(ctx, user.id, random, { name: 'Sis', identity: randomDirection(random), faces: 2 });
+      const { faceIds } = await seedPerson(ctx, user.id, random, {
+        identity: randomDirection(random),
+        faces: 1,
+        loose: true,
+      });
+      const first = await sut.create(auth, { faceId: faceIds[0], targetPersonId: sue.personGroupId });
+      const second = await sut.create(auth, { faceId: faceIds[0], targetPersonId: sis.personGroupId });
+      await expect(sut.getStatistics(auth)).resolves.toEqual({ pending: 2 });
+
+      await sut.answer(auth, first.id, { answer: PersonSuggestionStatus.Same });
+
+      await expect(sut.getStatistics(auth)).resolves.toEqual({ pending: 0 });
+      await expect(ctx.get(PersonSuggestionRepository).get(second.id)).resolves.toBeUndefined();
+    });
+  });
+
   describe('a face that is with another person', () => {
     it('should be asked about, moved to the target and moved back', async () => {
       const { sut, ctx } = setup();
