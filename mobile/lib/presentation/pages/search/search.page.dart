@@ -20,6 +20,7 @@ import 'package:immich_mobile/presentation/widgets/search/quick_date_picker.dart
 import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/custom_view.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
@@ -29,6 +30,7 @@ import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/feature_check.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
+import 'package:immich_mobile/widgets/search/search_filter/album_filter_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/camera_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/display_option_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/filter_bottom_sheet_scaffold.dart';
@@ -71,12 +73,15 @@ class SearchPage extends HookConsumerWidget {
     );
 
     final dateInputFilter = useState<DateFilterInputModel?>(null);
+    final uploadedInputFilter = useState<DateFilterInputModel?>(null);
 
     final peopleCurrentFilterWidget = useState<Widget?>(null);
     final dateRangeCurrentFilterWidget = useState<Widget?>(null);
     final cameraCurrentFilterWidget = useState<Widget?>(null);
     final locationCurrentFilterWidget = useState<Widget?>(null);
     final tagCurrentFilterWidget = useState<Widget?>(null);
+    final albumCurrentFilterWidget = useState<Widget?>(null);
+    final uploadedCurrentFilterWidget = useState<Widget?>(null);
     final mediaTypeCurrentFilterWidget = useState<Widget?>(null);
     final ratingCurrentFilterWidget = useState<Widget?>(null);
     final displayOptionCurrentFilterWidget = useState<Widget?>(null);
@@ -139,6 +144,9 @@ class SearchPage extends HookConsumerWidget {
           dateRangeCurrentFilterWidget.value = null;
           cameraCurrentFilterWidget.value = null;
           tagCurrentFilterWidget.value = null;
+          albumCurrentFilterWidget.value = null;
+          uploadedCurrentFilterWidget.value = null;
+          uploadedInputFilter.value = null;
           mediaTypeCurrentFilterWidget.value = null;
           ratingCurrentFilterWidget.value = null;
           displayOptionCurrentFilterWidget.value = null;
@@ -229,6 +237,56 @@ class SearchPage extends HookConsumerWidget {
               child: TagFilterPicker(
                 initialIncluded: (filter.value.tagIds ?? []).toSet(),
                 initialExcluded: (filter.value.excludeTagIds ?? []).toSet(),
+                onChanged: handleOnChanged,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    void showAlbumPicker() {
+      var albumIds = filter.value.albumIds ?? [];
+      var excludeAlbumIds = filter.value.excludeAlbumIds ?? [];
+
+      void handleOnChanged(Set<String> included, Set<String> excluded) {
+        albumIds = included.toList();
+        excludeAlbumIds = excluded.toList();
+      }
+
+      void handleClear() {
+        albumCurrentFilterWidget.value = null;
+        search(filter.value.copyWith(albumIds: [], excludeAlbumIds: []));
+      }
+
+      void handleApply() {
+        final names = {for (final album in ref.read(remoteAlbumProvider).albums) album.id: album.name};
+        final included = albumIds.map((id) => names[id]).nonNulls.join(', ');
+        final excluded = excludeAlbumIds.map((id) => names[id]).nonNulls.join(', ');
+        final albumLabel = [
+          if (included.isNotEmpty) included,
+          if (excluded.isNotEmpty) context.t.search_not_in_album(album: excluded),
+        ].join(' · ');
+        albumCurrentFilterWidget.value = albumLabel.isNotEmpty
+            ? Text(albumLabel, style: context.textTheme.labelLarge)
+            : null;
+        search(filter.value.copyWith(albumIds: albumIds, excludeAlbumIds: excludeAlbumIds));
+      }
+
+      unawaited(
+        showFilterBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          child: FractionallySizedBox(
+            heightFactor: 0.8,
+            child: FilterBottomSheetScaffold(
+              title: context.t.albums,
+              expanded: true,
+              onSearch: handleApply,
+              onClear: handleClear,
+              child: AlbumFilterPicker(
+                initialIncluded: (filter.value.albumIds ?? []).toSet(),
+                initialExcluded: (filter.value.excludeAlbumIds ?? []).toSet(),
                 onChanged: handleOnChanged,
               ),
             ),
@@ -347,13 +405,38 @@ class SearchPage extends HookConsumerWidget {
       );
     }
 
-    Future<void> showDatePicker() async {
+    // the upload date: the Google Photos upload time for assets imported from Google Photos, else the Immich one
+    void uploadedDatePicked(DateFilterInputModel? selectedDate) {
+      uploadedInputFilter.value = selectedDate;
+      if (selectedDate == null) {
+        uploadedCurrentFilterWidget.value = null;
+        search(filter.value.copyWith(uploaded: const SearchUploadDateFilter()));
+        return;
+      }
+
+      // from the start of the first day to the end of the last day, local time
+      final date = selectedDate.asDateTimeRange();
+      uploadedCurrentFilterWidget.value = Text(
+        context.t.search_uploaded_range(range: selectedDate.asHumanReadable(context)),
+        style: context.textTheme.labelLarge,
+      );
+      search(
+        filter.value.copyWith(
+          uploaded: SearchUploadDateFilter(
+            uploadedAfter: DateTime(date.start.year, date.start.month, date.start.day),
+            uploadedBefore: DateTime(date.end.year, date.end.month, date.end.day, 23, 59, 59, 999),
+          ),
+        ),
+      );
+    }
+
+    Future<void> showDatePicker({bool uploaded = false}) async {
       final firstDate = DateTime(1900);
       final lastDate = DateTime.now();
 
       var dateRange = DateTimeRange(
-        start: filter.value.date.takenAfter ?? lastDate,
-        end: filter.value.date.takenBefore ?? lastDate,
+        start: (uploaded ? filter.value.uploaded.uploadedAfter : filter.value.date.takenAfter) ?? lastDate,
+        end: (uploaded ? filter.value.uploaded.uploadedBefore : filter.value.date.takenBefore) ?? lastDate,
       );
 
       // datePicked() may increase the date, this will make the date picker fail an assertion
@@ -380,32 +463,49 @@ class SearchPage extends HookConsumerWidget {
         keyboardType: TextInputType.text,
       );
 
+      final picked = uploaded ? uploadedDatePicked : datePicked;
       if (date == null) {
-        datePicked(null);
+        picked(null);
       } else {
-        datePicked(CustomDateFilter.fromRange(date));
+        picked(CustomDateFilter.fromRange(date));
       }
     }
 
-    void showQuickDatePicker() {
+    void showQuickDatePicker({bool uploaded = false}) {
+      final picked = uploaded ? uploadedDatePicked : datePicked;
+      final quickPicker = QuickDatePicker(
+        currentInput: uploaded ? uploadedInputFilter.value : dateInputFilter.value,
+        onRequestPicker: () {
+          ContextHelper(context).pop();
+          unawaited(showDatePicker(uploaded: uploaded));
+        },
+        onSelect: (date) {
+          ContextHelper(context).pop();
+          picked(date);
+        },
+      );
+
       unawaited(
         showFilterBottomSheet(
           context: context,
           child: FilterBottomSheetScaffold(
-            title: context.t.pick_date_range,
+            title: uploaded ? context.t.search_filter_date_uploaded : context.t.pick_date_range,
             expanded: true,
-            onClear: () => datePicked(null),
-            child: QuickDatePicker(
-              currentInput: dateInputFilter.value,
-              onRequestPicker: () {
-                ContextHelper(context).pop();
-                unawaited(showDatePicker());
-              },
-              onSelect: (date) {
-                ContextHelper(context).pop();
-                datePicked(date);
-              },
-            ),
+            onClear: () => picked(null),
+            child: uploaded
+                ? Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          context.t.search_filter_date_uploaded_description,
+                          style: context.textTheme.bodyMedium?.copyWith(color: context.colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                      Expanded(child: quickPicker),
+                    ],
+                  )
+                : quickPicker,
           ),
         ),
       );
@@ -778,6 +878,13 @@ class SearchPage extends HookConsumerWidget {
                         currentFilter: tagCurrentFilterWidget.value,
                       ),
                     SearchFilterChip(
+                      key: const Key('album_chip'),
+                      icon: Icons.photo_album_outlined,
+                      onTap: showAlbumPicker,
+                      label: context.t.albums,
+                      currentFilter: albumCurrentFilterWidget.value,
+                    ),
+                    SearchFilterChip(
                       icon: Icons.camera_alt_outlined,
                       onTap: showCameraPicker,
                       label: context.t.camera,
@@ -788,6 +895,13 @@ class SearchPage extends HookConsumerWidget {
                       onTap: showQuickDatePicker,
                       label: context.t.search_filter_date,
                       currentFilter: dateRangeCurrentFilterWidget.value,
+                    ),
+                    SearchFilterChip(
+                      key: const Key('uploaded_chip'),
+                      icon: Icons.cloud_upload_outlined,
+                      onTap: () => showQuickDatePicker(uploaded: true),
+                      label: context.t.search_filter_date_uploaded,
+                      currentFilter: uploadedCurrentFilterWidget.value,
                     ),
                     SearchFilterChip(
                       key: const Key('media_type_chip'),
