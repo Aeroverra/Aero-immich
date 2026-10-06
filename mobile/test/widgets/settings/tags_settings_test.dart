@@ -184,24 +184,32 @@ void main() {
     expect(find.text(t.tag_deleted(tag: 'Gym')), findsOneWidget);
   });
 
-  testWidgets('renaming sends the new name and rejects a slash', (tester) async {
+  testWidgets('renaming takes a full path and refuses a move into the tag itself', (tester) async {
     when(
-      () => tagging.renameTag(any(), any()),
-    ).thenAnswer((_) async => const TagEntry(id: 'gym', ownerId: _me, value: 'Fitness'));
+      () => tagging.updateTagPath(any(), any()),
+    ).thenAnswer((_) async => const TagEntry(id: 'gym', ownerId: _me, value: 'Sports/Fitness'));
     final t = await pump(tester, privateMode: true);
     await openTag(tester, 'gym');
 
     await tester.tap(find.byKey(const Key('tag-rename')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('tag-rename-field')), 'A/B');
-    await tester.tap(find.byKey(const Key('tag-rename-save')));
-    await tester.pumpAndSettle();
-    expect(find.text(t.tag_name_invalid), findsOneWidget);
+    final field = find.byKey(const Key('tag-rename-field'));
+    expect(tester.widget<TextField>(field).controller!.text, _gym.value);
 
-    await tester.enterText(find.byKey(const Key('tag-rename-field')), 'Fitness');
+    await tester.enterText(field, '${_gym.value}/Inside');
     await tester.tap(find.byKey(const Key('tag-rename-save')));
     await tester.pumpAndSettle();
-    verify(() => tagging.renameTag(_gym, 'Fitness')).called(1);
-    expect(find.text(t.tag_renamed(tag: 'Fitness')), findsOneWidget);
+    expect(find.text(t.errors.tag_move_into_itself), findsOneWidget);
+
+    await tester.enterText(field, ' / ');
+    await tester.tap(find.byKey(const Key('tag-rename-save')));
+    await tester.pumpAndSettle();
+    expect(find.text(t.errors.tag_name_required), findsOneWidget);
+
+    await tester.enterText(field, ' Sports / Fitness ');
+    await tester.tap(find.byKey(const Key('tag-rename-save')));
+    await tester.pumpAndSettle();
+    verify(() => tagging.updateTagPath(_gym, 'Sports/Fitness')).called(1);
+    expect(find.text(t.tag_renamed(tag: 'Sports/Fitness')), findsOneWidget);
   });
 }
