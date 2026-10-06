@@ -147,9 +147,6 @@ const previouslyDeletedFlags = (row: { fallbacks?: string[] | null } | undefined
 
 const uploadFirst = (row: { action: string }) => (row.action === TakeoutRunFileAction.Upload ? 0 : 1);
 
-const effectiveInstantFor = (capture: { instant?: Date | null }, captureDate: Date | null): Date | null =>
-  capture.instant ?? captureDate;
-
 const formatBytes = (bytes: number): string => {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   let value = Math.max(0, bytes);
@@ -2144,8 +2141,9 @@ export class TakeoutRunService extends BaseService {
       exif: deriveCaptureExif(exif),
       names: [originalFileName, row.takeoutPath.split('/').pop()],
     });
-    // No zone evidence: display in the user home zone (flagged zoneAssumed); the moment itself stays Google's.
-    const zone = capture.zone ?? (effectiveInstantFor(capture, captureDate) ? settings.homeTimeZone : null);
+    // No zone evidence (flagged zoneAssumed): no zone is invented, the moment shows in UTC. A guessed home zone was
+    // wrong for every capture away from home; a file or rule that knows its offset always supplies it.
+    const zone = capture.zone;
     const zoneSource = capture.zoneSource;
     // The capture instant the algorithm chose (may differ from Google's for a phone that carries its own offset).
     const effectiveInstant: Date | null = capture.instant ?? captureDate;
@@ -2736,6 +2734,9 @@ function exifWallClock(value: unknown): Date | null {
   return null;
 }
 
+// The zone names exiftool-vendored gives a zero offset (UTC, UTC+0, Etc/UTC, GMT, Z).
+const UTC_ZONE_RE = /^(?:etc\/)?(?:utc|gmt|z)(?:[+-]0{1,2}(?::00)?)?$/i;
+
 // Reduce a full exiftool read to the primitives the section 13 capture-time rule needs. Splitting the exiftool
 // `zone`/`zoneSource` into an explicit file offset (kept) vs a GPS-derived zone (ignored: GPS never supplies the
 // zone) happens here, at the Nest boundary, so the pure library never interprets exiftool output.
@@ -2747,23 +2748,30 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
   const zone = firstString(exif.zone, exif.tz);
   const zoneSource = (firstString(exif.zoneSource, exif.tzSource) ?? '').toLowerCase();
   const gpsDerived = zoneSource.includes('gps') || zoneSource.includes('geolocation');
+  // QuickTime (MP4/MOV) dates are UTC by spec, so a video's UTC zone (defaultVideosToUTC, or a CreationDate written
+  // with Z / +00:00) says nothing about where the device was.
+  const isVideo = (firstString(exif.MIMEType) ?? '').toLowerCase().startsWith('video/');
+  const videoUtc = isVideo && zone !== null && UTC_ZONE_RE.test(zone);
   let fileOffsetZone: string | null = null;
   const recorded =
     zoneSource.includes('offset') ||
     zoneSource.includes('timezone') ||
     zoneSource.includes('creationdate') ||
     zoneSource.includes('timecreated');
-  if (zone && !zoneSource.includes('defaultvideostoutc') && !gpsDerived && recorded) {
+  if (zone && !zoneSource.includes('defaultvideostoutc') && !gpsDerived && !videoUtc && recorded) {
     fileOffsetZone = zone;
   }
 
   const fileHasGps = typeof exif.GPSLatitude === 'number' && typeof exif.GPSLongitude === 'number';
-  const fileClock = exifWallClock(
-    exif.SubSecDateTimeOriginal ?? exif.DateTimeOriginal ?? exif.CreationDate ?? exif.CreateDate,
-  );
+  const originalClock = exif.SubSecDateTimeOriginal ?? exif.DateTimeOriginal;
+  const fileClock = exifWallClock(originalClock ?? exif.CreationDate ?? exif.CreateDate);
+  // A video clock from its QuickTime dates (no DateTimeOriginal, no recorded offset) stays in UTC unless exiftool shifted
+  // it into a zone (GPS): then it is the local wall clock at that place and rule 2 may use it.
+  const fileClockIsUtc =
+    isVideo && fileClock !== null && !originalClock && !fileOffsetZone && (zone === null || UTC_ZONE_RE.test(zone));
   const gpsDateTime = exifWallClock(exif.GPSDateTime);
 
-  return { make, model, fileOffsetZone, fileHasGps, fileClock, gpsDateTime };
+  return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime };
 }
 
 /** The reason of a server duplicate whose asset is in the trash: it never joins a stack (a trashed cover hides it) */
