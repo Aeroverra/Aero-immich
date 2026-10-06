@@ -30,6 +30,7 @@ describe('AssetTagModal', () => {
     vi.clearAllMocks();
     tagPicker.expanded.current = [];
     tagPicker.recent.current = [];
+    tagPicker.pinned.current = [];
     sdkMock.getAllTags.mockResolvedValue([newTag('Beach'), newTag('Family'), newTag('Work')]);
     // all three assets carry Beach, one carries Family, none carries Work
     sdkMock.getTagAssetCounts.mockResolvedValue([
@@ -74,6 +75,18 @@ describe('AssetTagModal', () => {
     await userEvent.click(screen.getByLabelText('Work'));
     await userEvent.click(screen.getByLabelText('Work'));
 
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('pins a tag to the selection bar from the tree and unpins it', async () => {
+    renderWithTooltips(AssetTagModal, { assetIds, onClose });
+    await waitFor(() => expect(row('Beach')).toHaveAttribute('aria-selected', 'true'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pin Work to the selection bar' }));
+    expect(tagPicker.pinned.current).toEqual(['Work']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Unpin Work' }));
+    expect(tagPicker.pinned.current).toEqual([]);
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 });
