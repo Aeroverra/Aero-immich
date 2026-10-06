@@ -1,5 +1,6 @@
 import { PersonController } from 'src/controllers/person.controller';
 import { LoggingRepository } from 'src/repositories/logging.repository';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import request from 'supertest';
 import { errorDto } from 'test/medium/responses';
@@ -9,10 +10,12 @@ import { automock, ControllerContext, controllerSetup, mockBaseService } from 't
 describe(PersonController.name, () => {
   let ctx: ControllerContext;
   const service = mockBaseService(PersonService);
+  const suggestionService = mockBaseService(PersonSuggestionService);
 
   beforeAll(async () => {
     ctx = await controllerSetup(PersonController, [
       { provide: PersonService, useValue: service },
+      { provide: PersonSuggestionService, useValue: suggestionService },
       { provide: LoggingRepository, useValue: automock(LoggingRepository, { strict: false }) },
     ]);
     return () => ctx.close();
@@ -20,7 +23,97 @@ describe(PersonController.name, () => {
 
   beforeEach(() => {
     service.resetAllMocks();
+    suggestionService.resetAllMocks();
     ctx.reset();
+  });
+
+  describe('GET /people/suggestions', () => {
+    it('should not be taken for a person id', async () => {
+      await request(ctx.getHttpServer()).get('/people/suggestions').set('Authorization', `Bearer token`);
+      expect(suggestionService.getAll).toHaveBeenCalledWith(undefined, { page: 1, size: 10 });
+      expect(service.getById).not.toHaveBeenCalled();
+    });
+
+    it('should limit the page size', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .get('/people/suggestions')
+        .query({ size: 51 })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+  });
+
+  describe('GET /people/suggestions/count', () => {
+    it('should not be taken for a person id', async () => {
+      await request(ctx.getHttpServer()).get('/people/suggestions/count').set('Authorization', `Bearer token`);
+      expect(suggestionService.getStatistics).toHaveBeenCalled();
+      expect(service.getStatistics).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /people/suggestions', () => {
+    it('should require either a person or a face', async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .post('/people/suggestions')
+        .send({ targetPersonId: factory.uuid() })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+      expect(body).toEqual(
+        errorDto.validationError([{ path: [], message: 'Either personId or faceId is required, not both' }]),
+      );
+    });
+
+    it('should refuse both a person and a face', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .post('/people/suggestions')
+        .send({ personId: factory.uuid(), faceId: factory.uuid(), targetPersonId: factory.uuid() })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+
+    it('should refuse a score above 1', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .post('/people/suggestions')
+        .send({ personId: factory.uuid(), targetPersonId: factory.uuid(), score: 1.5 })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+  });
+
+  describe('PUT /people/suggestions/:id', () => {
+    it('should require a uuid', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .put('/people/suggestions/invalid')
+        .send({ answer: 'same' })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+
+    it('should only take same, different or skipped', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .put(`/people/suggestions/${factory.uuid()}`)
+        .send({ answer: 'pending' })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+
+    it('should pass a name on', async () => {
+      const id = factory.uuid();
+      await request(ctx.getHttpServer())
+        .put(`/people/suggestions/${id}`)
+        .send({ answer: 'same', name: ' Cleo ' })
+        .set('Authorization', `Bearer token`);
+      expect(suggestionService.answer).toHaveBeenCalledWith(undefined, id, { answer: 'same', name: 'Cleo' });
+    });
+  });
+
+  describe('DELETE /people/suggestions/:id/answer', () => {
+    it('should require a uuid', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .delete('/people/suggestions/invalid/answer')
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
   });
 
   describe('GET /people', () => {
