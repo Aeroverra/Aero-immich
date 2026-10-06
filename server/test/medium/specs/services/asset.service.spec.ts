@@ -1,6 +1,7 @@
+import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import { AssetFileType, AssetMetadataKey, AssetStatus, JobName, SharedLinkType } from 'src/enum';
+import { AssetFileType, AssetMetadataKey, AssetStatus, CalendarHeatmapType, JobName, SharedLinkType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
@@ -66,6 +67,52 @@ describe(AssetService.name, () => {
       await ctx.newExif({ assetId: asset.id, fileSizeInByte: 12_345 });
       const auth = factory.auth({ user: { id: user.id } });
       await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should not count private assets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id });
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should count private assets in private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id });
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: true } });
+      await expect(sut.getStatistics(auth, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+      await expect(sut.getStatistics(auth, { isPrivate: true })).resolves.toEqual({ images: 1, total: 1, videos: 0 });
+    });
+
+    it('should require private mode for private statistics', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      await expect(sut.getStatistics(auth, { isPrivate: true })).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('getCalendarHeatmap', () => {
+    it('should count private assets only in private mode', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const createdAt = new Date('2024-06-15T12:00:00.000Z');
+      await ctx.newAsset({ ownerId: user.id, createdAt });
+      await ctx.newAsset({ ownerId: user.id, createdAt, isPrivate: true });
+      const dto = { from: new Date('2024-06-01'), to: new Date('2024-07-01'), type: CalendarHeatmapType.Upload };
+
+      const assetRepository = ctx.get(AssetRepository);
+      await expect(
+        assetRepository.getCalendarHeatmap(user.id, dto, { privateMode: false, userId: user.id }),
+      ).resolves.toEqual([expect.objectContaining({ count: 1 })]);
+      await expect(
+        assetRepository.getCalendarHeatmap(user.id, dto, { privateMode: true, userId: user.id }),
+      ).resolves.toEqual([expect.objectContaining({ count: 2 })]);
     });
   });
 
@@ -143,9 +190,9 @@ describe(AssetService.name, () => {
       const auth = factory.auth({ user: { id: user.id } });
       await sut.copy(auth, { sourceId: oldAsset.id, targetId: newAsset.id });
 
-      await expect(stackRepo.getById(oldAsset.id)).resolves.toEqual(undefined);
+      await expect(stackRepo.getById(oldAsset.id, { privateMode: true, userId: user.id })).resolves.toEqual(undefined);
 
-      const newStack = await stackRepo.getById(newStackId);
+      const newStack = await stackRepo.getById(newStackId, { privateMode: true, userId: user.id });
       expect(newStack).toEqual(
         expect.objectContaining({
           primaryAssetId: newAsset.id,
@@ -176,7 +223,7 @@ describe(AssetService.name, () => {
       const auth = factory.auth({ user: { id: user.id } });
       await sut.copy(auth, { sourceId: oldAsset.id, targetId: newAsset.id });
 
-      const stack = await stackRepo.getById(stackId);
+      const stack = await stackRepo.getById(stackId, { privateMode: true, userId: user.id });
       expect(stack).toEqual(
         expect.objectContaining({
           primaryAssetId: oldAsset.id,
@@ -279,7 +326,7 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // stack is deleted as well
-      await expect(stackRepo.getById(stack.id)).resolves.toBe(undefined);
+      await expect(stackRepo.getById(stack.id, { privateMode: true, userId: user.id })).resolves.toBe(undefined);
     });
 
     it('should delete a stacked primary asset (3 assets)', async () => {
@@ -297,7 +344,9 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // new primary asset is picked
-      await expect(ctx.get(StackRepository).getById(stack.id)).resolves.toMatchObject({ primaryAssetId: asset2.id });
+      await expect(
+        ctx.get(StackRepository).getById(stack.id, { privateMode: true, userId: user.id }),
+      ).resolves.toMatchObject({ primaryAssetId: asset2.id });
     });
 
     it('should delete a stacked primary asset (3 trashed assets)', async () => {
@@ -320,7 +369,9 @@ describe(AssetService.name, () => {
       await sut.handleAssetDeletion({ id: asset1.id, deleteOnDisk: true });
 
       // stack is deleted as well
-      await expect(ctx.get(StackRepository).getById(stack.id)).resolves.toBe(undefined);
+      await expect(ctx.get(StackRepository).getById(stack.id, { privateMode: true, userId: user.id })).resolves.toBe(
+        undefined,
+      );
     });
 
     it('should not delete offline assets', async () => {
@@ -356,6 +407,31 @@ describe(AssetService.name, () => {
       await expect(sut.update(factory.auth({ user: otherUser }), asset.id, {})).rejects.toThrow(
         'Not found or no asset.update access',
       );
+    });
+
+    it('should mark an asset private outside private mode and hide it until the mode is on', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+
+      await expect(sut.update(off, asset.id, { isPrivate: true })).resolves.toMatchObject({
+        id: asset.id,
+        isPrivate: true,
+      });
+
+      // the asset is now hidden from the session that marked it, and stays private until unmarked in the mode
+      await expect(sut.get(off, asset.id)).rejects.toThrow('Not found or no asset.read access');
+      await expect(sut.update(off, asset.id, { isPrivate: false })).rejects.toThrow(
+        'Not found or no asset.update access',
+      );
+      await expect(sut.get(on, asset.id)).resolves.toMatchObject({ id: asset.id, isPrivate: true });
+      await expect(sut.update(on, asset.id, { isPrivate: false })).resolves.toMatchObject({ isPrivate: false });
+      await expect(sut.get(off, asset.id)).resolves.toMatchObject({ id: asset.id, isPrivate: false });
     });
 
     it('should automatically lock lockable columns', async () => {
@@ -445,7 +521,136 @@ describe(AssetService.name, () => {
     });
   });
 
+  describe('update (stacks)', () => {
+    it('should apply the private flag to every member of the stack', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: sibling } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: primary.id, make: 'Canon' });
+      await ctx.newExif({ assetId: sibling.id, make: 'Canon' });
+      await ctx.newStack({ ownerId: user.id }, [primary.id, sibling.id]);
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+      const flags = () =>
+        ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate'])
+          .where('id', 'in', [primary.id, sibling.id])
+          .orderBy('id')
+          .execute();
+
+      await sut.update(off, sibling.id, { isPrivate: true });
+      expect(await flags()).toEqual([primary.id, sibling.id].sort().map((id) => ({ id, isPrivate: true })));
+      await expect(sut.get(off, primary.id)).rejects.toThrow('Not found or no asset.read access');
+
+      await sut.update(on, primary.id, { isPrivate: false });
+      expect(await flags()).toEqual([primary.id, sibling.id].sort().map((id) => ({ id, isPrivate: false })));
+      await expect(sut.get(off, sibling.id)).resolves.toMatchObject({ id: sibling.id, isPrivate: false });
+    });
+
+    it('should bump every member and the album holding one of them, and tell the clients', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: inAlbum } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: loose } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: inAlbum.id, make: 'Canon' });
+      await ctx.newExif({ assetId: loose.id, make: 'Canon' });
+      const { album } = await ctx.newAlbum({ ownerId: user.id }, [inAlbum.id]);
+      await ctx.newStack({ ownerId: user.id }, [inAlbum.id, loose.id]);
+      const snapshot = async () => ({
+        assets: await ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate', 'updateId'])
+          .where('id', 'in', [inAlbum.id, loose.id])
+          .orderBy('id')
+          .execute(),
+        album: await ctx.database
+          .selectFrom('album')
+          .select(['isPrivate', 'updateId'])
+          .where('id', '=', album.id)
+          .executeTakeFirstOrThrow(),
+      });
+      const before = await snapshot();
+
+      // marking the member outside the album flags its stack sibling, and the album follows the sibling
+      await sut.update(factory.auth({ user }), loose.id, { isPrivate: true });
+
+      const after = await snapshot();
+      expect(after.assets.map(({ isPrivate }) => isPrivate)).toEqual([true, true]);
+      for (const [index, asset] of after.assets.entries()) {
+        expect(asset.updateId > before.assets[index].updateId).toBe(true);
+      }
+      expect(after.album.isPrivate).toBe(true);
+      expect(after.album.updateId > before.album.updateId).toBe(true);
+      expect(ctx.getMock(EventRepository).emit).toHaveBeenCalledWith('AssetPrivateUpdateAll', {
+        assetIds: [loose.id, inAlbum.id],
+        userId: user.id,
+      });
+    });
+  });
+
   describe('updateAll', () => {
+    it('should apply the private flag to every member of the affected stacks', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: primary } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: sibling } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: loose } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newExif({ assetId: primary.id, make: 'Canon' });
+      await ctx.newExif({ assetId: sibling.id, make: 'Canon' });
+      await ctx.newStack({ ownerId: user.id }, [primary.id, sibling.id]);
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+      const flags = () =>
+        ctx.database
+          .selectFrom('asset')
+          .select(['id', 'isPrivate'])
+          .where('ownerId', '=', user.id)
+          .orderBy('id')
+          .execute();
+
+      await sut.updateAll(off, { ids: [sibling.id], isPrivate: true });
+      expect(await flags()).toEqual(
+        expect.arrayContaining([
+          { id: primary.id, isPrivate: true },
+          { id: sibling.id, isPrivate: true },
+          { id: loose.id, isPrivate: false },
+        ]),
+      );
+
+      await sut.updateAll(on, { ids: [primary.id], isPrivate: false });
+      const unmarked = await flags();
+      expect(unmarked.every(({ isPrivate }) => !isPrivate)).toBe(true);
+    });
+
+    it('should bulk mark assets private outside private mode and hide them until the mode is on', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { asset: first } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: second } = await ctx.newAsset({ ownerId: user.id });
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+
+      await sut.updateAll(off, { ids: [first.id, second.id], isPrivate: true });
+
+      await expect(sut.getStatistics(off, {})).resolves.toEqual({ images: 0, total: 0, videos: 0 });
+      await expect(sut.updateAll(off, { ids: [first.id, second.id], isPrivate: false })).rejects.toThrow(
+        'Not found or no asset.update access',
+      );
+      await expect(sut.getStatistics(on, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+      await sut.updateAll(on, { ids: [first.id, second.id], isPrivate: false });
+      await expect(sut.getStatistics(off, {})).resolves.toEqual({ images: 2, total: 2, videos: 0 });
+    });
+
     it('should automatically lock lockable columns', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
