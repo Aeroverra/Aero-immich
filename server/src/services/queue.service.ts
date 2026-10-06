@@ -313,7 +313,11 @@ export class QueueService extends BaseService {
     }
 
     if (config.nightlyTasks.clusterNewFaces) {
-      jobs.push({ name: JobName.FacialRecognitionQueueAll, data: { force: false, nightly: true } });
+      jobs.push(
+        { name: JobName.FacialRecognitionQueueAll, data: { force: false, nightly: true } },
+        // people named or merged during the day open up new questions even without new faces
+        { name: JobName.PersonSuggestionsQueueAll },
+      );
     }
 
     await this.jobRepository.queueAll(jobs);

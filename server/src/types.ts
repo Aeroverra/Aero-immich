@@ -263,6 +263,10 @@ export interface INightlyJob extends IBaseJob {
   nightly?: boolean;
 }
 
+export interface IPersonSuggestionsJob extends IBaseJob {
+  userId: string;
+}
+
 export type EmailImageAttachment = {
   filename: string;
   path: string;
@@ -444,6 +448,8 @@ export type JobItem =
 
   // Asset Deletion
   | { name: JobName.PersonCleanup; data?: IBaseJob }
+  | { name: JobName.PersonSuggestionsQueueAll; data?: IBaseJob }
+  | { name: JobName.PersonSuggestions; data: IPersonSuggestionsJob }
   | { name: JobName.AssetDelete; data: IAssetDeleteJob }
   | { name: JobName.AssetDeleteCheck; data?: IBaseJob }
 

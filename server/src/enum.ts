@@ -494,6 +494,42 @@ export enum SourceType {
 
 export const SourceTypeSchema = z.enum(SourceType).describe('Face detection source type').meta({ id: 'SourceType' });
 
+export enum PersonSuggestionKind {
+  /** an unnamed person or a face without a person may be a named person */
+  Named = 'named',
+  /** two unnamed people may be one person */
+  Unnamed = 'unnamed',
+}
+
+export const PersonSuggestionKindSchema = z
+  .enum(PersonSuggestionKind)
+  .describe('What a person suggestion asks: whether someone is a named person, or whether two unnamed people are one')
+  .meta({ id: 'PersonSuggestionKind' });
+
+export enum PersonSuggestionStatus {
+  Pending = 'pending',
+  Same = 'same',
+  Different = 'different',
+  Skipped = 'skipped',
+}
+
+export const PersonSuggestionStatusSchema = z
+  .enum(PersonSuggestionStatus)
+  .describe('The answer to a person suggestion, or pending while it has none')
+  .meta({ id: 'PersonSuggestionStatus' });
+
+export enum PersonSuggestionSource {
+  /** found by the person suggestions job */
+  Automatic = 'automatic',
+  /** created through the API, for example by an import of reviewed candidates */
+  Api = 'api',
+}
+
+export const PersonSuggestionSourceSchema = z
+  .enum(PersonSuggestionSource)
+  .describe('Where a person suggestion came from')
+  .meta({ id: 'PersonSuggestionSource' });
+
 export enum IntegrityReport {
   UntrackedFile = 'untracked_file',
   MissingFile = 'missing_file',
@@ -982,6 +1018,8 @@ export enum JobName {
   PersonCleanup = 'PersonCleanup',
   PersonFileMigration = 'PersonFileMigration',
   PersonGenerateThumbnail = 'PersonGenerateThumbnail',
+  PersonSuggestionsQueueAll = 'PersonSuggestionsQueueAll',
+  PersonSuggestions = 'PersonSuggestions',
 
   SessionCleanup = 'SessionCleanup',
 

@@ -29,6 +29,7 @@ import { NotificationAdminService } from 'src/services/notification-admin.servic
 import { NotificationService } from 'src/services/notification.service';
 import { OcrService } from 'src/services/ocr.service';
 import { PartnerService } from 'src/services/partner.service';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import { PluginService } from 'src/services/plugin.service';
 import { QueueService } from 'src/services/queue.service';
@@ -54,8 +55,8 @@ import { TrashService } from 'src/services/trash.service';
 import { UserAdminService } from 'src/services/user-admin.service';
 import { UserService } from 'src/services/user.service';
 import { VersionService } from 'src/services/version.service';
-import { VideoFrameAnalysisService } from 'src/services/video-frame-analysis.service';
 import { VideoBookmarkService } from 'src/services/video-bookmark.service';
+import { VideoFrameAnalysisService } from 'src/services/video-frame-analysis.service';
 import { ViewService } from 'src/services/view.service';
 import { WorkflowExecutionService } from 'src/services/workflow-execution.service';
 import { WorkflowService } from 'src/services/workflow.service';
@@ -93,6 +94,7 @@ export const services = [
   CustomViewService,
   PartnerService,
   PersonService,
+  PersonSuggestionService,
   PluginService,
   QueueService,
   SearchService,

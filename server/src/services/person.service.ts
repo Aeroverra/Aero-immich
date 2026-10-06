@@ -134,10 +134,17 @@ export class PersonService extends BaseService {
         { viewingUserId: auth.user.id },
       );
 
+      // a face answered to be someone else is never moved to this person
+      const different = new Set(
+        await this.personSuggestionRepository.getFacesDifferentFrom(
+          faces.map(({ id }) => id),
+          person.personGroupId,
+        ),
+      );
       for (const face of faces) {
         const ids = await this.checkAccess({ auth, permission: Permission.PersonCreate, ids: [face.id] });
 
-        if (ids.size !== 1) {
+        if (ids.size !== 1 || different.has(face.id)) {
           continue;
         }
 
@@ -164,6 +171,11 @@ export class PersonService extends BaseService {
     await this.requireAccess({ auth, permission: Permission.PersonCreate, ids: [dto.id] });
     const face = await this.personRepository.getFaceById(dto.id, { viewingUserId: auth.user.id });
     const person = await this.findOrFail(auth, personGroupId);
+
+    const [different] = await this.personSuggestionRepository.getFacesDifferentFrom([face.id], person.personGroupId);
+    if (different) {
+      throw new BadRequestException('This face was answered to be a different person');
+    }
 
     await this.personRepository.reassignFace(face.id, person.personGroupId);
     if (person.faceAssetId === null) {
@@ -682,6 +694,9 @@ export class PersonService extends BaseService {
 
     await this.systemMetadataRepository.set(SystemMetadataKey.FacialRecognitionState, { lastRun });
 
+    // the queue runs one job at a time in order, so the suggestions are worked out once these faces are recognized
+    await this.jobRepository.queue({ name: JobName.PersonSuggestionsQueueAll });
+
     return JobStatus.Success;
   }
 
@@ -739,7 +754,11 @@ export class PersonService extends BaseService {
       return JobStatus.Skipped;
     }
 
-    let personGroupId = matches.find((match) => match.personGroupId)?.personGroupId;
+    // a face answered to be someone else is never matched to that person
+    const different = new Set(await this.personSuggestionRepository.getDifferentPersonGroupIds(id));
+    const isAllowed = (groupId: string | null): groupId is string => !!groupId && !different.has(groupId);
+
+    let personGroupId = matches.find((match) => isAllowed(match.personGroupId))?.personGroupId ?? undefined;
     if (!personGroupId) {
       const [matchWithPerson] = await this.searchRepository.searchFaces({
         clusterGroupId,
@@ -750,7 +769,7 @@ export class PersonService extends BaseService {
         minBirthDate: new Date(face.asset.fileCreatedAt),
       });
 
-      personGroupId = matchWithPerson?.personGroupId ?? undefined;
+      personGroupId = isAllowed(matchWithPerson?.personGroupId ?? null) ? matchWithPerson.personGroupId! : undefined;
     }
 
     // faces found only in video frames wait for a matching person unless creating people from them is allowed
@@ -855,6 +874,17 @@ export class PersonService extends BaseService {
         }
 
         const mergeName = mergePerson.name || mergePerson.personGroupId;
+        const [isDifferent] = await this.personSuggestionRepository.getPeopleDifferentFrom(
+          targetPerson.ownerId,
+          targetPerson.personGroupId,
+          [mergeId],
+        );
+        if (isDifferent) {
+          this.logger.log(`Not merging ${mergeName}: it was answered to be a different person`);
+          results.push({ id: mergeId, success: false, error: BulkIdErrorReason.VALIDATION });
+          continue;
+        }
+
         const mergeData: UpdateFacesData = {
           oldPersonGroupId: mergeId,
           newPersonGroupId: targetPerson.personGroupId,
@@ -865,6 +895,7 @@ export class PersonService extends BaseService {
         try {
           await this.personRepository.reassignFaces(mergeData);
           await this.personRepository.deleteDuplicateWholeAssetFaces(targetPerson.personGroupId);
+          await this.personSuggestionRepository.moveToPerson(targetPerson.ownerId, mergeId, targetPerson.personGroupId);
           await this.removeAllPersonGroups([mergeId], targetPerson.ownerId);
 
           this.logger.log(`Merged ${mergeName} into ${targetPerson.name || targetPerson.personGroupId}`);
