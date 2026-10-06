@@ -13,6 +13,7 @@ const NO_EXIF: CaptureExifInput = {
   fileOffsetZone: null,
   fileHasGps: false,
   fileClock: null,
+  fileClockIsUtc: false,
   gpsDateTime: null,
 };
 
@@ -339,6 +340,18 @@ const cases: Case[] = [
       putOffsetZone: 'UTC+0',
       flags: [],
     },
+  },
+  {
+    name: 'rule 2 skips a UTC video clock (QuickTime CreateDate) equal to Google: no zone, flagged',
+    google: G,
+    exif: { ...PHONE, fileClock: wall('2023-07-05T01:30:00'), fileClockIsUtc: true },
+    expected: { ...GOOGLE_NO_ZONE, flags: ['zoneAssumed'] },
+  },
+  {
+    name: 'rule 2 skips a UTC video clock on a whole-hour offset from Google: no zone, flagged, no DST note',
+    google: G,
+    exif: { ...PHONE, fileClock: wall('2023-07-05T02:30:00'), fileClockIsUtc: true },
+    expected: { ...GOOGLE_NO_ZONE, flags: ['google-instant-with-differing-clock', 'zoneAssumed'] },
   },
   {
     name: 'rule 2: 3 s residual rejected: Google, no zone, flagged',

@@ -72,6 +72,46 @@ const uploadRow = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+// readTags of PXL_20260930_052338134.VB-01.COVER.mp4 (Pixel 9 Pro XL Video Boost cover, run f934139e): only
+// QuickTime dates, stored in UTC as the format says, no OffsetTime, no GPS. Google has no GPS for it either.
+const pixelVideoBoostCover = () => ({
+  MIMEType: 'video/mp4',
+  FileType: 'MP4',
+  AndroidMake: 'Google',
+  AndroidModel: 'Pixel 9 Pro XL',
+  AndroidCaptureFPS: 30,
+  zone: 'UTC',
+  tz: 'UTC',
+  tzSource: 'defaultVideosToUTC',
+  CreateDate: {
+    year: 2026,
+    month: 9,
+    day: 30,
+    hour: 5,
+    minute: 45,
+    second: 17,
+    tzoffsetMinutes: 0,
+    zoneName: 'UTC',
+  },
+  MediaCreateDate: {
+    year: 2026,
+    month: 9,
+    day: 30,
+    hour: 5,
+    minute: 45,
+    second: 17,
+    tzoffsetMinutes: 0,
+    zoneName: 'UTC',
+  },
+});
+const coverRow = () =>
+  uploadRow({
+    takeoutPath: 'Takeout/Google Photos/Photos from 2026/PXL_20260930_052338134.VB-01.COVER.mp4',
+    originalFileName: 'PXL_20260930_052338134.VB-01.COVER.mp4',
+    targetPath: '/tmp/does-not-exist/asset-uuid.mp4',
+    captureDate: new Date('2026-09-30T05:45:17Z'),
+  });
+
 const preferences = (mode: DeletedReimportMode, albumId?: string) => [
   { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode, albumId } } },
 ];
@@ -201,6 +241,75 @@ describe(TakeoutRunService.name, () => {
       expect(mocks.asset.unlockProperties).toHaveBeenCalledWith('asset-uuid', ['tags']);
       expect(mocks.event.emit).not.toHaveBeenCalledWith('AssetTag', expect.anything());
       extractionQueuedAfterSidecar();
+    });
+
+    it('a phone video whose only clock is the UTC QuickTime CreateDate gets the home zone, not UTC+0', async () => {
+      mocks.metadata.readTags.mockResolvedValue(pixelVideoBoostCover() as any);
+
+      await (sut as any).processUpload(run(), settings(), coverRow());
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('America/New_York');
+      expect(created.zoneSource).toBe('google');
+      expect(created.fallbacks).toContain('zoneAssumed');
+      expect((mocks.asset.create.mock.calls[0][0] as any).localDateTime).toEqual(new Date('2026-09-30T01:45:17Z'));
+      const exif = (dateUpserts()[0][0] as any).exif;
+      expect(exif.dateTimeOriginal).toBe('2026-09-30T01:45:17.000-04:00');
+      expect(exif.timeZone).toBe('UTC-4');
+      expect((mocks.metadata.writeTags.mock.calls[0][1] as any).DateTimeOriginal).toBe('2026-09-30T01:45:17.000-04:00');
+    });
+
+    it('a video CreationDate written in UTC (+00:00) is not a recorded zone', async () => {
+      const creationDate = {
+        year: 2026,
+        month: 9,
+        day: 30,
+        hour: 5,
+        minute: 45,
+        second: 17,
+        tzoffsetMinutes: 0,
+        zoneName: 'UTC',
+      };
+      mocks.metadata.readTags.mockResolvedValue({
+        ...pixelVideoBoostCover(),
+        tzSource: 'CreationDate',
+        CreationDate: creationDate,
+      } as any);
+
+      await (sut as any).processUpload(run(), settings(), coverRow());
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('America/New_York');
+      expect(created.zoneSource).toBe('google');
+      expect((dateUpserts()[0][0] as any).exif.dateTimeOriginal).toBe('2026-09-30T01:45:17.000-04:00');
+    });
+
+    it('a video CreationDate with a real offset still counts as the file zone (rule 1, nothing stored)', async () => {
+      mocks.metadata.readTags.mockResolvedValue({
+        ...pixelVideoBoostCover(),
+        Make: 'Apple',
+        Model: 'iPhone 15',
+        zone: 'UTC-4',
+        tz: 'UTC-4',
+        tzSource: 'CreationDate',
+        CreationDate: {
+          year: 2026,
+          month: 9,
+          day: 30,
+          hour: 1,
+          minute: 45,
+          second: 17,
+          tzoffsetMinutes: -240,
+          zoneName: 'UTC-4',
+        },
+      } as any);
+
+      await (sut as any).processUpload(run(), settings(), coverRow());
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('UTC-4');
+      expect(created.zoneSource).toBe('fileOffset');
+      expect(dateUpserts()).toHaveLength(0);
     });
 
     it('writes Google GPS to the sidecar when the file lacks GPS', async () => {
