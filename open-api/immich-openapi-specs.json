@@ -10094,6 +10094,65 @@
         "x-immich-state": "Stable"
       }
     },
+    "/people/assets/counts": {
+      "post": {
+        "description": "For every person that is on any of the assets, how many of them the person is on and on how many only through a whole-asset mark (those are the ones removing the person takes them off).",
+        "operationId": "getPersonAssetCounts",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonAssetCountsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonAssetCountResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Count the people of assets",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.read",
+        "x-immich-state": "Beta"
+      }
+    },
     "/people/merge": {
       "post": {
         "description": "Merge an ordered list of people together into a single person. The final name and birth date are always the first defined value, following the order. Also automatically merges people for other users in the cluster group, skipping people that would result in overriding a previously set name or birth date.",
@@ -10343,8 +10402,76 @@
       }
     },
     "/people/{id}/assets": {
+      "delete": {
+        "description": "Take a person off assets by removing their whole-asset marks. Where a face of the person is located in the picture (detected or drawn) it stays and the asset is reported as a validation error; assets without the person are reported as not found.",
+        "operationId": "removePersonFromAssets",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkIdsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BulkIdResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Remove a person from assets",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "face.delete",
+        "x-immich-state": "Beta"
+      },
       "put": {
-        "description": "Mark videos as having a person in them. A video has no face box to draw, so each one gets a manual face covering the whole frame. Videos the person is already on are reported as duplicate, photos as validation errors (their people are marked on the face itself).",
+        "description": "Mark photos and videos as having a person in them without a location in the picture (close-ups, videos). Each asset gets a manual face covering the whole asset, flagged isWholeAsset. Assets the person is already on in any way (a detected face, a drawn box, an earlier mark) are reported as duplicate, other asset types as validation errors.",
         "operationId": "addPersonToAssets",
         "parameters": [
           {
@@ -10394,7 +10521,7 @@
             "api_key": []
           }
         ],
-        "summary": "Add a person to videos",
+        "summary": "Add a person to assets",
         "tags": [
           "People"
         ],
@@ -23004,6 +23131,21 @@
             "minimum": 0,
             "type": "integer"
           },
+          "isWholeAsset": {
+            "description": "The person is somewhere in the asset without a location: the box covers the whole asset and should not be drawn",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Beta"
+              }
+            ],
+            "x-immich-state": "Beta"
+          },
           "person": {
             "allOf": [
               {
@@ -28160,6 +28302,52 @@
           "adminAuth.unlinkAll"
         ],
         "type": "string"
+      },
+      "PersonAssetCountResponseDto": {
+        "properties": {
+          "count": {
+            "description": "How many of the assets the person is on",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "personId": {
+            "description": "Person ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "removableCount": {
+            "description": "How many of those the person is on only through a whole-asset mark, so removing the person takes them off; on the others a face of the person is located in the picture and stays",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "personId",
+          "removableCount"
+        ],
+        "type": "object"
+      },
+      "PersonAssetCountsDto": {
+        "properties": {
+          "assetIds": {
+            "description": "Asset IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "assetIds"
+        ],
+        "type": "object"
       },
       "PersonCreateDto": {
         "properties": {
