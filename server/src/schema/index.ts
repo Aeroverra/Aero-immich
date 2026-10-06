@@ -83,6 +83,7 @@ import { PartnerTable } from 'src/schema/tables/partner.table';
 import { PersonAuditTable } from 'src/schema/tables/person-audit.table';
 import { PersonGroupAuditTable } from 'src/schema/tables/person-group-audit.table';
 import { PersonGroupTable } from 'src/schema/tables/person-group.table';
+import { PersonSuggestionTable } from 'src/schema/tables/person-suggestion.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import { PluginMethodTable } from 'src/schema/tables/plugin-method.table';
 import { PluginTable } from 'src/schema/tables/plugin.table';
@@ -115,6 +116,7 @@ import { UserMetadataAuditTable } from 'src/schema/tables/user-metadata-audit.ta
 import { UserMetadataTable } from 'src/schema/tables/user-metadata.table';
 import { UserTable } from 'src/schema/tables/user.table';
 import { VersionHistoryTable } from 'src/schema/tables/version-history.table';
+import { VideoBookmarkTable } from 'src/schema/tables/video-bookmark.table';
 import {
   VideoStreamSegmentTable,
   VideoStreamSessionTable,
@@ -123,7 +125,6 @@ import {
 import { ViewAuditTable } from 'src/schema/tables/view-audit.table';
 import { ViewTagAuditTable } from 'src/schema/tables/view-tag-audit.table';
 import { ViewTagTable } from 'src/schema/tables/view-tag.table';
-import { VideoBookmarkTable } from 'src/schema/tables/video-bookmark.table';
 import { ViewTable } from 'src/schema/tables/view.table';
 import { WorkflowLogTable } from 'src/schema/tables/workflow-log.table';
 import { WorkflowStepTable } from 'src/schema/tables/workflow-step.table';
@@ -177,6 +178,7 @@ export class ImmichDatabase {
     PersonAuditTable,
     PersonGroupTable,
     PersonGroupAuditTable,
+    PersonSuggestionTable,
     SessionTable,
     SharedLinkAssetTable,
     SharedLinkTable,
@@ -329,6 +331,7 @@ export interface DB {
   person_audit: PersonAuditTable;
   person_group: PersonGroupTable;
   person_group_audit: PersonGroupAuditTable;
+  person_suggestion: PersonSuggestionTable;
 
   cluster_group: ClusterGroupTable;
   cluster_group_request: ClusterGroupRequestTable;

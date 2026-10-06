@@ -18,8 +18,8 @@
   import { handleError } from '$lib/utils/handle-error';
   import { clearQueryParam } from '$lib/utils/navigation';
   import { getAllPeople, getPerson, searchPerson, updatePerson, type PersonResponseDto } from '@immich/sdk';
-  import { Button, Icon, modalManager, toastManager } from '@immich/ui';
-  import { mdiAccountOff, mdiEyeOutline } from '@mdi/js';
+  import { Badge, Button, Icon, modalManager, toastManager } from '@immich/ui';
+  import { mdiAccountOff, mdiAccountQuestionOutline, mdiEyeOutline } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
   import type { PageData } from './$types';
@@ -327,6 +327,22 @@
             />
           </div>
         </div>
+        <Button
+          leadingIcon={mdiAccountQuestionOutline}
+          href={Route.peopleSuggestions()}
+          size="small"
+          variant="ghost"
+          color="secondary"
+          title={$t('same_person')}
+          data-testid="people-suggestions"
+        >
+          <span class="hidden md:inline">{$t('same_person')}</span>
+          {#if data.suggestions.pending > 0}
+            <Badge size="tiny" color="primary" class="ms-1" data-testid="people-suggestions-count"
+              >{data.suggestions.pending.toLocaleString($locale)}</Badge
+            >
+          {/if}
+        </Button>
         <Button
           leadingIcon={mdiEyeOutline}
           onclick={() => goto('/people/manage')}
