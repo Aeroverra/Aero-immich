@@ -21,14 +21,22 @@ const PeopleFilterOptions noPeopleFilterOptions = (
   hasUnnamedFaces: null,
 );
 
+String _names(BuildContext context, Set<Person> people) =>
+    people.map((person) => person.name != '' ? person.name : context.t.no_name).join(', ');
+
 /// The label of the People filter chip, empty when nothing is picked
-String peopleFilterLabel(BuildContext context, Set<Person> people, PeopleFilterOptions options) {
+String peopleFilterLabel(
+  BuildContext context,
+  Set<Person> people,
+  PeopleFilterOptions options, {
+  Set<Person> excludedPeople = const {},
+}) {
   final (:onlyPeople, :hasPeople, :hasNamedFaces, :hasUnnamedFaces) = options;
   if (hasPeople == false) {
     return context.t.search_filter_no_people;
   }
 
-  final names = people.map((person) => person.name != '' ? person.name : context.t.no_name).join(', ');
+  final names = _names(context, people);
   final picked = switch ((hasNamedFaces, names.isNotEmpty, onlyPeople)) {
     (false, _, _) => context.t.search_filter_no_named_people,
     (_, true, true) => context.t.search_filter_only_people_title(people: names),
@@ -37,12 +45,16 @@ String peopleFilterLabel(BuildContext context, Set<Person> people, PeopleFilterO
     (true, false, _) => context.t.search_filter_with_named_people,
     _ => '',
   };
+  // nobody named shows none of the left out people either
+  final without = excludedPeople.isEmpty || hasNamedFaces == false
+      ? ''
+      : context.t.search_without_person(name: _names(context, excludedPeople));
   final unnamed = switch (hasUnnamedFaces) {
     true => context.t.search_filter_with_unnamed_faces,
     false => context.t.search_filter_no_unnamed_faces,
     null => '',
   };
-  final parts = [picked, unnamed].where((part) => part.isNotEmpty).toList();
+  final parts = [picked, without, unnamed].where((part) => part.isNotEmpty).toList();
   // anyone at all is implied by every other option
   if (parts.isEmpty && hasPeople == true) {
     return context.t.search_filter_with_people;
@@ -50,17 +62,19 @@ String peopleFilterLabel(BuildContext context, Set<Person> people, PeopleFilterO
   return parts.join(' · ');
 }
 
-/// Picks the people a search looks for, with the face options above the list as pairs: one side, the other, or
-/// neither (tapping the picked side again). No people and no named people set the picked people aside without
-/// forgetting them.
+/// Picks the people a search looks for and the people it leaves out (one list at a time, a person is in one list at
+/// most), with the face options above the lists as pairs: one side, the other, or neither (tapping the picked side
+/// again). No people and no named people set the picked and left out people aside without forgetting them.
 class PeopleFilterPicker extends HookWidget {
   final Set<Person> initialPeople;
+  final Set<Person> initialExcludedPeople;
   final PeopleFilterOptions initialOptions;
-  final void Function(Set<Person> people, PeopleFilterOptions options) onChanged;
+  final void Function(Set<Person> people, Set<Person> excludedPeople, PeopleFilterOptions options) onChanged;
 
   const PeopleFilterPicker({
     super.key,
     required this.initialPeople,
+    this.initialExcludedPeople = const {},
     required this.initialOptions,
     required this.onChanged,
   });
@@ -68,6 +82,9 @@ class PeopleFilterPicker extends HookWidget {
   @override
   Widget build(BuildContext context) {
     final people = useState<Set<Person>>(initialPeople);
+    final excludedPeople = useState<Set<Person>>(initialExcludedPeople);
+    // starts on the left out list when only that one has people
+    final excludeMode = useState(initialExcludedPeople.isNotEmpty && initialPeople.isEmpty);
     final options = useState<PeopleFilterOptions>(initialOptions);
     final (:onlyPeople, :hasPeople, :hasNamedFaces, :hasUnnamedFaces) = options.value;
     final noFaces = hasPeople == false;
@@ -76,12 +93,18 @@ class PeopleFilterPicker extends HookWidget {
 
     void setOptions(PeopleFilterOptions value) {
       options.value = value;
-      onChanged(people.value, value);
+      onChanged(people.value, excludedPeople.value, value);
     }
 
-    void setPeople(Set<Person> value) {
-      people.value = value;
-      onChanged(value, options.value);
+    void setPeople(Set<Person> value, {required bool exclude}) {
+      if (exclude) {
+        excludedPeople.value = value;
+        people.value = people.value.difference(value);
+      } else {
+        people.value = value;
+        excludedPeople.value = excludedPeople.value.difference(value);
+      }
+      onChanged(people.value, excludedPeople.value, options.value);
     }
 
     Widget pair({
@@ -189,7 +212,46 @@ class PeopleFilterPicker extends HookWidget {
             ignoring: peopleSetAside,
             child: Opacity(
               opacity: peopleSetAside ? 0.4 : 1,
-              child: PeoplePicker(onSelect: setPeople, initialSelection: initialPeople),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    child: SegmentedButton<bool>(
+                      key: const Key('people-filter-mode'),
+                      segments: [
+                        ButtonSegment(
+                          value: false,
+                          label: Text(t.search_include_people),
+                          icon: const Icon(Icons.person_outline),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          label: Text(t.search_exclude_people),
+                          icon: const Icon(Icons.person_off_outlined),
+                        ),
+                      ],
+                      selected: {excludeMode.value},
+                      onSelectionChanged: (selection) => excludeMode.value = selection.first,
+                    ),
+                  ),
+                  Expanded(
+                    // a new picker per list, so each starts from its own selection
+                    child: excludeMode.value
+                        ? PeoplePicker(
+                            key: const ValueKey('exclude'),
+                            initialSelection: excludedPeople.value,
+                            selectedTileColor: context.colorScheme.error,
+                            selectedTextColor: context.colorScheme.onError,
+                            onSelect: (value) => setPeople(value, exclude: true),
+                          )
+                        : PeoplePicker(
+                            key: const ValueKey('include'),
+                            initialSelection: people.value,
+                            onSelect: (value) => setPeople(value, exclude: false),
+                          ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
