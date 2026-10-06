@@ -78,8 +78,11 @@
     }
   };
 
+  // looks the name up once typing pauses
   $effect(() => {
-    void findExisting(name);
+    const value = name;
+    const timer = setTimeout(() => void findExisting(value), 250);
+    return () => clearTimeout(timer);
   });
 
   // a new question starts without a name prompt
