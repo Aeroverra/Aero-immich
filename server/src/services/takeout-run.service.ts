@@ -2736,6 +2736,9 @@ function exifWallClock(value: unknown): Date | null {
   return null;
 }
 
+// The zone names exiftool-vendored gives a zero offset (UTC, UTC+0, Etc/UTC, GMT, Z).
+const UTC_ZONE_RE = /^(?:etc\/)?(?:utc|gmt|z)(?:[+-]0{1,2}(?::00)?)?$/i;
+
 // Reduce a full exiftool read to the primitives the section 13 capture-time rule needs. Splitting the exiftool
 // `zone`/`zoneSource` into an explicit file offset (kept) vs a GPS-derived zone (ignored: GPS never supplies the
 // zone) happens here, at the Nest boundary, so the pure library never interprets exiftool output.
@@ -2747,23 +2750,30 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
   const zone = firstString(exif.zone, exif.tz);
   const zoneSource = (firstString(exif.zoneSource, exif.tzSource) ?? '').toLowerCase();
   const gpsDerived = zoneSource.includes('gps') || zoneSource.includes('geolocation');
+  // QuickTime (MP4/MOV) dates are UTC by spec, so a video's UTC zone (defaultVideosToUTC, or a CreationDate written
+  // with Z / +00:00) says nothing about where the device was.
+  const isVideo = (firstString(exif.MIMEType) ?? '').toLowerCase().startsWith('video/');
+  const videoUtc = isVideo && zone !== null && UTC_ZONE_RE.test(zone);
   let fileOffsetZone: string | null = null;
   const recorded =
     zoneSource.includes('offset') ||
     zoneSource.includes('timezone') ||
     zoneSource.includes('creationdate') ||
     zoneSource.includes('timecreated');
-  if (zone && !zoneSource.includes('defaultvideostoutc') && !gpsDerived && recorded) {
+  if (zone && !zoneSource.includes('defaultvideostoutc') && !gpsDerived && !videoUtc && recorded) {
     fileOffsetZone = zone;
   }
 
   const fileHasGps = typeof exif.GPSLatitude === 'number' && typeof exif.GPSLongitude === 'number';
-  const fileClock = exifWallClock(
-    exif.SubSecDateTimeOriginal ?? exif.DateTimeOriginal ?? exif.CreationDate ?? exif.CreateDate,
-  );
+  const originalClock = exif.SubSecDateTimeOriginal ?? exif.DateTimeOriginal;
+  const fileClock = exifWallClock(originalClock ?? exif.CreationDate ?? exif.CreateDate);
+  // A video clock from its QuickTime dates (no DateTimeOriginal, no recorded offset) stays in UTC unless exiftool shifted
+  // it into a zone (GPS): then it is the local wall clock at that place and rule 2 may use it.
+  const fileClockIsUtc =
+    isVideo && fileClock !== null && !originalClock && !fileOffsetZone && (zone === null || UTC_ZONE_RE.test(zone));
   const gpsDateTime = exifWallClock(exif.GPSDateTime);
 
-  return { make, model, fileOffsetZone, fileHasGps, fileClock, gpsDateTime };
+  return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime };
 }
 
 /** The reason of a server duplicate whose asset is in the trash: it never joins a stack (a trashed cover hides it) */
