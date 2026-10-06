@@ -115,6 +115,7 @@ export {
   isAsset,
   parseGoogleJson,
   sanitizedTitle,
+  withGoogleAccount,
 } from 'src/takeout/google-json';
 
 export { DEFAULT_BANNED_PATTERNS } from 'src/takeout/banned';
