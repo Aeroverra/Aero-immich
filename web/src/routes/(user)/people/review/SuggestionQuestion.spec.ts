@@ -66,6 +66,20 @@ describe('SuggestionQuestion', () => {
     renderQuestion(newSuggestion(personFactory.build({ name: 'Anna' })));
 
     expect(screen.getAllByTestId('suggestion-side-title')[0]).toHaveTextContent('same_person_this_face');
+    // only the named person can be opened, a face has no person yet
+    expect(screen.getAllByTestId('suggestion-side-person')).toHaveLength(1);
+  });
+
+  it('opens either person in a new tab to check everyone in it', () => {
+    const anna = personFactory.build({ name: 'Anna' });
+    const cluster = personFactory.build({ name: '' });
+    renderQuestion(newSuggestion(anna, cluster));
+
+    const links = screen.getAllByTestId('suggestion-side-person');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([`/people/${cluster.id}`, `/people/${anna.id}`]);
+    for (const link of links) {
+      expect(link.getAttribute('target')).toBe('_blank');
+    }
   });
 
   it('answers with the buttons', async () => {

@@ -115,7 +115,7 @@
       side={suggestion.candidate}
       title={isFace ? $t('same_person_this_face') : $t('same_person_this_person')}
     />
-    <SuggestionSide side={suggestion.target} title={targetName || $t('same_person_unknown')} showPerson />
+    <SuggestionSide side={suggestion.target} title={targetName || $t('same_person_unknown')} />
   </div>
 
   <div

@@ -2052,6 +2052,7 @@
   "same_person_no_questions": "No questions right now",
   "same_person_no_questions_description": "After facial recognition, Immich asks about faces it is not sure about here, one at a time.",
   "same_person_not_sure": "Not sure",
+  "same_person_open_person": "Open this person to see all their photos",
   "same_person_open_photo": "Open the photo from {date}",
   "same_person_photo_count": "{count, plural, one {# photo} other {# photos}}",
   "same_person_question_named": "Is this {name}?",
