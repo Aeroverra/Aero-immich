@@ -3558,7 +3558,7 @@ export type TakeoutSettingsDto = {
     /** Save Google Photos fields as asset metadata */
     googlePhotosFields: boolean;
     heicJpg: TakeoutHeicJpgMode;
-    /** IANA time zone used when a file has no time zone of its own */
+    /** IANA time zone for the date range filter and the session tag start time */
     homeTimeZone: string;
     /** Import archived photos */
     includeArchived: boolean;
@@ -3912,7 +3912,7 @@ export type TakeoutSettingsUpdateDto = {
     /** Save Google Photos fields as asset metadata */
     googlePhotosFields?: boolean;
     heicJpg?: TakeoutHeicJpgMode;
-    /** IANA time zone used when a file has no time zone of its own */
+    /** IANA time zone for the date range filter and the session tag start time */
     homeTimeZone?: string;
     /** Import archived photos */
     includeArchived?: boolean;

@@ -2655,7 +2655,7 @@
   "takeout_setting_heic_jpg": "HEIC + JPG pairs",
   "takeout_setting_heic_jpg_description": "What to do when a HEIC and a JPG of the same photo are found together.",
   "takeout_setting_home_time_zone": "Home time zone",
-  "takeout_setting_home_time_zone_description": "IANA time zone used when a file has no time zone of its own.",
+  "takeout_setting_home_time_zone_description": "IANA time zone for the date range filter and the session tag start time. Files without a time zone of their own are imported in UTC.",
   "takeout_setting_include_partner": "Include partner photos",
   "takeout_setting_include_partner_description": "Import photos shared by a partner.",
   "takeout_setting_include_trashed": "Include trashed photos",

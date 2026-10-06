@@ -147,9 +147,6 @@ const previouslyDeletedFlags = (row: { fallbacks?: string[] | null } | undefined
 
 const uploadFirst = (row: { action: string }) => (row.action === TakeoutRunFileAction.Upload ? 0 : 1);
 
-const effectiveInstantFor = (capture: { instant?: Date | null }, captureDate: Date | null): Date | null =>
-  capture.instant ?? captureDate;
-
 const formatBytes = (bytes: number): string => {
   const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
   let value = Math.max(0, bytes);
@@ -2144,8 +2141,9 @@ export class TakeoutRunService extends BaseService {
       exif: deriveCaptureExif(exif),
       names: [originalFileName, row.takeoutPath.split('/').pop()],
     });
-    // No zone evidence: display in the user home zone (flagged zoneAssumed); the moment itself stays Google's.
-    const zone = capture.zone ?? (effectiveInstantFor(capture, captureDate) ? settings.homeTimeZone : null);
+    // No zone evidence (flagged zoneAssumed): no zone is invented, the moment shows in UTC. A guessed home zone was
+    // wrong for every capture away from home; a file or rule that knows its offset always supplies it.
+    const zone = capture.zone;
     const zoneSource = capture.zoneSource;
     // The capture instant the algorithm chose (may differ from Google's for a phone that carries its own offset).
     const effectiveInstant: Date | null = capture.instant ?? captureDate;
