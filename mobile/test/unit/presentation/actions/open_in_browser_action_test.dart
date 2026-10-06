@@ -22,6 +22,7 @@ void main() {
       TimelineOrigin.favorite: '/favorites',
       TimelineOrigin.trash: '/trash',
       TimelineOrigin.archive: '/archive',
+      TimelineOrigin.privateFolder: '/private',
     };
 
     for (final origin in TimelineOrigin.values) {

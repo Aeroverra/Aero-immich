@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/memory.repository.dart';
 
 import '../repository_context.dart';
@@ -14,6 +15,37 @@ void main() {
 
   tearDown(() async {
     await ctx.dispose();
+  });
+
+  group('private mode', () {
+    test('getAll drops private assets when off and returns own ones when on', () async {
+      final user = await ctx.newUser();
+      final public = await ctx.newRemoteAsset(ownerId: user.id);
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      final memory = await ctx.newMemory(ownerId: user.id);
+      await ctx.newMemoryAsset(memoryId: memory.id, assetId: public.id);
+      await ctx.newMemoryAsset(memoryId: memory.id, assetId: private.id);
+
+      final off = await sut.getAll(user.id);
+      expect(off.single.assets.map((asset) => asset.id), [public.id]);
+
+      final on = await sut.getAll(user.id, privateFilter: PrivateModeFilter(enabled: true, userId: user.id));
+      expect(on.single.assets.map((asset) => asset.id), containsAll([public.id, private.id]));
+      expect(on.single.assets, hasLength(2));
+    });
+
+    test('a memory made only of private assets disappears while off', () async {
+      final user = await ctx.newUser();
+      final private = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+      final memory = await ctx.newMemory(ownerId: user.id);
+      await ctx.newMemoryAsset(memoryId: memory.id, assetId: private.id);
+
+      expect(await sut.getAll(user.id), isEmpty);
+      expect(await sut.get(memory.id), isNotNull);
+      expect((await sut.get(memory.id))!.assets, isEmpty);
+      final on = PrivateModeFilter(enabled: true, userId: user.id);
+      expect((await sut.get(memory.id, privateFilter: on))!.assets.single.id, private.id);
+    });
   });
 
   group('getAll', () {

@@ -6,6 +6,7 @@ import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/events.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/utils/event_stream.dart';
 import 'package:immich_mobile/infrastructure/repositories/settings.repository.dart';
@@ -36,13 +37,19 @@ enum TimelineOrigin {
   albumActivities,
   folder,
   recentlyAdded,
+  privateFolder,
 }
 
 class TimelineFactory {
   final TimelineRepository _timelineRepository;
   final SettingsRepository _settingsRepository;
+  final PrivateModeFilter privateFilter;
 
-  const TimelineFactory({required this._timelineRepository, required this._settingsRepository});
+  const TimelineFactory({
+    required this._timelineRepository,
+    required this._settingsRepository,
+    this.privateFilter = PrivateModeFilter.off,
+  });
 
   GroupAssetsBy get groupBy {
     final group = _settingsRepository.appConfig.timeline.groupAssetsBy;
@@ -50,32 +57,44 @@ class TimelineFactory {
     return group == GroupAssetsBy.auto ? GroupAssetsBy.day : group;
   }
 
-  TimelineService main(List<String> timelineUsers) => TimelineService(_timelineRepository.main(timelineUsers, groupBy));
+  TimelineService main(List<String> timelineUsers) =>
+      TimelineService(_timelineRepository.main(timelineUsers, groupBy, privateFilter: privateFilter));
 
   TimelineService localAlbum({required String albumId}) =>
       TimelineService(_timelineRepository.localAlbum(albumId, groupBy));
 
   TimelineService remoteAlbum({required String albumId}) =>
-      TimelineService(_timelineRepository.remoteAlbum(albumId, groupBy));
+      TimelineService(_timelineRepository.remoteAlbum(albumId, groupBy, privateFilter: privateFilter));
 
-  TimelineService remoteAssets(String userId) => TimelineService(_timelineRepository.remote(userId, groupBy));
+  TimelineService remoteAssets(String userId) =>
+      TimelineService(_timelineRepository.remote(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService recentlyAdded(String userId) => TimelineService(_timelineRepository.recentlyAdded(userId, groupBy));
+  TimelineService recentlyAdded(String userId) =>
+      TimelineService(_timelineRepository.recentlyAdded(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService favorite(String userId) => TimelineService(_timelineRepository.favorite(userId, groupBy));
+  TimelineService favorite(String userId) =>
+      TimelineService(_timelineRepository.favorite(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService trash(String userId) => TimelineService(_timelineRepository.trash(userId, groupBy));
+  TimelineService trash(String userId) =>
+      TimelineService(_timelineRepository.trash(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService archive(String userId) => TimelineService(_timelineRepository.archived(userId, groupBy));
+  TimelineService archive(String userId) =>
+      TimelineService(_timelineRepository.archived(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService lockedFolder(String userId) => TimelineService(_timelineRepository.locked(userId, groupBy));
+  TimelineService lockedFolder(String userId) =>
+      TimelineService(_timelineRepository.locked(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService video(String userId) => TimelineService(_timelineRepository.video(userId, groupBy));
+  TimelineService privateFolder(String userId) =>
+      TimelineService(_timelineRepository.privateFolder(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService place(String place) => TimelineService(_timelineRepository.place(place, groupBy));
+  TimelineService video(String userId) =>
+      TimelineService(_timelineRepository.video(userId, groupBy, privateFilter: privateFilter));
+
+  TimelineService place(String place) =>
+      TimelineService(_timelineRepository.place(place, groupBy, privateFilter: privateFilter));
 
   TimelineService person(String userId, String personId) =>
-      TimelineService(_timelineRepository.person(userId, personId, groupBy));
+      TimelineService(_timelineRepository.person(userId, personId, groupBy, privateFilter: privateFilter));
 
   TimelineService fromAssets(List<BaseAsset> assets, TimelineOrigin type) =>
       TimelineService(_timelineRepository.fromAssets(assets, type));
@@ -91,7 +110,9 @@ class TimelineFactory {
     List<String> userIds,
     TimelineMapOptions Function() currentOptions,
     Stream<TimelineMapOptions> optionsStream,
-  ) => TimelineService(_timelineRepository.geographicMap(userIds, currentOptions, optionsStream, groupBy));
+  ) => TimelineService(
+    _timelineRepository.geographicMap(userIds, currentOptions, optionsStream, groupBy, privateFilter: privateFilter),
+  );
 }
 
 class TimelineService {
@@ -146,6 +167,10 @@ class TimelineService {
 
   Future<List<BaseAsset>> loadAssets(int index, int count) => _mutex.run(() => _loadAssets(index, count));
 
+  /// Reads a range straight from the source for a one-off lookup, leaving the buffer used for rendering untouched.
+  /// Unlike [loadAssets] this does not depend on the bucket listener having counted the assets yet
+  Future<List<BaseAsset>> fetchAssets(int index, int count) => _assetSource(index, count);
+
   Future<List<BaseAsset>> _loadAssets(int index, int count) async {
     if (hasRange(index, count)) {
       return getAssets(index, count);
@@ -171,7 +196,11 @@ class TimelineService {
     _buffer = await _assetSource(start, len);
     _bufferOffset = start;
 
-    return getAssets(index, count);
+    // A row can ask before the bucket listener has counted the assets of a freshly created service, or with an index
+    // from the segments of the service it replaced. Hand back what the source returned instead of throwing, the
+    // segments catch up on the next frame
+    final from = math.min(index - start, _buffer.length);
+    return _buffer.sublist(from, math.min(from + count, _buffer.length));
   }
 
   bool hasRange(int index, int count) =>
