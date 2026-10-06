@@ -5,6 +5,7 @@
   import DetailPanelLocation from '$lib/components/asset-viewer/DetailPanelLocation.svelte';
   import DetailPanelRating from '$lib/components/asset-viewer/DetailPanelStarRating.svelte';
   import DetailPanelTags from '$lib/components/asset-viewer/DetailPanelTags.svelte';
+  import DetailPanelUploadDate from '$lib/components/asset-viewer/DetailPanelUploadDate.svelte';
   import { timeToLoadTheMap } from '$lib/constants';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
@@ -166,6 +167,7 @@
       {/if}
 
       <DetailPanelDate {asset} />
+      <DetailPanelUploadDate {asset} />
 
       <div class="flex gap-4 py-4">
         <div><Icon icon={mdiImageOutline} size="24" /></div>
