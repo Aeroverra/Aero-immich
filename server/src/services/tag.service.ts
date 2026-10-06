@@ -4,6 +4,8 @@ import { OnJob } from 'src/decorators';
 import { BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
+  TagAssetCountResponseDto,
+  TagAssetCountsDto,
   TagBulkAssetsDto,
   TagBulkAssetsResponseDto,
   TagCreateDto,
@@ -25,6 +27,12 @@ export class TagService extends BaseService {
   async getAll(auth: AuthDto) {
     const tags = await this.tagRepository.getAll(auth.user.id, { withHidden: isPrivateMode(auth) });
     return tags.map((tag) => mapTag(tag));
+  }
+
+  /** How many of the assets carry each tag; hidden tags are left out while private mode is locked */
+  async getAssetCounts(auth: AuthDto, dto: TagAssetCountsDto): Promise<TagAssetCountResponseDto[]> {
+    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: dto.assetIds });
+    return this.tagRepository.getAssetCounts(auth.user.id, dto.assetIds, { withHidden: isPrivateMode(auth) });
   }
 
   async get(auth: AuthDto, id: string): Promise<TagResponseDto> {
