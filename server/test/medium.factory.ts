@@ -68,6 +68,7 @@ import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
+import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { DB } from 'src/schema';
@@ -514,6 +515,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case TrashRepository:
     case UserRepository:
     case VersionHistoryRepository:
+    case VideoBookmarkRepository:
     case WorkflowRepository: {
       return new key(db) as InstanceType<T>;
     }
@@ -596,6 +598,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case SystemMetadataRepository:
     case UserRepository:
     case VersionHistoryRepository:
+    case VideoBookmarkRepository:
     case TagRepository:
     case WorkflowRepository: {
       return automock(key);

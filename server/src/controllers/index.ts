@@ -44,6 +44,7 @@ import { TrashController } from 'src/controllers/trash.controller';
 import { UserAdminController } from 'src/controllers/user-admin.controller';
 import { UserController } from 'src/controllers/user.controller';
 import { VideoStreamController } from 'src/controllers/video-stream.controller';
+import { VideoBookmarkController } from 'src/controllers/video-bookmark.controller';
 import { ViewController } from 'src/controllers/view.controller';
 import { WorkflowController } from 'src/controllers/workflow.controller';
 
@@ -94,6 +95,7 @@ export const controllers = [
   UserAdminController,
   UserController,
   VideoStreamController,
+  VideoBookmarkController,
   ViewController,
   WorkflowController,
 ];
