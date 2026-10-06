@@ -269,6 +269,12 @@ export type AdminConfigOcrDto = {
     /** Name of the model to use */
     modelName: string;
 };
+export type AdminConfigPersonSuggestionsDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Minimum similarity (0-1) for asking whether an unnamed person or face is a named person, or whether two unnamed people are one */
+    minScore: number;
+};
 export type AdminConfigVideoFrameAnalysisDto = {
     /** Whether faces found only in video frames may create new people */
     createPeople: boolean;
@@ -293,6 +299,7 @@ export type AdminConfigMachineLearningDto = {
     faceAttributes: AdminConfigFaceAttributesDto;
     facialRecognition: AdminConfigFacialRecognitionDto;
     ocr: AdminConfigOcrDto;
+    personSuggestions: AdminConfigPersonSuggestionsDto;
     /** ML service URLs */
     urls: string[];
     videoFrameAnalysis: AdminConfigVideoFrameAnalysisDto;
@@ -1718,6 +1725,10 @@ export type UserConfigOcrDto = {
     /** Whether the task is enabled */
     enabled: boolean;
 };
+export type UserConfigPersonSuggestionsDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigVideoFrameAnalysisDto = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -1731,6 +1742,7 @@ export type UserConfigMachineLearningDto = {
     faceAttributes: UserConfigFaceAttributesDto;
     facialRecognition: UserConfigFacialRecognitionDto;
     ocr: UserConfigOcrDto;
+    personSuggestions: UserConfigPersonSuggestionsDto;
     videoFrameAnalysis: UserConfigVideoFrameAnalysisDto;
 };
 export type UserConfigMapDto = {
@@ -2198,6 +2210,65 @@ export type PersonAssetCountResponseDto = {
 export type MergePersonDto = {
     /** Person IDs to merge */
     ids: string[];
+};
+export type PersonSuggestionFaceDto = {
+    /** Asset ID */
+    assetId: string;
+    /** Face ID */
+    id: string;
+    /** When the photo or video was taken */
+    takenAt: string;
+    /** When the face last changed */
+    updatedAt: string;
+};
+export type PersonSuggestionSideDto = {
+    /** On how many photos and videos the caller may see this person is */
+    assetCount: number;
+    /** Faces to compare, spread over time */
+    faces: PersonSuggestionFaceDto[];
+    /** The person, or null for a face without a person */
+    person: (PersonResponseDto) | null;
+};
+export type PersonSuggestionResponseDto = {
+    /** When it was answered */
+    answeredAt: string | null;
+    /** The unnamed person or the face without a person */
+    candidate: PersonSuggestionSideDto;
+    /** Suggestion ID */
+    id: string;
+    kind: PersonSuggestionKind;
+    /** How alike the two look, 0 to 1 */
+    score: number;
+    source: PersonSuggestionSource;
+    status: PersonSuggestionStatus;
+    /** The person the candidate may be */
+    target: PersonSuggestionSideDto;
+};
+export type PersonSuggestionsResponseDto = {
+    /** Whether there are more pages */
+    hasNextPage: boolean;
+    suggestions: PersonSuggestionResponseDto[];
+    /** Number of questions there are to answer */
+    total: number;
+};
+export type PersonSuggestionCreateDto = {
+    /** The candidate when it is a face without a person */
+    faceId?: string;
+    /** The candidate when it is a person */
+    personId?: string;
+    /** How alike the two look, 0 to 1 */
+    score?: number;
+    /** The person the candidate may be */
+    targetPersonId: string;
+};
+export type PersonSuggestionStatisticsResponseDto = {
+    /** Number of questions there are to answer */
+    pending: number;
+};
+export type PersonSuggestionAnswerDto = {
+    answer: PersonSuggestionAnswer;
+    /** A name for the person both turned out to be, when two unnamed people are answered to be the same */
+    name?: string;
 };
 export type PersonUpdateDto = {
     /** Person date of birth */
@@ -6527,6 +6598,19 @@ export function reassignFacesById({ id, faceDto }: {
     })));
 }
 /**
+ * Get face thumbnail
+ */
+export function getFaceThumbnail({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchBlob<{
+        status: 200;
+        data: Blob;
+    }>(`/faces/${encodeURIComponent(id)}/thumbnail`, {
+        ...opts
+    }));
+}
+/**
  * Retrieve queue counts and status
  */
 export function getQueuesLegacy(opts?: Oazapfts.RequestOpts) {
@@ -7189,6 +7273,103 @@ export function mergePeople({ mergePersonDto }: {
         method: "POST",
         body: mergePersonDto
     })));
+}
+/**
+ * Get person suggestions
+ */
+export function getPersonSuggestions({ page, size }: {
+    page?: number;
+    size?: number;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonSuggestionsResponseDto;
+    }>(`/people/suggestions${QS.query(QS.explode({
+        page,
+        size
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Create a person suggestion
+ */
+export function createPersonSuggestion({ personSuggestionCreateDto }: {
+    personSuggestionCreateDto: PersonSuggestionCreateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: PersonSuggestionResponseDto;
+    }>("/people/suggestions", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: personSuggestionCreateDto
+    })));
+}
+/**
+ * Get answered person suggestions
+ */
+export function getPersonSuggestionAnswers({ size }: {
+    size?: number;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonSuggestionResponseDto[];
+    }>(`/people/suggestions/answers${QS.query(QS.explode({
+        size
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Count person suggestions
+ */
+export function getPersonSuggestionStatistics(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonSuggestionStatisticsResponseDto;
+    }>("/people/suggestions/count", {
+        ...opts
+    }));
+}
+/**
+ * Look for person suggestions
+ */
+export function refreshPersonSuggestions(opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText("/people/suggestions/refresh", {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Answer a person suggestion
+ */
+export function answerPersonSuggestion({ id, personSuggestionAnswerDto }: {
+    id: string;
+    personSuggestionAnswerDto: PersonSuggestionAnswerDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonSuggestionResponseDto;
+    }>(`/people/suggestions/${encodeURIComponent(id)}`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: personSuggestionAnswerDto
+    })));
+}
+/**
+ * Take back the answer to a person suggestion
+ */
+export function undoPersonSuggestionAnswer({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonSuggestionResponseDto;
+    }>(`/people/suggestions/${encodeURIComponent(id)}/answer`, {
+        ...opts,
+        method: "DELETE"
+    }));
 }
 /**
  * Delete person
@@ -9922,6 +10103,25 @@ export enum PartnerDirection {
     SharedBy = "shared-by",
     SharedWith = "shared-with"
 }
+export enum PersonSuggestionKind {
+    Named = "named",
+    Unnamed = "unnamed"
+}
+export enum PersonSuggestionSource {
+    Automatic = "automatic",
+    Api = "api"
+}
+export enum PersonSuggestionStatus {
+    Pending = "pending",
+    Same = "same",
+    Different = "different",
+    Skipped = "skipped"
+}
+export enum PersonSuggestionAnswer {
+    Same = "same",
+    Different = "different",
+    Skipped = "skipped"
+}
 export enum WorkflowType {
     AssetV1 = "AssetV1"
 }
@@ -9986,6 +10186,8 @@ export enum JobName {
     PersonCleanup = "PersonCleanup",
     PersonFileMigration = "PersonFileMigration",
     PersonGenerateThumbnail = "PersonGenerateThumbnail",
+    PersonSuggestionsQueueAll = "PersonSuggestionsQueueAll",
+    PersonSuggestions = "PersonSuggestions",
     SessionCleanup = "SessionCleanup",
     SendMail = "SendMail",
     SidecarQueueAll = "SidecarQueueAll",
