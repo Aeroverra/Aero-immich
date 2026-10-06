@@ -516,6 +516,14 @@ const SearchAlbumResponseSchema = z
   })
   .meta({ id: 'SearchAlbumResponseDto' });
 
+const SearchMatchedFrameResponseSchema = z
+  .object({
+    assetId: z.uuidv4().describe('Video asset ID'),
+    frameTimestamp: z.int().min(0).describe('Position in milliseconds of the sampled video frame that matched best'),
+  })
+  .describe('A video that matched a smart search on one of its sampled frames rather than its thumbnail')
+  .meta({ id: 'SearchMatchedFrameResponseDto' });
+
 const SearchAssetResponseSchema = z
   .object({
     total: z
@@ -528,6 +536,11 @@ const SearchAssetResponseSchema = z
     facets: z.array(SearchFacetResponseSchema),
     nextPage: z.string().nullable().describe('Next page token').meta(DEPRECATED_FLAT_FIELD),
     nextCursor: z.string().nullable().describe('Cursor for the next page of results').meta(ADDED_V3_2),
+    matchedFrames: z
+      .array(SearchMatchedFrameResponseSchema)
+      .optional()
+      .describe('Smart search only: the videos of this page that matched on a sampled frame, with its position')
+      .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
   })
   .meta({ id: 'SearchAssetResponseDto' });
 
