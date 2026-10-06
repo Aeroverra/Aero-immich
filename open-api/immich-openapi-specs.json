@@ -16183,6 +16183,15 @@
             }
           },
           {
+            "name": "withAutoStacked",
+            "required": false,
+            "in": "query",
+            "description": "Together with withStacked, whether stacks created automatically are collapsed as well (default true). When false, the assets of automatic stacks are returned individually and without stack information.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "withCoordinates",
             "required": false,
             "in": "query",
@@ -16378,6 +16387,15 @@
             "description": "Filter by asset visibility status (ARCHIVE, TIMELINE, HIDDEN, LOCKED)",
             "schema": {
               "$ref": "#/components/schemas/AssetVisibility"
+            }
+          },
+          {
+            "name": "withAutoStacked",
+            "required": false,
+            "in": "query",
+            "description": "Together with withStacked, whether stacks created automatically are collapsed as well (default true). When false, the assets of automatic stacks are returned individually and without stack information.",
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -21439,12 +21457,16 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/StackSource"
           }
         },
         "required": [
           "assetCount",
           "id",
-          "primaryAssetId"
+          "primaryAssetId",
+          "source"
         ],
         "type": "object"
       },
@@ -27735,6 +27757,10 @@
             "description": "Whether smart search is enabled",
             "type": "boolean"
           },
+          "stackSource": {
+            "description": "Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it.",
+            "type": "boolean"
+          },
           "trash": {
             "description": "Whether trash feature is enabled",
             "type": "boolean"
@@ -29167,14 +29193,26 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/StackSource"
           }
         },
         "required": [
           "assets",
           "id",
-          "primaryAssetId"
+          "primaryAssetId",
+          "source"
         ],
         "type": "object"
+      },
+      "StackSource": {
+        "description": "How the stack was created",
+        "enum": [
+          "manual",
+          "auto"
+        ],
+        "type": "string"
       },
       "StackUpdateDto": {
         "properties": {
@@ -29183,6 +29221,27 @@
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "StacksResponse": {
+        "properties": {
+          "groupAuto": {
+            "description": "Whether stacks created automatically are shown grouped in the timeline, like manual stacks",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "groupAuto"
+        ],
+        "type": "object"
+      },
+      "StacksUpdate": {
+        "properties": {
+          "groupAuto": {
+            "description": "Whether stacks created automatically are shown grouped in the timeline, like manual stacks",
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -31221,8 +31280,10 @@
           "PartnerAssetExifV1",
           "PartnerAssetExifBackfillV1",
           "PartnerStackBackfillV1",
+          "PartnerStackBackfillV2",
           "PartnerStackDeleteV1",
           "PartnerStackV1",
+          "PartnerStackV2",
           "AlbumV1",
           "AlbumV2",
           "AlbumDeleteV1",
@@ -31246,6 +31307,7 @@
           "MemoryToAssetV1",
           "MemoryToAssetDeleteV1",
           "StackV1",
+          "StackV2",
           "StackDeleteV1",
           "PersonV1",
           "PersonDeleteV1",
@@ -31570,7 +31632,9 @@
           "PartnerAssetsV2",
           "PartnerAssetExifsV1",
           "PartnerStacksV1",
+          "PartnerStacksV2",
           "StacksV1",
+          "StacksV2",
           "UsersV1",
           "PeopleV1",
           "AssetFacesV1",
@@ -31637,6 +31701,54 @@
           "id",
           "ownerId",
           "primaryAssetId",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "SyncStackV2": {
+        "properties": {
+          "createdAt": {
+            "description": "Created at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stack ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "ownerId": {
+            "description": "Owner ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "primaryAssetId": {
+            "description": "Primary asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/StackSource"
+          },
+          "updatedAt": {
+            "description": "Updated at",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "ownerId",
+          "primaryAssetId",
+          "source",
           "updatedAt"
         ],
         "type": "object"
@@ -33215,6 +33327,9 @@
           "sharedLinks": {
             "$ref": "#/components/schemas/SharedLinksResponse"
           },
+          "stacks": {
+            "$ref": "#/components/schemas/StacksResponse"
+          },
           "tags": {
             "$ref": "#/components/schemas/TagsResponse"
           }
@@ -33233,6 +33348,7 @@
           "ratings",
           "recentlyAdded",
           "sharedLinks",
+          "stacks",
           "tags"
         ],
         "type": "object"
@@ -33280,6 +33396,9 @@
           },
           "sharedLinks": {
             "$ref": "#/components/schemas/SharedLinksUpdate"
+          },
+          "stacks": {
+            "$ref": "#/components/schemas/StacksUpdate"
           },
           "tags": {
             "$ref": "#/components/schemas/TagsUpdate"
