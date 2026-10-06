@@ -33,6 +33,7 @@ import { ClusterGroupRepository } from 'src/repositories/cluster-group.repositor
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { CustomViewRepository } from 'src/repositories/custom-view.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
 import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
@@ -372,16 +373,22 @@ export class SyncTestContext extends MediumTestContext<typeof SyncService> {
   constructor(database: Kysely<DB>) {
     super(SyncService, {
       database,
-      real: [SyncRepository, SyncCheckpointRepository, SessionRepository],
+      real: [SyncRepository, SyncCheckpointRepository, SessionRepository, CustomViewRepository],
       mock: [LoggingRepository],
     });
   }
 
-  async syncStream(auth: AuthDto, types: SyncRequestType[], shouldReset?: boolean, includePrivate?: boolean) {
+  async syncStream(
+    auth: AuthDto,
+    types: SyncRequestType[],
+    shouldReset?: boolean,
+    includePrivate?: boolean,
+    includeViews?: boolean,
+  ) {
     const stream = mediumFactory.syncStream();
     // Wait for 2ms to ensure all updates are available and account for setTimeout inaccuracy
     await wait(2);
-    await this.sut.stream(auth, stream, { types, reset: shouldReset, includePrivate });
+    await this.sut.stream(auth, stream, { types, reset: shouldReset, includePrivate, includeViews });
 
     return stream.getResponse();
   }
@@ -396,7 +403,8 @@ export class SyncTestContext extends MediumTestContext<typeof SyncService> {
     const acks: Record<string, string> = {};
     const syncAcks: string[] = [];
     for (const { type, ack } of response) {
-      if (type === SyncEntityType.SyncAckV1) {
+      // a checkpoint event can carry the ack of another stream (see write in the sync service)
+      if (type === SyncEntityType.SyncAckV1 || !ack.startsWith(`${type}|`)) {
         syncAcks.push(ack);
         continue;
       }
@@ -485,6 +493,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case AssetJobRepository:
     case AutoStackRepository:
     case ClusterGroupRepository:
+    case CustomViewRepository:
     case DuplicateRepository:
     case IntegrityRepository:
     case MemoryRepository:
@@ -571,6 +580,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case AssetJobRepository:
     case AutoStackRepository:
     case ConfigRepository:
+    case CustomViewRepository:
     case CryptoRepository:
     case LibraryRepository:
     case MemoryRepository:
