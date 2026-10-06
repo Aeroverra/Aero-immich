@@ -45,6 +45,9 @@ export interface SearchStatusOptions {
   isMotion?: boolean;
   isOffline?: boolean;
   isNotInAlbum?: boolean;
+  /** video length bounds in milliseconds; either one keeps the search to videos */
+  minDuration?: number;
+  maxDuration?: number;
   type?: AssetType;
   status?: AssetStatus;
   withArchived?: boolean;
