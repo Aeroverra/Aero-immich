@@ -24,6 +24,16 @@ describe('Route', () => {
     });
   });
 
+  describe(Route.viewAsset.name, () => {
+    it('should work', () => {
+      expect(Route.viewAsset({ id: 'asset-id' })).toBe('/photos/asset-id');
+    });
+
+    it('should point out a face', () => {
+      expect(Route.viewAsset({ id: 'asset-id' }, { face: 'face-id' })).toBe('/photos/asset-id?face=face-id');
+    });
+  });
+
   describe(Route.viewSharedLink.name, () => {
     it('should work with key', () => {
       expect(Route.viewSharedLink({ key: 'uuid-key' })).toBe('/share/uuid-key');

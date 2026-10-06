@@ -42,6 +42,7 @@
   import { AssetVisibility, searchPerson, updatePerson, type PersonResponseDto } from '@immich/sdk';
   import {
     ActionButton,
+    Button,
     CommandPaletteDefaultProvider,
     ContextMenuButton,
     LoadingSpinner,
@@ -49,7 +50,13 @@
     toastManager,
     type ActionItem,
   } from '@immich/ui';
-  import { mdiAccountBoxOutline, mdiAccountMultipleCheckOutline, mdiArrowLeft, mdiDotsVertical } from '@mdi/js';
+  import {
+    mdiAccountBoxOutline,
+    mdiAccountMultipleCheckOutline,
+    mdiAccountQuestionOutline,
+    mdiArrowLeft,
+    mdiDotsVertical,
+  } from '@mdi/js';
   import { DateTime } from 'luxon';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
@@ -423,6 +430,19 @@
               </div>
             {/if}
           </section>
+          {#if !isEditingName && data.suggestions.pending > 0}
+            <!-- people that may be this person, to go through one at a time -->
+            <Button
+              href={Route.peopleSuggestions({ personId: person.id })}
+              size="small"
+              variant="ghost"
+              leadingIcon={mdiAccountQuestionOutline}
+              class="mt-2"
+              data-testid="person-suggestions"
+            >
+              {$t('same_person_review_for_person', { values: { count: data.suggestions.pending } })}
+            </Button>
+          {/if}
           {#if isEditingName}
             <div class="absolute z-1 w-64 sm:w-96">
               {#if isSearchingPeople}
