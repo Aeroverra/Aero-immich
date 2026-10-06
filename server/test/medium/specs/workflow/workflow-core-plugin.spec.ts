@@ -1154,6 +1154,48 @@ describe('core plugin', () => {
       }
     });
 
+    it('should only put filters of the core plugin in groups', () => {
+      const filters = new Set(
+        manifest.methods
+          .filter(({ uiHints }) => uiHints?.includes('Filter'))
+          .map(({ name }) => `immich-plugin-core#${name}`),
+      );
+      const check = (name: string, steps: Array<{ method: string; config?: Record<string, unknown> | null }>) => {
+        for (const step of steps) {
+          if (step.method !== 'immich-plugin-core#assetFilterGroup') {
+            continue;
+          }
+
+          const children = (step.config?.filters ?? []) as typeof steps;
+          expect(children.length, `${name}: empty group`).toBeGreaterThan(0);
+          for (const child of children) {
+            expect(filters.has(child.method), `${name}: ${child.method}`).toBe(true);
+          }
+          check(name, children);
+        }
+      };
+
+      for (const template of manifest.templates) {
+        check(template.name, template.steps);
+      }
+    });
+
+    it('should have one template per pack and keep the status bar on its own', () => {
+      const names = manifest.templates.map(({ name }) => name);
+      expect(names).toEqual(
+        expect.arrayContaining(['screenshots-smart-album', 'screenshots-status-bar', 'tiktok-downloads']),
+      );
+      expect(names.filter((name) => name.startsWith('tiktok-'))).toEqual(['tiktok-downloads']);
+      for (const name of ['screenshots-smart-album', 'screenshots-status-bar', 'tiktok-downloads']) {
+        const template = manifest.templates.find((template) => template.name === name)!;
+        // rule hits go to a tag to review, not straight into a curated one
+        expect(template.steps.at(-1)).toMatchObject({
+          method: 'immich-plugin-core#assetAddTags',
+          config: { tags: [], tagName: expect.stringMatching(/^review\//) },
+        });
+      }
+    });
+
     it.each([
       ['someuser_2025-01-01-00-00-00_1735689600000.mp4', true],
       ['some.user_2025-01-01-00-00-00_1735689600000_mute (1).mp4', true],
@@ -1167,7 +1209,7 @@ describe('core plugin', () => {
     ])('should recognize TikTok file names: %s', async (originalFileName, expected) => {
       const { user } = await ctx.newUser();
       const { asset } = await ctx.newAsset({ ownerId: user.id, originalFileName, type: AssetType.Video });
-      await expect(runTemplate('tiktok-downloads-file-names', asset.id, user.id)).resolves.toBe(expected);
+      await expect(runTemplate('tiktok-downloads', asset.id, user.id)).resolves.toBe(expected);
     });
 
     it('should recognize older TikTok saves by name, width and missing make', async () => {
@@ -1182,9 +1224,9 @@ describe('core plugin', () => {
       await ctx.newExif({ assetId: camera.id, make: 'Apple', exifImageWidth: 576 });
       await ctx.newExif({ assetId: wide.id, make: null, exifImageWidth: 1080 });
 
-      await expect(runTemplate('tiktok-downloads-hash-videos', save.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-hash-videos', camera.id, user.id)).resolves.toBe(false);
-      await expect(runTemplate('tiktok-downloads-hash-videos', wide.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', save.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', camera.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', wide.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize photo mode images by name, ratio and missing make', async () => {
@@ -1210,9 +1252,9 @@ describe('core plugin', () => {
         }),
       ]);
 
-      await expect(runTemplate('tiktok-downloads-photo-mode', png.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-photo-mode', jpg.id, user.id)).resolves.toBe(false);
-      await expect(runTemplate('tiktok-downloads-photo-mode', square.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', png.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', jpg.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', square.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize the TikTok watermark but not screen recordings of the app', async () => {
@@ -1224,8 +1266,8 @@ describe('core plugin', () => {
       await addOcr(download.id, [{ text: 'TikTok' }, { text: '@someuser' }]);
       await addOcr(recording.id, [{ text: 'TikTok' }]);
 
-      await expect(runTemplate('tiktok-downloads-watermark', download.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-watermark', recording.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', download.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', recording.id, user.id)).resolves.toBe(false);
     });
 
     it.each([
@@ -1236,6 +1278,7 @@ describe('core plugin', () => {
       ['Bildschirmfoto 2025-01-01 um 00.00.00.png', true],
       ['Capture d’écran 2025-01-01.png', true],
       ['IMG_1234.JPG', false],
+      ['IMG_1234.PNG', true],
       ['screenplay.pdf', false],
     ])('should recognize screenshot file names: %s', async (originalFileName, expected) => {
       const { user } = await ctx.newUser();
@@ -1251,8 +1294,8 @@ describe('core plugin', () => {
       ]);
       await ctx.newExif({ assetId: photo.id, make: 'Apple' });
 
-      await expect(runTemplate('screenshots-iphone', screenshot.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('screenshots-iphone', photo.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('screenshots-smart-album', screenshot.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('screenshots-smart-album', photo.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize a status bar clock', async () => {
