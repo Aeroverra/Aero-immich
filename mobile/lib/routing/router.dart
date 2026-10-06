@@ -71,6 +71,7 @@ import 'package:immich_mobile/presentation/pages/recently_added.page.dart';
 import 'package:immich_mobile/presentation/pages/recently_taken.page.dart';
 import 'package:immich_mobile/presentation/pages/remote_album.page.dart';
 import 'package:immich_mobile/presentation/pages/search/search.page.dart';
+import 'package:immich_mobile/presentation/pages/search/similar_photos.page.dart';
 import 'package:immich_mobile/presentation/pages/slideshow.page.dart';
 import 'package:immich_mobile/presentation/pages/tag_review.page.dart';
 import 'package:immich_mobile/presentation/pages/trash.page.dart';
@@ -154,6 +155,7 @@ class AppRouter extends RootStackRouter {
     AutoRoute(page: PinAuthRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: PrivatePinAuthRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: HiddenAssetRoute.page, guards: [_authGuard, _duplicateGuard]),
+    AutoRoute(page: SimilarPhotosRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: LocalMediaSummaryRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: RemoteMediaSummaryRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: BackupRoute.page, guards: [_authGuard, _duplicateGuard]),
