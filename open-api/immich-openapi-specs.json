@@ -11782,6 +11782,36 @@
             }
           },
           {
+            "name": "excludePersonIds",
+            "required": false,
+            "in": "query",
+            "description": "Leave out assets that show any of these people",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$"
+              }
+            }
+          },
+          {
             "name": "excludeTagIds",
             "required": false,
             "in": "query",
@@ -26834,6 +26864,31 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "excludePersonIds": {
+            "deprecated": true,
+            "description": "Leave out assets that show any of these people",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "excludeTagIds": {
             "deprecated": true,
             "description": "Leave out assets with any of these tags or their child tags",
@@ -29642,6 +29697,31 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "excludePersonIds": {
+            "deprecated": true,
+            "description": "Leave out assets that show any of these people",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "excludeTagIds": {
             "deprecated": true,
             "description": "Leave out assets with any of these tags or their child tags",
@@ -32104,6 +32184,31 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "excludePersonIds": {
+            "deprecated": true,
+            "description": "Leave out assets that show any of these people",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "excludeTagIds": {
             "deprecated": true,
             "description": "Leave out assets with any of these tags or their child tags",
@@ -33151,6 +33256,31 @@
           "excludeAlbumIds": {
             "deprecated": true,
             "description": "Leave out assets in any of these albums",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "excludePersonIds": {
+            "deprecated": true,
+            "description": "Leave out assets that show any of these people",
             "items": {
               "format": "uuid",
               "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
