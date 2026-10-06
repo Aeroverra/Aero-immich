@@ -170,6 +170,23 @@ const AssetFaceCreateSchema = AssetFaceUpdateItemSchema.extend({
   y: z.int().describe('Face bounding box Y coordinate'),
   width: z.int().describe('Face bounding box width'),
   height: z.int().describe('Face bounding box height'),
+  frameTimestamp: z
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'Position in milliseconds of the video frame the face is in (videos only). The box is then in the pixel space of that frame as decoded from the original video, and imageWidth and imageHeight are the frame size',
+    )
+    .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
+  embedding: z
+    .array(z.number().meta({ format: 'double' }))
+    .length(512)
+    .refine((values) => values.some((value) => value !== 0), 'Embedding must not be all zeros')
+    .optional()
+    .describe(
+      'Face embedding (512 values) from the facial recognition model, so facial recognition can match other faces to this one',
+    )
+    .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
 }).meta({ id: 'AssetFaceCreateDto' });
 
 const AssetFaceDeleteSchema = z
