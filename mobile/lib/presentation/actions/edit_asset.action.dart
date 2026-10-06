@@ -55,12 +55,18 @@ class EditAssetAction extends AssetActionBuilder {
         return;
       }
 
-      ref.read(editorStateProvider.notifier).init(edits, exif);
+      ref.read(editorStateProvider.notifier).init(edits, exif, rotateOnly: asset.isRotateOnly);
       unawaited(
         context.pushRoute(
           EditImageRoute(
             image: Image(image: getFullImageProvider(asset, edited: false)),
-            applyEdits: (newEdits) => applyEdits(ref, asset.id, newEdits),
+            // the server copies a rotated video before the edit is ready, which takes a while for a big one
+            applyEdits: (newEdits) => applyEdits(
+              ref,
+              asset.id,
+              newEdits,
+              timeout: asset.isVideo ? const Duration(minutes: 5) : const Duration(seconds: 10),
+            ),
           ),
         ),
       );
@@ -71,13 +77,18 @@ class EditAssetAction extends AssetActionBuilder {
 }
 
 @visibleForTesting
-Future<void> applyEdits(WidgetRef ref, String remoteId, List<AssetEdit> edits) async {
+Future<void> applyEdits(
+  WidgetRef ref,
+  String remoteId,
+  List<AssetEdit> edits, {
+  Duration timeout = const Duration(seconds: 10),
+}) async {
   final websocket = ref.read(websocketProvider.notifier);
 
   bool isCurrentId(dynamic data) => data is Map && (data['asset'] as Map?)?['id'] == remoteId;
   await ref.read(assetServiceProvider).applyEdits(remoteId, edits);
   await Future.any([
-    websocket.waitForEvent('AssetEditReadyV1', isCurrentId, const .new(seconds: 10)),
-    websocket.waitForEvent('AssetEditReadyV2', isCurrentId, const .new(seconds: 10)),
+    websocket.waitForEvent('AssetEditReadyV1', isCurrentId, timeout),
+    websocket.waitForEvent('AssetEditReadyV2', isCurrentId, timeout),
   ]).catchError((_) {});
 }
