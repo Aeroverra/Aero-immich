@@ -1,5 +1,3 @@
-import { PersonSuggestionKind } from 'src/enum';
-
 /**
  * How the person suggestions job finds pairs worth asking about. Similarities are cosine similarities of face
  * embeddings. On a family library (buffalo_l) the averages of two clusters that split one person were 0.35 to 0.82
@@ -29,6 +27,8 @@ export const PERSON_SUGGESTION = {
   skippedDays: 7,
   /** recency halves the value of a question about every this many years */
   recencyYears: 3,
+  /** the photos of the target count up to this many when ranking questions */
+  targetAssetsCap: 100,
 } as const;
 
 /** The mean of the `k` best similarities; when fewer were found, the rest count as `fill` (no better than the worst seen) */
@@ -88,20 +88,22 @@ export const getSuggestionScore = ({
 }) => (faceMatch + centroid) / 2 - PERSON_SUGGESTION.sharedPenalty * sharedAssetShare;
 
 /**
- * How much answering is worth: the photos the answer names (or brings together), how many different days they are
- * from (someone who keeps coming back matters more than a face in one crowd), and how recent they are; weighed by how
- * likely the answer is yes.
+ * Which questions come first: the likeliest pairs with the most photos on both sides. The score counts the most (it
+ * is squared); then the photos of the candidate (what the answer names or brings together), the photos of the target
+ * (counted up to 100, so a face is not asked first just because the person it may be is on thousands of photos), how
+ * many different days the candidate's photos are from (someone who keeps coming back matters more than a face in one
+ * crowd), and how recent they are.
  */
 export const getSuggestionPriority = ({
-  kind,
   assets,
+  targetAssets,
   days,
   latest,
   score,
   now = new Date(),
 }: {
-  kind: PersonSuggestionKind;
   assets: number;
+  targetAssets: number;
   days: number;
   latest: Date | null;
   score: number;
@@ -109,10 +111,12 @@ export const getSuggestionPriority = ({
 }) => {
   const years = latest ? Math.max(0, (now.getTime() - latest.getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 10;
   const recency = Math.pow(0.5, years / PERSON_SUGGESTION.recencyYears);
-  const value = Math.log1p(Math.max(0, assets)) + 0.5 * Math.log1p(Math.max(0, days)) + recency;
-  // bringing two unnamed people together names nobody yet
-  const weight = kind === PersonSuggestionKind.Unnamed ? 0.75 : 1;
-  return value * weight * Math.max(0, score);
+  const value =
+    Math.log1p(Math.max(0, assets)) +
+    0.5 * Math.log1p(Math.min(Math.max(0, targetAssets), PERSON_SUGGESTION.targetAssetsCap)) +
+    0.5 * Math.log1p(Math.max(0, days)) +
+    recency;
+  return value * Math.max(0, score) ** 2;
 };
 
 /** Of the targets a candidate may be, the ones worth asking about: the best, and a close runner-up (look-alikes) */

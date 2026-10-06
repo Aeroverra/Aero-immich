@@ -340,6 +340,37 @@ describe(PersonSuggestionService.name, () => {
     });
   });
 
+  describe('order', () => {
+    it('should ask about the likeliest pairs with the most photos first, questions from the API included', async () => {
+      const { sut, ctx } = setup();
+      const random = newRandom(22);
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const tom = randomDirection(random);
+      const { personGroupId: tomId } = await seedPerson(ctx, user.id, random, { name: 'Tom', identity: tom, faces: 8 });
+      // a big part of Tom split off, and one blurry-ish face of him
+      const big = await seedPerson(ctx, user.id, random, { identity: tom, faces: 6, firstDay: 1 });
+      const face = await seedPerson(ctx, user.id, random, { identity: tom, faces: 1, loose: true, noise: 1.2 });
+      // a question handed over through the API about someone barely alike
+      const other = await seedPerson(ctx, user.id, random, { identity: randomDirection(random), faces: 1 });
+      const imported = await sut.create(auth, { personId: other.personGroupId, targetPersonId: tomId, score: 0.36 });
+
+      await sut.handleSuggestions({ userId: user.id });
+
+      const { suggestions } = await sut.getAll(auth, { page: 1, size: 10 });
+      const order = suggestions.map(({ id, candidate }) =>
+        id === imported.id
+          ? 'imported'
+          : candidate.person?.id === big.personGroupId
+            ? 'big'
+            : candidate.faces[0]?.id === face.faceIds[0]
+              ? 'face'
+              : '?',
+      );
+      expect(order).toEqual(['big', 'face', 'imported']);
+    });
+  });
+
   describe('getAll', () => {
     it('should show both sides with faces, names and counts', async () => {
       const { sut, ctx } = setup();

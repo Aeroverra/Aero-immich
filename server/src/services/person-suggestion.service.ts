@@ -166,11 +166,13 @@ export class PersonSuggestionService extends BaseService {
 
     const kind = target.name ? PersonSuggestionKind.Named : PersonSuggestionKind.Unnamed;
     const score = dto.score ?? 0.5;
-    const [statistics] = await this.personSuggestionRepository.getCandidateStatistics(
+    const statistics = await this.personSuggestionRepository.getCandidateStatistics(
       ownerId,
-      pair.personGroupId ? [pair.personGroupId] : [],
+      pair.personGroupId ? [pair.personGroupId, pair.targetPersonGroupId] : [pair.targetPersonGroupId],
       pair.faceId ? [pair.faceId] : [],
     );
+    const candidate = statistics.find(({ id }) => id === (pair.personGroupId ?? pair.faceId));
+    const targetAssets = statistics.find(({ id }) => id === pair.targetPersonGroupId)?.assets ?? 0;
     const suggestion = await this.personSuggestionRepository.create({
       ownerId,
       kind,
@@ -178,11 +180,11 @@ export class PersonSuggestionService extends BaseService {
       ...pair,
       score,
       priority: getSuggestionPriority({
-        kind,
         score,
-        assets: statistics?.assets ?? 1,
-        days: statistics?.days ?? 1,
-        latest: statistics?.latest ?? null,
+        assets: candidate?.assets ?? 1,
+        targetAssets,
+        days: candidate?.days ?? 1,
+        latest: candidate?.latest ?? null,
       }),
     });
 
@@ -506,15 +508,19 @@ export class PersonSuggestionService extends BaseService {
   }
 
   private async saveSuggestions(userId: string, found: ScoredPair[], existing: Suggestion[]) {
+    // questions that came in through the API are ranked the same way, with their own score
+    const fromApi = existing.filter(
+      ({ status, source }) => status === PersonSuggestionStatus.Pending && source === PersonSuggestionSource.Api,
+    );
     const personGroupIds = new Set<string>();
     const faceIds = new Set<string>();
-    for (const pair of found) {
+    for (const pair of [...found, ...fromApi]) {
       if (pair.faceId) {
         faceIds.add(pair.faceId);
-      } else {
-        personGroupIds.add(pair.personGroupId!);
-        personGroupIds.add(pair.targetPersonGroupId);
+      } else if (pair.personGroupId) {
+        personGroupIds.add(pair.personGroupId);
       }
+      personGroupIds.add(pair.targetPersonGroupId);
     }
 
     const statistics = await this.personSuggestionRepository.getCandidateStatistics(
@@ -525,6 +531,18 @@ export class PersonSuggestionService extends BaseService {
     const statisticsById = new Map(statistics.map((row) => [row.id, row]));
 
     const now = new Date();
+    const getPriority = (candidateId: string, targetId: string, score: number) => {
+      const candidate = statisticsById.get(candidateId);
+      return getSuggestionPriority({
+        score,
+        assets: candidate?.assets ?? 1,
+        targetAssets: statisticsById.get(targetId)?.assets ?? 0,
+        days: candidate?.days ?? 1,
+        latest: candidate?.latest ?? null,
+        now,
+      });
+    };
+
     const ranked = found.map((pair) => {
       let { personGroupId, targetPersonGroupId } = pair;
       // of two unnamed people, the one on fewer photos is asked about and merged into the other
@@ -539,15 +557,7 @@ export class PersonSuggestionService extends BaseService {
         }
       }
 
-      const candidate = statisticsById.get(pair.faceId ?? personGroupId!);
-      const priority = getSuggestionPriority({
-        kind: pair.kind,
-        score: pair.score,
-        assets: candidate?.assets ?? 1,
-        days: candidate?.days ?? 1,
-        latest: candidate?.latest ?? null,
-        now,
-      });
+      const priority = getPriority(pair.faceId ?? personGroupId!, targetPersonGroupId, pair.score);
       return { ...pair, personGroupId, targetPersonGroupId, priority };
     });
 
@@ -593,6 +603,14 @@ export class PersonSuggestionService extends BaseService {
         suggestion.source === PersonSuggestionSource.Automatic &&
         !keptIds.has(suggestion.id),
     );
+
+    for (const suggestion of fromApi) {
+      const candidateId = suggestion.faceId ?? suggestion.personGroupId;
+      if (candidateId) {
+        const priority = getPriority(candidateId, suggestion.targetPersonGroupId, suggestion.score);
+        toUpdate.push({ id: suggestion.id, score: suggestion.score, priority });
+      }
+    }
 
     await this.personSuggestionRepository.deleteAll(stale.map(({ id }) => id));
     await this.personSuggestionRepository.updateScores(toUpdate);
