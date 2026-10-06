@@ -543,6 +543,21 @@ export function inAlbums<O>(qb: SelectQueryBuilder<DB, 'asset', O>, albumIds: st
   );
 }
 
+/** Leaves out the assets that carry any of [tagIds] or one of their child tags */
+export function withoutTags<O>(qb: SelectQueryBuilder<DB, 'asset', O>, tagIds: string[]) {
+  return qb.where((eb) =>
+    eb.not(
+      eb.exists(
+        eb
+          .selectFrom('tag_asset')
+          .innerJoin('tag_closure', 'tag_asset.tagId', 'tag_closure.id_descendant')
+          .whereRef('tag_asset.assetId', '=', 'asset.id')
+          .where('tag_closure.id_ancestor', '=', anyUuid(tagIds)),
+      ),
+    ),
+  );
+}
+
 export function hasTags<O>(qb: SelectQueryBuilder<DB, 'asset', O>, tagIds: string[]) {
   return qb.innerJoin(
     (eb) =>
@@ -668,6 +683,7 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
     .$if(options.tagIds === null, (qb) =>
       qb.where((eb) => eb.not(eb.exists((eb) => eb.selectFrom('tag_asset').whereRef('assetId', '=', 'asset.id')))),
     )
+    .$if(!!options.excludeTagIds && options.excludeTagIds.length > 0, (qb) => withoutTags(qb, options.excludeTagIds!))
     .$if(!!options.personIds && options.personIds.length > 0, (qb) => hasPeople(qb, options.personIds!))
     .$if(!!options.createdBefore, (qb) => qb.where('asset.createdAt', '<=', options.createdBefore!))
     .$if(!!options.createdAfter, (qb) => qb.where('asset.createdAt', '>=', options.createdAfter!))
