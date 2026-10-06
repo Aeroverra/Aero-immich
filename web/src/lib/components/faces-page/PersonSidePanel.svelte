@@ -289,7 +289,7 @@
                     curve
                     shadow
                     highlighted={isHighlighted}
-                    url={getPeopleThumbnailUrl(face.person)}
+                    url={getPeopleThumbnailUrl(face.person, undefined, assetId)}
                     altText={face.person.name}
                     title={$getPersonNameWithHiddenValue(face.person.name, face.person.isHidden)}
                     widthStyle={thumbnailWidth}
