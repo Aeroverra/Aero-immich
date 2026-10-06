@@ -8,7 +8,7 @@
     type PersonResponseDto,
     type PersonSuggestionResponseDto,
   } from '@immich/sdk';
-  import { Button, Input, Kbd } from '@immich/ui';
+  import { Button, Input } from '@immich/ui';
   import { mdiCheck, mdiClose, mdiHelp } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
@@ -24,6 +24,10 @@
   let isNaming = $state(false);
   let name = $state('');
   let existing = $state<PersonResponseDto>();
+
+  // the key hint takes the colour of its button, so it reads on filled and outlined buttons alike
+  const keyClass =
+    'ms-1 hidden rounded border border-current px-1 font-mono text-xs leading-4 opacity-75 sm:inline-block';
 
   const targetName = $derived(suggestion.target.person?.name ?? '');
   const isFace = $derived(!suggestion.candidate.person);
@@ -167,10 +171,11 @@
           leadingIcon={mdiClose}
           disabled={busy}
           onclick={() => answer(PersonSuggestionAnswer.Different)}
+          aria-keyshortcuts="d"
           data-testid="suggestion-different"
         >
           {$t('same_person_different')}
-          <Kbd size="tiny" class="ms-1 hidden sm:inline-block">D</Kbd>
+          <kbd class={keyClass} aria-hidden="true">D</kbd>
         </Button>
         <Button
           variant="outline"
@@ -178,19 +183,21 @@
           leadingIcon={mdiHelp}
           disabled={busy}
           onclick={() => answer(PersonSuggestionAnswer.Skipped)}
+          aria-keyshortcuts="n"
           data-testid="suggestion-skip"
         >
           {$t('same_person_not_sure')}
-          <Kbd size="tiny" class="ms-1 hidden sm:inline-block">N</Kbd>
+          <kbd class={keyClass} aria-hidden="true">N</kbd>
         </Button>
         <Button
           leadingIcon={mdiCheck}
           disabled={busy}
           onclick={() => answer(PersonSuggestionAnswer.Same)}
+          aria-keyshortcuts="s"
           data-testid="suggestion-same"
         >
           {$t('same_person_same')}
-          <Kbd size="tiny" class="ms-1 hidden sm:inline-block">S</Kbd>
+          <kbd class={keyClass} aria-hidden="true">S</kbd>
         </Button>
       </div>
     {/if}
