@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 from io import BytesIO
@@ -7,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 from unittest import mock
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 import orjson
@@ -19,12 +21,15 @@ from pytest_mock import MockerFixture
 
 from immich_ml.config import MaxBatchSize, Settings, settings
 from immich_ml.main import load, preload_models
+from immich_ml.models import get_model_class
 from immich_ml.models.base import InferenceModel
 from immich_ml.models.cache import ModelCache
 from immich_ml.models.clip.textual import MClipTextualEncoder, OpenClipTextualEncoder
 from immich_ml.models.clip.visual import OpenClipVisualEncoder
+from immich_ml.models.face_attributes.landmarks import FaceLandmarker, head_pose, scale_box
 from immich_ml.models.facial_recognition.detection import FaceDetector
 from immich_ml.models.facial_recognition.recognition import FaceRecognizer
+from immich_ml.models.image_quality.laplacian import LaplacianImageQuality
 from immich_ml.models.ocr.detection import TextDetector
 from immich_ml.models.ocr.recognition import TextRecognizer
 from immich_ml.schemas import ModelFormat, ModelPrecision, ModelTask, ModelType
@@ -1173,6 +1178,243 @@ class TestOcr:
         text_recognizer = TextRecognizer("PP-OCRv5_mobile", cache_dir="test_cache")
 
         assert text_recognizer.batch_size == 6
+
+
+def make_landmarker_result(
+    blink_left: float = 0.1, blink_right: float = 0.2, smile: float = 0.6, yaw_degrees: float = 0.0
+) -> SimpleNamespace:
+    scores = {
+        "eyeBlinkLeft": blink_left,
+        "eyeBlinkRight": blink_right,
+        "mouthSmileLeft": smile,
+        "mouthSmileRight": smile,
+    }
+    theta = np.radians(yaw_degrees)
+    matrix = np.eye(4, dtype=np.float32)
+    matrix[:3, :3] = [[np.cos(theta), 0, np.sin(theta)], [0, 1, 0], [-np.sin(theta), 0, np.cos(theta)]]
+    return SimpleNamespace(
+        face_blendshapes=[[SimpleNamespace(category_name=name, score=score) for name, score in scores.items()]],
+        facial_transformation_matrixes=[matrix],
+    )
+
+
+def make_face_box(x1: float, y1: float, x2: float, y2: float, width: int = 600, height: int = 800) -> Any:
+    return {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "imageWidth": width, "imageHeight": height}
+
+
+class TestFaceAttributes:
+    def test_resolves_model_class(self) -> None:
+        assert get_model_class("face_landmarker", ModelType.LANDMARKS, ModelTask.FACE_ATTRIBUTES) is FaceLandmarker
+
+    def test_returns_early_without_faces(self, pil_image: Image.Image) -> None:
+        session = mock.Mock()
+        landmarker = FaceLandmarker("face_landmarker", cache_dir="test_cache", session=session)
+
+        assert landmarker.predict(pil_image, faces=[]) == []
+        assert landmarker.predict(pil_image) == []
+        session.detect.assert_not_called()
+
+    def test_describes_each_face_in_request_order(self, pil_image: Image.Image) -> None:
+        session = mock.Mock()
+        session.detect.side_effect = [make_landmarker_result(yaw_degrees=20), SimpleNamespace(face_blendshapes=[])]
+        landmarker = FaceLandmarker("face_landmarker", cache_dir="test_cache", session=session)
+
+        faces = landmarker.predict(
+            pil_image, faces=[make_face_box(100, 100, 200, 250), make_face_box(300, 400, 400, 520)]
+        )
+
+        assert len(faces) == 2
+        first, second = faces
+        assert first["detected"] is True
+        assert first["eyeBlinkLeft"] == pytest.approx(0.1)
+        assert first["eyeBlinkRight"] == pytest.approx(0.2)
+        assert first["smile"] == pytest.approx(0.6)
+        assert first["yaw"] == pytest.approx(20, abs=1e-3)
+        assert first["pitch"] == pytest.approx(0, abs=1e-3)
+        assert first["roll"] == pytest.approx(0, abs=1e-3)
+        assert first["sharpness"] == 0
+
+        assert second["detected"] is False
+        assert second["eyeBlinkLeft"] is None
+        assert second["eyeBlinkRight"] is None
+        assert second["smile"] is None
+        assert second["yaw"] is None
+        # sharpness does not need landmarks
+        assert second["sharpness"] == 0
+
+    def test_crops_padded_face_to_landmarker_size(self, pil_image: Image.Image) -> None:
+        session = mock.Mock()
+        session.detect.return_value = make_landmarker_result()
+        landmarker = FaceLandmarker("face_landmarker", cache_dir="test_cache", session=session)
+
+        landmarker.predict(pil_image, faces=[make_face_box(200, 300, 300, 400)])
+
+        crop = session.detect.call_args.args[0]
+        # a 100x100 box padded by 60% on every side is 220x220, then resized to 256
+        assert crop.shape == (256, 256, 3)
+        assert crop.dtype == np.uint8
+
+    def test_face_sharpness_prefers_sharp_faces(self) -> None:
+        session = mock.Mock()
+        session.detect.return_value = make_landmarker_result()
+        landmarker = FaceLandmarker("face_landmarker", cache_dir="test_cache", session=session)
+        pattern = (np.indices((200, 200)).sum(axis=0) // 4 % 2 * 255).astype(np.uint8)
+        sharp = Image.fromarray(pattern).convert("RGB")
+        blurred = Image.fromarray(cv2.GaussianBlur(pattern, (15, 15), 5)).convert("RGB")
+        box = make_face_box(50, 50, 150, 150, width=200, height=200)
+
+        [sharp_face] = landmarker.predict(sharp, faces=[box])
+        [blurred_face] = landmarker.predict(blurred, faces=[box])
+
+        assert sharp_face["sharpness"] is not None and blurred_face["sharpness"] is not None
+        assert sharp_face["sharpness"] > blurred_face["sharpness"] * 10
+
+    def test_skips_box_outside_image(self, pil_image: Image.Image) -> None:
+        session = mock.Mock()
+        landmarker = FaceLandmarker("face_landmarker", cache_dir="test_cache", session=session)
+
+        [face] = landmarker.predict(pil_image, faces=[make_face_box(700, 900, 800, 1000)])
+
+        assert face["detected"] is False
+        assert face["sharpness"] is None
+        session.detect.assert_not_called()
+
+    def test_scales_box_to_image_size(self) -> None:
+        box = make_face_box(100, 200, 150, 260, width=300, height=400)
+
+        assert scale_box(box, 600, 800) == (200, 400, 300, 520)
+
+    def test_rotates_box_when_orientation_differs(self) -> None:
+        # stored against a 300x400 portrait image, the image is an 800x600 landscape
+        box = make_face_box(100, 200, 150, 260, width=300, height=400)
+
+        assert scale_box(box, 800, 600) == pytest.approx((140 * 2, 100 * 2, 200 * 2, 150 * 2))
+
+    def test_keeps_box_without_stored_size(self) -> None:
+        assert scale_box(make_face_box(1, 2, 3, 4, width=0, height=0), 600, 800) == (1, 2, 3, 4)
+
+    def test_head_pose(self) -> None:
+        roll = np.radians(10)
+        matrix = np.eye(4, dtype=np.float32)
+        matrix[:3, :3] = [[np.cos(roll), -np.sin(roll), 0], [np.sin(roll), np.cos(roll), 0], [0, 0, 1]]
+
+        yaw, pitch, rolled = head_pose(matrix)
+
+        assert yaw == pytest.approx(0, abs=1e-3)
+        assert pitch == pytest.approx(0, abs=1e-3)
+        assert rolled == pytest.approx(10, abs=1e-3)
+
+    def test_downloads_model_and_verifies_checksum(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        content = b"model"
+        mocker.patch.dict(
+            "immich_ml.models.face_attributes.landmarks.MODEL_URLS",
+            {"face_landmarker": ("https://example.com/model.task", hashlib.sha256(content).hexdigest())},
+        )
+        urlopen = mocker.patch("immich_ml.models.face_attributes.landmarks.urllib.request.urlopen")
+        urlopen.return_value.__enter__.return_value = BytesIO(content)
+        landmarker = FaceLandmarker("face_landmarker", cache_dir=tmp_path)
+
+        landmarker.download()
+
+        urlopen.assert_called_once_with("https://example.com/model.task", timeout=60)
+        assert landmarker.model_path == tmp_path / "landmarks" / "model.task"
+        assert landmarker.model_path.read_bytes() == content
+        assert landmarker.cached
+
+    def test_rejects_download_with_wrong_checksum(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        mocker.patch.dict(
+            "immich_ml.models.face_attributes.landmarks.MODEL_URLS",
+            {"face_landmarker": ("https://example.com/model.task", "0" * 64)},
+        )
+        urlopen = mocker.patch("immich_ml.models.face_attributes.landmarks.urllib.request.urlopen")
+        urlopen.return_value.__enter__.return_value = BytesIO(b"tampered")
+        landmarker = FaceLandmarker("face_landmarker", cache_dir=tmp_path)
+
+        with pytest.raises(ValueError, match="Checksum mismatch"):
+            landmarker.download()
+
+        assert not landmarker.cached
+        assert list((tmp_path / "landmarks").iterdir()) == []
+
+    def test_loads_session_from_model_file(self, tmp_path: Path, mocker: MockerFixture) -> None:
+        session_cls = mocker.patch("immich_ml.models.face_attributes.landmarks.FaceLandmarkerSession")
+        landmarker = FaceLandmarker("face_landmarker", cache_dir=tmp_path)
+        landmarker.model_path.parent.mkdir(parents=True)
+        landmarker.model_path.write_bytes(b"model")
+
+        landmarker.load()
+
+        session_cls.assert_called_once_with(tmp_path / "landmarks" / "model.task")
+        assert landmarker.session is session_cls.return_value
+
+
+class TestImageQuality:
+    def test_resolves_model_class(self) -> None:
+        assert get_model_class("laplacian", ModelType.QUALITY, ModelTask.IMAGE_QUALITY) is LaplacianImageQuality
+
+    def test_loads_without_model_file(self, tmp_path: Path) -> None:
+        model = LaplacianImageQuality("laplacian", cache_dir=tmp_path / "missing")
+
+        model.load()
+
+        assert model.loaded
+        assert not (tmp_path / "missing").exists()
+
+    def test_black_image_is_fully_clipped(self) -> None:
+        quality = LaplacianImageQuality("laplacian").predict(Image.new("RGB", (1440, 1080)))
+
+        assert quality == {"sharpness": 0, "exposureClipped": 1, "brightness": 0}
+
+    def test_mid_gray_image_is_not_clipped(self) -> None:
+        quality = LaplacianImageQuality("laplacian").predict(Image.new("RGB", (320, 240), (128, 128, 128)))
+
+        assert quality["exposureClipped"] == 0
+        assert quality["brightness"] == pytest.approx(128 / 255)
+
+    def test_sharp_image_scores_higher_than_blurred(self) -> None:
+        pattern = (np.indices((1080, 1440)).sum(axis=0) // 8 % 2 * 255).astype(np.uint8)
+        sharp = Image.fromarray(pattern).convert("RGB")
+        blurred = Image.fromarray(cv2.GaussianBlur(pattern, (31, 31), 10)).convert("RGB")
+        model = LaplacianImageQuality("laplacian")
+
+        assert model.predict(sharp)["sharpness"] > model.predict(blurred)["sharpness"] * 10
+
+
+class TestFaceAttributesEndpoint:
+    def test_describes_faces_and_image_quality_in_one_request(
+        self, pil_image: Image.Image, deployed_app: TestClient, mocker: MockerFixture
+    ) -> None:
+        mocker.patch.object(FaceLandmarker, "download")
+        session_cls = mocker.patch("immich_ml.models.face_attributes.landmarks.FaceLandmarkerSession")
+        session_cls.return_value.detect.return_value = make_landmarker_result(smile=0.9)
+        byte_image = BytesIO()
+        pil_image.save(byte_image, format="jpeg")
+        entries = {
+            "face-attributes": {
+                "landmarks": {
+                    "modelName": "face_landmarker",
+                    "options": {"faces": [make_face_box(100, 100, 200, 250)]},
+                }
+            },
+            "image-quality": {"quality": {"modelName": "laplacian"}},
+        }
+
+        response = deployed_app.post(
+            "http://localhost:3003/predict",
+            data={"entries": json.dumps(entries)},
+            files={"image": byte_image.getvalue()},
+        )
+
+        assert response.status_code == 200
+        actual = response.json()
+        assert actual["imageWidth"] == 600
+        assert actual["imageHeight"] == 800
+        [face] = actual["face-attributes"]
+        assert face["detected"] is True
+        assert face["smile"] == pytest.approx(0.9)
+        assert set(face) == {"detected", "eyeBlinkLeft", "eyeBlinkRight", "smile", "yaw", "pitch", "roll", "sharpness"}
+        assert set(actual["image-quality"]) == {"sharpness", "exposureClipped", "brightness"}
+        assert actual["image-quality"]["exposureClipped"] == pytest.approx(1)
 
 
 @pytest.mark.asyncio
