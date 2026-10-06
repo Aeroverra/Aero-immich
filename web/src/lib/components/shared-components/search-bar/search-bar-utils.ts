@@ -4,7 +4,7 @@ import { t } from 'svelte-i18n';
 import type { SvelteSet } from 'svelte/reactivity';
 import { get } from 'svelte/store';
 import { MediaType } from '$lib/constants';
-import type { SearchDateFilter } from '$lib/types';
+import type { SearchDateFilter, SearchFilter } from '$lib/types';
 import { handleError } from '$lib/utils/handle-error';
 
 export enum SearchDatePreset {
@@ -222,6 +222,48 @@ export const getSearchPeopleTitle = (people: PersonResponseDto[], selected: Svel
   }
 
   return $t('people_count', { values: { count: selected.size } });
+};
+
+/** The People filter title: [names] from {@link getSearchPeopleTitle}, with the face options */
+export const getSearchPeopleFilterTitle = (
+  names: string | undefined,
+  {
+    onlyPersonIds,
+    hasPeople,
+    hasNamedFaces,
+    hasUnnamedFaces,
+  }: Pick<SearchFilter, 'onlyPersonIds' | 'hasPeople' | 'hasNamedFaces' | 'hasUnnamedFaces'>,
+) => {
+  const $t = get(t);
+
+  if (hasPeople === false) {
+    return $t('search_filter_no_people');
+  }
+
+  let people: string | undefined;
+  if (hasNamedFaces === false) {
+    people = $t('search_filter_no_named_people');
+  } else if (names) {
+    people =
+      onlyPersonIds === undefined
+        ? names
+        : $t(onlyPersonIds ? 'search_filter_only_people_title' : 'search_filter_with_others_title', {
+            values: { people: names },
+          });
+  } else if (hasNamedFaces) {
+    people = $t('search_filter_with_named_people');
+  }
+
+  const unnamed =
+    hasUnnamedFaces === undefined
+      ? undefined
+      : $t(hasUnnamedFaces ? 'search_filter_with_unnamed_faces' : 'search_filter_no_unnamed_faces');
+  const parts = [people, unnamed].filter(Boolean);
+  // anyone at all is implied by every other option
+  if (parts.length === 0 && hasPeople) {
+    return $t('search_filter_with_people');
+  }
+  return parts.join(' · ') || undefined;
 };
 
 export const getSearchTagsTitle = (
