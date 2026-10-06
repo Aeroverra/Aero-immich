@@ -151,6 +151,39 @@ describe(AssetService.name, () => {
       );
     });
 
+    it('should say whether a transcoded video exists', async () => {
+      const transcoded = AssetFactory.from({ type: AssetType.Video }).files([AssetFileType.EncodedVideo]).build();
+      const original = AssetFactory.from({ type: AssetType.Video }).files([AssetFileType.Preview]).build();
+      mocks.access.asset.checkOwnerAccess
+        .mockResolvedValueOnce(new Set([transcoded.id]))
+        .mockResolvedValueOnce(new Set([original.id]));
+      mocks.asset.getById.mockResolvedValueOnce(getForAsset(transcoded)).mockResolvedValueOnce(getForAsset(original));
+
+      await expect(sut.get(authStub.admin, transcoded.id)).resolves.toEqual(
+        expect.objectContaining({ hasEncodedVideo: true }),
+      );
+      await expect(sut.get(authStub.admin, original.id)).resolves.toEqual(
+        expect.objectContaining({ hasEncodedVideo: false }),
+      );
+      expect(mocks.asset.getById).toHaveBeenCalledWith(
+        transcoded.id,
+        expect.objectContaining({ files: true }),
+        expect.anything(),
+      );
+    });
+
+    it('should not count an edited transcode as the playback copy', async () => {
+      const asset = AssetFactory.from({ type: AssetType.Video })
+        .files([{ type: AssetFileType.EncodedVideo, isEdited: true }])
+        .build();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+
+      await expect(sut.get(authStub.admin, asset.id)).resolves.toEqual(
+        expect.objectContaining({ hasEncodedVideo: false }),
+      );
+    });
+
     it('should allow partner sharing access', async () => {
       const asset = AssetFactory.create();
       mocks.access.asset.checkPartnerAccess.mockResolvedValue(new Set([asset.id]));
