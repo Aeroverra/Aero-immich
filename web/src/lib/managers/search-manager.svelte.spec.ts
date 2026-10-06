@@ -221,6 +221,7 @@ describe('SearchManager people and faces', () => {
   it('drops every other face option while searching for photos without people', async () => {
     searchManager.setQuery({
       personIds: ['ann'],
+      excludePersonIds: ['bob'],
       onlyPersonIds: true,
       hasUnnamedFaces: true,
       hasNamedFaces: false,
@@ -233,11 +234,35 @@ describe('SearchManager people and faces', () => {
   });
 
   it('drops the people but keeps unnamed faces while searching for photos without anyone named', async () => {
-    searchManager.setQuery({ personIds: ['ann'], onlyPersonIds: true, hasUnnamedFaces: true, hasNamedFaces: false });
+    searchManager.setQuery({
+      personIds: ['ann'],
+      excludePersonIds: ['bob'],
+      onlyPersonIds: true,
+      hasUnnamedFaces: true,
+      hasNamedFaces: false,
+    });
 
     await searchManager.submit();
 
     expect(submittedQuery()).toEqual({ hasNamedFaces: false, hasUnnamedFaces: true });
+  });
+
+  it('reads the left out people from a query and submits them with the picked people', async () => {
+    searchManager.setQuery({ personIds: ['ann'], excludePersonIds: ['bob', 'carol'] });
+
+    expect([...searchManager.filter.excludePersonIds]).toEqual(['bob', 'carol']);
+    await searchManager.submit();
+    expect(submittedQuery()).toEqual({ personIds: ['ann'], excludePersonIds: ['bob', 'carol'] });
+  });
+
+  it('sends left out people on their own and nothing for an empty list', async () => {
+    searchManager.filter.excludePersonIds.add('bob');
+    await searchManager.submit();
+    expect(submittedQuery()).toEqual({ excludePersonIds: ['bob'] });
+
+    searchManager.filter.excludePersonIds.delete('bob');
+    await searchManager.submit();
+    expect(submittedQuery()).not.toHaveProperty('excludePersonIds');
   });
 
   it('sends with people alone', async () => {

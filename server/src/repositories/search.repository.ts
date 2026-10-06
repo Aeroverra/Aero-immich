@@ -111,6 +111,8 @@ export interface SearchOcrOptions {
 
 export interface SearchPeopleOptions {
   personIds?: string[];
+  /** leaves out the assets that show any of these people */
+  excludePersonIds?: string[];
   /** with personIds: true = nobody else in the asset, false = someone else too; faces without a person count as someone else */
   onlyPersonIds?: boolean;
   /** true = at least one visible face, false = none */

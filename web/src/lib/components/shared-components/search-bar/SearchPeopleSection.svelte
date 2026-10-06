@@ -1,42 +1,49 @@
 <script lang="ts">
   import ImageThumbnail from '$lib/components/assets/thumbnail/ImageThumbnail.svelte';
-  import { getPeople, getSearchPeopleTitle } from './search-bar-utils';
+  import { getPeople, getSearchExcludedPeopleTitle, getSearchPeopleTitle } from './search-bar-utils';
   import SingleGridRow from '$lib/components/shared-components/SingleGridRow.svelte';
   import SearchBar from '$lib/elements/SearchBar.svelte';
   import { getPeopleThumbnailUrl } from '$lib/utils';
   import { type PersonResponseDto } from '@immich/sdk';
   import { Button, Icon, LoadingSpinner, Text } from '@immich/ui';
-  import { mdiArrowRight, mdiCheck, mdiClose } from '@mdi/js';
+  import { mdiAccountCancel, mdiArrowRight, mdiCheck, mdiClose } from '@mdi/js';
   import { t } from 'svelte-i18n';
   import { searchManager } from '$lib/managers/search-manager.svelte';
   import SearchButton from './SearchButton.svelte';
 
   interface Props {
     title: string | undefined;
+    excludedTitle?: string;
     parentPromise: Promise<PersonResponseDto[]> | undefined;
   }
 
   // eslint-disable-next-line no-useless-assignment
-  let { title = $bindable(), parentPromise }: Props = $props();
+  let { title = $bindable(), excludedTitle = $bindable(), parentPromise }: Props = $props();
 
   let selectedPeople = $derived(searchManager.filter.personIds);
+  let excludedPeople = $derived(searchManager.filter.excludePersonIds);
   let filter = $derived(searchManager.filter);
+  // picking people to find, or to leave out; starts on leaving out when only that was picked
+  let excluding = $state(searchManager.filter.excludePersonIds.size > 0 && searchManager.filter.personIds.size === 0);
   // with no people, or nobody named, the picked people do not apply
   let peopleSetAside = $derived(filter.hasPeople === false || filter.hasNamedFaces === false);
   let noFaces = $derived(filter.hasPeople === false);
-  let peoplePromise = parentPromise ?? getPeople(selectedPeople);
+  let peoplePromise = parentPromise ?? getPeople(new Set([...selectedPeople, ...excludedPeople]));
   let showAllPeople = $state(false);
   let name = $state('');
   let numberOfPeople = $state(1);
 
   function togglePersonSelection(id: string, people: PersonResponseDto[]) {
-    if (selectedPeople.has(id)) {
-      selectedPeople.delete(id);
+    const [picked, other] = excluding ? [excludedPeople, selectedPeople] : [selectedPeople, excludedPeople];
+    if (picked.has(id)) {
+      picked.delete(id);
     } else {
-      selectedPeople.add(id);
+      picked.add(id);
+      other.delete(id);
     }
 
     title = getSearchPeopleTitle(people, selectedPeople);
+    excludedTitle = getSearchExcludedPeopleTitle(people, excludedPeople);
   }
 
   const filterPeople = (list: PersonResponseDto[], name: string) => {
@@ -56,8 +63,17 @@
         ? filterPeople(people, name)
         : filterPeople(people, name).slice(0, numberOfPeople)}
 
+      <!-- outside the list's scroller, so the lists can always be switched -->
+      <div class="flex flex-wrap gap-2 pb-3" data-testid="search-people-mode">
+        <SearchButton checked active={!excluding} onclick={() => (excluding = false)}
+          >{$t('search_include_people')}</SearchButton
+        >
+        <SearchButton checked active={excluding} onclick={() => (excluding = true)}
+          >{$t('search_exclude_people')}</SearchButton
+        >
+      </div>
       <div id="people-selection" class="max-h-80 immich-scrollbar overflow-y-auto">
-        <Text class="pb-5">{$t('people_search_description')}</Text>
+        <Text class="pb-5">{$t(excluding ? 'search_exclude_people_description' : 'people_search_description')}</Text>
         <SearchBar bind:name placeholder={$t('filter_people')} showLoadingSpinner={false} />
 
         <SingleGridRow
@@ -68,6 +84,7 @@
             <button
               type="button"
               class="flex flex-col items-center rounded-3xl border-none p-0 transition-all"
+              aria-pressed={excluding ? excludedPeople.has(person.id) : selectedPeople.has(person.id)}
               onclick={() => togglePersonSelection(person.id, people)}
             >
               <div class="relative w-full">
@@ -84,9 +101,22 @@
                   >
                     <Icon icon={mdiCheck} size="32" color="white" />
                   </div>
+                {:else if excludedPeople.has(person.id)}
+                  <div
+                    class="absolute top-0 flex size-full items-center justify-center rounded-full bg-danger opacity-75"
+                    data-testid="search-person-excluded"
+                  >
+                    <Icon icon={mdiAccountCancel} size="32" color="white" />
+                  </div>
                 {/if}
               </div>
-              <p class="mt-2 line-clamp-2 text-sm font-medium dark:text-white">{person.name}</p>
+              <p
+                class="mt-2 line-clamp-2 text-sm font-medium dark:text-white {excludedPeople.has(person.id)
+                  ? 'line-through'
+                  : ''}"
+              >
+                {person.name}
+              </p>
             </button>
           {/each}
         </SingleGridRow>
