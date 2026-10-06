@@ -316,7 +316,7 @@ export class QueueService extends BaseService {
       jobs.push(
         { name: JobName.FacialRecognitionQueueAll, data: { force: false, nightly: true } },
         // people named or merged during the day open up new questions even without new faces
-        { name: JobName.PersonSuggestionsQueueAll },
+        { name: JobName.PersonSuggestionsQueueAll, data: { force: true } },
       );
     }
 

@@ -55,11 +55,21 @@ describe(PersonSuggestionService.name, () => {
       const users = [{ id: newUuid() }, { id: newUuid() }];
       mocks.user.getList.mockResolvedValue(users as any);
 
-      await expect(sut.handleQueueSuggestions()).resolves.toBe(JobStatus.Success);
+      await expect(sut.handleQueueSuggestions({ force: true })).resolves.toBe(JobStatus.Success);
 
       expect(mocks.job.queueAll).toHaveBeenCalledWith(
         users.map(({ id }) => ({ name: JobName.PersonSuggestions, data: { userId: id } })),
       );
+    });
+
+    it('should work them out at most once an hour unless forced', async () => {
+      mocks.user.getList.mockResolvedValue([{ id: newUuid() }] as any);
+
+      await expect(sut.handleQueueSuggestions({ force: true })).resolves.toBe(JobStatus.Success);
+      await expect(sut.handleQueueSuggestions({})).resolves.toBe(JobStatus.Skipped);
+      await expect(sut.handleQueueSuggestions({ force: true })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.job.queueAll).toHaveBeenCalledTimes(2);
     });
 
     it('should skip when machine learning is off', async () => {

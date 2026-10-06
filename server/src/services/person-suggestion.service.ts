@@ -59,6 +59,13 @@ type ScoredPair = {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/**
+ * When the questions were last worked out for everyone. Facial recognition queues the work every time its queue
+ * drains, which during an import is every few minutes; the work is redone at most once an hour then.
+ */
+const lastQueueAll = { at: 0 };
+const QUEUE_ALL_INTERVAL = 60 * 60 * 1000;
+
 /** The same key for a pair whichever way round two people were compared */
 const getPairKey = (pair: { personGroupId?: string | null; faceId?: string | null; targetPersonGroupId: string }) => {
   if (pair.faceId) {
@@ -277,11 +284,18 @@ export class PersonSuggestionService extends BaseService {
   }
 
   @OnJob({ name: JobName.PersonSuggestionsQueueAll, queue: QueueName.FacialRecognition })
-  async handleQueueSuggestions(): Promise<JobStatus> {
+  async handleQueueSuggestions({ force }: JobOf<JobName.PersonSuggestionsQueueAll> = {}): Promise<JobStatus> {
     const { machineLearning } = await this.getConfig({ withCache: false });
     if (!isPersonSuggestionsEnabled(machineLearning)) {
       return JobStatus.Skipped;
     }
+
+    if (!force && Date.now() - lastQueueAll.at < QUEUE_ALL_INTERVAL) {
+      this.logger.debug('Skipping person suggestions, they were worked out less than an hour ago');
+      return JobStatus.Skipped;
+    }
+
+    lastQueueAll.at = Date.now();
 
     const users = await this.userRepository.getList({ withDeleted: false });
     await this.jobRepository.queueAll(

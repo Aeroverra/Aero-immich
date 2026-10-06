@@ -695,7 +695,7 @@ export class PersonService extends BaseService {
     await this.systemMetadataRepository.set(SystemMetadataKey.FacialRecognitionState, { lastRun });
 
     // the queue runs one job at a time in order, so the suggestions are worked out once these faces are recognized
-    await this.jobRepository.queue({ name: JobName.PersonSuggestionsQueueAll });
+    await this.jobRepository.queue({ name: JobName.PersonSuggestionsQueueAll, data: { force } });
 
     return JobStatus.Success;
   }

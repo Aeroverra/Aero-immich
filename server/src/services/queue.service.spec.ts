@@ -50,7 +50,7 @@ describe(QueueService.name, () => {
         { name: JobName.AssetGenerateThumbnailsQueueAll, data: { force: false } },
         { name: JobName.AutoStackQueueAll, data: { force: false } },
         { name: JobName.FacialRecognitionQueueAll, data: { force: false, nightly: true } },
-        { name: JobName.PersonSuggestionsQueueAll },
+        { name: JobName.PersonSuggestionsQueueAll, data: { force: true } },
       ]);
     });
   });
