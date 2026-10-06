@@ -2,10 +2,12 @@ import { deleteTag, getCustomViews, updateTag, upsertTags, type TagUpdateDto } f
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
+import { rememberRecentTags } from '$lib/components/tags/tag-picker.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
 import TagCreateModal from '$lib/modals/TagCreateModal.svelte';
 import TagEditModal from '$lib/modals/TagEditModal.svelte';
+import { removeTag, tagAssets } from '$lib/utils/asset-utils';
 import { handleError } from '$lib/utils/handle-error';
 import { getFormatter } from '$lib/utils/i18n';
 import type { TreeNode } from '$lib/utils/tree-utils';
@@ -32,6 +34,36 @@ export const getTagActions = ($t: MessageFormatter, tag: TreeNode) => {
   };
 
   return { Create, Update, Delete };
+};
+
+/**
+ * Adds the tags [addIds] to every asset of [assetIds] and takes the tags [removeIds] off every one of them: the save of
+ * the tag dialog and of the pinned tags in the selection bar. Resolves to whether the tags were saved.
+ */
+export const handleTagAssetsChanges = async ({
+  assetIds,
+  addIds,
+  removeIds,
+}: {
+  assetIds: string[];
+  addIds: string[];
+  removeIds: string[];
+}) => {
+  try {
+    if (addIds.length > 0) {
+      await tagAssets({ tagIds: addIds, assetIds });
+      rememberRecentTags(addIds);
+    }
+    if (removeIds.length > 0) {
+      await removeTag({ tagIds: removeIds, assetIds });
+    }
+    eventManager.emit('AssetsTag', assetIds);
+    return true;
+  } catch (error) {
+    const $t = await getFormatter();
+    handleError(error, $t('errors.failed_to_tag_assets'));
+    return false;
+  }
 };
 
 export const handleCreateTag = async (tagValue: string, { isHidden = false }: { isHidden?: boolean } = {}) => {
