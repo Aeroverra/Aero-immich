@@ -8,6 +8,7 @@ import {
   AssetTypeSchema,
   AssetVisibilitySchema,
   MemoryTypeSchema,
+  StackSourceSchema,
   SyncEntityType,
   SyncEntityTypeSchema,
   SyncRequestTypeSchema,
@@ -329,6 +330,10 @@ const SyncStackV1Schema = z
   })
   .meta({ id: 'SyncStackV1' });
 
+const SyncStackV2Schema = SyncStackV1Schema.extend({
+  source: StackSourceSchema,
+}).meta({ id: 'SyncStackV2' });
+
 const SyncStackDeleteV1Schema = z
   .object({ stackId: z.uuidv4().describe('Stack ID') })
   .meta({ id: 'SyncStackDeleteV1' });
@@ -441,7 +446,15 @@ class SyncAssetOcrDeleteV1 extends createZodDto(SyncAssetOcrDeleteV1Schema) {}
 @ExtraModel()
 class SyncStackV1 extends createZodDto(SyncStackV1Schema) {}
 @ExtraModel()
+class SyncStackV2 extends createZodDto(SyncStackV2Schema) {}
+@ExtraModel()
 class SyncStackDeleteV1 extends createZodDto(SyncStackDeleteV1Schema) {}
+
+export function syncStackV2ToV1(stackV2: SyncStackV2): SyncStackV1 {
+  const { source: _, ...stackV1 } = stackV2;
+
+  return stackV1;
+}
 @ExtraModel()
 class SyncPersonV1 extends createZodDto(SyncPersonV1Schema) {}
 @ExtraModel()
@@ -503,10 +516,13 @@ export type SyncItem = {
   [SyncEntityType.MemoryToAssetV1]: SyncMemoryAssetV1;
   [SyncEntityType.MemoryToAssetDeleteV1]: SyncMemoryAssetDeleteV1;
   [SyncEntityType.StackV1]: SyncStackV1;
+  [SyncEntityType.StackV2]: SyncStackV2;
   [SyncEntityType.StackDeleteV1]: SyncStackDeleteV1;
   [SyncEntityType.PartnerStackBackfillV1]: SyncStackV1;
+  [SyncEntityType.PartnerStackBackfillV2]: SyncStackV2;
   [SyncEntityType.PartnerStackDeleteV1]: SyncStackDeleteV1;
   [SyncEntityType.PartnerStackV1]: SyncStackV1;
+  [SyncEntityType.PartnerStackV2]: SyncStackV2;
   [SyncEntityType.PersonV1]: SyncPersonV1;
   [SyncEntityType.PersonDeleteV1]: SyncPersonDeleteV1;
   [SyncEntityType.AssetFaceV1]: SyncAssetFaceV1;
