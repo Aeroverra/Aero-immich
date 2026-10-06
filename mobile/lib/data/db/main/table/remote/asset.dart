@@ -22,6 +22,9 @@ CREATE INDEX IF NOT EXISTS idx_remote_asset_owner_visibility_deleted_created
 ON remote_asset_entity (owner_id, visibility, deleted_at, created_at DESC)
 ''')
 @TableIndex.sql('CREATE INDEX IF NOT EXISTS idx_remote_asset_uploaded ON remote_asset_entity (uploaded_at)')
+@TableIndex.sql(
+  'CREATE INDEX IF NOT EXISTS idx_remote_asset_owner_private ON remote_asset_entity (owner_id, is_private)',
+)
 class RemoteAssetEntity extends Table with DriftDefaultsMixin, AssetEntityMixin {
   const RemoteAssetEntity();
 
@@ -51,6 +54,8 @@ class RemoteAssetEntity extends Table with DriftDefaultsMixin, AssetEntityMixin 
 
   BoolColumn get isEdited => boolean().withDefault(const Constant(false))();
 
+  BoolColumn get isPrivate => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -76,5 +81,6 @@ extension RemoteAssetEntityDataDomainEx on RemoteAssetEntityData {
     stackId: stackId,
     isEdited: isEdited,
     deletedAt: deletedAt,
+    isPrivate: isPrivate,
   );
 }
