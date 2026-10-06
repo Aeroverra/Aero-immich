@@ -1,0 +1,74 @@
+# Feature branches merged into the `main` integration branch, in stacking order.
+# Format: <branch> [<parent branch>]
+#   - a branch with no parent is rebased directly onto upstream-main
+#   - a branch with a parent is stacked on it and is rebased onto the parent's
+#     freshly rebased tip (git rebase --onto <new parent> <old parent> <branch>)
+# Lines starting with # and blank lines are ignored.
+#
+# Two branches that change the same construct in different ways must be stacked,
+# even when git merges them without a conflict: independent branches adding an
+# argument to the same widget or call merge silently and break only the rebuilt
+# main. That is why feat/search-back-navigation is stacked on feat/custom-views
+# instead of on feat/private-mode: both it and the stack chain put something in
+# the main timeline app bar.
+feat/aero-migrations
+feat/private-mode feat/aero-migrations
+feat/private-mode-sync-compat feat/private-mode
+fix/event-manager-listener-drop
+feat/deleted-hash feat/private-mode-sync-compat
+feat/stack-view-toggle feat/deleted-hash
+feat/face-attributes feat/stack-view-toggle
+feat/auto-stacks feat/face-attributes
+feat/stack-selection-actions feat/auto-stacks
+feat/video-frame-search feat/stack-selection-actions
+feat/custom-views feat/video-frame-search
+feat/search-back-navigation feat/custom-views
+feat/untagged-filters feat/search-back-navigation
+fix/hidden-asset-deep-link feat/untagged-filters
+fix/similar-photos-back fix/hidden-asset-deep-link
+fix/stack-duplicates-in-views fix/hidden-asset-deep-link
+fix/node-blob-leak
+fix/tag-sidecar-race
+# feat/takeout-import needs fix/tag-sidecar-race (writeTags returns a boolean,
+# tag writes lock `tags`), so it is listed after it and builds only in main.
+feat/takeout-import fix/stack-duplicates-in-views
+# the tag branches change tag.repository/tag.service next to fix/tag-sidecar-race and build on the
+# takeout OpenAPI spec, so they sit on feat/takeout-import and build only in main as well.
+fix/album-stack-once feat/takeout-import
+feat/tag-reparent fix/album-stack-once
+feat/tag-picker feat/tag-reparent
+fix/search-stack-once feat/tag-picker
+feat/search-exclude-tags fix/search-stack-once
+feat/search-video-length feat/search-exclude-tags
+feat/bulk-untag feat/search-video-length
+feat/bulk-person-tag feat/bulk-untag
+feat/video-bookmarks feat/bulk-person-tag
+feat/transcode-indicator feat/video-bookmarks
+# fix/view-switcher-everywhere and feat/search-albums-upload-date both add lines to the mobile search page
+# imports, so the tail of the chain is kept linear: new tail branches go on the last line.
+fix/view-switcher-everywhere feat/transcode-indicator
+feat/search-albums-upload-date fix/view-switcher-everywhere
+feat/people-whole-asset feat/search-albums-upload-date
+feat/search-face-filters feat/people-whole-asset
+feat/video-rotate feat/search-face-filters
+feat/camera-group-stacks feat/search-face-filters
+feat/video-bookmarks-stack-share feat/search-face-filters
+fix/ml-startup-race
+fix/smart-search-unhandled-rejection feat/search-face-filters
+fix/search-filter-chips-pinned feat/search-face-filters
+feat/search-exclude-people fix/search-filter-chips-pinned
+fix/video-frame-search feat/search-exclude-people
+feat/video-search-moments fix/video-frame-search
+feat/video-search-pooling feat/video-search-moments
+feat/takeout-google-account feat/video-search-pooling
+fix/edited-face-boxes feat/takeout-google-account
+fix/takeout-rotation-direction fix/edited-face-boxes
+# feat/asset-metadata-panel and feat/google-photos-account-link edit DetailPanel.svelte next to the chain, so they were
+# restacked onto its tail (2026-10-04) for feat/info-panel-order; they used to be a root branch and its child.
+feat/asset-metadata-panel fix/edited-face-boxes
+feat/google-photos-account-link feat/asset-metadata-panel
+feat/info-panel-order feat/google-photos-account-link
+fix/private-albums-bulk-lookup fix/edited-face-boxes
+feat/create-face-frame-timestamp fix/edited-face-boxes
+fix/person-thumbnail-fallback feat/create-face-frame-timestamp
+fix/takeout-utc-video-zone fix/takeout-rotation-direction
