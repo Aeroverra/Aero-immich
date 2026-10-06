@@ -101,6 +101,15 @@ import { TagAssetTable } from 'src/schema/tables/tag-asset.table';
 import { TagAuditTable } from 'src/schema/tables/tag-audit.table';
 import { TagClosureTable } from 'src/schema/tables/tag-closure.table';
 import { TagTable } from 'src/schema/tables/tag.table';
+import { TakeoutEntryTable } from 'src/schema/tables/takeout-entry.table';
+import { TakeoutExportTable } from 'src/schema/tables/takeout-export.table';
+import { TakeoutFolderTable } from 'src/schema/tables/takeout-folder.table';
+import { TakeoutLargerVersionTable } from 'src/schema/tables/takeout-larger-version.table';
+import { TakeoutPartTable } from 'src/schema/tables/takeout-part.table';
+import { TakeoutRunFileTable } from 'src/schema/tables/takeout-run-file.table';
+import { TakeoutRunTable } from 'src/schema/tables/takeout-run.table';
+import { TakeoutSettingsTable } from 'src/schema/tables/takeout-settings.table';
+import { TakeoutUploadTable } from 'src/schema/tables/takeout-upload.table';
 import { UserAuditTable } from 'src/schema/tables/user-audit.table';
 import { UserMetadataAuditTable } from 'src/schema/tables/user-metadata-audit.table';
 import { UserMetadataTable } from 'src/schema/tables/user-metadata.table';
@@ -182,6 +191,15 @@ export class ImmichDatabase {
     TagAssetTable,
     TagAssetAuditTable,
     TagClosureTable,
+    TakeoutFolderTable,
+    TakeoutSettingsTable,
+    TakeoutUploadTable,
+    TakeoutExportTable,
+    TakeoutPartTable,
+    TakeoutEntryTable,
+    TakeoutRunTable,
+    TakeoutRunFileTable,
+    TakeoutLargerVersionTable,
     UserAuditTable,
     UserMetadataTable,
     UserMetadataAuditTable,
@@ -333,6 +351,16 @@ export interface DB {
   tag_asset: TagAssetTable;
   tag_asset_audit: TagAssetAuditTable;
   tag_closure: TagClosureTable;
+
+  takeout_folder: TakeoutFolderTable;
+  takeout_settings: TakeoutSettingsTable;
+  takeout_upload: TakeoutUploadTable;
+  takeout_export: TakeoutExportTable;
+  takeout_part: TakeoutPartTable;
+  takeout_entry: TakeoutEntryTable;
+  takeout_run: TakeoutRunTable;
+  takeout_run_file: TakeoutRunFileTable;
+  takeout_larger_version: TakeoutLargerVersionTable;
 
   user: UserTable;
   user_audit: UserAuditTable;
