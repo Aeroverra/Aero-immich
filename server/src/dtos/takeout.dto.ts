@@ -147,7 +147,7 @@ const TakeoutSettingsSchema = z
     applyRotation: z.boolean().describe('Apply rotations from rotate-only edited copies'),
     tagServerDuplicates: z.boolean().describe('Tag photos that are already on the server'),
     burstByTime: z.boolean().describe('Stack bursts by time (500 ms grouper)'),
-    homeTimeZone: z.string().describe('IANA time zone used when a file has no time zone of its own'),
+    homeTimeZone: z.string().describe('IANA time zone for the date range filter and the session tag start time'),
   })
   .meta({ id: 'TakeoutSettingsDto' });
 
