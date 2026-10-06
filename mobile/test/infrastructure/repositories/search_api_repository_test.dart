@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/search_api.repository.dart';
 import 'package:immich_mobile/models/search/search_filter.model.dart';
 import 'package:mocktail/mocktail.dart';
@@ -190,6 +191,62 @@ void main() {
       final smart = sentSmart();
       expect(smart.uploadedAfter.isPresent, isFalse);
       expect(smart.uploadedBefore.isPresent, isFalse);
+    });
+  });
+
+  group('people and faces', () {
+    const ann = Person(id: 'ann', name: 'Ann');
+
+    test('sends both sides of the face options with the people, for both searches', () async {
+      final picked = filter.copyWith(people: {ann}, onlyPeople: false, hasNamedFaces: true, hasUnnamedFaces: false);
+
+      await repo.search(picked, 1);
+      await repo.search(picked.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.personIds.value, ['ann']);
+      expect(metadata.onlyPersonIds, const Optional<bool?>.present(false));
+      expect(metadata.hasNamedFaces, const Optional<bool?>.present(true));
+      expect(metadata.hasUnnamedFaces, const Optional<bool?>.present(false));
+      expect(metadata.hasPeople.isPresent, isFalse);
+      final smart = sentSmart();
+      expect(smart.personIds.value, ['ann']);
+      expect(smart.onlyPersonIds, const Optional<bool?>.present(false));
+      expect(smart.hasNamedFaces, const Optional<bool?>.present(true));
+      expect(smart.hasUnnamedFaces, const Optional<bool?>.present(false));
+    });
+
+    test('leaves only these people out without people', () async {
+      await repo.search(filter.copyWith(onlyPeople: true), 1);
+
+      expect(sentMetadata().onlyPersonIds.isPresent, isFalse);
+    });
+
+    test('sends no people alone, setting everything else aside', () async {
+      await repo.search(
+        filter.copyWith(people: {ann}, onlyPeople: true, hasUnnamedFaces: true, hasNamedFaces: true, hasPeople: false),
+        1,
+      );
+
+      final metadata = sentMetadata();
+      expect(metadata.hasPeople, const Optional<bool?>.present(false));
+      expect(metadata.personIds.value, isEmpty);
+      expect(metadata.onlyPersonIds.isPresent, isFalse);
+      expect(metadata.hasNamedFaces.isPresent, isFalse);
+      expect(metadata.hasUnnamedFaces.isPresent, isFalse);
+    });
+
+    test('sets the people aside for no named people but keeps unnamed faces', () async {
+      await repo.search(
+        filter.copyWith(people: {ann}, onlyPeople: true, hasNamedFaces: false, hasUnnamedFaces: true),
+        1,
+      );
+
+      final metadata = sentMetadata();
+      expect(metadata.personIds.value, isEmpty);
+      expect(metadata.onlyPersonIds.isPresent, isFalse);
+      expect(metadata.hasNamedFaces, const Optional<bool?>.present(false));
+      expect(metadata.hasUnnamedFaces, const Optional<bool?>.present(true));
     });
   });
 
