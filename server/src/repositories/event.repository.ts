@@ -124,6 +124,11 @@ type EventMap = {
 
   // websocket events
   WebsocketConnect: [{ userId: string }];
+
+  /** sent to every worker so the one running the takeout run aborts it right away */
+  TakeoutRunCancel: [{ runId: string }];
+  /** a run was paused or resumed: the job holding it looks at its status now instead of at the next tick */
+  TakeoutRunPause: [{ runId: string }];
 };
 
 export type AppRestartEvent = {
