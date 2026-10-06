@@ -19,6 +19,16 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
 import { BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
+  PersonSuggestionAnswerDto,
+  PersonSuggestionAnswersSearchDto,
+  PersonSuggestionCreateDto,
+  PersonSuggestionResponseDto,
+  PersonSuggestionSearchDto,
+  PersonSuggestionsResponseDto,
+  PersonSuggestionStatisticsDto,
+  PersonSuggestionStatisticsResponseDto,
+} from 'src/dtos/person-suggestion.dto';
+import {
   AssetFaceUpdateDto,
   MergePersonDto,
   PeopleResponseDto,
@@ -35,6 +45,7 @@ import {
 import { ApiTag, Permission } from 'src/enum';
 import { Auth, Authenticated, FileResponse } from 'src/middleware/auth.guard';
 import { LoggingRepository } from 'src/repositories/logging.repository';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import { sendFile } from 'src/utils/file';
 import { UUIDParamDto } from 'src/validation';
@@ -44,6 +55,7 @@ import { UUIDParamDto } from 'src/validation';
 export class PersonController {
   constructor(
     private service: PersonService,
+    private suggestionService: PersonSuggestionService,
     private logger: LoggingRepository,
   ) {
     this.logger.setContext(PersonController.name);
@@ -92,6 +104,109 @@ export class PersonController {
   })
   deletePeople(@Auth() auth: AuthDto, @Body() dto: BulkIdsDto): Promise<void> {
     return this.service.deleteAll(auth, dto);
+  }
+
+  // the suggestion routes come before the routes with a person id, so that "suggestions" is not taken for one
+
+  @Get('suggestions')
+  @Authenticated({ permission: Permission.PersonRead })
+  @Endpoint({
+    summary: 'Get person suggestions',
+    description:
+      'Questions to answer, most valuable first: whether an unnamed person or a face without a person is a named person, or whether two unnamed people are one.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  getPersonSuggestions(
+    @Auth() auth: AuthDto,
+    @Query() dto: PersonSuggestionSearchDto,
+  ): Promise<PersonSuggestionsResponseDto> {
+    return this.suggestionService.getAll(auth, dto);
+  }
+
+  @Post('suggestions')
+  @Authenticated({ permission: Permission.PersonUpdate })
+  @Endpoint({
+    summary: 'Create a person suggestion',
+    description:
+      'Ask whether a person (or a face) is the same person as another, for example to hand over matches a tool was not sure about. An existing question about the same pair is returned instead.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  createPersonSuggestion(
+    @Auth() auth: AuthDto,
+    @Body() dto: PersonSuggestionCreateDto,
+  ): Promise<PersonSuggestionResponseDto> {
+    return this.suggestionService.create(auth, dto);
+  }
+
+  @Get('suggestions/count')
+  @Authenticated({ permission: Permission.PersonRead })
+  @Endpoint({
+    summary: 'Count person suggestions',
+    description: 'How many person suggestions there are to answer, optionally only those about one person.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  getPersonSuggestionStatistics(
+    @Auth() auth: AuthDto,
+    @Query() dto: PersonSuggestionStatisticsDto,
+  ): Promise<PersonSuggestionStatisticsResponseDto> {
+    return this.suggestionService.getStatistics(auth, dto);
+  }
+
+  @Get('suggestions/answers')
+  @Authenticated({ permission: Permission.PersonRead })
+  @Endpoint({
+    summary: 'Get answered person suggestions',
+    description: 'The latest answers to person suggestions, newest first.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  getPersonSuggestionAnswers(
+    @Auth() auth: AuthDto,
+    @Query() dto: PersonSuggestionAnswersSearchDto,
+  ): Promise<PersonSuggestionResponseDto[]> {
+    return this.suggestionService.getAnswers(auth, dto);
+  }
+
+  @Post('suggestions/refresh')
+  @Authenticated({ permission: Permission.PersonRead })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Endpoint({
+    summary: 'Look for person suggestions',
+    description: 'Queue a search for new person suggestions for the current user.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  refreshPersonSuggestions(@Auth() auth: AuthDto): Promise<void> {
+    return this.suggestionService.refresh(auth);
+  }
+
+  @Put('suggestions/:id')
+  @Authenticated({ permission: Permission.PersonMerge })
+  @Endpoint({
+    summary: 'Answer a person suggestion',
+    description:
+      'Same merges the candidate into the target person (or moves the face to it). Different is kept for good: the pair is never asked about again, merged or matched by facial recognition. Skipped asks again later.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  answerPersonSuggestion(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: PersonSuggestionAnswerDto,
+  ): Promise<PersonSuggestionResponseDto> {
+    return this.suggestionService.answer(auth, id, dto);
+  }
+
+  @Delete('suggestions/:id/answer')
+  @Authenticated({ permission: Permission.PersonMerge })
+  @Endpoint({
+    summary: 'Take back the answer to a person suggestion',
+    description:
+      'Asks the question again. Taking back Same moves the faces the answer moved back, as long as they are still with the person.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  undoPersonSuggestionAnswer(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+  ): Promise<PersonSuggestionResponseDto> {
+    return this.suggestionService.undoAnswer(auth, id);
   }
 
   @Get(':id')
