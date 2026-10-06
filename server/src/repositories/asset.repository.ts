@@ -33,11 +33,13 @@ import { AssetFileTable } from 'src/schema/tables/asset-file.table';
 import { AssetJobStatusTable } from 'src/schema/tables/asset-job-status.table';
 import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
+import { toPrivateScope } from 'src/utils/access';
 import {
   anyUuid,
   asUuid,
   hasPeople,
   inSharedAlbum,
+  type PrivateScope,
   removeUndefinedKeys,
   truncatedDate,
   unnest,
@@ -50,6 +52,8 @@ import {
   withFiles,
   withLibrary,
   withOwner,
+  withPrivateAlbumScope,
+  withPrivateScope,
   withSmartSearch,
   withTagId,
   withTags,
@@ -67,6 +71,7 @@ export interface BoundingBox {
 
 interface AssetStatsOptions {
   isFavorite?: boolean;
+  isPrivate?: boolean;
   isTrashed?: boolean;
   visibility?: AssetVisibility;
 }
@@ -81,6 +86,7 @@ interface LivePhotoSearchOptions {
 
 interface AssetBuilderOptions {
   isFavorite?: boolean;
+  isPrivate?: boolean;
   isTrashed?: boolean;
   isDuplicate?: boolean;
   albumId?: string;
@@ -457,8 +463,12 @@ export class AssetRepository {
     return ids.map(({ id }) => id);
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { year: 2000, day: 1, month: 1 }] })
-  getByDayOfYear(ownerIds: string[], { year, day, month }: YearMonthDay) {
+  @GenerateSql({ params: [DummyValue.UUID, { year: 2000, day: 1, month: 1 }, { includePrivate: false }] })
+  getByDayOfYear(
+    ownerIds: string[],
+    { year, day, month }: YearMonthDay,
+    { includePrivate }: { includePrivate: boolean },
+  ) {
     return this.db
       .with('res', (qb) =>
         qb
@@ -484,6 +494,7 @@ export class AssetRepository {
                 .where(sql`(asset."localDateTime" at time zone 'UTC')::date`, '=', sql`today.date`)
                 .where('asset.ownerId', '=', anyUuid(ownerIds))
                 .where('asset.visibility', '=', AssetVisibility.Timeline)
+                .$if(!includePrivate, (qb) => qb.where('asset.isPrivate', '=', false))
                 .where((eb) =>
                   eb.exists((qb) =>
                     qb
@@ -505,6 +516,27 @@ export class AssetRepository {
       .select((eb) => eb.fn.jsonAgg(eb.table('res')).as('assets'))
       .groupBy(sql`("localDateTime" at time zone 'UTC')::date`)
       .orderBy(sql`("localDateTime" at time zone 'UTC')::date`, 'desc')
+      .execute();
+  }
+
+  /**
+   * Every asset in every stack the given assets belong to (the given assets included), owned
+   * by the owner, so that a private flag can be applied to whole stacks at a time.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  @ChunkedArray({ paramIndex: 1 })
+  getStackMembers(ownerId: string, ids: string[]) {
+    return this.db
+      .selectFrom('asset')
+      .select(['asset.id', 'asset.isPrivate'])
+      .where('asset.ownerId', '=', ownerId)
+      .where('asset.stackId', 'in', (eb) =>
+        eb
+          .selectFrom('asset as target')
+          .select('target.stackId')
+          .where('target.id', '=', anyUuid(ids))
+          .where('target.stackId', 'is not', null),
+      )
       .execute();
   }
 
@@ -569,10 +601,11 @@ export class AssetRepository {
       .executeTakeFirst();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID] })
+  @GenerateSql({ params: [DummyValue.UUID, {}, { privateMode: false, userId: DummyValue.UUID }] })
   getById(
     id: string,
     { exifInfo, faces, files, library, owner, smartSearch, stack, tags, edits }: GetByIdsRelations = {},
+    scope?: PrivateScope,
   ) {
     return this.db
       .selectFrom('asset')
@@ -609,6 +642,7 @@ export class AssetRepository {
                     .whereRef('stacked.id', '!=', 'stack.primaryAssetId')
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
+                    .$if(!!scope && !scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
                     .groupBy('stack.id')
                     .as('stacked_assets'),
                 (join) => join.on('stack.id', 'is not', null),
@@ -707,7 +741,12 @@ export class AssetRepository {
       .executeTakeFirst();
   }
 
-  getStatistics(ownerId: string, { visibility, isFavorite, isTrashed }: AssetStatsOptions): Promise<AssetStats> {
+  @GenerateSql({ params: [DummyValue.UUID, {}, { privateMode: false, userId: DummyValue.UUID }] })
+  getStatistics(
+    ownerId: string,
+    { visibility, isFavorite, isPrivate, isTrashed }: AssetStatsOptions,
+    scope: PrivateScope,
+  ): Promise<AssetStats> {
     return this.db
       .selectFrom('asset')
       .select((eb) => eb.fn.countAll<number>().filterWhere('type', '=', AssetType.Audio).as(AssetType.Audio))
@@ -718,15 +757,21 @@ export class AssetRepository {
       .$if(visibility === undefined, withDefaultVisibility)
       .$if(!!visibility, (qb) => qb.where('asset.visibility', '=', visibility!))
       .$if(isFavorite !== undefined, (qb) => qb.where('isFavorite', '=', isFavorite!))
+      .$call(withPrivateScope(scope))
+      .$if(isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', isPrivate!))
       .$if(!!isTrashed, (qb) => qb.where('asset.status', '!=', AssetStatus.Deleted))
       .where('deletedAt', isTrashed ? 'is not' : 'is', null)
       .executeTakeFirstOrThrow();
   }
 
   @GenerateSql({
-    params: [DummyValue.UUID, { from: DummyValue.DATE, to: DummyValue.DATE, type: CalendarHeatmapType.Upload }],
+    params: [
+      DummyValue.UUID,
+      { from: DummyValue.DATE, to: DummyValue.DATE, type: CalendarHeatmapType.Upload },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
   })
-  getCalendarHeatmap(ownerId: string, dto: { from: Date; to: Date; type: CalendarHeatmapType }) {
+  getCalendarHeatmap(ownerId: string, dto: { from: Date; to: Date; type: CalendarHeatmapType }, scope: PrivateScope) {
     const dateColumns: Record<CalendarHeatmapType, { order: AssetOrderBy; column: 'createdAt' | 'localDateTime' }> = {
       [CalendarHeatmapType.Upload]: { order: AssetOrderBy.CreatedAt, column: 'createdAt' },
       [CalendarHeatmapType.Taken]: { order: AssetOrderBy.TakenAt, column: 'localDateTime' },
@@ -744,6 +789,7 @@ export class AssetRepository {
       .where(column, '>=', dto.from)
       .where(column, '<', dto.to)
       .where('deletedAt', 'is', null)
+      .$call(withPrivateScope(scope))
       .groupBy(date)
       .orderBy('date', 'asc')
       .execute();
@@ -751,6 +797,7 @@ export class AssetRepository {
 
   @GenerateSql({ params: [{}, { user: { id: DummyValue.UUID } }] })
   async getTimeBuckets(options: TimeBucketOptions, auth: AuthDto): Promise<TimeBucketItem[]> {
+    const scope = auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
     return this.db
       .with('asset', (qb) =>
         qb
@@ -774,6 +821,9 @@ export class AssetRepository {
           })
           .$if(options.visibility === undefined, withDefaultVisibility)
           .$if(!!options.visibility, (qb) => qb.where('asset.visibility', '=', options.visibility!))
+          .$if(!!options.albumId, withPrivateAlbumScope(scope))
+          .$if(!options.albumId, withPrivateScope(scope))
+          .$if(options.isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', options.isPrivate!))
           .$if(!!options.albumId, (qb) =>
             qb
               .innerJoin('album_asset', 'asset.id', 'album_asset.assetId')
@@ -814,6 +864,7 @@ export class AssetRepository {
   })
   getTimeBucket(timeBucket: string, options: TimeBucketOptions, auth: AuthDto) {
     const order = options.order ?? 'desc';
+    const scope = auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
     const query = this.db
       .with('cte', (qb) =>
         qb
@@ -824,6 +875,7 @@ export class AssetRepository {
             'asset.id',
             'asset.visibility',
             sql`asset."isFavorite" and asset."ownerId" = ${auth.user.id}`.as('isFavorite'),
+            'asset.isPrivate',
             sql`asset.type = 'IMAGE'`.as('isImage'),
             sql`asset."deletedAt" is not null`.as('isTrashed'),
             'asset.livePhotoVideoId',
@@ -855,6 +907,9 @@ export class AssetRepository {
           .where('asset.deletedAt', options.isTrashed ? 'is not' : 'is', null)
           .$if(options.visibility === undefined, withDefaultVisibility)
           .$if(!!options.visibility, (qb) => qb.where('asset.visibility', '=', options.visibility!))
+          .$if(!!options.albumId, withPrivateAlbumScope(scope))
+          .$if(!options.albumId, withPrivateScope(scope))
+          .$if(options.isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', options.isPrivate!))
           .$if(!!options.bbox, (qb) => {
             const bbox = options.bbox!;
             const circle = getBoundingCircle(bbox);
@@ -906,6 +961,7 @@ export class AssetRepository {
                     .whereRef('stacked.stackId', '=', 'asset.stackId')
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
+                    .$if(!scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
                     .groupBy('stacked.stackId')
                     .as('stacked_assets'),
                 (join) => join.onTrue(),
@@ -935,6 +991,7 @@ export class AssetRepository {
             eb.fn.coalesce(eb.fn('array_agg', ['id']), sql.lit('{}')).as('id'),
             eb.fn.coalesce(eb.fn('array_agg', ['visibility']), sql.lit('{}')).as('visibility'),
             eb.fn.coalesce(eb.fn('array_agg', ['isFavorite']), sql.lit('{}')).as('isFavorite'),
+            eb.fn.coalesce(eb.fn('array_agg', ['isPrivate']), sql.lit('{}')).as('isPrivate'),
             eb.fn.coalesce(eb.fn('array_agg', ['isImage']), sql.lit('{}')).as('isImage'),
             // TODO: isTrashed is redundant as it will always be all true or false depending on the options
             eb.fn.coalesce(eb.fn('array_agg', ['isTrashed']), sql.lit('{}')).as('isTrashed'),
@@ -970,8 +1027,14 @@ export class AssetRepository {
     return query.executeTakeFirstOrThrow();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { minAssetsPerField: 5, maxFields: 12 }] })
-  async getAssetIdByCity(ownerId: string, { minAssetsPerField, maxFields }: AssetExploreFieldOptions) {
+  @GenerateSql({
+    params: [DummyValue.UUID, { minAssetsPerField: 5, maxFields: 12 }, { privateMode: false, userId: DummyValue.UUID }],
+  })
+  async getAssetIdByCity(
+    ownerId: string,
+    { minAssetsPerField, maxFields }: AssetExploreFieldOptions,
+    scope: PrivateScope,
+  ) {
     const items = await this.db
       .with('cities', (qb) =>
         qb
@@ -991,14 +1054,15 @@ export class AssetRepository {
       .where('visibility', '=', AssetVisibility.Timeline)
       .where('type', '=', AssetType.Image)
       .where('deletedAt', 'is', null)
+      .$call(withPrivateScope(scope))
       .limit(maxFields)
       .execute();
 
     return { fieldName: 'exifInfo.city', items };
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, 12] })
-  async getRecentlyCreatedAssetIds(ownerId: string, maxAssets: number) {
+  @GenerateSql({ params: [DummyValue.UUID, 12, { privateMode: false, userId: DummyValue.UUID }] })
+  async getRecentlyCreatedAssetIds(ownerId: string, maxAssets: number, scope: PrivateScope) {
     const items = await this.db
       .selectFrom('asset')
       .select(['id as data', 'createdAt as value'])
@@ -1006,6 +1070,7 @@ export class AssetRepository {
       .where('asset.visibility', '=', AssetVisibility.Timeline)
       .where('type', '=', AssetType.Image)
       .where('deletedAt', 'is', null)
+      .$call(withPrivateScope(scope))
       .orderBy('value', 'desc')
       .limit(maxAssets)
       .execute();
