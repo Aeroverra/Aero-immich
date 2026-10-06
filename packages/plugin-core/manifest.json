@@ -109,6 +109,12 @@
             "default": false,
             "title": "Use path",
             "description": "Match the full path on the server instead of the original filename"
+          },
+          "inverse": {
+            "type": "boolean",
+            "default": false,
+            "title": "Inverse",
+            "description": "Keep assets whose filename does NOT match the pattern"
           }
         },
         "required": ["pattern"]
@@ -325,6 +331,11 @@
             "uiHint": {
               "type": "TagId"
             }
+          },
+          "tagName": {
+            "type": "string",
+            "title": "Tag name",
+            "description": "Use a tag with this name if one exists, otherwise create it (use / for nested tags, for example Downloads/TikTok)"
           }
         },
         "required": ["tags"]
@@ -361,7 +372,7 @@
     {
       "name": "assetExifFilter",
       "title": "Filter by EXIF metadata",
-      "description": "Filter assets by their EXIF properties",
+      "description": "Filter assets by their EXIF properties, or by a property being empty",
       "types": ["AssetV1"],
       "schema": {
         "type": "object",
@@ -399,7 +410,7 @@
           "pattern": {
             "type": "string",
             "title": "Pattern",
-            "description": "Text or regex pattern to match against property value",
+            "description": "Text or regex pattern to match against property value (not used by the \"empty\" match type)",
             "uiHint": {
               "order": 2
             }
@@ -407,9 +418,9 @@
           "matchType": {
             "type": "string",
             "title": "Match type",
-            "enum": ["contains", "startsWith", "exact", "regex"],
+            "enum": ["contains", "startsWith", "exact", "regex", "empty"],
             "default": "contains",
-            "description": "Type of pattern matching to perform",
+            "description": "Type of pattern matching to perform; \"empty\" matches assets that have no value for the property",
             "uiHint": {
               "order": 3
             }
@@ -422,9 +433,137 @@
             "uiHint": {
               "order": 4
             }
+          },
+          "inverse": {
+            "type": "boolean",
+            "default": false,
+            "title": "Inverse",
+            "description": "Keep assets whose property does NOT match (for example a camera make that is not empty)",
+            "uiHint": {
+              "order": 5
+            }
           }
         },
-        "required": ["property", "pattern"]
+        "required": ["property"]
+      },
+      "uiHints": ["Filter"]
+    },
+    {
+      "name": "assetOcrFilter",
+      "title": "Filter by text in the image",
+      "description": "Filter assets by the text that OCR recognized in them",
+      "types": ["AssetV1"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "title": "Text pattern",
+            "description": "Text or regex pattern to match against the recognized text (lines are joined with line breaks)",
+            "uiHint": {
+              "order": 1
+            }
+          },
+          "matchType": {
+            "type": "string",
+            "title": "Match type",
+            "enum": ["contains", "startsWith", "exact", "regex", "empty"],
+            "default": "contains",
+            "description": "Type of pattern matching to perform; \"startsWith\" and \"exact\" compare each line, \"empty\" matches assets without recognized text",
+            "uiHint": {
+              "order": 2
+            }
+          },
+          "caseSensitive": {
+            "type": "boolean",
+            "default": false,
+            "title": "Case sensitive",
+            "description": "Whether matching should be case-sensitive",
+            "uiHint": {
+              "order": 3
+            }
+          },
+          "inverse": {
+            "type": "boolean",
+            "default": false,
+            "title": "Inverse",
+            "description": "Keep assets whose text does NOT match the pattern",
+            "uiHint": {
+              "order": 4
+            }
+          },
+          "minY": {
+            "type": "number",
+            "title": "Area top",
+            "description": "Only use text that starts below this point, from 0 (top of the image) to 1 (bottom)",
+            "minimum": 0,
+            "maximum": 1,
+            "uiHint": {
+              "order": 5
+            }
+          },
+          "maxY": {
+            "type": "number",
+            "title": "Area bottom",
+            "description": "Only use text that starts above this point, from 0 (top of the image) to 1 (bottom), for example 0.05 for a phone status bar",
+            "minimum": 0,
+            "maximum": 1,
+            "uiHint": {
+              "order": 6
+            }
+          }
+        },
+        "required": ["pattern"]
+      },
+      "uiHints": ["Filter"]
+    },
+    {
+      "name": "assetDimensionFilter",
+      "title": "Filter by dimensions",
+      "description": "Filter assets by orientation or aspect ratio",
+      "types": ["AssetV1"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "orientation": {
+            "type": "string",
+            "title": "Orientation",
+            "enum": ["any", "portrait", "landscape", "square"],
+            "default": "any",
+            "description": "Orientation the asset must have, as displayed",
+            "uiHint": {
+              "order": 1
+            }
+          },
+          "aspectRatio": {
+            "type": "string",
+            "title": "Aspect ratio",
+            "description": "Width to height ratio the asset must have, for example 3:4 or 16:9",
+            "uiHint": {
+              "order": 2
+            }
+          },
+          "tolerance": {
+            "type": "number",
+            "title": "Tolerance",
+            "description": "How far in percent the aspect ratio may be off",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 1,
+            "uiHint": {
+              "order": 3
+            }
+          },
+          "inverse": {
+            "type": "boolean",
+            "default": false,
+            "title": "Inverse",
+            "description": "Keep assets that do NOT have these dimensions",
+            "uiHint": {
+              "order": 4
+            }
+          }
+        }
       },
       "uiHints": ["Filter"]
     },

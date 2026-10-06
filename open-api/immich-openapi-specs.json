@@ -21044,6 +21044,115 @@
         "x-immich-permission": "workflow.logs"
       }
     },
+    "/workflows/{id}/preview": {
+      "get": {
+        "description": "Check the filters at the start of a workflow against the assets a manual run goes through, newest first, without changing anything. Returns how many match and the first matching asset IDs. Large libraries are checked for a limited time.",
+        "operationId": "previewWorkflow",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Maximum number of matching asset IDs to return",
+            "schema": {
+              "minimum": 0,
+              "maximum": 100,
+              "default": 12,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowPreviewResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Preview a workflow run",
+        "tags": [
+          "Workflows"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "workflow.read"
+      }
+    },
+    "/workflows/{id}/run": {
+      "post": {
+        "description": "Queue a run of the workflow on every existing asset of its owner, also when the workflow is disabled. Each matching asset is processed in the background and logged with a shared run ID.",
+        "operationId": "runWorkflow",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Run a workflow on existing assets",
+        "tags": [
+          "Workflows"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "workflow.run"
+      }
+    },
     "/workflows/{id}/share": {
       "get": {
         "description": "Retrieve a workflow details without ids, default values, etc.",
@@ -26408,6 +26517,7 @@
           "OcrQueueAll",
           "Ocr",
           "WorkflowAssetTrigger",
+          "WorkflowRunQueueAll",
           "IntegrityUntrackedFilesQueueAll",
           "IntegrityUntrackedFiles",
           "IntegrityUntrackedRefresh",
@@ -29081,6 +29191,7 @@
           "workflow.update",
           "workflow.delete",
           "workflow.logs",
+          "workflow.run",
           "adminUser.create",
           "adminUser.read",
           "adminUser.update",
@@ -41406,6 +41517,10 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
+          "isManual": {
+            "description": "Whether the run was started by hand on existing assets",
+            "type": "boolean"
+          },
           "lastStep": {
             "description": "Last step ran, if the workflow ended early",
             "properties": {
@@ -41430,6 +41545,12 @@
           "result": {
             "$ref": "#/components/schemas/WorkflowResult"
           },
+          "runId": {
+            "description": "Workflow run ID, shared by every asset of a manual run",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
           "triggerDataId": {
             "description": "Workflow trigger data ID",
             "format": "uuid",
@@ -41440,7 +41561,59 @@
         "required": [
           "at",
           "id",
-          "result"
+          "isManual",
+          "result",
+          "runId"
+        ],
+        "type": "object"
+      },
+      "WorkflowPreviewResponseDto": {
+        "properties": {
+          "assetIds": {
+            "description": "IDs of the first matching assets",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "complete": {
+            "description": "Whether every asset was checked (false when the preview ran out of time)",
+            "type": "boolean"
+          },
+          "filters": {
+            "description": "Number of leading filter steps that were checked",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "matched": {
+            "description": "Number of checked assets that pass the filters",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "scanned": {
+            "description": "Number of assets checked, newest first",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "description": "Number of assets a manual run goes through",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assetIds",
+          "complete",
+          "filters",
+          "matched",
+          "scanned",
+          "total"
         ],
         "type": "object"
       },
@@ -41595,7 +41768,8 @@
         "enum": [
           "AssetCreate",
           "AssetMetadataExtraction",
-          "AssetTagged"
+          "AssetTagged",
+          "AssetOcr"
         ],
         "type": "string"
       },
