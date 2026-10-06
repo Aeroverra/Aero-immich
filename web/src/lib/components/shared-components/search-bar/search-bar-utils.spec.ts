@@ -1,8 +1,10 @@
+import type { PersonResponseDto } from '@immich/sdk';
 import { DateTime } from 'luxon';
 import {
   formatVideoLength,
   getSearchAlbumsTitle,
   getSearchDateFilterTitle,
+  getSearchExcludedPeopleTitle,
   getSearchPeopleFilterTitle,
   isPopoverContent,
   parseVideoLength,
@@ -88,17 +90,27 @@ describe('getSearchAlbumsTitle', () => {
 
 describe('getSearchPeopleFilterTitle', () => {
   it('names the people and the side of each face option', () => {
-    expect(getSearchPeopleFilterTitle('Ann', {})).toBe('Ann');
-    expect(getSearchPeopleFilterTitle('Ann', { onlyPersonIds: true })).toBe('search_filter_only_people_title');
-    expect(getSearchPeopleFilterTitle('Ann', { onlyPersonIds: false })).toBe('search_filter_with_others_title');
-    expect(getSearchPeopleFilterTitle('Ann', { hasUnnamedFaces: true })).toBe('Ann · search_filter_with_unnamed_faces');
-    expect(getSearchPeopleFilterTitle(undefined, { hasUnnamedFaces: false })).toBe('search_filter_no_unnamed_faces');
-    expect(getSearchPeopleFilterTitle(undefined, { hasNamedFaces: true })).toBe('search_filter_with_named_people');
+    expect(getSearchPeopleFilterTitle('Ann', undefined, {})).toBe('Ann');
+    expect(getSearchPeopleFilterTitle('Ann', undefined, { onlyPersonIds: true })).toBe(
+      'search_filter_only_people_title',
+    );
+    expect(getSearchPeopleFilterTitle('Ann', undefined, { onlyPersonIds: false })).toBe(
+      'search_filter_with_others_title',
+    );
+    expect(getSearchPeopleFilterTitle('Ann', undefined, { hasUnnamedFaces: true })).toBe(
+      'Ann · search_filter_with_unnamed_faces',
+    );
+    expect(getSearchPeopleFilterTitle(undefined, undefined, { hasUnnamedFaces: false })).toBe(
+      'search_filter_no_unnamed_faces',
+    );
+    expect(getSearchPeopleFilterTitle(undefined, undefined, { hasNamedFaces: true })).toBe(
+      'search_filter_with_named_people',
+    );
   });
 
   it('says no people over everything else', () => {
     expect(
-      getSearchPeopleFilterTitle('Ann', {
+      getSearchPeopleFilterTitle('Ann', undefined, {
         onlyPersonIds: true,
         hasPeople: false,
         hasNamedFaces: false,
@@ -109,17 +121,50 @@ describe('getSearchPeopleFilterTitle', () => {
 
   it('says no named people instead of the picked people', () => {
     expect(
-      getSearchPeopleFilterTitle('Ann', { onlyPersonIds: true, hasNamedFaces: false, hasUnnamedFaces: true }),
+      getSearchPeopleFilterTitle('Ann', undefined, {
+        onlyPersonIds: true,
+        hasNamedFaces: false,
+        hasUnnamedFaces: true,
+      }),
     ).toBe('search_filter_no_named_people · search_filter_with_unnamed_faces');
   });
 
   it('says with people only when nothing else is set', () => {
-    expect(getSearchPeopleFilterTitle(undefined, { hasPeople: true })).toBe('search_filter_with_people');
-    expect(getSearchPeopleFilterTitle('Ann', { hasPeople: true })).toBe('Ann');
+    expect(getSearchPeopleFilterTitle(undefined, undefined, { hasPeople: true })).toBe('search_filter_with_people');
+    expect(getSearchPeopleFilterTitle('Ann', undefined, { hasPeople: true })).toBe('Ann');
   });
 
   it('has no title without people or options', () => {
-    expect(getSearchPeopleFilterTitle(undefined, { onlyPersonIds: true })).toBeUndefined();
+    expect(getSearchPeopleFilterTitle(undefined, undefined, { onlyPersonIds: true })).toBeUndefined();
+  });
+
+  it('names the left out people after the picked ones', () => {
+    expect(getSearchPeopleFilterTitle(undefined, 'Without Bob', {})).toBe('Without Bob');
+    expect(getSearchPeopleFilterTitle('Ann', 'Without Bob', { hasUnnamedFaces: false })).toBe(
+      'Ann · Without Bob · search_filter_no_unnamed_faces',
+    );
+  });
+
+  it('leaves out the left out people when they do not apply', () => {
+    expect(getSearchPeopleFilterTitle(undefined, 'Without Bob', { hasPeople: false })).toBe('search_filter_no_people');
+    expect(getSearchPeopleFilterTitle(undefined, 'Without Bob', { hasNamedFaces: false })).toBe(
+      'search_filter_no_named_people',
+    );
+  });
+});
+
+describe('getSearchExcludedPeopleTitle', () => {
+  const people = [
+    { id: 'ann', name: 'Ann' },
+    { id: 'bob', name: 'Bob' },
+  ] as PersonResponseDto[];
+
+  it('says without the first left out person', () => {
+    expect(getSearchExcludedPeopleTitle(people, new Set(['bob']))).toBe('search_without_person');
+  });
+
+  it('has no title without left out people', () => {
+    expect(getSearchExcludedPeopleTitle(people, new Set())).toBeUndefined();
   });
 });
 
