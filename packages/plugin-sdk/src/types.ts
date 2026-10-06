@@ -24,6 +24,7 @@ export enum WorkflowTrigger {
   AssetCreate = 'AssetCreate',
   AssetMetadataExtraction = 'AssetMetadataExtraction',
   AssetTagged = 'AssetTagged',
+  AssetOcr = 'AssetOcr',
   // PersonRecognized = 'PersonRecognized',
 }
 
@@ -94,7 +95,13 @@ export type AssetV1 = {
     duplicateId: string | null;
     visibility: AssetVisibility;
     isEdited: boolean;
+    /** width as displayed, after the orientation is applied */
+    width: number | null;
+    /** height as displayed, after the orientation is applied */
+    height: number | null;
     tags: TagResponseDto[];
+    /** visible text recognized in the asset, one entry per line, in reading order */
+    ocr: AssetOcrLineV1[];
     exifInfo: {
       make: string | null;
       model: string | null;
@@ -128,6 +135,21 @@ export type AssetV1 = {
       updatedAt: string | null;
     } | null;
   };
+};
+
+export type AssetOcrLineV1 = {
+  text: string;
+  /** confidence of the recognized text, between 0 and 1 */
+  textScore: number;
+  /** corners of the text box, normalized between 0 and 1 (top left, top right, bottom right, bottom left) */
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  x3: number;
+  y3: number;
+  x4: number;
+  y4: number;
 };
 
 // export type AssetPersonV1 = AssetV1 & {
