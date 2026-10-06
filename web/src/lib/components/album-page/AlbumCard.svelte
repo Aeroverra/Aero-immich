@@ -78,6 +78,12 @@
         <p>
           {$t('items_count', { values: { count: album.assetCount } })}
         </p>
+        {#if album.hiddenByViewCount}
+          <!-- only sent while private mode is unlocked -->
+          <p class="text-immich-gray" data-testid="album-hidden-by-view">
+            {$t('album_hidden_by_view_count', { values: { count: album.hiddenByViewCount } })}
+          </p>
+        {/if}
       {/if}
 
       {#if (showOwner || album.shared) && showItemCount}

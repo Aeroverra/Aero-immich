@@ -78,11 +78,11 @@
 <nav id="dashboard-navbar" class="h-(--navbar-height) w-dvw text-sm max-md:h-(--navbar-height-md)">
   <SkipLink text={$t('skip_to_content')} />
   <div
-    class="grid h-full grid-cols-[--spacing(32)_auto] items-center py-2 sidebar:grid-cols-[--spacing(64)_auto] {noBorder
+    class="grid h-full grid-cols-[--spacing(28)_auto] items-center py-2 sm:grid-cols-[--spacing(32)_auto] sidebar:grid-cols-[--spacing(64)_auto] {noBorder
       ? ''
       : 'border-b'}"
   >
-    <div class="mx-4 flex flex-row items-center gap-1">
+    <div class="mx-2 flex flex-row items-center gap-1 sm:mx-4">
       <IconButton
         id={menuButtonId}
         shape="round"
@@ -106,14 +106,14 @@
         <Logo variant={mediaQueryManager.isFullSidebar ? 'inline' : 'icon'} class="max-md:h-12" />
       </a>
     </div>
-    <div class="flex justify-between gap-4 pe-6 lg:gap-8">
+    <div class="flex justify-between gap-4 pe-2 sm:pe-6 lg:gap-8">
       <div class="hidden w-full max-w-5xl flex-1 sm:block tall:ps-0">
         {#if featureFlagsManager.value.search}
           <SearchBar grayTheme={true} />
         {/if}
       </div>
 
-      <section class="flex w-full place-items-center justify-end gap-1 sm:w-auto md:gap-2">
+      <section class="flex w-full place-items-center justify-end gap-0 sm:w-auto sm:gap-1 md:gap-2">
         {#if featureFlagsManager.value.search}
           <IconButton
             color="secondary"
@@ -211,7 +211,7 @@
         >
           <button
             type="button"
-            class="flex ps-2"
+            class="flex ps-1 sm:ps-2"
             onclick={() => (shouldShowAccountInfoPanel = !shouldShowAccountInfoPanel)}
             title="{authManager.user.name} ({authManager.user.email})"
           >
