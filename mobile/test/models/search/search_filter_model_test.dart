@@ -9,7 +9,7 @@ void main() {
     camera: SearchCameraFilter(),
     date: SearchDateFilter(),
     rating: SearchRatingFilter(),
-    display: SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false),
+    display: SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false, hasNoTags: false),
     mediaType: AssetType.other,
   );
 
