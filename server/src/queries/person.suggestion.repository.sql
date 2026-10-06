@@ -394,7 +394,10 @@ where
     )
     or (
       "face"."id" is not null
-      and "face"."personGroupId" is null
+      and (
+        "face"."personGroupId" is null
+        or "face"."personGroupId" != "person_suggestion"."targetPersonGroupId"
+      )
     )
   )
   and exists (
@@ -659,7 +662,10 @@ where
     )
     or (
       "face"."id" is not null
-      and "face"."personGroupId" is null
+      and (
+        "face"."personGroupId" is null
+        or "face"."personGroupId" != "person_suggestion"."targetPersonGroupId"
+      )
     )
   )
   and exists (

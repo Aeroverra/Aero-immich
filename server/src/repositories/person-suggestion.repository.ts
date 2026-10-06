@@ -516,7 +516,14 @@ export class PersonSuggestionRepository {
       .where((eb) =>
         eb.or([
           eb.and([eb('candidate.isHidden', '=', false), eb('candidate.name', '=', '')]),
-          eb.and([eb('face.id', 'is not', null), eb('face.personGroupId', 'is', null)]),
+          // a face that is not with the target yet (the job only asks about faces without a person)
+          eb.and([
+            eb('face.id', 'is not', null),
+            eb.or([
+              eb('face.personGroupId', 'is', null),
+              eb('face.personGroupId', '!=', eb.ref('person_suggestion.targetPersonGroupId')),
+            ]),
+          ]),
         ]),
       )
       .where((eb) =>

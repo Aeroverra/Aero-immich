@@ -603,6 +603,43 @@ describe(PersonSuggestionService.name, () => {
     });
   });
 
+  describe('a face that is with another person', () => {
+    it('should be asked about, moved to the target and moved back', async () => {
+      const { sut, ctx } = setup();
+      const random = newRandom(20);
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { personGroupId: rayId } = await seedPerson(ctx, user.id, random, {
+        name: 'Ray',
+        identity: randomDirection(random),
+        faces: 2,
+      });
+      const mixed = await seedPerson(ctx, user.id, random, { identity: randomDirection(random), faces: 3 });
+      const faceId = mixed.faceIds[0];
+
+      const created = await sut.create(auth, { faceId, targetPersonId: rayId, score: 0.4 });
+      await expect(sut.getAll(auth, { page: 1, size: 10 })).resolves.toEqual(
+        expect.objectContaining({ total: 1, suggestions: [expect.objectContaining({ id: created.id })] }),
+      );
+
+      await sut.answer(auth, created.id, { answer: PersonSuggestionStatus.Same });
+      const moved = await ctx.database
+        .selectFrom('asset_face')
+        .select('personGroupId')
+        .where('id', '=', faceId)
+        .executeTakeFirst();
+      expect(moved?.personGroupId).toBe(rayId);
+
+      await sut.undoAnswer(auth, created.id);
+      const back = await ctx.database
+        .selectFrom('asset_face')
+        .select('personGroupId')
+        .where('id', '=', faceId)
+        .executeTakeFirst();
+      expect(back?.personGroupId).toBe(mixed.personGroupId);
+    });
+  });
+
   describe('create', () => {
     it('should ask about the unnamed one of the two and return the same question twice', async () => {
       const { sut, ctx } = setup();
