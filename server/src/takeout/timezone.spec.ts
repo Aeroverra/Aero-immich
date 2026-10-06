@@ -342,16 +342,23 @@ const cases: Case[] = [
     },
   },
   {
-    name: 'rule 2 skips a UTC video clock (QuickTime CreateDate) equal to Google: no zone, flagged',
+    name: 'rule 2 ignores a zero offset from a UTC video clock (QuickTime CreateDate): no zone, flagged',
     google: G,
     exif: { ...PHONE, fileClock: wall('2023-07-05T01:30:00'), fileClockIsUtc: true },
     expected: { ...GOOGLE_NO_ZONE, flags: ['zoneAssumed'] },
   },
   {
-    name: 'rule 2 skips a UTC video clock on a whole-hour offset from Google: no zone, flagged, no DST note',
+    name: 'rule 2 still derives a non-zero offset from a video clock marked UTC (a writer that stored local time)',
     google: G,
-    exif: { ...PHONE, fileClock: wall('2023-07-05T02:30:00'), fileClockIsUtc: true },
-    expected: { ...GOOGLE_NO_ZONE, flags: ['google-instant-with-differing-clock', 'zoneAssumed'] },
+    exif: { ...PHONE, fileClock: wall('2023-07-04T21:30:00'), fileClockIsUtc: true },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC-4',
+      zoneSource: 'derivedOffset',
+      putDate: true,
+      putOffsetZone: 'UTC-4',
+      flags: [],
+    },
   },
   {
     name: 'rule 2: 3 s residual rejected: Google, no zone, flagged',

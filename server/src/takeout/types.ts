@@ -537,8 +537,8 @@ export interface CaptureExifInput {
   // The file's own wall clock (DateTimeOriginal / QuickTime CreateDate) as UTC calendar components: a Date
   // whose UTC Y-M-D H:M:S equal the clock the device wrote. Null when the file has no date.
   fileClock: Date | null;
-  // True when fileClock is a UTC instant rather than the device's wall clock: a video whose only date is a
-  // QuickTime CreateDate / CreationDate, which the format stores in UTC. It never yields a zone (rule 2).
+  // True when fileClock is a video's QuickTime CreateDate / CreationDate left in UTC (the format stores it in UTC
+  // and exiftool had no non-UTC zone to shift it into). A zero rule-2 offset from it is no zone evidence.
   fileClockIsUtc: boolean;
   // The file's GPSDateTime (a UTC instant), when present: an independent clock that can prove a rule-1 file
   // moment that disagrees with Google (section 13.1). Null otherwise.

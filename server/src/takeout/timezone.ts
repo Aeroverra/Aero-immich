@@ -135,7 +135,7 @@ function pxlInstant(name: string): Date | null {
 //      flagged) unless an independent clock (PXL_ name or GPSDateTime, within 2 s) proves the file: then the
 //      file's moment and zone. GPS never overrides a recorded zone.
 //   2. PHONE with a zone-less wall clock whose clock minus Google is a whole 15-min offset within 2 s: that offset.
-//      A video's UTC QuickTime date is not a wall clock and never takes this rule.
+//      A zero offset from a video's UTC QuickTime date is no zone evidence.
 //   3. exact Screenshot_YYYYMMDD-HHMMSS name: as rule 2 with the name as the clock.
 //   4. CAMERA: Google's moment, no zone change.
 export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
@@ -208,10 +208,10 @@ export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
   }
 
   // ---------- rule 2 ----------
-  // A UTC clock (QuickTime video date) minus Google is always ~0: that is no evidence of a +0 zone.
-  if (device === 'phone' && exif.fileClock && !exif.fileOffsetZone && !exif.fileClockIsUtc) {
+  if (device === 'phone' && exif.fileClock && !exif.fileOffsetZone) {
     const offsetMinutes = fifteenMinuteOffset(exif.fileClock, googleInstant);
-    if (offsetMinutes !== null) {
+    // A UTC clock (a video's QuickTime date) always equals Google: that is no evidence of a +0 zone.
+    if (offsetMinutes !== null && !(offsetMinutes === 0 && exif.fileClockIsUtc)) {
       return result({
         instant: googleInstant,
         zone: fixedOffsetName(offsetMinutes),
@@ -240,7 +240,7 @@ export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
     const diff = exif.fileClock.getTime() - googleInstant.getTime();
     if (Math.abs(diff) > TOLERANCE_MS) {
       flags.push('google-instant-with-differing-clock');
-      if (isAboutOneHour(diff) && !exif.fileClockIsUtc) {
+      if (isAboutOneHour(diff)) {
         flags.push('1-hour-ambiguous');
       }
     }

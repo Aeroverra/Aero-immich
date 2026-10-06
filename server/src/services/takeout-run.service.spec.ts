@@ -312,6 +312,85 @@ describe(TakeoutRunService.name, () => {
       expect(dateUpserts()).toHaveLength(0);
     });
 
+    it('a phone video with GPS keeps the offset of its QuickTime date shifted into the GPS zone', async () => {
+      // readTags of PXL_20260924_082940796.mp4 (Pixel 9 Pro XL, run 15c636d6): exiftool moves the UTC CreateDate
+      // (raw 08:30:02) into the GeolocationTimeZone, so the wall clock is 00:30:02 and Google says 08:30:02Z.
+      const sitka = {
+        year: 2026,
+        month: 9,
+        day: 24,
+        hour: 0,
+        minute: 30,
+        second: 2,
+        tzoffsetMinutes: -480,
+        zoneName: 'America/Sitka',
+      };
+      mocks.metadata.readTags.mockResolvedValue({
+        MIMEType: 'video/mp4',
+        AndroidMake: 'Google',
+        AndroidModel: 'Pixel 9 Pro XL',
+        GPSLatitude: 55.9598,
+        GPSLongitude: -133.6463,
+        zone: 'America/Sitka',
+        tz: 'America/Sitka',
+        tzSource: 'GeolocationTimeZone',
+        CreateDate: sitka,
+        MediaCreateDate: sitka,
+      } as any);
+
+      await (sut as any).processUpload(
+        run(),
+        settings(),
+        uploadRow({
+          originalFileName: 'PXL_20260924_082940796.mp4',
+          targetPath: '/tmp/does-not-exist/asset-uuid.mp4',
+          captureDate: new Date('2026-09-24T08:30:02Z'),
+        }),
+      );
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('UTC-8');
+      expect(created.zoneSource).toBe('derivedOffset');
+    });
+
+    it('a phone video with GPS in a zone at UTC+0 still gets +0 from its shifted clock', async () => {
+      const dublin = {
+        year: 2025,
+        month: 3,
+        day: 21,
+        hour: 9,
+        minute: 31,
+        second: 57,
+        tzoffsetMinutes: 0,
+        zoneName: 'Europe/Dublin',
+      };
+      mocks.metadata.readTags.mockResolvedValue({
+        MIMEType: 'video/mp4',
+        AndroidMake: 'Google',
+        AndroidModel: 'Pixel 9 Pro XL',
+        GPSLatitude: 53.35,
+        GPSLongitude: -6.26,
+        zone: 'Europe/Dublin',
+        tz: 'Europe/Dublin',
+        tzSource: 'GeolocationTimeZone',
+        CreateDate: dublin,
+      } as any);
+
+      await (sut as any).processUpload(
+        run(),
+        settings(),
+        uploadRow({
+          originalFileName: 'PXL_20250321_092953241.mp4',
+          targetPath: '/tmp/does-not-exist/asset-uuid.mp4',
+          captureDate: new Date('2025-03-21T09:31:57Z'),
+        }),
+      );
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('UTC+0');
+      expect(created.zoneSource).toBe('derivedOffset');
+    });
+
     it('writes Google GPS to the sidecar when the file lacks GPS', async () => {
       mocks.metadata.readTags.mockResolvedValue({
         Make: 'Google',

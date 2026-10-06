@@ -2767,8 +2767,10 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
   const fileHasGps = typeof exif.GPSLatitude === 'number' && typeof exif.GPSLongitude === 'number';
   const originalClock = exif.SubSecDateTimeOriginal ?? exif.DateTimeOriginal;
   const fileClock = exifWallClock(originalClock ?? exif.CreationDate ?? exif.CreateDate);
-  // A video clock from its QuickTime dates (no DateTimeOriginal, no recorded offset) is a UTC instant, not a wall clock.
-  const fileClockIsUtc = isVideo && fileClock !== null && !originalClock && !fileOffsetZone;
+  // A video clock from its QuickTime dates (no DateTimeOriginal, no recorded offset) stays in UTC unless exiftool shifted
+  // it into a zone (GPS): then it is the local wall clock at that place and rule 2 may use it.
+  const fileClockIsUtc =
+    isVideo && fileClock !== null && !originalClock && !fileOffsetZone && (zone === null || UTC_ZONE_RE.test(zone));
   const gpsDateTime = exifWallClock(exif.GPSDateTime);
 
   return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime };
