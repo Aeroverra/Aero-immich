@@ -160,6 +160,8 @@ abstract class SearchFilter with _$SearchFilter {
     // assets in any of these albums are left out
     List<String>? excludeAlbumIds,
     required Set<Person> people,
+    // photos that show any of these people are left out
+    @Default({}) Set<Person> excludedPeople,
     // with people picked: true = nobody else in the photo, false = someone else too; faces without a name count
     bool? onlyPeople,
     // true = photos with a face, false = without any (the picked people and other face options do not apply)
@@ -191,6 +193,7 @@ abstract class SearchFilter with _$SearchFilter {
         (albumIds ?? []).isEmpty &&
         (excludeAlbumIds ?? []).isEmpty &&
         people.isEmpty &&
+        excludedPeople.isEmpty &&
         hasPeople == null &&
         hasNamedFaces == null &&
         hasUnnamedFaces == null &&
