@@ -88,6 +88,7 @@ export const Route = {
 
   // people
   people: () => '/people',
+  peopleSuggestions: () => '/people/review',
   viewPerson: ({ id }: { id: string }, params?: { previousRoute?: string; action?: 'merge' }) =>
     `/people/${id}` + asQueryString(params),
 
