@@ -119,7 +119,7 @@
             <ImageThumbnail
               curve
               shadow
-              url={getPeopleThumbnailUrl(person)}
+              url={getPeopleThumbnailUrl(person, undefined, asset.id)}
               altText={person.name}
               title={person.name}
               widthStyle="100%"
