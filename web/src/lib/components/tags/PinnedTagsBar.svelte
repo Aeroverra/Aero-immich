@@ -4,7 +4,6 @@
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { handleTagAssetsChanges } from '$lib/services/tag.service';
-  import { handleError } from '$lib/utils/handle-error';
   import { getPinnedTags, getTagCoverage, nextTagChange, type TagCoverage } from '$lib/utils/pinned-tags';
   import { tagName } from '$lib/utils/tag-tree';
   import { getAllTags, getTagAssetCounts, type TagResponseDto } from '@immich/sdk';
@@ -41,7 +40,8 @@
         tagPicker.pinned.current = pinned.filter((id) => existing.has(id));
       }
     } catch (error) {
-      handleError(error, $t('errors.something_went_wrong'));
+      // the bar only offers shortcuts; without the tags it stays empty instead of showing an error
+      console.warn('Could not load the pinned tags', error);
     }
   };
 
@@ -55,7 +55,11 @@
         countedIds = ids;
       }
     } catch (error) {
-      handleError(error, $t('errors.something_went_wrong'));
+      // a background refresh: keep the chips usable with what is known instead of showing an error
+      console.warn('Could not count the tags of the selection', error);
+      if (request === countRequest) {
+        countedIds = ids;
+      }
     }
   };
 
@@ -107,6 +111,7 @@
         assetIds: ids,
         addIds: entries.filter(([, add]) => add).map(([id]) => id),
         removeIds: entries.filter(([, add]) => !add).map(([id]) => id),
+        tags,
       });
       if (saved) {
         changes.clear();

@@ -80,6 +80,7 @@
       assetIds,
       addIds: added.map(({ id }) => id),
       removeIds: removed.map(({ id }) => id),
+      tags: allTags,
     });
     if (saved) {
       onClose(true);

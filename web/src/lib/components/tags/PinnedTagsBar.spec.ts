@@ -1,4 +1,5 @@
-import { StackActionMode, type TagResponseDto } from '@immich/sdk';
+import { StackActionMode, ViewAccess, ViewPrivateAssets, type TagResponseDto } from '@immich/sdk';
+import { toastManager } from '@immich/ui';
 import { screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
@@ -8,10 +9,32 @@ import { tagPicker } from '$lib/components/tags/tag-picker.svelte';
 import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import { viewManager } from '$lib/managers/view-manager.svelte';
 import { renderWithTooltips } from '$tests/helpers';
 import { timelineAssetFactory } from '@test-data/factories/asset-factory';
 import { preferencesFactory } from '@test-data/factories/preferences-factory';
 import { userAdminFactory } from '@test-data/factories/user-factory';
+
+/** the view the session sees: every asset but the excluded ones, or only the included ones */
+const setView = (rule: { includeAll: boolean; includeTagIds: string[]; excludeTagIds: string[] } | null) => {
+  viewManager.active = {
+    viewId: null,
+    expiresAt: null,
+    view: rule && {
+      ...rule,
+      id: 'view',
+      name: 'Default',
+      order: 0,
+      isDefault: true,
+      access: ViewAccess.Open,
+      includeUntagged: false,
+      privateAssets: ViewPrivateAssets.Hide,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  };
+};
 
 const newTag = (value: string): TagResponseDto => ({
   id: value,
@@ -57,6 +80,9 @@ describe('PinnedTagsBar', () => {
     ]);
     sdkMock.bulkTagAssets.mockResolvedValue({ count: 3 });
     sdkMock.untagAssets.mockResolvedValue([]);
+    setView(null);
+    vi.spyOn(privateModeManager, 'invalidate').mockReturnValue();
+    vi.spyOn(toastManager, 'danger');
   });
 
   it('shows the pinned tags by name with whether all, some or none of the selection carry them', async () => {
@@ -165,5 +191,71 @@ describe('PinnedTagsBar', () => {
     await waitFor(() => expect(sdkMock.getAllTags).toHaveBeenCalled());
     expect(screen.queryByTestId('pinned-tags-bar')).not.toBeInTheDocument();
     expect(sdkMock.getTagAssetCounts).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the counts quietly and keeps the chips usable when the server refuses them', async () => {
+    sdkMock.getTagAssetCounts.mockRejectedValue(new Error('Not found or no asset.read access'));
+    const warn = vi.spyOn(console, 'warn').mockReturnValue();
+    select('a', 'b');
+    renderWithTooltips(PinnedTagsBar, {});
+
+    await waitFor(() => expect(warn).toHaveBeenCalled());
+    expect(toastManager.danger).not.toHaveBeenCalled();
+    expect(chipButton('Travel')).toBeEnabled();
+    warn.mockRestore();
+  });
+
+  it('takes the assets a saved tag moved out of the view off the selection and reloads the page', async () => {
+    setView({ includeAll: true, includeTagIds: [], excludeTagIds: ['Food'] });
+    select('a', 'b', 'c');
+    renderWithTooltips(PinnedTagsBar, {});
+    await waitFor(() => expect(chip('Food/Fruit')).toHaveAttribute('data-coverage', 'some'));
+    sdkMock.getTagAssetCounts.mockClear();
+
+    await userEvent.click(chipButton('Food/Fruit'));
+    await userEvent.click(screen.getByTestId('pinned-tags-save'));
+
+    await waitFor(() => expect(assetMultiSelectManager.assets).toHaveLength(0));
+    expect(sdkMock.bulkTagAssets).toHaveBeenCalledWith({
+      tagBulkAssetsDto: { tagIds: ['Food/Fruit'], assetIds: ['a', 'b', 'c'] },
+    });
+    expect(privateModeManager.invalidate).toHaveBeenCalled();
+    expect(sdkMock.getTagAssetCounts).not.toHaveBeenCalled();
+    expect(toastManager.danger).not.toHaveBeenCalled();
+  });
+
+  it('looks up which assets left a view that only shows a tag that was taken off', async () => {
+    setView({ includeAll: false, includeTagIds: ['Food'], excludeTagIds: [] });
+    // b still carries another tag below Food, a and c do not
+    sdkMock.getAssetInfo.mockImplementation(({ id }) =>
+      id === 'b' ? Promise.resolve({ id } as never) : Promise.reject(new Error('no access')),
+    );
+    select('a', 'b', 'c');
+    renderWithTooltips(PinnedTagsBar, {});
+    await waitFor(() => expect(chip('Food/Dessert/Cake')).toHaveAttribute('data-coverage', 'all'));
+
+    await userEvent.click(chipButton('Food/Dessert/Cake'));
+    await userEvent.click(screen.getByTestId('pinned-tags-save'));
+
+    await waitFor(() => expect(assetMultiSelectManager.assets.map(({ id }) => id)).toEqual(['b']));
+    expect(privateModeManager.invalidate).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(sdkMock.getTagAssetCounts).toHaveBeenLastCalledWith({ tagAssetCountsDto: { assetIds: ['b'] } }),
+    );
+  });
+
+  it('keeps the selection when the saved tags do not touch the view', async () => {
+    setView({ includeAll: true, includeTagIds: [], excludeTagIds: ['Food'] });
+    select('a', 'b', 'c');
+    renderWithTooltips(PinnedTagsBar, {});
+    await waitFor(() => expect(chip('Food/Dessert/Cake')).toHaveAttribute('data-coverage', 'all'));
+
+    await userEvent.click(chipButton('Travel'));
+    await userEvent.click(screen.getByTestId('pinned-tags-save'));
+
+    await waitFor(() => expect(sdkMock.bulkTagAssets).toHaveBeenCalled());
+    expect(assetMultiSelectManager.assets).toHaveLength(3);
+    expect(privateModeManager.invalidate).not.toHaveBeenCalled();
+    expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
   });
 });

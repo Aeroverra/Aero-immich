@@ -30,10 +30,17 @@ export class TagService extends BaseService {
     return tags.map((tag) => mapTag(tag));
   }
 
-  /** How many of the assets carry each tag; hidden tags are left out while private mode is locked */
+  /**
+   * How many of the assets carry each tag; hidden tags are left out while private mode is locked. Assets the request
+   * cannot read count as carrying nothing instead of failing the request: a selection outlives its assets, for example
+   * when a tag just added to them takes them out of the session's view.
+   */
   async getAssetCounts(auth: AuthDto, dto: TagAssetCountsDto): Promise<TagAssetCountResponseDto[]> {
-    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: dto.assetIds });
-    return this.tagRepository.getAssetCounts(auth.user.id, dto.assetIds, { withHidden: isPrivateMode(auth) });
+    const assetIds = await this.checkAccess({ auth, permission: Permission.AssetRead, ids: dto.assetIds });
+    if (assetIds.size === 0) {
+      return [];
+    }
+    return this.tagRepository.getAssetCounts(auth.user.id, [...assetIds], { withHidden: isPrivateMode(auth) });
   }
 
   async get(auth: AuthDto, id: string): Promise<TagResponseDto> {
