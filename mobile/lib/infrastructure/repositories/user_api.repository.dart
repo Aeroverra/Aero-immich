@@ -35,6 +35,14 @@ class UserApiRepository extends ApiRepository {
     );
   }
 
+  Future<void> updateGroupAutoStacks(bool groupAuto) async {
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(stacks: Optional.present(StacksUpdate(groupAuto: Optional.present(groupAuto)))),
+      ),
+    );
+  }
+
   Future<String> createProfileImage({required String name, required Uint8List data}) async {
     final res = await checkNull(_api.createProfileImage(MultipartFile.fromBytes('file', data, filename: name)));
     return res.profileImagePath;
