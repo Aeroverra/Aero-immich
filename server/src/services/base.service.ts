@@ -62,6 +62,7 @@ import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
 import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
+import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -127,6 +128,7 @@ export const BASE_SERVICE_DEPENDENCIES = [
   UserRepository,
   VersionHistoryRepository,
   VideoStreamRepository,
+  VideoBookmarkRepository,
   ViewRepository,
   WebsocketRepository,
   WorkflowRepository,
@@ -194,6 +196,7 @@ export class BaseService {
     protected userRepository: UserRepository,
     protected versionRepository: VersionHistoryRepository,
     protected videoStreamRepository: VideoStreamRepository,
+    protected videoBookmarkRepository: VideoBookmarkRepository,
     protected viewRepository: ViewRepository,
     protected websocketRepository: WebsocketRepository,
     protected workflowRepository: WorkflowRepository,
@@ -270,6 +273,7 @@ export class BaseService {
       ctx.userRepository,
       ctx.versionRepository,
       ctx.videoStreamRepository,
+      ctx.videoBookmarkRepository,
       ctx.viewRepository,
       ctx.websocketRepository,
       ctx.workflowRepository,
