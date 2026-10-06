@@ -13,6 +13,7 @@ import {
   PersonSuggestionResponseDto,
   PersonSuggestionSearchDto,
   PersonSuggestionsResponseDto,
+  PersonSuggestionStatisticsDto,
   PersonSuggestionStatisticsResponseDto,
 } from 'src/dtos/person-suggestion.dto';
 import { mapPerson } from 'src/dtos/person.dto';
@@ -93,11 +94,18 @@ const mapFace = (face: { id: string; assetId: string; updatedAt: Date | string; 
 
 @Injectable()
 export class PersonSuggestionService extends BaseService {
-  async getAll(auth: AuthDto, { page, size }: PersonSuggestionSearchDto): Promise<PersonSuggestionsResponseDto> {
+  async getAll(
+    auth: AuthDto,
+    { page, size, personId }: PersonSuggestionSearchDto,
+  ): Promise<PersonSuggestionsResponseDto> {
     const scope = toPrivateScope(auth);
     const [suggestions, total] = await Promise.all([
-      this.personSuggestionRepository.getPending(scope, { take: size + 1, skip: (page - 1) * size }),
-      this.personSuggestionRepository.getPendingCount(scope),
+      this.personSuggestionRepository.getPending(scope, {
+        take: size + 1,
+        skip: (page - 1) * size,
+        personGroupId: personId,
+      }),
+      this.personSuggestionRepository.getPendingCount(scope, personId),
     ]);
 
     return {
@@ -109,8 +117,11 @@ export class PersonSuggestionService extends BaseService {
     };
   }
 
-  async getStatistics(auth: AuthDto): Promise<PersonSuggestionStatisticsResponseDto> {
-    return { pending: await this.personSuggestionRepository.getPendingCount(toPrivateScope(auth)) };
+  async getStatistics(
+    auth: AuthDto,
+    { personId }: PersonSuggestionStatisticsDto = {},
+  ): Promise<PersonSuggestionStatisticsResponseDto> {
+    return { pending: await this.personSuggestionRepository.getPendingCount(toPrivateScope(auth), personId) };
   }
 
   async getAnswers(auth: AuthDto, { size }: PersonSuggestionAnswersSearchDto): Promise<PersonSuggestionResponseDto[]> {

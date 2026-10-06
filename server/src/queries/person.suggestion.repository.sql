@@ -386,19 +386,23 @@ from
   left join "person" as "facePerson" on "facePerson"."personGroupId" = "face"."personGroupId"
   and "facePerson"."ownerId" = $3
 where
-  "person_suggestion"."ownerId" = $4
-  and "person_suggestion"."status" = $5
-  and "target"."isHidden" = $6
+  (
+    "person_suggestion"."personGroupId" = $4
+    or "person_suggestion"."targetPersonGroupId" = $5
+  )
+  and "person_suggestion"."ownerId" = $6
+  and "person_suggestion"."status" = $7
+  and "target"."isHidden" = $8
   and (
     (
-      "candidate"."isHidden" = $7
-      and "candidate"."name" = $8
+      "candidate"."isHidden" = $9
+      and "candidate"."name" = $10
     )
     or (
       "face"."id" is not null
       and (
         "face"."personGroupId" is null
-        or "facePerson"."name" = $9
+        or "facePerson"."name" = $11
       )
       and (
         "face"."personGroupId" is null
@@ -418,14 +422,14 @@ where
         or "asset_face"."id" = "person_suggestion"."faceId"
       )
       and (
-        "asset"."ownerId" = $10
+        "asset"."ownerId" = $12
         and "asset"."deletedAt" is null
-        and "asset"."visibility" in ($11, $12)
+        and "asset"."visibility" in ($13, $14)
         and "asset_face"."deletedAt" is null
-        and "asset_face"."isVisible" = $13
-        and "asset_face"."isWholeAsset" = $14
+        and "asset_face"."isVisible" = $15
+        and "asset_face"."isWholeAsset" = $16
         and (
-          "asset"."isPrivate" = $15
+          "asset"."isPrivate" = $17
           and (
             (
               (
@@ -436,7 +440,7 @@ where
                     inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag"."userId" = $16
+                    and "tag"."userId" = $18
                 )
                 and (
                   "asset"."visibility" != 'hidden'
@@ -453,7 +457,7 @@ where
                           inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag"."userId" = $17
+                          and "tag"."userId" = $19
                       )
                   )
                 )
@@ -466,7 +470,7 @@ where
                     inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag_closure"."id_ancestor" = any ($18::uuid[])
+                    and "tag_closure"."id_ancestor" = any ($20::uuid[])
                 )
                 or (
                   "asset"."visibility" = 'hidden'
@@ -483,7 +487,7 @@ where
                           inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag_closure"."id_ancestor" = any ($19::uuid[])
+                          and "tag_closure"."id_ancestor" = any ($21::uuid[])
                       )
                   )
                 )
@@ -497,7 +501,7 @@ where
                   inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                 where
                   "tag_asset"."assetId" = "asset"."id"
-                  and "tag_closure"."id_ancestor" = any ($20::uuid[])
+                  and "tag_closure"."id_ancestor" = any ($22::uuid[])
               )
               and (
                 "asset"."visibility" != 'hidden'
@@ -514,12 +518,12 @@ where
                         inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                       where
                         "tag_asset"."assetId" = "live_photo_still"."id"
-                        and "tag_closure"."id_ancestor" = any ($21::uuid[])
+                        and "tag_closure"."id_ancestor" = any ($23::uuid[])
                     )
                 )
               )
             )
-            and "asset"."isPrivate" = $22
+            and "asset"."isPrivate" = $24
           )
         )
       )
@@ -533,14 +537,14 @@ where
     where
       "asset_face"."personGroupId" = "person_suggestion"."targetPersonGroupId"
       and (
-        "asset"."ownerId" = $23
+        "asset"."ownerId" = $25
         and "asset"."deletedAt" is null
-        and "asset"."visibility" in ($24, $25)
+        and "asset"."visibility" in ($26, $27)
         and "asset_face"."deletedAt" is null
-        and "asset_face"."isVisible" = $26
-        and "asset_face"."isWholeAsset" = $27
+        and "asset_face"."isVisible" = $28
+        and "asset_face"."isWholeAsset" = $29
         and (
-          "asset"."isPrivate" = $28
+          "asset"."isPrivate" = $30
           and (
             (
               (
@@ -551,7 +555,7 @@ where
                     inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag"."userId" = $29
+                    and "tag"."userId" = $31
                 )
                 and (
                   "asset"."visibility" != 'hidden'
@@ -568,7 +572,7 @@ where
                           inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag"."userId" = $30
+                          and "tag"."userId" = $32
                       )
                   )
                 )
@@ -581,7 +585,7 @@ where
                     inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag_closure"."id_ancestor" = any ($31::uuid[])
+                    and "tag_closure"."id_ancestor" = any ($33::uuid[])
                 )
                 or (
                   "asset"."visibility" = 'hidden'
@@ -598,7 +602,7 @@ where
                           inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag_closure"."id_ancestor" = any ($32::uuid[])
+                          and "tag_closure"."id_ancestor" = any ($34::uuid[])
                       )
                   )
                 )
@@ -612,7 +616,7 @@ where
                   inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                 where
                   "tag_asset"."assetId" = "asset"."id"
-                  and "tag_closure"."id_ancestor" = any ($33::uuid[])
+                  and "tag_closure"."id_ancestor" = any ($35::uuid[])
               )
               and (
                 "asset"."visibility" != 'hidden'
@@ -629,12 +633,12 @@ where
                         inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                       where
                         "tag_asset"."assetId" = "live_photo_still"."id"
-                        and "tag_closure"."id_ancestor" = any ($34::uuid[])
+                        and "tag_closure"."id_ancestor" = any ($36::uuid[])
                     )
                 )
               )
             )
-            and "asset"."isPrivate" = $35
+            and "asset"."isPrivate" = $37
           )
         )
       )
@@ -643,9 +647,9 @@ order by
   "person_suggestion"."priority" desc,
   "person_suggestion"."id"
 limit
-  $36
+  $38
 offset
-  $37
+  $39
 
 -- PersonSuggestionRepository.getPendingCount
 select
@@ -660,19 +664,23 @@ from
   left join "person" as "facePerson" on "facePerson"."personGroupId" = "face"."personGroupId"
   and "facePerson"."ownerId" = $3
 where
-  "person_suggestion"."ownerId" = $4
-  and "person_suggestion"."status" = $5
-  and "target"."isHidden" = $6
+  (
+    "person_suggestion"."personGroupId" = $4
+    or "person_suggestion"."targetPersonGroupId" = $5
+  )
+  and "person_suggestion"."ownerId" = $6
+  and "person_suggestion"."status" = $7
+  and "target"."isHidden" = $8
   and (
     (
-      "candidate"."isHidden" = $7
-      and "candidate"."name" = $8
+      "candidate"."isHidden" = $9
+      and "candidate"."name" = $10
     )
     or (
       "face"."id" is not null
       and (
         "face"."personGroupId" is null
-        or "facePerson"."name" = $9
+        or "facePerson"."name" = $11
       )
       and (
         "face"."personGroupId" is null
@@ -692,14 +700,14 @@ where
         or "asset_face"."id" = "person_suggestion"."faceId"
       )
       and (
-        "asset"."ownerId" = $10
+        "asset"."ownerId" = $12
         and "asset"."deletedAt" is null
-        and "asset"."visibility" in ($11, $12)
+        and "asset"."visibility" in ($13, $14)
         and "asset_face"."deletedAt" is null
-        and "asset_face"."isVisible" = $13
-        and "asset_face"."isWholeAsset" = $14
+        and "asset_face"."isVisible" = $15
+        and "asset_face"."isWholeAsset" = $16
         and (
-          "asset"."isPrivate" = $15
+          "asset"."isPrivate" = $17
           and (
             (
               (
@@ -710,7 +718,7 @@ where
                     inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag"."userId" = $16
+                    and "tag"."userId" = $18
                 )
                 and (
                   "asset"."visibility" != 'hidden'
@@ -727,7 +735,7 @@ where
                           inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag"."userId" = $17
+                          and "tag"."userId" = $19
                       )
                   )
                 )
@@ -740,7 +748,7 @@ where
                     inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag_closure"."id_ancestor" = any ($18::uuid[])
+                    and "tag_closure"."id_ancestor" = any ($20::uuid[])
                 )
                 or (
                   "asset"."visibility" = 'hidden'
@@ -757,7 +765,7 @@ where
                           inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag_closure"."id_ancestor" = any ($19::uuid[])
+                          and "tag_closure"."id_ancestor" = any ($21::uuid[])
                       )
                   )
                 )
@@ -771,7 +779,7 @@ where
                   inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                 where
                   "tag_asset"."assetId" = "asset"."id"
-                  and "tag_closure"."id_ancestor" = any ($20::uuid[])
+                  and "tag_closure"."id_ancestor" = any ($22::uuid[])
               )
               and (
                 "asset"."visibility" != 'hidden'
@@ -788,12 +796,12 @@ where
                         inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                       where
                         "tag_asset"."assetId" = "live_photo_still"."id"
-                        and "tag_closure"."id_ancestor" = any ($21::uuid[])
+                        and "tag_closure"."id_ancestor" = any ($23::uuid[])
                     )
                 )
               )
             )
-            and "asset"."isPrivate" = $22
+            and "asset"."isPrivate" = $24
           )
         )
       )
@@ -807,14 +815,14 @@ where
     where
       "asset_face"."personGroupId" = "person_suggestion"."targetPersonGroupId"
       and (
-        "asset"."ownerId" = $23
+        "asset"."ownerId" = $25
         and "asset"."deletedAt" is null
-        and "asset"."visibility" in ($24, $25)
+        and "asset"."visibility" in ($26, $27)
         and "asset_face"."deletedAt" is null
-        and "asset_face"."isVisible" = $26
-        and "asset_face"."isWholeAsset" = $27
+        and "asset_face"."isVisible" = $28
+        and "asset_face"."isWholeAsset" = $29
         and (
-          "asset"."isPrivate" = $28
+          "asset"."isPrivate" = $30
           and (
             (
               (
@@ -825,7 +833,7 @@ where
                     inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag"."userId" = $29
+                    and "tag"."userId" = $31
                 )
                 and (
                   "asset"."visibility" != 'hidden'
@@ -842,7 +850,7 @@ where
                           inner join "tag" on "tag"."id" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag"."userId" = $30
+                          and "tag"."userId" = $32
                       )
                   )
                 )
@@ -855,7 +863,7 @@ where
                     inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                   where
                     "tag_asset"."assetId" = "asset"."id"
-                    and "tag_closure"."id_ancestor" = any ($31::uuid[])
+                    and "tag_closure"."id_ancestor" = any ($33::uuid[])
                 )
                 or (
                   "asset"."visibility" = 'hidden'
@@ -872,7 +880,7 @@ where
                           inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                         where
                           "tag_asset"."assetId" = "live_photo_still"."id"
-                          and "tag_closure"."id_ancestor" = any ($32::uuid[])
+                          and "tag_closure"."id_ancestor" = any ($34::uuid[])
                       )
                   )
                 )
@@ -886,7 +894,7 @@ where
                   inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                 where
                   "tag_asset"."assetId" = "asset"."id"
-                  and "tag_closure"."id_ancestor" = any ($33::uuid[])
+                  and "tag_closure"."id_ancestor" = any ($35::uuid[])
               )
               and (
                 "asset"."visibility" != 'hidden'
@@ -903,12 +911,12 @@ where
                         inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
                       where
                         "tag_asset"."assetId" = "live_photo_still"."id"
-                        and "tag_closure"."id_ancestor" = any ($34::uuid[])
+                        and "tag_closure"."id_ancestor" = any ($36::uuid[])
                     )
                 )
               )
             )
-            and "asset"."isPrivate" = $35
+            and "asset"."isPrivate" = $37
           )
         )
       )

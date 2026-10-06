@@ -25,6 +25,7 @@ import {
   PersonSuggestionResponseDto,
   PersonSuggestionSearchDto,
   PersonSuggestionsResponseDto,
+  PersonSuggestionStatisticsDto,
   PersonSuggestionStatisticsResponseDto,
 } from 'src/dtos/person-suggestion.dto';
 import {
@@ -141,11 +142,14 @@ export class PersonController {
   @Authenticated({ permission: Permission.PersonRead })
   @Endpoint({
     summary: 'Count person suggestions',
-    description: 'How many person suggestions there are to answer.',
+    description: 'How many person suggestions there are to answer, optionally only those about one person.',
     history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
   })
-  getPersonSuggestionStatistics(@Auth() auth: AuthDto): Promise<PersonSuggestionStatisticsResponseDto> {
-    return this.suggestionService.getStatistics(auth);
+  getPersonSuggestionStatistics(
+    @Auth() auth: AuthDto,
+    @Query() dto: PersonSuggestionStatisticsDto,
+  ): Promise<PersonSuggestionStatisticsResponseDto> {
+    return this.suggestionService.getStatistics(auth, dto);
   }
 
   @Get('suggestions/answers')

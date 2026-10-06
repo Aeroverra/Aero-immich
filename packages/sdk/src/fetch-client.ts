@@ -7277,8 +7277,9 @@ export function mergePeople({ mergePersonDto }: {
 /**
  * Get person suggestions
  */
-export function getPersonSuggestions({ page, size }: {
+export function getPersonSuggestions({ page, personId, size }: {
     page?: number;
+    personId?: string;
     size?: number;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
@@ -7286,6 +7287,7 @@ export function getPersonSuggestions({ page, size }: {
         data: PersonSuggestionsResponseDto;
     }>(`/people/suggestions${QS.query(QS.explode({
         page,
+        personId,
         size
     }))}`, {
         ...opts
@@ -7324,11 +7326,15 @@ export function getPersonSuggestionAnswers({ size }: {
 /**
  * Count person suggestions
  */
-export function getPersonSuggestionStatistics(opts?: Oazapfts.RequestOpts) {
+export function getPersonSuggestionStatistics({ personId }: {
+    personId?: string;
+}, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
         status: 200;
         data: PersonSuggestionStatisticsResponseDto;
-    }>("/people/suggestions/count", {
+    }>(`/people/suggestions/count${QS.query(QS.explode({
+        personId
+    }))}`, {
         ...opts
     }));
 }

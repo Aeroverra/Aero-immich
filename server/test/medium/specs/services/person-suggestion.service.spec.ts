@@ -371,6 +371,32 @@ describe(PersonSuggestionService.name, () => {
     });
   });
 
+  describe('questions about one person', () => {
+    it('should list and count only the questions about that person', async () => {
+      const { sut, ctx } = setup();
+      const random = newRandom(23);
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const uma = await seedPerson(ctx, user.id, random, { name: 'Uma', identity: randomDirection(random), faces: 2 });
+      const vic = await seedPerson(ctx, user.id, random, { name: 'Vic', identity: randomDirection(random), faces: 2 });
+      const unnamed = await seedPerson(ctx, user.id, random, { identity: randomDirection(random), faces: 1 });
+      const other = await seedPerson(ctx, user.id, random, { identity: randomDirection(random), faces: 1 });
+      const aboutUma = await sut.create(auth, { personId: unnamed.personGroupId, targetPersonId: uma.personGroupId });
+      const aboutUnnamed = await sut.create(auth, {
+        personId: unnamed.personGroupId,
+        targetPersonId: vic.personGroupId,
+      });
+      await sut.create(auth, { personId: other.personGroupId, targetPersonId: vic.personGroupId });
+
+      await expect(sut.getStatistics(auth, { personId: uma.personGroupId })).resolves.toEqual({ pending: 1 });
+      await expect(sut.getStatistics(auth, { personId: unnamed.personGroupId })).resolves.toEqual({ pending: 2 });
+      await expect(sut.getStatistics(auth)).resolves.toEqual({ pending: 3 });
+      const { suggestions, total } = await sut.getAll(auth, { page: 1, size: 10, personId: unnamed.personGroupId });
+      expect(total).toBe(2);
+      expect(suggestions.map(({ id }) => id).toSorted()).toEqual([aboutUma.id, aboutUnnamed.id].toSorted());
+    });
+  });
+
   describe('getAll', () => {
     it('should show both sides with faces, names and counts', async () => {
       const { sut, ctx } = setup();

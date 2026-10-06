@@ -34,6 +34,14 @@ describe(PersonController.name, () => {
       expect(service.getById).not.toHaveBeenCalled();
     });
 
+    it('should only take a uuid as the person', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .get('/people/suggestions')
+        .query({ personId: 'invalid' })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+    });
+
     it('should limit the page size', async () => {
       const { status } = await request(ctx.getHttpServer())
         .get('/people/suggestions')
@@ -45,8 +53,12 @@ describe(PersonController.name, () => {
 
   describe('GET /people/suggestions/count', () => {
     it('should not be taken for a person id', async () => {
-      await request(ctx.getHttpServer()).get('/people/suggestions/count').set('Authorization', `Bearer token`);
-      expect(suggestionService.getStatistics).toHaveBeenCalled();
+      const personId = factory.uuid();
+      await request(ctx.getHttpServer())
+        .get('/people/suggestions/count')
+        .query({ personId })
+        .set('Authorization', `Bearer token`);
+      expect(suggestionService.getStatistics).toHaveBeenCalledWith(undefined, { personId });
       expect(service.getStatistics).not.toHaveBeenCalled();
     });
   });

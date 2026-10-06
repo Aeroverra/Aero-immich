@@ -475,9 +475,12 @@ export class PersonSuggestionRepository {
    * The pending questions the caller can be asked right now, most valuable first: both sides still exist and have a
    * face the caller may see, the candidate is still unnamed or without a person, and nobody involved is hidden
    */
-  @GenerateSql({ params: [dummyScope, { take: 10, skip: 0 }] })
-  getPending(scope: PrivateScope, { take, skip }: { take: number; skip: number }) {
-    return this.pendingQuery(scope)
+  @GenerateSql({ params: [dummyScope, { take: 10, skip: 0, personGroupId: DummyValue.UUID }] })
+  getPending(
+    scope: PrivateScope,
+    { take, skip, personGroupId }: { take: number; skip: number; personGroupId?: string },
+  ) {
+    return this.pendingQuery(scope, personGroupId)
       .selectAll('person_suggestion')
       .orderBy('person_suggestion.priority', 'desc')
       .orderBy('person_suggestion.id')
@@ -486,76 +489,87 @@ export class PersonSuggestionRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [dummyScope] })
-  async getPendingCount(scope: PrivateScope): Promise<number> {
-    const row = await this.pendingQuery(scope)
+  @GenerateSql({ params: [dummyScope, DummyValue.UUID] })
+  async getPendingCount(scope: PrivateScope, personGroupId?: string): Promise<number> {
+    const row = await this.pendingQuery(scope, personGroupId)
       .select((eb) => eb.fn.countAll<number>().as('count'))
       .executeTakeFirst();
 
     return Number(row?.count ?? 0);
   }
 
-  private pendingQuery(scope: PrivateScope) {
+  private pendingQuery(scope: PrivateScope, personGroupId?: string) {
     const ownerId = scope.userId;
-    return this.db
-      .selectFrom('person_suggestion')
-      .innerJoin('person as target', (join) =>
-        join
-          .onRef('target.personGroupId', '=', 'person_suggestion.targetPersonGroupId')
-          .on('target.ownerId', '=', ownerId),
-      )
-      .leftJoin('person as candidate', (join) =>
-        join
-          .onRef('candidate.personGroupId', '=', 'person_suggestion.personGroupId')
-          .on('candidate.ownerId', '=', ownerId),
-      )
-      .leftJoin('asset_face as face', 'face.id', 'person_suggestion.faceId')
-      .leftJoin('person as facePerson', (join) =>
-        join.onRef('facePerson.personGroupId', '=', 'face.personGroupId').on('facePerson.ownerId', '=', ownerId),
-      )
-      .where('person_suggestion.ownerId', '=', ownerId)
-      .where('person_suggestion.status', '=', PersonSuggestionStatus.Pending)
-      .where('target.isHidden', '=', false)
-      .where((eb) =>
-        eb.or([
-          eb.and([eb('candidate.isHidden', '=', false), eb('candidate.name', '=', '')]),
-          // a face without a person, or with an unnamed one (questions created through the API); a face that went to
-          // a named person in the meantime has its answer
-          eb.and([
-            eb('face.id', 'is not', null),
-            eb.or([eb('face.personGroupId', 'is', null), eb('facePerson.name', '=', '')]),
+    return (
+      this.db
+        .selectFrom('person_suggestion')
+        // only the questions about one person: asked about, or the one asked about may be them
+        .$if(!!personGroupId, (qb) =>
+          qb.where((eb) =>
             eb.or([
-              eb('face.personGroupId', 'is', null),
-              eb('face.personGroupId', '!=', eb.ref('person_suggestion.targetPersonGroupId')),
+              eb('person_suggestion.personGroupId', '=', personGroupId!),
+              eb('person_suggestion.targetPersonGroupId', '=', personGroupId!),
+            ]),
+          ),
+        )
+        .innerJoin('person as target', (join) =>
+          join
+            .onRef('target.personGroupId', '=', 'person_suggestion.targetPersonGroupId')
+            .on('target.ownerId', '=', ownerId),
+        )
+        .leftJoin('person as candidate', (join) =>
+          join
+            .onRef('candidate.personGroupId', '=', 'person_suggestion.personGroupId')
+            .on('candidate.ownerId', '=', ownerId),
+        )
+        .leftJoin('asset_face as face', 'face.id', 'person_suggestion.faceId')
+        .leftJoin('person as facePerson', (join) =>
+          join.onRef('facePerson.personGroupId', '=', 'face.personGroupId').on('facePerson.ownerId', '=', ownerId),
+        )
+        .where('person_suggestion.ownerId', '=', ownerId)
+        .where('person_suggestion.status', '=', PersonSuggestionStatus.Pending)
+        .where('target.isHidden', '=', false)
+        .where((eb) =>
+          eb.or([
+            eb.and([eb('candidate.isHidden', '=', false), eb('candidate.name', '=', '')]),
+            // a face without a person, or with an unnamed one (questions created through the API); a face that went to
+            // a named person in the meantime has its answer
+            eb.and([
+              eb('face.id', 'is not', null),
+              eb.or([eb('face.personGroupId', 'is', null), eb('facePerson.name', '=', '')]),
+              eb.or([
+                eb('face.personGroupId', 'is', null),
+                eb('face.personGroupId', '!=', eb.ref('person_suggestion.targetPersonGroupId')),
+              ]),
             ]),
           ]),
-        ]),
-      )
-      .where((eb) =>
-        eb.exists(
-          eb
-            .selectFrom('asset_face')
-            .innerJoin('asset', 'asset.id', 'asset_face.assetId')
-            .select('asset_face.id')
-            .where((eb) =>
-              eb.or([
-                eb('asset_face.personGroupId', '=', eb.ref('person_suggestion.personGroupId')),
-                eb('asset_face.id', '=', eb.ref('person_suggestion.faceId')),
-              ]),
-            )
-            .where((eb) => isShownFace(eb, scope)),
-        ),
-      )
-      .where((eb) =>
-        eb.exists(
-          eb
-            .selectFrom('asset_face')
-            .innerJoin('asset', 'asset.id', 'asset_face.assetId')
-            .select('asset_face.id')
-            .whereRef('asset_face.personGroupId', '=', 'person_suggestion.targetPersonGroupId')
-            .where((eb) => isShownFace(eb, scope)),
-        ),
-      );
+        )
+        .where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('asset_face')
+              .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+              .select('asset_face.id')
+              .where((eb) =>
+                eb.or([
+                  eb('asset_face.personGroupId', '=', eb.ref('person_suggestion.personGroupId')),
+                  eb('asset_face.id', '=', eb.ref('person_suggestion.faceId')),
+                ]),
+              )
+              .where((eb) => isShownFace(eb, scope)),
+          ),
+        )
+        .where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('asset_face')
+              .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+              .select('asset_face.id')
+              .whereRef('asset_face.personGroupId', '=', 'person_suggestion.targetPersonGroupId')
+              .where((eb) => isShownFace(eb, scope)),
+          ),
+        )
+    );
   }
 
   /** The latest answers, newest first */

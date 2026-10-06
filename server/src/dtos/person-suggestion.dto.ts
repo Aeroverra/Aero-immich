@@ -8,12 +8,22 @@ import {
 } from 'src/enum';
 import z from 'zod';
 
+const personFilter = z
+  .uuidv4()
+  .optional()
+  .describe('Only questions about this person, whether they are the one asked about or the one they may be');
+
 const PersonSuggestionSearchSchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1).describe('Page number for pagination'),
     size: z.coerce.number().int().min(1).max(50).default(10).describe('Number of questions per page'),
+    personId: personFilter,
   })
   .meta({ id: 'PersonSuggestionSearchDto' });
+
+const PersonSuggestionStatisticsSchema = z
+  .object({ personId: personFilter })
+  .meta({ id: 'PersonSuggestionStatisticsDto' });
 
 const PersonSuggestionAnswersSearchSchema = z
   .object({
@@ -96,6 +106,7 @@ const PersonSuggestionStatisticsResponseSchema = z
 
 export class PersonSuggestionSearchDto extends createZodDto(PersonSuggestionSearchSchema) {}
 export class PersonSuggestionAnswersSearchDto extends createZodDto(PersonSuggestionAnswersSearchSchema) {}
+export class PersonSuggestionStatisticsDto extends createZodDto(PersonSuggestionStatisticsSchema) {}
 export class PersonSuggestionAnswerDto extends createZodDto(PersonSuggestionAnswerRequestSchema) {}
 export class PersonSuggestionCreateDto extends createZodDto(PersonSuggestionCreateSchema) {}
 export class PersonSuggestionResponseDto extends createZodDto(PersonSuggestionResponseSchema) {}
