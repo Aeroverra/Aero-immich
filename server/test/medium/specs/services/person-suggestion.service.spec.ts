@@ -369,6 +369,69 @@ describe(PersonSuggestionService.name, () => {
       );
       expect(order).toEqual(['big', 'face', 'imported']);
     });
+
+    it('should put first the kinds of question the user says same to, whatever their scores', async () => {
+      const { sut, ctx } = setup();
+      const random = newRandom(24);
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const una = randomDirection(random);
+      const { personGroupId: unaId } = await seedPerson(ctx, user.id, random, { name: 'Una', identity: una, faces: 8 });
+      const face = await seedPerson(ctx, user.id, random, { identity: una, faces: 1, loose: true });
+      // one person split in two unnamed halves: more photos, and they score high
+      const val = randomDirection(random);
+      const half = await seedPerson(ctx, user.id, random, { identity: val, faces: 3, firstDay: 1 });
+      await seedPerson(ctx, user.id, random, { identity: val, faces: 4, firstDay: 2 });
+
+      const getOrder = async () => {
+        const { suggestions } = await sut.getAll(auth, { page: 1, size: 10 });
+        return suggestions.map(({ candidate }) =>
+          candidate.person?.id === half.personGroupId
+            ? 'unnamed'
+            : candidate.faces[0]?.id === face.faceIds[0]
+              ? 'face'
+              : '?',
+        );
+      };
+
+      await sut.handleSuggestions({ userId: user.id });
+      await expect(getOrder()).resolves.toEqual(['unnamed', 'face']);
+
+      // earlier answers: faces were the person they looked like, two unnamed people never sure
+      const strangers: { personGroupId: string }[] = [];
+      for (let index = 0; index < 12; index++) {
+        strangers.push(await seedPerson(ctx, user.id, random, { identity: randomDirection(random), faces: 1 }));
+      }
+      const loose = await seedPerson(ctx, user.id, random, {
+        identity: randomDirection(random),
+        faces: 6,
+        loose: true,
+      });
+      const answeredAt = new Date();
+      await ctx.get(PersonSuggestionRepository).createAll([
+        ...loose.faceIds.map((faceId) => ({
+          ownerId: user.id,
+          kind: PersonSuggestionKind.Named,
+          faceId,
+          targetPersonGroupId: unaId,
+          score: 0.4,
+          status: PersonSuggestionStatus.Same,
+          answeredAt,
+        })),
+        ...strangers.slice(0, 6).map(({ personGroupId }, index) => ({
+          ownerId: user.id,
+          kind: PersonSuggestionKind.Unnamed,
+          personGroupId,
+          targetPersonGroupId: strangers[index + 6].personGroupId,
+          score: 0.6,
+          status: PersonSuggestionStatus.Skipped,
+          answeredAt,
+        })),
+      ]);
+
+      await sut.handleSuggestions({ userId: user.id });
+      await expect(getOrder()).resolves.toEqual(['face', 'unnamed']);
+    });
   });
 
   describe('questions about one person', () => {

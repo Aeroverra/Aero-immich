@@ -412,6 +412,7 @@ const newPersonSuggestionRepositoryMock = () => {
   mock.getDifferentPersonGroupIds.mockResolvedValue([]);
   mock.getFacesDifferentFrom.mockResolvedValue([]);
   mock.getPeopleDifferentFrom.mockResolvedValue([]);
+  mock.getAnswerOutcomes.mockResolvedValue([]);
   mock.moveToPerson.mockResolvedValue();
   return mock;
 };

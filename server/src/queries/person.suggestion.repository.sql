@@ -936,6 +936,26 @@ order by
 limit
   $3
 
+-- PersonSuggestionRepository.getAnswerOutcomes
+select
+  "kind",
+  "faceId" is not null as "isFace",
+  count(*) filter (
+    where
+      "status" = $1
+  ) as "same",
+  sum(
+    person_suggestion.score::float8 * person_suggestion.score
+  ) as "expected"
+from
+  "person_suggestion"
+where
+  "ownerId" = $2
+  and "status" != $3
+group by
+  "kind",
+  "isFace"
+
 -- PersonSuggestionRepository.getShownFaces
 select distinct
   on ("face"."tile") "face"."id",

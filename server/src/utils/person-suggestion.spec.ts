@@ -1,5 +1,8 @@
+import { PersonSuggestionKind } from 'src/enum';
 import {
+  getAnswerWeights,
   getFaceMatchScore,
+  getSuggestionClass,
   getSuggestionPriority,
   getSuggestionScore,
   getTopMean,
@@ -106,6 +109,62 @@ describe('person suggestion scoring', () => {
       expect(getSuggestionPriority({ ...base, score: 0.7, assets: 5, days: 3, latest: recent })).toBeGreaterThan(
         getSuggestionPriority({ ...base, score: 0.4, assets: 12, days: 3, latest: recent }),
       );
+    });
+
+    it('should scale with the weight of the kind of question', () => {
+      const question = { ...base, assets: 5, days: 3, latest: recent };
+      expect(getSuggestionPriority({ ...question, weight: 2 })).toBeCloseTo(2 * getSuggestionPriority(question));
+      expect(getSuggestionPriority({ ...question, weight: -1 })).toBe(0);
+    });
+  });
+
+  describe(getSuggestionClass.name, () => {
+    it('should tell faces, unnamed people and two unnamed people apart', () => {
+      expect(getSuggestionClass(PersonSuggestionKind.Named, true)).toBe('face');
+      expect(getSuggestionClass(PersonSuggestionKind.Named, false)).toBe('person');
+      expect(getSuggestionClass(PersonSuggestionKind.Unnamed, false)).toBe('unnamed');
+    });
+  });
+
+  describe(getAnswerWeights.name, () => {
+    const named = PersonSuggestionKind.Named;
+    const unnamed = PersonSuggestionKind.Unnamed;
+
+    it('should weigh every kind the same without answers', () => {
+      expect(getAnswerWeights([])).toEqual({ face: 1, person: 1, unnamed: 1 });
+    });
+
+    it('should put the kinds answered "same" more often than their scores promise first', () => {
+      // 87 of 132 faces were the person, the scores promised 22; 11 of 77 pairs of unnamed people, 17 promised
+      const weights = getAnswerWeights([
+        { kind: named, isFace: true, same: 87, expected: 21.7 },
+        { kind: unnamed, isFace: false, same: 11, expected: 17.2 },
+      ]);
+      expect(weights.face).toBeCloseTo((87 + 3) / (21.7 + 3));
+      expect(weights.unnamed).toBeCloseTo((11 + 3) / (17.2 + 3));
+      expect(weights.person).toBe(1);
+      expect(weights.face).toBeGreaterThan(1);
+      expect(weights.unnamed).toBeLessThan(1);
+    });
+
+    it('should move only a little after a few answers', () => {
+      const { person } = getAnswerWeights([{ kind: named, isFace: false, same: 0, expected: 0.5 }]);
+      expect(person).toBeCloseTo(3 / 3.5);
+    });
+
+    it('should add up rows of the same kind', () => {
+      const { face } = getAnswerWeights(
+        [
+          { kind: named, isFace: true, same: 2, expected: 1 },
+          { kind: named, isFace: true, same: 4, expected: 1 },
+        ],
+        0,
+      );
+      expect(face).toBe(3);
+    });
+
+    it('should be 1 without answers or a prior', () => {
+      expect(getAnswerWeights([], 0)).toEqual({ face: 1, person: 1, unnamed: 1 });
     });
   });
 

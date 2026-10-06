@@ -38,7 +38,9 @@ import { asDateString } from 'src/utils/date';
 import { VideoFrameConfig } from 'src/utils/media';
 import { isPersonSuggestionsEnabled } from 'src/utils/misc';
 import {
+  getAnswerWeights,
   getFaceMatchScore,
+  getSuggestionClass,
   getSuggestionPriority,
   getSuggestionScore,
   NeighborFace,
@@ -177,11 +179,14 @@ export class PersonSuggestionService extends BaseService {
 
     const kind = target.name ? PersonSuggestionKind.Named : PersonSuggestionKind.Unnamed;
     const score = dto.score ?? 0.5;
-    const statistics = await this.personSuggestionRepository.getCandidateStatistics(
-      ownerId,
-      pair.personGroupId ? [pair.personGroupId, pair.targetPersonGroupId] : [pair.targetPersonGroupId],
-      pair.faceId ? [pair.faceId] : [],
-    );
+    const [statistics, outcomes] = await Promise.all([
+      this.personSuggestionRepository.getCandidateStatistics(
+        ownerId,
+        pair.personGroupId ? [pair.personGroupId, pair.targetPersonGroupId] : [pair.targetPersonGroupId],
+        pair.faceId ? [pair.faceId] : [],
+      ),
+      this.personSuggestionRepository.getAnswerOutcomes(ownerId),
+    ]);
     const candidate = statistics.find(({ id }) => id === (pair.personGroupId ?? pair.faceId));
     const targetAssets = statistics.find(({ id }) => id === pair.targetPersonGroupId)?.assets ?? 0;
     const suggestion = await this.personSuggestionRepository.create({
@@ -192,6 +197,7 @@ export class PersonSuggestionService extends BaseService {
       score,
       priority: getSuggestionPriority({
         score,
+        weight: getAnswerWeights(outcomes)[getSuggestionClass(kind, !!pair.faceId)],
         assets: candidate?.assets ?? 1,
         targetAssets,
         days: candidate?.days ?? 1,
@@ -534,18 +540,25 @@ export class PersonSuggestionService extends BaseService {
       personGroupIds.add(pair.targetPersonGroupId);
     }
 
-    const statistics = await this.personSuggestionRepository.getCandidateStatistics(
-      userId,
-      [...personGroupIds],
-      [...faceIds],
-    );
+    const [statistics, outcomes] = await Promise.all([
+      this.personSuggestionRepository.getCandidateStatistics(userId, [...personGroupIds], [...faceIds]),
+      this.personSuggestionRepository.getAnswerOutcomes(userId),
+    ]);
     const statisticsById = new Map(statistics.map((row) => [row.id, row]));
+    // the kinds of question the user says "same" to more often than their scores promise come first
+    const weights = getAnswerWeights(outcomes);
 
     const now = new Date();
-    const getPriority = (candidateId: string, targetId: string, score: number) => {
+    const getPriority = (
+      { kind, faceId }: { kind: PersonSuggestionKind; faceId?: string | null },
+      candidateId: string,
+      targetId: string,
+      score: number,
+    ) => {
       const candidate = statisticsById.get(candidateId);
       return getSuggestionPriority({
         score,
+        weight: weights[getSuggestionClass(kind, !!faceId)],
         assets: candidate?.assets ?? 1,
         targetAssets: statisticsById.get(targetId)?.assets ?? 0,
         days: candidate?.days ?? 1,
@@ -568,7 +581,7 @@ export class PersonSuggestionService extends BaseService {
         }
       }
 
-      const priority = getPriority(pair.faceId ?? personGroupId!, targetPersonGroupId, pair.score);
+      const priority = getPriority(pair, pair.faceId ?? personGroupId!, targetPersonGroupId, pair.score);
       return { ...pair, personGroupId, targetPersonGroupId, priority };
     });
 
@@ -618,7 +631,7 @@ export class PersonSuggestionService extends BaseService {
     for (const suggestion of fromApi) {
       const candidateId = suggestion.faceId ?? suggestion.personGroupId;
       if (candidateId) {
-        const priority = getPriority(candidateId, suggestion.targetPersonGroupId, suggestion.score);
+        const priority = getPriority(suggestion, candidateId, suggestion.targetPersonGroupId, suggestion.score);
         toUpdate.push({ id: suggestion.id, score: suggestion.score, priority });
       }
     }

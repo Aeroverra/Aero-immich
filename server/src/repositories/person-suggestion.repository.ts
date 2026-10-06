@@ -15,6 +15,7 @@ import {
   withFilePath,
   withVideoStream,
 } from 'src/utils/database';
+import { AnswerOutcome } from 'src/utils/person-suggestion';
 
 export type FaceQualityOptions = {
   /** faces with a shorter embedding are left out: backs of heads, upside-down faces and other weak detections */
@@ -584,6 +585,30 @@ export class PersonSuggestionRepository {
       .orderBy('answeredAt', 'desc')
       .limit(limit)
       .execute();
+  }
+
+  /** How the owner answered each kind of question: how often "same", and how often the scores promised it */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getAnswerOutcomes(ownerId: string): Promise<AnswerOutcome[]> {
+    const rows = await this.db
+      .selectFrom('person_suggestion')
+      .select((eb) => [
+        'kind',
+        eb('faceId', 'is not', null).as('isFace'),
+        eb.fn.countAll<number>().filterWhere('status', '=', PersonSuggestionStatus.Same).as('same'),
+        sql<number>`sum(person_suggestion.score::float8 * person_suggestion.score)`.as('expected'),
+      ])
+      .where('ownerId', '=', ownerId)
+      .where('status', '!=', PersonSuggestionStatus.Pending)
+      .groupBy(['kind', 'isFace'])
+      .execute();
+
+    return rows.map(({ kind, isFace, same, expected }) => ({
+      kind,
+      isFace: !!isFace,
+      same: Number(same),
+      expected: Number(expected),
+    }));
   }
 
   /**
