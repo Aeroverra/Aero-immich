@@ -117,7 +117,7 @@
                 </HStack>
               </TableCell>
               <TableCell>
-                <HStack class="justify-center">
+                <HStack class="flex-wrap justify-center gap-1">
                   {#if entry.result === WorkflowResult.Completed}
                     <p class="rounded-full bg-green-700 px-3 py-1 text-xs text-white">
                       {$t('workflow_logging_completed')}
@@ -137,6 +137,13 @@
                       {:else}
                         {$t('error')}
                       {/if}
+                    </p>
+                  {/if}
+                  {#if entry.isManual}
+                    <p
+                      class="rounded-full border border-gray-400 px-3 py-1 text-xs whitespace-nowrap dark:border-gray-500"
+                    >
+                      {$t('workflow_logging_manual')}
                     </p>
                   {/if}
                 </HStack>

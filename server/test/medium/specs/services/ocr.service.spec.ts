@@ -3,6 +3,7 @@ import { AssetFileType, JobStatus } from 'src/enum';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
+import { EventRepository } from 'src/repositories/event.repository';
 import { JobRepository } from 'src/repositories/job.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { MachineLearningRepository } from 'src/repositories/machine-learning.repository';
@@ -16,11 +17,13 @@ import { getKyselyDB } from 'test/utils';
 let defaultDatabase: Kysely<DB>;
 
 const setup = (db?: Kysely<DB>) => {
-  return newMediumService(OcrService, {
+  const result = newMediumService(OcrService, {
     database: db || defaultDatabase,
     real: [AssetRepository, AssetJobRepository, ConfigRepository, OcrRepository, SystemMetadataRepository],
-    mock: [JobRepository, LoggingRepository, MachineLearningRepository],
+    mock: [EventRepository, JobRepository, LoggingRepository, MachineLearningRepository],
   });
+  result.ctx.getMock(EventRepository).emit.mockResolvedValue();
+  return result;
 };
 
 beforeAll(async () => {
@@ -48,6 +51,7 @@ describe(OcrService.name, () => {
     });
 
     await expect(sut.handleOcr({ id: asset.id })).resolves.toBe(JobStatus.Success);
+    expect(ctx.getMock(EventRepository).emit).toHaveBeenCalledWith('AssetOcr', { assetId: asset.id, userId: user.id });
 
     const ocrRepository = ctx.get(OcrRepository);
     await expect(ocrRepository.getByAssetId(asset.id)).resolves.toEqual([

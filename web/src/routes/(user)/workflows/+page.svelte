@@ -31,7 +31,8 @@
 
   let { data }: Props = $props();
 
-  let workflows = $state<WorkflowResponseDto[]>(data.workflows);
+  // follows the page data, so that creating several workflows at once can reload the list
+  let workflows = $derived<WorkflowResponseDto[]>(data.workflows);
 
   const expandedIds = new SvelteSet<string>();
 
@@ -75,7 +76,7 @@
       {:else}
         <div class="my-6 flex flex-col gap-3">
           {#each workflows as workflow (workflow.id)}
-            {@const { ToggleEnabled, Duplicate, Logs, Edit, Delete } = getWorkflowActions($t, workflow)}
+            {@const { ToggleEnabled, Duplicate, Logs, Edit, Delete, Run } = getWorkflowActions($t, workflow)}
 
             <Card class="group shadow-none transition-colors hover:border-primary">
               <CardHeader>
@@ -119,6 +120,7 @@
                     items={[
                       ToggleEnabled,
                       Edit,
+                      Run,
                       Duplicate,
                       Logs,
                       getWorkflowShowSchemaAction($t, expandedIds.has(workflow.id), () => onToggleExpand(workflow.id)),
