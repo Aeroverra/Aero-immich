@@ -13,6 +13,8 @@ import 'package:immich_mobile/providers/album/album_sort_by_options.provider.dar
 import 'package:immich_mobile/providers/album/pending_album_uploads.provider.dart';
 import 'package:immich_mobile/providers/backup/asset_upload_progress.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
+import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:logging/logging.dart';
@@ -37,12 +39,20 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
   @override
   RemoteAlbumState build() {
     _remoteAlbumService = ref.read(remoteAlbumServiceProvider);
+    // Album asset counts depend on the private mode state
+    ref.listen(privateModeFilterProvider, (previous, next) => refresh());
+    // A remote sync can bring or take away albums (a private album follows its assets), so the list is re-read after it
+    ref.listen(syncStatusProvider.select((state) => state.remoteSyncStatus), (previous, next) {
+      if (next == SyncStatus.success) {
+        unawaited(refresh());
+      }
+    });
     return const RemoteAlbumState(albums: []);
   }
 
   Future<List<RemoteAlbum>> _getAll() async {
     try {
-      final albums = await _remoteAlbumService.getAll();
+      final albums = await _remoteAlbumService.getAll(privateFilter: ref.read(privateModeFilterProvider));
       state = state.copyWith(albums: albums);
       return albums;
     } catch (error, stack) {
@@ -189,8 +199,16 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     return _remoteAlbumService.getAssets(albumId);
   }
 
-  Future<({int added, int failed})> addAssets(String albumId, List<String> assetIds) async {
-    final result = await _remoteAlbumService.addAssets(albumId: albumId, assetIds: assetIds);
+  Future<({int added, int failed})> addAssets(
+    String albumId,
+    List<String> assetIds, {
+    bool confirmPrivate = false,
+  }) async {
+    final result = await _remoteAlbumService.addAssets(
+      albumId: albumId,
+      assetIds: assetIds,
+      confirmPrivate: confirmPrivate,
+    );
     if (result.added > 0) {
       await _refreshAlbumInState(albumId);
     }
@@ -217,7 +235,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
   /// are linked immediately; local-only assets are queued in
   /// [pendingAlbumUploadsProvider] (so the album page can show them with
   /// progress indicators), uploaded, and linked one-by-one as each finishes.
-  Future<int> addAssetsToAlbum(String albumId, Iterable<BaseAsset> assets) async {
+  Future<int> addAssetsToAlbum(String albumId, Iterable<BaseAsset> assets, {bool confirmPrivate = false}) async {
     final currentUser = ref.read(currentUserProvider);
     if (currentUser == null) {
       throw Exception('User not logged in');
@@ -239,6 +257,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
         uploader: currentUser,
         candidates: candidates,
         cancelToken: cancelToken,
+        confirmPrivate: confirmPrivate,
         uploadCallbacks: UploadCallbacks(
           onProgress: (localAssetId, _, bytes, totalBytes) {
             final progress = totalBytes > 0 ? bytes / totalBytes : 0.0;
@@ -274,7 +293,7 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
   /// that views bound to the album list (counts, thumbnails) reflect the
   /// latest junction-table changes without a full `refresh()`.
   Future<void> _refreshAlbumInState(String albumId) async {
-    final updated = await _remoteAlbumService.get(albumId);
+    final updated = await _remoteAlbumService.get(albumId, privateFilter: ref.read(privateModeFilterProvider));
     if (updated == null) {
       return;
     }
@@ -282,8 +301,8 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
     state = state.copyWith(albums: state.albums.map((album) => album.id == albumId ? updated : album).toList());
   }
 
-  Future<void> addUsers(String albumId, List<String> userIds) {
-    return _remoteAlbumService.addUsers(albumId: albumId, userIds: userIds);
+  Future<void> addUsers(String albumId, List<String> userIds, {bool confirmPrivate = false}) {
+    return _remoteAlbumService.addUsers(albumId: albumId, userIds: userIds, confirmPrivate: confirmPrivate);
   }
 
   Future<void> removeUser(String albumId, String userId) {
@@ -304,7 +323,18 @@ class RemoteAlbumNotifier extends Notifier<RemoteAlbumState> {
 
 final remoteAlbumDateRangeProvider = StreamProvider.autoDispose.family<(DateTime, DateTime), String>((ref, albumId) {
   final service = ref.watch(remoteAlbumServiceProvider);
-  return service.watchDateRange(albumId);
+  return service.watchDateRange(albumId, privateFilter: ref.watch(privateModeFilterProvider));
+});
+
+/// Whether the album can be shown in this session. A private album is hidden as a whole while
+/// private mode is off, so this flips to false when the mode turns off on an open album page, or
+/// when a sync marks the album private (it follows its assets) while the mode is off.
+final remoteAlbumVisibleProvider = StreamProvider.autoDispose.family<bool, String>((ref, albumId) {
+  final privateFilter = ref.watch(privateModeFilterProvider);
+  return ref
+      .watch(remoteAlbumServiceProvider)
+      .watchAlbum(albumId, privateFilter: privateFilter)
+      .map((album) => album != null);
 });
 
 final remoteAlbumSharedUsersProvider = FutureProvider.autoDispose.family<List<UserDto>, String>((ref, albumId) async {

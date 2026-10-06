@@ -1,6 +1,7 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart' as beta_asset_service;
 import 'package:immich_mobile/domain/services/memory.service.dart';
@@ -13,6 +14,7 @@ import 'package:immich_mobile/providers/infrastructure/asset.provider.dart' as b
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 
@@ -24,6 +26,7 @@ final deepLinkServiceProvider = Provider(
     MemoryService(ref.watch(driftProvider).memoryRepository),
     ref.watch(peopleServiceProvider),
     ref.watch(currentUserProvider),
+    ref.watch(privateModeFilterProvider),
   ),
 );
 
@@ -35,6 +38,7 @@ class DeepLinkService {
   final PeopleService _betaPeopleService;
 
   final UserDto? _currentUser;
+  final PrivateModeFilter _privateFilter;
 
   const DeepLinkService(
     this._betaTimelineFactory,
@@ -42,8 +46,9 @@ class DeepLinkService {
     this._betaRemoteAlbumService,
     this._betaMemoryService,
     this._betaPeopleService,
-    this._currentUser,
-  );
+    this._currentUser, [
+    this._privateFilter = PrivateModeFilter.off,
+  ]);
 
   Future<PageRouteInfo?> handleScheme(PlatformDeepLink link, WidgetRef ref) async {
     // get everything after the scheme, since Uri cannot parse path
@@ -116,7 +121,7 @@ class DeepLinkService {
       return null;
     }
 
-    final album = albumId != null ? await _betaRemoteAlbumService.get(albumId) : null;
+    final album = albumId != null ? await _betaRemoteAlbumService.get(albumId, privateFilter: _privateFilter) : null;
 
     AssetViewer.setAsset(ref, asset);
     return AssetViewerRoute(
@@ -127,7 +132,7 @@ class DeepLinkService {
   }
 
   Future<PageRouteInfo?> _buildAlbumDeepLink(String albumId) async {
-    final album = await _betaRemoteAlbumService.get(albumId);
+    final album = await _betaRemoteAlbumService.get(albumId, privateFilter: _privateFilter);
 
     if (album == null) {
       return null;
@@ -137,7 +142,7 @@ class DeepLinkService {
   }
 
   Future<PageRouteInfo?> _buildActivityDeepLink(String albumId) async {
-    final album = await _betaRemoteAlbumService.get(albumId);
+    final album = await _betaRemoteAlbumService.get(albumId, privateFilter: _privateFilter);
 
     if (album == null || album.isActivityEnabled == false) {
       return null;
