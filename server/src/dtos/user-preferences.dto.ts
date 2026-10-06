@@ -160,6 +160,28 @@ const StackActionsUpdateSchema = z
   .optional()
   .meta({ id: 'StackActionsUpdate' });
 
+const CameraGroupTagPatternsSchema = z
+  .array(z.string().trim().min(1).max(255))
+  .max(100)
+  .describe('Tag values, where * matches anything');
+
+const CameraGroupsUpdateSchema = z
+  .object({
+    enabled: z
+      .boolean()
+      .optional()
+      .describe('Whether files a camera saved from one shot are stacked when they are uploaded'),
+    copyTags: z.boolean().optional().describe('Whether the files of one shot get the same tags when they are stacked'),
+    keepTags: CameraGroupTagPatternsSchema.optional().describe(
+      'Tags that stay on one file of a shot, such as where it came from; * matches anything',
+    ),
+    reviewTags: CameraGroupTagPatternsSchema.optional().describe(
+      'Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything',
+    ),
+  })
+  .optional()
+  .meta({ id: 'CameraGroupsUpdate' });
+
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
@@ -176,6 +198,7 @@ const UserPreferencesUpdateSchema = z
     ratings: RatingsUpdateSchema,
     sharedLinks: SharedLinksUpdateSchema,
     stackActions: StackActionsUpdateSchema,
+    cameraGroups: CameraGroupsUpdateSchema,
     tags: TagsUpdateSchema,
     recentlyAdded: RecentlyAddedUpdateSchema,
     stacks: StacksUpdateSchema,
@@ -312,6 +335,19 @@ const StackActionsResponseSchema = z
   })
   .meta({ id: 'StackActionsResponse' });
 
+const CameraGroupsResponseSchema = z
+  .object({
+    enabled: z.boolean().describe('Whether files a camera saved from one shot are stacked when they are uploaded'),
+    copyTags: z.boolean().describe('Whether the files of one shot get the same tags when they are stacked'),
+    keepTags: z
+      .array(z.string())
+      .describe('Tags that stay on one file of a shot, such as where it came from; * matches anything'),
+    reviewTags: z
+      .array(z.string())
+      .describe('Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything'),
+  })
+  .meta({ id: 'CameraGroupsResponse' });
+
 const UserPreferencesResponseSchema = z
   .object({
     albums: AlbumsResponseSchema,
@@ -332,6 +368,7 @@ const UserPreferencesResponseSchema = z
     autoStack: AutoStackResponseSchema,
     deletedReimport: DeletedReimportResponseSchema,
     stackActions: StackActionsResponseSchema,
+    cameraGroups: CameraGroupsResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });
 

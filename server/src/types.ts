@@ -297,6 +297,8 @@ export interface IAutoStackJob extends IEntityJob, IDelayedJob {
   refresh?: boolean;
 }
 
+export interface IStackCameraGroupJob extends IEntityJob, IDelayedJob {}
+
 export interface INotifyDeletedReimportJob extends IDelayedJob {
   userId: string;
 }
@@ -429,6 +431,7 @@ export type JobItem =
   // Automatic stacks
   | { name: JobName.AutoStackQueueAll; data: IBaseJob }
   | { name: JobName.AutoStack; data: IAutoStackJob }
+  | { name: JobName.StackCameraGroup; data: IStackCameraGroupJob }
 
   // Memories
   | { name: JobName.MemoryCleanup; data?: IBaseJob }
@@ -669,6 +672,14 @@ export type UserPreferences = {
   };
   stackActions: {
     mode: StackActionMode;
+  };
+  cameraGroups: {
+    enabled: boolean;
+    copyTags: boolean;
+    /** tags that stay on one file of a shot, such as where it came from; `*` matches anything */
+    keepTags: string[];
+    /** tags that stay only when every file of a shot has them, such as Unreviewed */
+    reviewTags: string[];
   };
 };
 
