@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Kysely, OrderByDirection, Selectable, ShallowDehydrateObject, sql } from 'kysely';
+import { Kysely, OrderByDirection, Selectable, SelectQueryBuilder, ShallowDehydrateObject, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
@@ -331,17 +331,93 @@ export class SearchRepository {
     }
 
     return this.db.transaction().execute(async (trx) => {
-      await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
-      const items = await searchAssetBuilderLegacy(trx, options)
-        .select(columns.searchAsset)
-        .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
-        .orderBy(sql`smart_search.embedding <=> ${options.embedding}`)
-        .orderBy('asset.id', 'asc')
-        .limit(pagination.size + 1)
-        .offset((pagination.page - 1) * pagination.size)
-        .execute();
-      return paginationHelper(items, pagination.size);
+      const skip = (pagination.page - 1) * pagination.size;
+      const items = await this.searchSmartWithFrames(
+        () => searchAssetBuilderLegacy(trx, options),
+        trx,
+        options.embedding,
+        skip + pagination.size + 1,
+      );
+      return paginationHelper(items.slice(skip), pagination.size);
     });
+  }
+
+  /**
+   * Ranks assets by their best match: the thumbnail embedding or, for analyzed videos, the closest
+   * sampled frame. Both lookups use their vector index with the same filters, then the lists are
+   * merged so every asset appears once. The result is the exact top `limit` of the merged ranking.
+   */
+  private async searchSmartWithFrames(
+    // both search builders fit here, their result types only differ in joined tables
+    getBuilder: () => SelectQueryBuilder<any, any, any>,
+    trx: Kysely<DB>,
+    embedding: string,
+    limit: number,
+  ): Promise<MapAsset[]> {
+    await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
+    const thumbnailMatches = await getBuilder()
+      .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
+      .select(columns.searchAsset)
+      .select(sql<number>`smart_search.embedding <=> ${embedding}`.as('distance'))
+      .orderBy(sql`smart_search.embedding <=> ${embedding}`)
+      .orderBy('asset.id', 'asc')
+      .limit(limit)
+      .$castTo<MapAsset & { distance: number }>()
+      .execute();
+
+    await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.ClipFrame])}`.execute(trx);
+    const frameDistances = new Map<string, number>();
+    // several frames of one video can match, so fetch more rows until enough distinct assets are found
+    for (let frameLimit = limit * 4, attempt = 0; attempt < 4; frameLimit *= 4, attempt++) {
+      const frameMatches = await getBuilder()
+        .innerJoin('smart_search_frame', 'asset.id', 'smart_search_frame.assetId')
+        .select(['asset.id', sql<number>`smart_search_frame.embedding <=> ${embedding}`.as('distance')])
+        .orderBy(sql`smart_search_frame.embedding <=> ${embedding}`)
+        .limit(frameLimit)
+        .$castTo<{ id: string; distance: number }>()
+        .execute();
+
+      frameDistances.clear();
+      for (const { id, distance } of frameMatches) {
+        if (!frameDistances.has(id)) {
+          frameDistances.set(id, distance);
+        }
+      }
+
+      if (frameMatches.length < frameLimit || frameDistances.size >= limit) {
+        break;
+      }
+    }
+
+    if (frameDistances.size === 0) {
+      return thumbnailMatches.map(({ distance: _, ...asset }) => asset);
+    }
+
+    const ranked = thumbnailMatches.map(({ distance, ...asset }) => ({
+      asset,
+      distance: Math.min(distance, frameDistances.get(asset.id) ?? Infinity),
+    }));
+
+    const thumbnailIds = new Set(thumbnailMatches.map(({ id }) => id));
+    const frameOnlyIds = frameDistances
+      .keys()
+      .filter((id) => !thumbnailIds.has(id))
+      .toArray();
+    if (frameOnlyIds.length > 0) {
+      const frameOnlyAssets = await getBuilder()
+        .select(columns.searchAsset)
+        .where('asset.id', '=', anyUuid(frameOnlyIds))
+        .$castTo<MapAsset>()
+        .execute();
+      for (const asset of frameOnlyAssets) {
+        ranked.push({ asset, distance: frameDistances.get(asset.id)! });
+      }
+    }
+
+    return ranked
+      .toSorted((a, b) => a.distance - b.distance || a.asset.id.localeCompare(b.asset.id))
+      .slice(0, limit)
+      .map(({ asset }) => asset);
   }
 
   @GenerateSql({
@@ -495,6 +571,35 @@ export class SearchRepository {
       .execute();
   }
 
+  async replaceFrames(assetId: string, frames: { frameTimestamp: number; embedding: string }[]): Promise<void> {
+    await this.db.transaction().execute(async (trx) => {
+      await trx.deleteFrom('smart_search_frame').where('assetId', '=', assetId).execute();
+      if (frames.length > 0) {
+        await trx
+          .insertInto('smart_search_frame')
+          .values(frames.map(({ frameTimestamp, embedding }) => ({ assetId, frameTimestamp, embedding })))
+          .execute();
+      }
+    });
+  }
+
+  @GenerateSql({ params: [DummyValue.VECTOR, [DummyValue.UUID]] })
+  async getMinFaceDistance(embedding: string, personGroupIds: string[]): Promise<number | null> {
+    if (personGroupIds.length === 0) {
+      return null;
+    }
+
+    const result = await this.db
+      .selectFrom('asset_face')
+      .innerJoin('face_search', 'face_search.faceId', 'asset_face.id')
+      .select(sql<number | null>`min(face_search.embedding <=> ${embedding})`.as('distance'))
+      .where('asset_face.personGroupId', '=', anyUuid(personGroupIds))
+      .where('asset_face.deletedAt', 'is', null)
+      .executeTakeFirst();
+
+    return result?.distance ?? null;
+  }
+
   async upsert(assetId: string, embedding: string): Promise<void> {
     await this.db
       .insertInto('smart_search')
@@ -629,16 +734,14 @@ export class SearchRepository {
     scope: AssetSearchScope,
   ) {
     return this.db.transaction().execute(async (trx) => {
-      await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
-      const items = await searchAssetBuilder(trx, options, scope)
-        .select(columns.searchAsset)
-        .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
-        .orderBy(sql`smart_search.embedding <=> ${options.embedding}`)
-        .orderBy('asset.id', 'asc')
-        .limit(pagination.take + 1)
-        .offset(pagination.skip ?? 0)
-        .execute();
-      return paginationHelper(items, pagination.take);
+      const skip = pagination.skip ?? 0;
+      const items = await this.searchSmartWithFrames(
+        () => searchAssetBuilder(trx, options, scope),
+        trx,
+        options.embedding,
+        skip + pagination.take + 1,
+      );
+      return paginationHelper(items.slice(skip), pagination.take);
     });
   }
 
