@@ -41,6 +41,10 @@
   let isLooking = $state(false);
 
   const current = $derived(queue[0]);
+  // when coming from a person's page, only the questions about that person
+  const person = $derived(data.person);
+  const personId = $derived(person?.id);
+  const personName = $derived(person?.name || $t('same_person_unknown'));
 
   // the next question's faces load while this one is answered
   $effect(() => {
@@ -55,7 +59,7 @@
       return;
     }
 
-    const response = await getPersonSuggestions({ size: 10 });
+    const response = await getPersonSuggestions({ size: 10, personId });
     const known = new Set(queue.map(({ id }) => id));
     queue = [...queue, ...response.suggestions.filter(({ id }) => !known.has(id))];
     total = response.total;
@@ -137,7 +141,7 @@
     const check = async (): Promise<void> => {
       attempts++;
       try {
-        const { pending } = await getPersonSuggestionStatistics();
+        const { pending } = await getPersonSuggestionStatistics({ personId });
         if (pending > queue.length) {
           await refill();
           stopLooking();
@@ -193,6 +197,17 @@
   {/snippet}
 
   <div class="mx-auto flex w-full max-w-4xl flex-col gap-6 px-2 pt-2 pb-8 sm:px-4">
+    {#if person}
+      <div
+        class="flex flex-wrap items-center justify-center gap-2 text-sm text-gray-600 dark:text-gray-400"
+        data-testid="suggestion-filter"
+      >
+        <span>{$t('same_person_about', { values: { name: personName } })}</span>
+        <Button href={Route.peopleSuggestions()} size="tiny" variant="outline" color="secondary"
+          >{$t('same_person_show_all')}</Button
+        >
+      </div>
+    {/if}
     {#if current}
       <SuggestionQuestion suggestion={current} {busy} onAnswer={handleAnswer} />
       <p class="text-center text-sm text-gray-600 dark:text-gray-400" data-testid="suggestion-left">
@@ -204,9 +219,23 @@
         data-testid="suggestion-empty"
       >
         <Icon icon={mdiAccountQuestionOutline} size="3.5em" />
-        <p class="text-2xl font-medium">{$t('same_person_no_questions')}</p>
-        <p class="max-w-md text-sm text-gray-600 dark:text-gray-400">{$t('same_person_no_questions_description')}</p>
-        {#if isLooking}
+        {#if person}
+          <p class="text-2xl font-medium">{$t('same_person_no_questions_about', { values: { name: personName } })}</p>
+          <div class="flex flex-wrap justify-center gap-2">
+            <Button href={Route.viewPerson(person)} variant="outline" color="secondary" leadingIcon={mdiArrowLeft}
+              >{$t('same_person_back_to_person', { values: { name: personName } })}</Button
+            >
+            <Button href={Route.peopleSuggestions()}>{$t('same_person_all_questions')}</Button>
+          </div>
+        {:else}
+          <p class="text-2xl font-medium">{$t('same_person_no_questions')}</p>
+          <p class="max-w-md text-sm text-gray-600 dark:text-gray-400">
+            {$t('same_person_no_questions_description')}
+          </p>
+        {/if}
+        {#if person}
+          <!-- looking for more works out the questions about everyone; the full list is one click away -->
+        {:else if isLooking}
           <div class="flex items-center gap-2 text-sm" data-testid="suggestion-looking">
             <LoadingSpinner />
             <span>{$t('same_person_looking')}</span>

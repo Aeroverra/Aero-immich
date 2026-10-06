@@ -60,12 +60,14 @@ const newSuggestion = (id: string, target: PersonResponseDto, status = PersonSug
 const getData = (
   suggestions: PersonSuggestionResponseDto[],
   answers: PersonSuggestionResponseDto[] = [],
+  person?: PersonResponseDto,
 ): ComponentProps<typeof PersonSuggestionsPage>['data'] => ({
   error: undefined,
   meta: { title: 'Same person?' },
   asset: undefined,
   suggestions: { suggestions, total: suggestions.length, hasNextPage: false },
   answers,
+  person,
 });
 
 describe('Same person? page', () => {
@@ -141,6 +143,27 @@ describe('Same person? page', () => {
       id: 'pair',
       personSuggestionAnswerDto: { answer: PersonSuggestionAnswer.Same, name: undefined },
     });
+  });
+
+  it('asks only about the person it was opened for', async () => {
+    const first = newSuggestion('first', anna);
+    vi.mocked(answerPersonSuggestion).mockResolvedValue({ ...first, status: PersonSuggestionStatus.Different });
+    vi.mocked(getPersonSuggestions).mockResolvedValue({ suggestions: [], total: 0, hasNextPage: false });
+    const user = userEvent.setup();
+
+    render(PersonSuggestionsPageTestWrapper, { data: getData([first], [], anna) });
+    expect(screen.getByTestId('suggestion-filter')).toHaveTextContent('same_person_about');
+    expect(screen.getByText('same_person_show_all').closest('a')?.getAttribute('href')).toBe('/people/review');
+
+    await user.click(screen.getByTestId('suggestion-different'));
+
+    await waitFor(() => expect(screen.getByTestId('suggestion-empty')).toBeInTheDocument());
+    expect(getPersonSuggestions).toHaveBeenCalledWith({ size: 10, personId: anna.id });
+    expect(screen.getByText('same_person_no_questions_about')).toBeInTheDocument();
+    expect(screen.getByText('same_person_back_to_person').closest('a')?.getAttribute('href')).toBe(
+      `/people/${anna.id}`,
+    );
+    expect(screen.queryByTestId('suggestion-look')).not.toBeInTheDocument();
   });
 
   it('looks for more questions when there are none', async () => {

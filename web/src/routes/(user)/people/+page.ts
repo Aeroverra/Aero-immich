@@ -9,7 +9,7 @@ export const load = (async ({ url }) => {
   const [people, suggestions] = await Promise.all([
     getAllPeople({ withHidden: true }),
     // the questions are a nice to have: the page works without their count
-    getPersonSuggestionStatistics().catch(() => ({ pending: 0 })),
+    getPersonSuggestionStatistics({}).catch(() => ({ pending: 0 })),
   ]);
   const $t = await getFormatter();
 
