@@ -257,6 +257,12 @@ export class JobService extends BaseService {
         break;
       }
 
+      case JobName.AssetDetectFaces: {
+        // attributes are computed for the faces that detection just stored
+        await this.jobRepository.queue({ name: JobName.AssetDetectFaceAttributes, data: { id: item.data.id } });
+        break;
+      }
+
       // no default
     }
   }
