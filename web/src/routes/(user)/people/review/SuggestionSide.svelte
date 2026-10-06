@@ -66,7 +66,7 @@
   <div class="grid gap-2 {columns}">
     {#each side.faces as face (face.id)}
       <a
-        href={Route.viewAsset({ id: face.assetId })}
+        href={Route.viewAsset({ id: face.assetId }, { face: face.id })}
         target="_blank"
         rel="noopener noreferrer"
         title={$t('same_person_open_photo', { values: { date: formatDate(face.takenAt) } })}

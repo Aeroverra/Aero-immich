@@ -130,7 +130,7 @@
         }}
         data-testid="suggestion-name-form"
       >
-        <label for="suggestion-name" class="text-center text-sm">{$t('same_person_name_prompt')}</label>
+        <label for="suggestion-name" class="text-center text-sm">{$t('same_person_name_prompt_optional')}</label>
         <Input
           id="suggestion-name"
           bind:value={name}
@@ -150,18 +150,14 @@
             {$t('same_person_merge_into_existing', { values: { name: existing.name } })}
           </p>
         {/if}
+        <!-- a name is optional: with the field empty, Merge (or Enter) merges them without one -->
         <div class="flex justify-center gap-2">
           <Button type="button" size="small" variant="ghost" color="secondary" onclick={cancelNaming}
             >{$t('cancel')}</Button
           >
-          <Button
-            type="button"
-            size="small"
-            variant="outline"
-            color="secondary"
-            onclick={() => onAnswer(PersonSuggestionAnswer.Same)}>{$t('skip')}</Button
-          >
-          <Button type="submit" size="small" disabled={!name.trim()}>{$t('same_person_save_name')}</Button>
+          <Button type="submit" size="small" data-testid="suggestion-merge">
+            {name.trim() ? $t('same_person_merge_and_name') : $t('same_person_merge_without_name')}
+          </Button>
         </div>
       </form>
     {:else}

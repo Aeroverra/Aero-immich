@@ -57,6 +57,8 @@ describe('SuggestionQuestion', () => {
     expect(faces).toHaveLength(7);
     expect(faces[0].getAttribute('src')).toContain('/faces/c1/thumbnail');
     expect(faces[3].getAttribute('src')).toContain('/faces/t1/thumbnail');
+    // a face opens its photo with the face pointed out
+    expect(faces[0].closest('a')?.getAttribute('href')).toBe('/photos/asset-c1?face=c1');
     const titles = screen.getAllByTestId('suggestion-side-title');
     expect(titles[0]).toHaveTextContent('same_person_this_person');
     expect(titles[1]).toHaveTextContent('Anna');
@@ -135,21 +137,36 @@ describe('SuggestionQuestion', () => {
     expect(form).toBeInTheDocument();
 
     // the shortcuts are off while typing
-    await user.keyboard('Dana{Enter}');
+    await user.keyboard('Dana');
+    expect(screen.getByTestId('suggestion-merge')).toHaveTextContent('same_person_merge_and_name');
+    await user.keyboard('{Enter}');
 
     expect(onAnswer).toHaveBeenCalledWith(PersonSuggestionAnswer.Same, 'Dana', undefined);
   });
 
-  it('merges without a name when naming is skipped', async () => {
+  it('merges without a name when the name is left empty', async () => {
     const user = userEvent.setup();
     const { onAnswer } = renderQuestion(
       newSuggestion(personFactory.build({ name: '' }), personFactory.build({ name: '' })),
     );
 
     await user.click(screen.getByTestId('suggestion-same'));
-    await user.click(screen.getByText('skip'));
+    expect(screen.getByTestId('suggestion-merge')).toHaveTextContent('same_person_merge_without_name');
+    await user.click(screen.getByTestId('suggestion-merge'));
 
-    expect(onAnswer).toHaveBeenCalledWith(PersonSuggestionAnswer.Same);
+    expect(onAnswer).toHaveBeenCalledWith(PersonSuggestionAnswer.Same, undefined, undefined);
+  });
+
+  it('merges without a name with S and Enter', async () => {
+    const user = userEvent.setup();
+    const { onAnswer } = renderQuestion(
+      newSuggestion(personFactory.build({ name: '' }), personFactory.build({ name: '' })),
+    );
+
+    await user.keyboard('s');
+    await user.keyboard('{Enter}');
+
+    expect(onAnswer).toHaveBeenCalledWith(PersonSuggestionAnswer.Same, undefined, undefined);
   });
 
   it('goes back to the question on escape', async () => {
