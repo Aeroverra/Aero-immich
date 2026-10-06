@@ -13,8 +13,8 @@ export const PERSON_SUGGESTION = {
   minFaceSize: 0.025,
   /** pairs whose averages are less alike than this are not looked at closer */
   shortlist: 0.15,
-  /** faces of an unnamed person compared one by one, spread over time */
-  facesPerPerson: 12,
+  /** faces of an unnamed person compared one by one, spread over time (each is a vector index search, about 15 ms) */
+  facesPerPerson: 8,
   /** nearest faces looked at for each compared face */
   neighbors: 32,
   /** best face matches averaged per compared face */
