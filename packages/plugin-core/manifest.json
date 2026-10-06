@@ -8,33 +8,261 @@
   "templates": [
     {
       "name": "screenshots-smart-album",
-      "title": "Archive screenshots",
-      "description": "Archive uploads with \"screenshot\" in the filename and optionally add them to an album",
-      "trigger": "AssetCreate",
+      "title": "Screenshots: file names",
+      "description": "Tag screenshots and screen recordings named by phones and computers (Screenshot_..., screen-..., RPReplay, Bildschirmfoto, ...)",
+      "trigger": "AssetMetadataExtraction",
       "steps": [
         {
           "method": "immich-plugin-core#assetFileFilter",
           "config": {
-            "pattern": "screenshot",
-            "matchType": "contains",
+            "pattern": "screenshot|screen[ _-]?shot|^screen-\\d{8}-\\d{6}|screen_?recording|^rpreplay|^capture d.?[ée]cran|^bildschirmfoto|^captura de pantalla",
+            "matchType": "regex",
             "caseSensitive": false
           }
         },
         {
-          "method": "immich-plugin-core#assetArchive",
+          "method": "immich-plugin-core#assetAddTags",
           "config": {
-            "inverse": false
-          }
-        },
-        {
-          "method": "immich-plugin-core#assetAddToAlbums",
-          "config": {
-            "albumName": "Screenshots",
-            "albumIds": []
+            "tags": [],
+            "tagName": "Screenshots"
           }
         }
       ],
-      "uiHints": ["SmartAlbum"]
+      "uiHints": []
+    },
+    {
+      "name": "screenshots-iphone",
+      "title": "Screenshots: iPhone",
+      "description": "Tag iPhone screenshots: IMG_0000.PNG files without a camera make (iPhone photos are HEIC or JPG with a camera make)",
+      "trigger": "AssetMetadataExtraction",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetFileFilter",
+          "config": {
+            "pattern": "^IMG_\\d{4}\\.png$",
+            "matchType": "regex",
+            "caseSensitive": false
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetTypeFilter",
+          "config": {
+            "allowedTypes": ["IMAGE"]
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "make",
+            "matchType": "empty"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "Screenshots"
+          }
+        }
+      ],
+      "uiHints": []
+    },
+    {
+      "name": "screenshots-status-bar",
+      "title": "Screenshots: status bar",
+      "description": "Less certain: tag images without a camera make that show a clock at the very top, like a phone status bar. Runs after text recognition (OCR)",
+      "trigger": "AssetOcr",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetTypeFilter",
+          "config": {
+            "allowedTypes": ["IMAGE"]
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "make",
+            "matchType": "empty"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetOcrFilter",
+          "config": {
+            "pattern": "(^|\\D)([01]?\\d|2[0-3]):[0-5]\\d(\\D|$)",
+            "matchType": "regex",
+            "caseSensitive": false,
+            "maxY": 0.045
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "Screenshots"
+          }
+        }
+      ],
+      "uiHints": []
+    },
+    {
+      "name": "tiktok-downloads-file-names",
+      "title": "TikTok: file names",
+      "description": "Tag videos saved from the TikTok app or downloader sites, recognized by their file name (user_2025-01-01-00-00-00_..., ssstik.io_..., TikTok video ids)",
+      "trigger": "AssetMetadataExtraction",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetFileFilter",
+          "config": {
+            "pattern": "^[A-Za-z0-9._]{2,24}_\\d{4}-\\d\\d-\\d\\d-\\d\\d-\\d\\d-\\d\\d_\\d{13}(_mute)?(\\s?\\(\\d+\\)|-\\d+)?\\.\\w+$|tik.?tok|musical\\.?ly|snaptik|ssstik|tikmate|musicallydown|tiktokio|savett|tikdown|douyin|^v\\d{2}0[0-9a-z]{2}g[a-z0-9]0000[0-9a-z]{10,}|^(?:[^_]*[_ ])?[67]\\d{18}(?![_\\-]\\w*-?n\\b)(?:[ ._(]|$)",
+            "matchType": "regex",
+            "caseSensitive": false
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "TikTok"
+          }
+        }
+      ],
+      "uiHints": []
+    },
+    {
+      "name": "tiktok-downloads-hash-videos",
+      "title": "TikTok: older app saves",
+      "description": "Tag videos with a 32 character hex name, 540 or 576 pixels wide and no camera make, as older TikTok versions saved them",
+      "trigger": "AssetMetadataExtraction",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetFileFilter",
+          "config": {
+            "pattern": "^[0-9a-f]{32}(_mute)?(\\s?\\(\\d+\\)|-\\d+)?\\.mp4$",
+            "matchType": "regex",
+            "caseSensitive": false
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetTypeFilter",
+          "config": {
+            "allowedTypes": ["VIDEO"]
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "make",
+            "matchType": "empty"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "exifImageWidth",
+            "pattern": "^(540|576)$",
+            "matchType": "regex"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "TikTok"
+          }
+        }
+      ],
+      "uiHints": []
+    },
+    {
+      "name": "tiktok-downloads-photo-mode",
+      "title": "TikTok: photo mode",
+      "description": "Tag 3:4 PNG images with a 32 character hex name and no camera make, as TikTok saves photo mode posts",
+      "trigger": "AssetMetadataExtraction",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetFileFilter",
+          "config": {
+            "pattern": "^[0-9a-f]{32}(\\s?\\(\\d+\\)|-\\d+)?\\.png$",
+            "matchType": "regex",
+            "caseSensitive": false
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetTypeFilter",
+          "config": {
+            "allowedTypes": ["IMAGE"]
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "make",
+            "matchType": "empty"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetDimensionFilter",
+          "config": {
+            "aspectRatio": "3:4",
+            "tolerance": 1.5
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "TikTok"
+          }
+        }
+      ],
+      "uiHints": []
+    },
+    {
+      "name": "tiktok-downloads-watermark",
+      "title": "TikTok: watermark",
+      "description": "Tag downloaded videos that show the TikTok watermark, found by text recognition (OCR). Screenshots and screen recordings of the app are left out",
+      "trigger": "AssetOcr",
+      "steps": [
+        {
+          "method": "immich-plugin-core#assetTypeFilter",
+          "config": {
+            "allowedTypes": ["VIDEO"]
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetOcrFilter",
+          "config": {
+            "pattern": "\\btik\\s?tok\\b",
+            "matchType": "regex",
+            "caseSensitive": false
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetFileFilter",
+          "config": {
+            "pattern": "^(Screenshot|screen-|IMG_\\d+\\.PNG|Screen_Recording|RPReplay)",
+            "matchType": "regex",
+            "caseSensitive": false,
+            "inverse": true
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetExifFilter",
+          "config": {
+            "property": "make",
+            "matchType": "empty"
+          }
+        },
+        {
+          "method": "immich-plugin-core#assetAddTags",
+          "config": {
+            "tags": [],
+            "tagName": "TikTok"
+          }
+        }
+      ],
+      "uiHints": []
     },
     {
       "name": "missing-timezone-smart-album",

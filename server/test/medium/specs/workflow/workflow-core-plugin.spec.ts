@@ -20,7 +20,7 @@ import { UserRepository } from 'src/repositories/user.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { DB } from 'src/schema';
 import { WorkflowExecutionService } from 'src/services/workflow-execution.service';
-import { resolveMethod } from 'src/utils/workflow';
+import { isMethodCompatible, resolveMethod } from 'src/utils/workflow';
 import { MediumTestContext } from 'test/medium.factory';
 import { mockEnvData } from 'test/repositories/config.repository.mock';
 import { getKyselyDB } from 'test/utils';
@@ -195,6 +195,18 @@ const setupRun = async () => {
   });
 
   return { user, workflow, match1, match2, other, trashed };
+};
+
+const manifest = JSON.parse(readFileSync('../packages/plugin-core/manifest.json').toString()) as PluginManifestDto;
+
+const runTemplate = async (name: string, assetId: string, ownerId: string) => {
+  const template = manifest.templates.find((template) => template.name === name)!;
+  // swap the action for a favorite, to see which assets the filters let through
+  const filters = template.steps.filter((step) => !step.method.endsWith('#assetAddTags'));
+  const steps = [...filters, { method: 'immich-plugin-core#assetFavorite' }] as WorkflowTemplateStep[];
+  const workflow = await createWorkflow({ ownerId, trigger: template.trigger as WorkflowTrigger, steps });
+  await ctx.sut.handleAssetTrigger({ workflowId: workflow.id, assetId });
+  return isFavorite(assetId);
 };
 
 describe('core plugin', () => {
@@ -961,6 +973,136 @@ describe('core plugin', () => {
       await ctx.sut.handleAssetTrigger({ workflowId: workflow.id, assetId: match1.id });
 
       await expect(isFavorite(match1.id)).resolves.toBe(false);
+    });
+  });
+
+  describe('templates', () => {
+    it('should only use known methods compatible with their trigger', async () => {
+      const methods = await ctx.get(PluginRepository).getForValidation();
+      for (const template of manifest.templates) {
+        for (const step of template.steps) {
+          const method = resolveMethod(methods, step.method);
+          expect(method, `${template.name}: ${step.method}`).toBeDefined();
+          expect(isMethodCompatible(method!, template.trigger as WorkflowTrigger)).toBe(true);
+        }
+      }
+    });
+
+    it.each([
+      ['someuser_2025-01-01-00-00-00_1735689600000.mp4', true],
+      ['some.user_2025-01-01-00-00-00_1735689600000_mute (1).mp4', true],
+      ['ssstik.io_1735689600000.mp4', true],
+      ['Snaptik.app_7123456789012345678.mp4', true],
+      ['v12044gd0000abcdefghijklmnopqrst.mp4', true],
+      ['7123456789012345678.mp4', true],
+      ['12345678_7123456789012345678_1234567890123456_n.jpg', false],
+      ['PXL_20250101_000000000.mp4', false],
+      ['IMG_1234.MOV', false],
+    ])('should recognize TikTok file names: %s', async (originalFileName, expected) => {
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, originalFileName, type: AssetType.Video });
+      await expect(runTemplate('tiktok-downloads-file-names', asset.id, user.id)).resolves.toBe(expected);
+    });
+
+    it('should recognize older TikTok saves by name, width and missing make', async () => {
+      const { user } = await ctx.newUser();
+      const name = '0123456789abcdef0123456789abcdef.mp4';
+      const [{ asset: save }, { asset: camera }, { asset: wide }] = await Promise.all([
+        ctx.newAsset({ ownerId: user.id, originalFileName: name, type: AssetType.Video }),
+        ctx.newAsset({ ownerId: user.id, originalFileName: name, type: AssetType.Video }),
+        ctx.newAsset({ ownerId: user.id, originalFileName: name, type: AssetType.Video }),
+      ]);
+      await ctx.newExif({ assetId: save.id, make: null, exifImageWidth: 576 });
+      await ctx.newExif({ assetId: camera.id, make: 'Apple', exifImageWidth: 576 });
+      await ctx.newExif({ assetId: wide.id, make: null, exifImageWidth: 1080 });
+
+      await expect(runTemplate('tiktok-downloads-hash-videos', save.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads-hash-videos', camera.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads-hash-videos', wide.id, user.id)).resolves.toBe(false);
+    });
+
+    it('should recognize photo mode images by name, ratio and missing make', async () => {
+      const { user } = await ctx.newUser();
+      const [{ asset: png }, { asset: jpg }, { asset: square }] = await Promise.all([
+        ctx.newAsset({
+          ownerId: user.id,
+          originalFileName: '0123456789abcdef0123456789abcdef.png',
+          width: 1080,
+          height: 1440,
+        }),
+        ctx.newAsset({
+          ownerId: user.id,
+          originalFileName: '0123456789abcdef0123456789abcdef.jpg',
+          width: 1080,
+          height: 1440,
+        }),
+        ctx.newAsset({
+          ownerId: user.id,
+          originalFileName: '0123456789abcdef0123456789abcdef.png',
+          width: 1080,
+          height: 1080,
+        }),
+      ]);
+
+      await expect(runTemplate('tiktok-downloads-photo-mode', png.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads-photo-mode', jpg.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads-photo-mode', square.id, user.id)).resolves.toBe(false);
+    });
+
+    it('should recognize the TikTok watermark but not screen recordings of the app', async () => {
+      const { user } = await ctx.newUser();
+      const [{ asset: download }, { asset: recording }] = await Promise.all([
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'video_2025.mp4', type: AssetType.Video }),
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'Screen_Recording_20250101.mp4', type: AssetType.Video }),
+      ]);
+      await addOcr(download.id, [{ text: 'TikTok' }, { text: '@someuser' }]);
+      await addOcr(recording.id, [{ text: 'TikTok' }]);
+
+      await expect(runTemplate('tiktok-downloads-watermark', download.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads-watermark', recording.id, user.id)).resolves.toBe(false);
+    });
+
+    it.each([
+      ['Screenshot_20250101-000000.png', true],
+      ['Screenshot 2025-01-01 at 00.00.00.png', true],
+      ['screen-20250101-000000.mp4', true],
+      ['RPReplay_Final1735689600.MP4', true],
+      ['Bildschirmfoto 2025-01-01 um 00.00.00.png', true],
+      ['Capture d’écran 2025-01-01.png', true],
+      ['IMG_1234.JPG', false],
+      ['screenplay.pdf', false],
+    ])('should recognize screenshot file names: %s', async (originalFileName, expected) => {
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, originalFileName });
+      await expect(runTemplate('screenshots-smart-album', asset.id, user.id)).resolves.toBe(expected);
+    });
+
+    it('should recognize iPhone screenshots by name and missing make', async () => {
+      const { user } = await ctx.newUser();
+      const [{ asset: screenshot }, { asset: photo }] = await Promise.all([
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'IMG_1234.PNG' }),
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'IMG_1235.PNG' }),
+      ]);
+      await ctx.newExif({ assetId: photo.id, make: 'Apple' });
+
+      await expect(runTemplate('screenshots-iphone', screenshot.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('screenshots-iphone', photo.id, user.id)).resolves.toBe(false);
+    });
+
+    it('should recognize a status bar clock', async () => {
+      const { user } = await ctx.newUser();
+      const [{ asset: screenshot }, { asset: photo }] = await Promise.all([
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'image.jpg' }),
+        ctx.newAsset({ ownerId: user.id, originalFileName: 'image.jpg' }),
+      ]);
+      await addOcr(screenshot.id, [
+        { text: '12:30', y: 0.01 },
+        { text: 'Settings', y: 0.1 },
+      ]);
+      await addOcr(photo.id, [{ text: 'Open 9:00 to 17:00', y: 0.5 }]);
+
+      await expect(runTemplate('screenshots-status-bar', screenshot.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('screenshots-status-bar', photo.id, user.id)).resolves.toBe(false);
     });
   });
 
