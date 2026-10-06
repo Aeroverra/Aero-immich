@@ -21,6 +21,9 @@ enum StoreKey<T> {
 
   syncMigrationStatus<String>._(1013),
 
+  // Fork: ids of the tags added most recently from the tag sheet, as a JSON list
+  recentTagIds<String>._(2001),
+
   // Legacy keys that have been migrated to the new metadata store
   legacyBackupRequireCharging<bool>._(7),
   legacyBackupTriggerDelay<int>._(8),
