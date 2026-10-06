@@ -557,6 +557,148 @@ describe(PersonService.name, () => {
 
       expect(mocks.person.createAssetFace).not.toHaveBeenCalled();
     });
+
+    describe('in a video frame', () => {
+      const frameFace = { imageWidth: 1280, imageHeight: 720, x: 600, y: 100, width: 80, height: 90 };
+
+      it('should store the frame timestamp and keep the box in the frame space of a rotated video', async () => {
+        const auth = AuthFactory.create();
+        const asset = AssetFactory.from({ type: AssetType.Video, width: 1080, height: 1920, duration: 30_000 })
+          .exif({ exifImageWidth: 1920, exifImageHeight: 1080 })
+          .edit({ action: AssetEditAction.Rotate, parameters: { angle: 90 }, sequence: 0 })
+          .build();
+        const person = PersonFactory.create({ faceAssetId: newUuid() });
+
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+        mocks.person.getByGroupId.mockResolvedValue(person);
+
+        await expect(
+          sut.createFace(auth, {
+            assetId: asset.id,
+            personId: person.personGroupId,
+            ...frameFace,
+            frameTimestamp: 12_345,
+          }),
+        ).resolves.toBeUndefined();
+
+        expect(mocks.person.createAssetFace).toHaveBeenCalledWith({
+          assetId: asset.id,
+          personGroupId: person.personGroupId,
+          imageWidth: 1280,
+          imageHeight: 720,
+          boundingBoxX1: 600,
+          boundingBoxY1: 100,
+          boundingBoxX2: 680,
+          boundingBoxY2: 190,
+          sourceType: SourceType.Manual,
+          frameTimestamp: 12_345,
+        });
+        expect(mocks.person.refreshFaces).not.toHaveBeenCalled();
+      });
+
+      it('should accept the last moment of a video and a video without a known duration', async () => {
+        const auth = AuthFactory.create();
+        const timed = AssetFactory.create({ type: AssetType.Video, duration: 30_000 });
+        const untimed = AssetFactory.create({ type: AssetType.Video, duration: null });
+        const person = PersonFactory.create({ faceAssetId: newUuid() });
+
+        mocks.access.asset.checkOwnerAccess
+          .mockResolvedValueOnce(new Set([timed.id]))
+          .mockResolvedValueOnce(new Set([untimed.id]));
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.asset.getById.mockResolvedValueOnce(getForAsset(timed)).mockResolvedValueOnce(getForAsset(untimed));
+        mocks.person.getByGroupId.mockResolvedValue(person);
+
+        await sut.createFace(auth, {
+          assetId: timed.id,
+          personId: person.personGroupId,
+          ...frameFace,
+          frameTimestamp: 30_000,
+        });
+        await sut.createFace(auth, {
+          assetId: untimed.id,
+          personId: person.personGroupId,
+          ...frameFace,
+          frameTimestamp: 90_000,
+        });
+
+        expect(mocks.person.createAssetFace).toHaveBeenCalledTimes(2);
+      });
+
+      it('should refuse a frame timestamp on a photo', async () => {
+        const auth = AuthFactory.create();
+        const asset = AssetFactory.create({ type: AssetType.Image });
+        const person = PersonFactory.create({ faceAssetId: newUuid() });
+
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+        mocks.person.getByGroupId.mockResolvedValue(person);
+
+        await expect(
+          sut.createFace(auth, { assetId: asset.id, personId: person.personGroupId, ...frameFace, frameTimestamp: 0 }),
+        ).rejects.toThrow('A frame timestamp can only be set for a video');
+
+        expect(mocks.person.createAssetFace).not.toHaveBeenCalled();
+      });
+
+      it('should refuse a frame timestamp past the end of the video', async () => {
+        const auth = AuthFactory.create();
+        const asset = AssetFactory.create({ type: AssetType.Video, duration: 30_000 });
+        const person = PersonFactory.create({ faceAssetId: newUuid() });
+
+        mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+        mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+        mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+        mocks.person.getByGroupId.mockResolvedValue(person);
+
+        await expect(
+          sut.createFace(auth, {
+            assetId: asset.id,
+            personId: person.personGroupId,
+            ...frameFace,
+            frameTimestamp: 30_001,
+          }),
+        ).rejects.toThrow('Frame timestamp is past the end of the video');
+
+        expect(mocks.person.createAssetFace).not.toHaveBeenCalled();
+      });
+    });
+
+    it('should store a given embedding with the face', async () => {
+      const auth = AuthFactory.create();
+      const asset = AssetFactory.create({ type: AssetType.Video, duration: 30_000 });
+      const person = PersonFactory.create({ faceAssetId: newUuid() });
+      const embedding = Array.from({ length: 512 }, (_, index) => index / 512);
+
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.person.getByGroupId.mockResolvedValue(person);
+      mocks.crypto.randomUUID.mockReturnValue('face-id');
+
+      await sut.createFace(auth, {
+        assetId: asset.id,
+        personId: person.personGroupId,
+        imageWidth: 1280,
+        imageHeight: 720,
+        x: 600,
+        y: 100,
+        width: 80,
+        height: 90,
+        frameTimestamp: 2000,
+        embedding,
+      });
+
+      expect(mocks.person.createAssetFace).not.toHaveBeenCalled();
+      expect(mocks.person.refreshFaces).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: 'face-id', assetId: asset.id, frameTimestamp: 2000 })],
+        [],
+        [{ faceId: 'face-id', embedding: `[${embedding.join(',')}]` }],
+      );
+    });
   });
 
   describe('addToAssets', () => {
