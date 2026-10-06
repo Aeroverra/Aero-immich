@@ -1,4 +1,11 @@
-import { AssetEditAction, AssetMediaSize, MirrorAxis, type AssetResponseDto, type CropParameters } from '@immich/sdk';
+import {
+  AssetEditAction,
+  AssetMediaSize,
+  AssetTypeEnum,
+  MirrorAxis,
+  type AssetResponseDto,
+  type CropParameters,
+} from '@immich/sdk';
 import { clamp } from 'lodash-es';
 import { tick } from 'svelte';
 import { type EditActions, type EditToolManager } from '$lib/managers/edit/edit-manager.svelte';
@@ -37,6 +44,9 @@ export enum ResizeBoundary {
   Bottom = 'bottom',
 }
 
+export const isRotateOnlyAsset = (asset: AssetResponseDto) =>
+  asset.type === AssetTypeEnum.Video || !!asset.livePhotoVideoId;
+
 class TransformManager implements EditToolManager {
   canReset: boolean = $derived.by(() => this.checkEdits());
   hasChanges: boolean = $state(false);
@@ -60,6 +70,8 @@ class TransformManager implements EditToolManager {
     height: this.cropImageSize.height * this.cropImageScale,
   });
 
+  // a video (or the video of a live photo) is turned by its rotation metadata, so it can only be rotated
+  rotateOnly = $state(false);
   imageRotation = $state(0);
   mirrorHorizontal = $state(false);
   mirrorVertical = $state(false);
@@ -104,6 +116,12 @@ class TransformManager implements EditToolManager {
 
   getEdits(): EditActions {
     const edits: EditActions = [];
+
+    if (this.rotateOnly) {
+      return this.normalizedRotation === 0
+        ? edits
+        : [{ action: AssetEditAction.Rotate, parameters: { angle: this.normalizedRotation } }];
+    }
 
     if (this.checkCropEdits()) {
       // Convert from display coordinates to loaded preview image coordinates
@@ -172,6 +190,7 @@ class TransformManager implements EditToolManager {
   }
 
   async onActivate(asset: AssetResponseDto, edits: EditActions): Promise<void> {
+    this.rotateOnly = isRotateOnlyAsset(asset);
     const originalSize = getDimensions(asset.exifInfo!);
     this.originalImageSize = { width: originalSize.width ?? 0, height: originalSize.height ?? 0 };
 
@@ -232,6 +251,7 @@ class TransformManager implements EditToolManager {
     this.cropImageScale = 1;
     this.cropAspectRatio = 'free';
     this.hasChanges = false;
+    this.rotateOnly = false;
   }
 
   mirror(axis: 'horizontal' | 'vertical') {

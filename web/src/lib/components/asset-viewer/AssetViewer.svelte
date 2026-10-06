@@ -433,6 +433,9 @@
     if (previewStackedAsset) {
       return previewStackedAsset.type === AssetTypeEnum.Image ? 'PhotoViewer' : 'StackVideoViewer';
     }
+    if (assetViewerManager.isShowEditor && editManager.selectedTool?.type === EditToolType.Transform) {
+      return 'CropArea';
+    }
     if (asset.type === AssetTypeEnum.Video) {
       return 'VideoViewer';
     }
@@ -444,9 +447,6 @@
       (asset.originalPath && asset.originalPath.toLowerCase().endsWith('.insp'))
     ) {
       return 'ImagePanaramaViewer';
-    }
-    if (assetViewerManager.isShowEditor && editManager.selectedTool?.type === EditToolType.Transform) {
-      return 'CropArea';
     }
     return 'PhotoViewer';
   });
