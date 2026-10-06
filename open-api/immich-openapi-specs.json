@@ -18847,6 +18847,23 @@
         ],
         "type": "object"
       },
+      "AdminConfigFaceAttributesDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "modelName": {
+            "description": "Name of the model to use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "modelName"
+        ],
+        "type": "object"
+      },
       "AdminConfigFacesDto": {
         "properties": {
           "import": {
@@ -19062,6 +19079,9 @@
           "editor": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
+          "faceAttributes": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
           "faceDetection": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
@@ -19105,6 +19125,7 @@
         "required": [
           "backgroundTask",
           "editor",
+          "faceAttributes",
           "faceDetection",
           "integrityCheck",
           "library",
@@ -19234,6 +19255,9 @@
             "description": "Enabled",
             "type": "boolean"
           },
+          "faceAttributes": {
+            "$ref": "#/components/schemas/AdminConfigFaceAttributesDto"
+          },
           "facialRecognition": {
             "$ref": "#/components/schemas/AdminConfigFacialRecognitionDto"
           },
@@ -19254,6 +19278,7 @@
           "clip",
           "duplicateDetection",
           "enabled",
+          "faceAttributes",
           "facialRecognition",
           "ocr",
           "urls"
@@ -22872,6 +22897,8 @@
           "AssetDeleteCheck",
           "AssetDetectFacesQueueAll",
           "AssetDetectFaces",
+          "AssetDetectFaceAttributesQueueAll",
+          "AssetDetectFaceAttributes",
           "AssetDetectDuplicatesQueueAll",
           "AssetDetectDuplicates",
           "AssetEditThumbnailGeneration",
@@ -26018,6 +26045,7 @@
           "notifications",
           "backupDatabase",
           "ocr",
+          "faceAttributes",
           "workflow",
           "integrityCheck",
           "editor"
@@ -26148,6 +26176,9 @@
           "editor": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "faceAttributes": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "faceDetection": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -26199,6 +26230,7 @@
           "backupDatabase",
           "duplicateDetection",
           "editor",
+          "faceAttributes",
           "faceDetection",
           "facialRecognition",
           "integrityCheck",
@@ -27709,6 +27741,10 @@
             "description": "Whether email notifications are enabled",
             "type": "boolean"
           },
+          "faceAttributes": {
+            "description": "Whether face attributes and image quality analysis is enabled",
+            "type": "boolean"
+          },
           "facialRecognition": {
             "description": "Whether facial recognition is enabled",
             "type": "boolean"
@@ -27770,6 +27806,7 @@
           "configFile",
           "duplicateDetection",
           "email",
+          "faceAttributes",
           "facialRecognition",
           "importFaces",
           "map",
@@ -33010,6 +33047,18 @@
         ],
         "type": "object"
       },
+      "UserConfigFaceAttributesDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
       "UserConfigFacialRecognitionDto": {
         "properties": {
           "enabled": {
@@ -33086,6 +33135,9 @@
             "description": "Enabled",
             "type": "boolean"
           },
+          "faceAttributes": {
+            "$ref": "#/components/schemas/UserConfigFaceAttributesDto"
+          },
           "facialRecognition": {
             "$ref": "#/components/schemas/UserConfigFacialRecognitionDto"
           },
@@ -33097,6 +33149,7 @@
           "clip",
           "duplicateDetection",
           "enabled",
+          "faceAttributes",
           "facialRecognition",
           "ocr"
         ],
