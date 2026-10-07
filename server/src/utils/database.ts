@@ -544,6 +544,55 @@ export function inAlbums<O>(qb: SelectQueryBuilder<DB, 'asset', O>, albumIds: st
   );
 }
 
+/** Leaves out the assets that are in any of [albumIds] */
+export function withoutAlbums<O>(qb: SelectQueryBuilder<DB, 'asset', O>, albumIds: string[]) {
+  return qb.where((eb) =>
+    eb.not(
+      eb.exists(
+        eb
+          .selectFrom('album_asset')
+          .whereRef('album_asset.assetId', '=', 'asset.id')
+          .where('album_asset.albumId', '=', anyUuid(albumIds)),
+      ),
+    ),
+  );
+}
+
+/** Asset metadata the takeout importers write from Google's JSON, with the Google upload time as uploadedAt */
+export const GOOGLE_PHOTOS_METADATA_KEY = 'google-photos';
+// written as fixed-format UTC text
+const GOOGLE_UPLOADED_AT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/** The Google Photos upload time in an asset's google-photos metadata, when it is well formed */
+export const getGoogleUploadedAt = (value: unknown) => {
+  const uploadedAt = (value as { uploadedAt?: unknown } | null | undefined)?.uploadedAt;
+  if (typeof uploadedAt !== 'string' || !GOOGLE_UPLOADED_AT.test(uploadedAt)) {
+    return;
+  }
+  const date = new Date(uploadedAt);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+};
+
+/** A time in the text form of {@link uploadedAt}, to the second */
+export const toUploadedAtText = (date: Date) => date.toISOString().slice(0, 19) + 'Z';
+
+/**
+ * When an asset was uploaded: its Google Photos upload time when it was imported from Google Photos,
+ * else when it reached Immich. Compared as UTC text that sorts like time, so a malformed value in the
+ * free-form asset metadata can never fail the query the way a cast would.
+ */
+function uploadedAt(eb: ExpressionBuilder<DB, 'asset'>) {
+  return eb.fn.coalesce(
+    eb
+      .selectFrom('asset_metadata')
+      .select(sql<string>`asset_metadata.value->>'uploadedAt'`.as('uploadedAt'))
+      .whereRef('asset_metadata.assetId', '=', 'asset.id')
+      .where('asset_metadata.key', '=', GOOGLE_PHOTOS_METADATA_KEY)
+      .where(sql`asset_metadata.value->>'uploadedAt'`, '~', GOOGLE_UPLOADED_AT.source),
+    sql<string>`to_char(asset."createdAt" at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')`,
+  );
+}
+
 /** Leaves out the assets that carry any of [tagIds] or one of their child tags */
 export function withoutTags<O>(qb: SelectQueryBuilder<DB, 'asset', O>, tagIds: string[]) {
   return qb.where((eb) =>
@@ -681,6 +730,9 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
       )
       .$call(withPrivateScope(options.privateScope ?? { privateMode: false, userId: '' }))
       .$if(!!options.albumIds && options.albumIds.length > 0, (qb) => inAlbums(qb, options.albumIds!))
+      .$if(!!options.excludeAlbumIds && options.excludeAlbumIds.length > 0, (qb) =>
+        withoutAlbums(qb, options.excludeAlbumIds!),
+      )
       .$if(!!options.tagIds && options.tagIds.length > 0, (qb) => hasTags(qb, options.tagIds!))
       .$if(options.tagIds === null, (qb) =>
         qb.where((eb) => eb.not(eb.exists((eb) => eb.selectFrom('tag_asset').whereRef('assetId', '=', 'asset.id')))),
@@ -689,6 +741,12 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
       .$if(!!options.personIds && options.personIds.length > 0, (qb) => hasPeople(qb, options.personIds!))
       .$if(!!options.createdBefore, (qb) => qb.where('asset.createdAt', '<=', options.createdBefore!))
       .$if(!!options.createdAfter, (qb) => qb.where('asset.createdAt', '>=', options.createdAfter!))
+      .$if(!!options.uploadedBefore, (qb) =>
+        qb.where((eb) => eb(uploadedAt(eb), '<=', toUploadedAtText(options.uploadedBefore!))),
+      )
+      .$if(!!options.uploadedAfter, (qb) =>
+        qb.where((eb) => eb(uploadedAt(eb), '>=', toUploadedAtText(options.uploadedAfter!))),
+      )
       .$if(!!options.updatedBefore, (qb) => qb.where('asset.updatedAt', '<=', options.updatedBefore!))
       .$if(!!options.updatedAfter, (qb) => qb.where('asset.updatedAt', '>=', options.updatedAfter!))
       .$if(!!options.trashedBefore, (qb) => qb.where('asset.deletedAt', '<=', options.trashedBefore!))
