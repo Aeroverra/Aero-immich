@@ -70,6 +70,34 @@ describe('DetailPanelTags', () => {
     expect(screen.getByRole('link', { name: 'Cake' })).toHaveAttribute('title', 'Food/Dessert/Cake');
   });
 
+  it('shows a tag in its own color', () => {
+    const colored = { ...newTag('Trip'), color: '#ff0000' };
+    renderWithTooltips(DetailPanelTags, { asset: { ...video, tags: [cake, colored] }, isOwner: true });
+
+    const chip = (name: string) =>
+      screen.getAllByTestId('tag-chip').find((element) => element.textContent?.includes(name))!;
+    const plain = chip('Cake');
+    const red = chip('Trip');
+    expect(plain.style.backgroundColor).toBe('');
+    expect(red.style.backgroundColor).toBe('#ff0000');
+    expect(red.style.color).toBe('#000000');
+  });
+
+  it('shows only the picker while editing and the tag list again when done', async () => {
+    renderWithTooltips(DetailPanelTags, { asset: video, isOwner: true });
+
+    await userEvent.click(screen.getByTestId('detail-panel-tags-toggle'));
+
+    expect(await screen.findByLabelText('Search or create tags')).toBeInTheDocument();
+    expect(screen.queryByTestId('detail-panel-tags')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove tag' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('detail-panel-tags-toggle'));
+
+    expect(screen.getByRole('link', { name: 'Cake' })).toBeInTheDocument();
+    expect(screen.queryByTestId('tag-tree-picker')).not.toBeInTheDocument();
+  });
+
   it('removes a tag from the whole manual stack', async () => {
     renderWithTooltips(DetailPanelTags, { asset: video, isOwner: true });
 
