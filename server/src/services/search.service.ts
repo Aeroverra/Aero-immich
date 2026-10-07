@@ -443,7 +443,8 @@ export class SearchService extends BaseService {
       return assets;
     }
 
-    const stacks = new Map((await this.stackRepository.getSummaries(stackIds)).map((stack) => [stack.id, stack]));
+    const summaries = await this.stackRepository.getSummaries(stackIds);
+    const stacks = new Map(summaries.map((stack) => [stack.id, stack]));
     return assets.map((asset) => {
       const stack = asset.stackId ? stacks.get(asset.stackId) : undefined;
       return stack ? { ...asset, stack: { ...stack, assetCount: stack.assetCount ?? 0, assets: [] } } : asset;
