@@ -371,6 +371,7 @@
 
 <OnEvents
   onAssetsDelete={onAssetsChanged}
+  onAssetsRestore={onAssetsChanged}
   onAssetsArchive={onAssetsChanged}
   onAssetsUnarchive={onAssetsChanged}
   onPrivateModeChange={onAssetsChanged}
