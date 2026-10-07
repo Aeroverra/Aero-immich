@@ -9,6 +9,7 @@ import {
 } from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem, type IconLike } from '@immich/ui';
 import {
+  mdiArchiveArrowUpOutline,
   mdiCameraBurst,
   mdiClose,
   mdiCog,
@@ -267,6 +268,10 @@ export const asQueueItem = ($t: MessageFormatter, queue: { name: QueueName }): Q
     [QueueName.Editor]: {
       icon: mdiPencil,
       title: $t('editor'),
+    },
+    [QueueName.Takeout]: {
+      icon: mdiArchiveArrowUpOutline,
+      title: $t('admin.takeout_job'),
     },
   };
 
