@@ -7,7 +7,7 @@ import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { DB } from 'src/schema';
 import { SessionTable } from 'src/schema/tables/session.table';
-import { asUuid } from 'src/utils/database';
+import { asUuid, viewFilterColumns } from 'src/utils/database';
 
 @Injectable()
 export class SessionRepository {
@@ -30,7 +30,15 @@ export class SessionRepository {
   get(id: string) {
     return this.db
       .selectFrom('session')
-      .select(['id', 'expiresAt', 'pinExpiresAt', 'privateModeExpiresAt', 'oauthBearerToken'])
+      .select([
+        'id',
+        'expiresAt',
+        'pinExpiresAt',
+        'privateModeExpiresAt',
+        'viewId',
+        'viewExpiresAt',
+        'oauthBearerToken',
+      ])
       .where('id', '=', id)
       .executeTakeFirst();
   }
@@ -58,6 +66,20 @@ export class SessionRepository {
             .whereRef('user.id', '=', 'session.userId')
             .where('user.deletedAt', 'is', null),
         ).as('user'),
+        jsonObjectFrom(
+          eb
+            .selectFrom('view')
+            .select(viewFilterColumns)
+            .whereRef('view.id', '=', 'session.viewId')
+            .whereRef('view.ownerId', '=', 'session.userId'),
+        ).as('view'),
+        jsonObjectFrom(
+          eb
+            .selectFrom('view')
+            .select(viewFilterColumns)
+            .whereRef('view.ownerId', '=', 'session.userId')
+            .where('view.isDefault', '=', true),
+        ).as('defaultView'),
       ])
       .where('session.token', '=', token)
       .where((eb) =>
@@ -134,7 +156,7 @@ export class SessionRepository {
   async lockAll(userId: string) {
     await this.db
       .updateTable('session')
-      .set({ pinExpiresAt: null, privateModeExpiresAt: null })
+      .set({ pinExpiresAt: null, privateModeExpiresAt: null, viewId: null, viewExpiresAt: null })
       .where('userId', '=', userId)
       .execute();
   }
