@@ -144,6 +144,17 @@ delete from "tag"
 where
   "id" = $1
 
+-- TagRepository.getAssetTags
+select
+  "tag_asset"."assetId",
+  "tag"."id",
+  "tag"."value"
+from
+  "tag_asset"
+  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+where
+  "tag_asset"."assetId" in ($1)
+
 -- TagRepository.addAssetIds
 begin
 select
