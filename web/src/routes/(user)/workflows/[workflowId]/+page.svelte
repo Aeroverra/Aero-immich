@@ -287,10 +287,10 @@
       }))}
       overflowActions={mediaQueryManager.maxMd ? [Logs, Duplicate, CopyJson, Download, Delete] : []}
     >
-      <ControlBarHeader>
-        <!-- on phones the header keeps room for the actions -->
-        <ControlBarTitle class="max-w-48 truncate md:max-w-none">{data.workflow.name}</ControlBarTitle>
-        <ControlBarDescription class="hidden md:block">{data.workflow.description}</ControlBarDescription>
+      <!-- the header keeps room for the actions, also with a long description -->
+      <ControlBarHeader class="md:max-w-[45vw]">
+        <ControlBarTitle class="max-w-48 truncate md:max-w-full">{data.workflow.name}</ControlBarTitle>
+        <ControlBarDescription class="hidden truncate md:block">{data.workflow.description}</ControlBarDescription>
       </ControlBarHeader>
       <ControlBarContent class="flex items-center justify-end gap-6">
         {#if hasChanges}
