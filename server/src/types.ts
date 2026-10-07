@@ -204,6 +204,7 @@ export type ConcurrentQueueName = Exclude<
   | QueueName.DuplicateDetection
   | QueueName.AutoStack
   | QueueName.BackupDatabase
+  | QueueName.Takeout
 >;
 
 export type Jobs = { [K in JobItem['name']]: (JobItem & { name: K })['data'] };
@@ -336,6 +337,21 @@ export interface IIntegrityPathWithChecksumJob {
 
 export interface IFacialRecognitionQueueAll extends INightlyJob {
   clusterGroupId?: string;
+}
+
+/** `attempt` is part of the job id, so a job that stalled into the failed set never blocks a re-queue */
+export interface ITakeoutScanPartJob extends IDelayedJob {
+  partId: string;
+  attempt: number;
+}
+
+export interface ITakeoutAnalyzeExportJob extends IDelayedJob {
+  exportId: string;
+}
+
+export interface ITakeoutRunJob extends IDelayedJob {
+  runId: string;
+  attempt: number;
 }
 
 export interface JobCounts {
@@ -475,7 +491,12 @@ export type JobItem =
   | { name: JobName.IntegrityDeleteReports; data: IIntegrityDeleteReportsJob }
 
   // Editor
-  | { name: JobName.AssetEditThumbnailGeneration; data: IEntityJob };
+  | { name: JobName.AssetEditThumbnailGeneration; data: IEntityJob }
+
+  // Takeout
+  | { name: JobName.TakeoutScanPart; data: ITakeoutScanPartJob }
+  | { name: JobName.TakeoutAnalyzeExport; data: ITakeoutAnalyzeExportJob }
+  | { name: JobName.TakeoutRun; data: ITakeoutRunJob };
 
 export type VectorExtension = (typeof VECTOR_EXTENSIONS)[number];
 

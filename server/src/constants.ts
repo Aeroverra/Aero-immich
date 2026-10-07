@@ -27,6 +27,9 @@ export const VECTOR_VERSION_RANGE = '>=0.5 <1';
 export const JOBS_ASSET_PAGINATION_SIZE = 1000;
 export const JOBS_LIBRARY_PAGINATION_SIZE = 10_000;
 
+// takeout jobs read whole archives sequentially; two keep one user from blocking another without thrashing the disk
+export const TAKEOUT_QUEUE_CONCURRENCY = 2;
+
 export const EXTENSION_NAMES: Record<DatabaseExtension, string> = {
   cube: 'cube',
   earthdistance: 'earthdistance',
@@ -199,6 +202,8 @@ export const endpointTags: Record<ApiTag, string> = {
   [ApiTag.SystemConfig]: 'Endpoints to view, modify, and validate the system configuration settings.',
   [ApiTag.SystemMetadata]:
     'Endpoints to view, modify, and validate the system metadata, which includes information about things like admin onboarding status.',
+  [ApiTag.Takeouts]:
+    'Import Google Photos exports made with Google Takeout. Archives are read in place from the takeout folder of the user or uploaded in chunks.',
   [ApiTag.Tags]:
     'A tag is a user-defined label that can be applied to assets for organizational purposes. Tags can also be hierarchical, allowing for parent-child relationships between tags.',
   [ApiTag.Timeline]:
