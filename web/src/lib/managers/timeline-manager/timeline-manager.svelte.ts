@@ -160,6 +160,7 @@ export class TimelineManager extends VirtualScrollManager {
           }
         },
         AssetsUnarchive: (assets) => this.upsertAssets(assets),
+        AssetsRestore: (assets) => this.upsertAssets(assets),
         PrivateModeChange: () => void this.reset(),
       }),
     );

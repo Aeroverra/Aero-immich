@@ -179,10 +179,13 @@ describe('actions on a selection with stacks', () => {
     expect(sdkMock.deleteAssets).toHaveBeenCalledExactlyOnceWith({ assetBulkDeleteDto: { ids, force: false } });
     expect(onAssetDelete).toHaveBeenCalledWith(ids);
 
-    const toast = vi.mocked(toastManager.primary).mock.calls[0][0] as { button: { onclick: () => Promise<void> } };
-    await toast.button.onclick();
+    const toast = vi.mocked(toastManager.primary).mock.calls[0][0] as {
+      button: (close: () => void) => { onclick: () => void };
+    };
+    toast.button(vi.fn()).onclick();
 
+    await waitFor(() => expect(onUndoDelete).toHaveBeenCalledOnce());
     expect(sdkMock.restoreAssets).toHaveBeenCalledExactlyOnceWith({ bulkIdsDto: { ids } });
-    expect(onUndoDelete).toHaveBeenCalledWith(selection);
+    expect(onUndoDelete).toHaveBeenCalledWith(selection.map((asset) => ({ ...asset, isTrashed: false })));
   });
 });
