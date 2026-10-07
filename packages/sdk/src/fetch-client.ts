@@ -3413,6 +3413,7 @@ export type TakeoutResultCountersDto = {
     albumsCreated: number;
     alreadyProcessed: number;
     betterOnServer: number;
+    datesFromGoogle: number;
     errors: number;
     largerUploaded: number;
     metadataSaved: number;

@@ -97,6 +97,42 @@ describe('[DEV 1] matcher engine', () => {
     expect(matchEdited(`${longStem}.COVER.j.json`, `${longStem}.COVER.jpg`)).toBe(true);
     expect(matchEdited('X.COVER.jp.json', 'X.COVER.jpg')).toBe(false);
   });
+
+  it('gives every file of a real year folder its own JSON, with full and cut sidecar names side by side', async () => {
+    // names of family assets from the 2026-09 Takeouts (full names), plus two with the older cut names
+    const dir = 'Takeout/Google Photos/Photos from 2019';
+    const full = [
+      '[RWBY MMD] Apple Pie - Sisterly HD [JIC JIC] - Pornhub.com.mp4',
+      'Rwby Nora Gang Bang - Pornhub.com.mp4',
+      '[iRB] Toxic (pyrrha, Weiss, Blake) - Pornhub.com.mp4',
+      '11024379_800533190002620_1254948441_n.jpg',
+      '11024379_800533190002620_1254948441_n-fr3.jpg',
+      'deadmoon114_1481316161512.jpg',
+      'Screenshot_2016-08-08-21-24-25.png',
+    ];
+    const cut = new Map([
+      [
+        '20170608-120938-0074450 11024379_800533190002620_1254948441_n.jpg',
+        '20170608-120938-0074450 11024379_8005331900026.json',
+      ],
+      ['20161210-001810-0082642 deadmoon114_1481316161512.jpg', '20161210-001810-0082642 deadmoon114_1481316161.json'],
+    ]);
+    const inputs: CatalogInput[] = [];
+    for (const name of full) {
+      inputs.push(media(`${dir}/${name}`), json(`${dir}/${name}.supplemental-metadata.json`, name));
+    }
+    for (const [name, jsonName] of cut) {
+      inputs.push(media(`${dir}/${name}`), json(`${dir}/${jsonName}`, name));
+    }
+
+    const matched = await matchedIn(inputs);
+    for (const name of full) {
+      expect(matched.get(name)?.jsonPath, name).toBe(`${dir}/${name}.supplemental-metadata.json`);
+    }
+    for (const [name, jsonName] of cut) {
+      expect(matched.get(name)?.jsonPath, name).toBe(`${dir}/${jsonName}`);
+    }
+  });
 });
 
 const skipped = (path: string, kind: CatalogInput['kind']): CatalogInput => ({ ...media(path), kind });

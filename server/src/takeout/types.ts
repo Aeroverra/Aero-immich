@@ -623,6 +623,8 @@ export interface TakeoutCounters {
     rotationsQueued: number;
     rotationsApplied: number;
     zoneAssumed: number;
+    /** server copies without a date of their own, dated from file times, that took Google's moment */
+    datesFromGoogle: number;
     errors: number;
   };
   bytes: { total: number; done: number };

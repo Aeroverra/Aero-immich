@@ -32,6 +32,7 @@ import { ArgOf } from 'src/repositories/event.repository';
 import type { ImmichTags } from 'src/repositories/metadata.repository';
 import { TAKEOUT_LEASED_RUN_STATUSES, TAKEOUT_RUNNING_RUN_STATUSES } from 'src/repositories/takeout.repository';
 import { BaseService } from 'src/services/base.service';
+import { firstDateTime } from 'src/services/metadata.service';
 import { storedAnalysisInput } from 'src/services/takeout-analyze.service';
 import { assembleStackIds, dedupeTags, hasLocation } from 'src/services/takeout-asset';
 import {
@@ -111,6 +112,7 @@ import {
   withGoogleAccount,
 } from 'src/takeout';
 import { JobOf } from 'src/types';
+import { getAssetFiles } from 'src/utils/asset.util';
 import { updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone, mergeTimeZone } from 'src/utils/date';
 import { DeletedReimportRepositories, checkDeletedReimport, onDeletedReimport } from 'src/utils/deleted-reimport';
@@ -2131,6 +2133,10 @@ export class TakeoutRunService extends BaseService {
     const fallbacks: string[] = [...(row.fallbacks ?? [])];
     if (!captureDate) {
       fallbacks.push('noGoogleDate');
+      this.logger.warn(
+        `Takeout: ${row.takeoutPath} has no Google date (${row.jsonPath ? 'none in its JSON' : 'no matching JSON'}), ` +
+          'its date comes from the file alone',
+      );
     }
 
     // Section 13 capture-time rule ("Google unless 100% sure"). Read the file's EXIF once and let the pure library
@@ -2389,6 +2395,10 @@ export class TakeoutRunService extends BaseService {
     if (await this.saveGoogleMetadata(run, settings, assetId, plan, alreadyHasMeta)) {
       resultFlags.push('metadataSaved');
     }
+    // an alreadyProcessed row points at the asset of another row of this run, which made this check itself
+    if (row.action !== TakeoutRunFileAction.AlreadyProcessed && (await this.adoptGoogleDate(row, assetId))) {
+      resultFlags.push('dateFromGoogle');
+    }
     await this.addResultFlags(row, resultFlags);
 
     // a rotate-only-pair original (section 11 D1) is rotated by phaseRotateFaces, never here or by the async hook:
@@ -2416,6 +2426,69 @@ export class TakeoutRunService extends BaseService {
     }
 
     await this.finishRow(row);
+  }
+
+  /**
+   * A file that was already on the server (uploaded by the mobile app, the web or another tool) and that carries no
+   * capture date of its own, in the file or in its sidecar, was dated by Immich from its file times: the time it was
+   * downloaded, copied or extracted. Google's photoTakenTime of the same bytes is older evidence, so such an asset
+   * takes Google's moment, through the same locked date + SidecarWrite path as PUT /assets/:id.
+   *
+   * Only a server date LATER than Google's is replaced: a copy written after Google already had the file cannot be its
+   * capture time, while an earlier file time may be the real one (Google dates a dateless upload from the uploaded
+   * file's own times too; Immich likewise keeps the earliest of the file times). A date the file or its sidecar
+   * carries, or one the user is setting right now (locked), is never touched.
+   */
+  private async adoptGoogleDate(row: any, assetId: string): Promise<boolean> {
+    if (!row.captureDate) {
+      return false;
+    }
+    const googleInstant = new Date(row.captureDate);
+    const asset = await this.assetRepository.getById(assetId, { exifInfo: true, files: true }).catch(() => null);
+    if (!asset) {
+      return false;
+    }
+    const exifInfo = (asset as any).exifInfo as
+      { dateTimeOriginal?: Date | string | null; lockedProperties?: string[] | null } | null | undefined;
+    if (exifInfo?.lockedProperties?.includes('dateTimeOriginal')) {
+      return false;
+    }
+    const current = new Date(exifInfo?.dateTimeOriginal ?? asset.fileCreatedAt);
+    if (Number.isNaN(current.getTime()) || current.getTime() - googleInstant.getTime() <= SERVER_DATE_TOLERANCE_MS) {
+      return false;
+    }
+
+    const { sidecarFile } = getAssetFiles((asset as any).files ?? []);
+    const [mediaTags, sidecarTags] = await Promise.all([
+      this.metadataRepository.readTags(asset.originalPath).catch(() => null),
+      sidecarFile ? this.metadataRepository.readTags(sidecarFile.path).catch(() => null) : ({} as ImmichTags),
+    ]);
+    // unreadable: nothing proves the date came from file times
+    if (!mediaTags || !sidecarTags || firstDateTime(mediaTags) || firstDateTime(sidecarTags)) {
+      return false;
+    }
+
+    const capture = resolveCaptureTime({
+      googleInstant,
+      exif: deriveCaptureExif(mediaTags),
+      names: [asset.originalFileName, row.originalFileName, row.takeoutPath?.split('/').pop()].filter(Boolean),
+    });
+    if (!capture.putDate || !capture.instant) {
+      return false;
+    }
+    const putZone = capture.putOffsetZone;
+    const dateTimeOriginal = putZone ? sidecarDateString(capture.instant, putZone) : capture.instant.toISOString();
+    const timeZone = putZone ? (extractTimeZone(dateTimeOriginal)?.name ?? null) : null;
+    await this.assetRepository.upsertExif({
+      exif: updateLockedColumns({ assetId, dateTimeOriginal, timeZone }),
+      lockedPropertiesBehavior: 'append',
+    } as any);
+    await this.jobRepository.queue({ name: JobName.SidecarWrite, data: { id: assetId } });
+    this.logger.log(
+      `Takeout: ${row.takeoutPath} is already on the server as ${assetId} with no date of its own, dated ` +
+        `${current.toISOString()} from its file times; using Google's ${googleInstant.toISOString()}`,
+    );
+    return true;
   }
 
   /** Not imported because the user permanently deleted the file before (skip mode): a report row, no file kept */
@@ -2773,6 +2846,12 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
 
   return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime };
 }
+
+/**
+ * How much later than Google's photoTakenTime the date of a dateless server copy must be before it counts as a file
+ * time (download, copy, extraction) and takes Google's moment instead: past the clock noise of any upload.
+ */
+const SERVER_DATE_TOLERANCE_MS = 60_000;
 
 /** The reason of a server duplicate whose asset is in the trash: it never joins a stack (a trashed cover hides it) */
 const IN_TRASH_REASON = 'already on the server (in trash)';
