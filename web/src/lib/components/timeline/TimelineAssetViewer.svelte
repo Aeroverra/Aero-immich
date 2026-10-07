@@ -128,7 +128,9 @@
       case AssetAction.DELETE:
       case AssetAction.ARCHIVE:
       case AssetAction.SET_VISIBILITY_LOCKED:
-      case AssetAction.SET_VISIBILITY_TIMELINE: {
+      case AssetAction.SET_VISIBILITY_TIMELINE:
+      case AssetAction.SET_PRIVATE: {
+        // SET_PRIVATE only arrives here while private mode is off, when the asset leaves the timeline
         // must update manager before performing any navigation
         timelineManager.removeAssets([action.asset.id]);
 

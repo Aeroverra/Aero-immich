@@ -18,6 +18,7 @@ class RemoteAlbumFactory {
     int assetCount = 0,
     String? ownerName,
     bool isShared = false,
+    bool isPrivate = false,
   }) {
     final albumId = TestUtils.uuid(id);
     return RemoteAlbum(
@@ -33,6 +34,7 @@ class RemoteAlbumFactory {
       assetCount: assetCount,
       ownerName: ownerName ?? 'owner_$albumId',
       isShared: isShared,
+      isPrivate: isPrivate,
     );
   }
 }
