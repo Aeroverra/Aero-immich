@@ -426,7 +426,7 @@ export const toggleArchive = async (asset: AssetResponseDto) => {
   return asset;
 };
 
-const showUndoArchiveToast = (description: string, assets: TimelineAsset[]) => {
+const showUndoArchiveToast = (description: string, assets: TimelineAsset[], stackedAssetIds: string[] = []) => {
   const $t = get(t);
   toastManager.primary({
     description,
@@ -434,16 +434,16 @@ const showUndoArchiveToast = (description: string, assets: TimelineAsset[]) => {
       label: $t('undo'),
       onclick: () => {
         close();
-        void undoArchiveAssets(assets);
+        void undoArchiveAssets(assets, stackedAssetIds);
       },
     }),
   });
 };
 
-const undoArchiveAssets = async (assets: TimelineAsset[]) => {
+const undoArchiveAssets = async (assets: TimelineAsset[], stackedAssetIds: string[]) => {
   const $t = get(t);
   try {
-    const ids = assets.map((a) => a.id);
+    const ids = [...assets.map((a) => a.id), ...stackedAssetIds];
     if (ids.length > 0) {
       await updateAssets({
         assetBulkUpdateDto: {
@@ -458,14 +458,19 @@ const undoArchiveAssets = async (assets: TimelineAsset[]) => {
     }
     eventManager.emit('AssetsUnarchive', assets);
     eventManager.emit('AssetsUndoArchive', assets);
-    toastManager.success($t('unarchived_count', { values: { count: assets.length } }));
+    toastManager.success($t('unarchived_count', { values: { count: ids.length } }));
   } catch (error) {
     handleError(error, $t('errors.unable_to_archive_unarchive', { values: { archived: false } }));
   }
 };
 
-export const archiveAssets = async (assets: TimelineAsset[], visibility: AssetVisibility) => {
-  const ids = assets.map(({ id }) => id);
+/** stackedAssetIds are assets stacked below the selected ones, archived and restored along with them */
+export const archiveAssets = async (
+  assets: TimelineAsset[],
+  visibility: AssetVisibility,
+  stackedAssetIds: string[] = [],
+) => {
+  const ids = [...assets.map(({ id }) => id), ...stackedAssetIds];
   const $t = get(t);
 
   try {
@@ -476,7 +481,7 @@ export const archiveAssets = async (assets: TimelineAsset[], visibility: AssetVi
     }
 
     if (visibility === AssetVisibility.Archive) {
-      showUndoArchiveToast($t('archived_count', { values: { count: ids.length } }), assets);
+      showUndoArchiveToast($t('archived_count', { values: { count: ids.length } }), assets, stackedAssetIds);
     } else {
       toastManager.primary($t('unarchived_count', { values: { count: ids.length } }));
     }
