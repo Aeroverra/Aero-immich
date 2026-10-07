@@ -315,4 +315,52 @@ describe(SyncRequestType.AlbumToAssetsV1, () => {
     await wait(2);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumToAssetsV1]);
   });
+  describe('private albums and the includePrivate flag', () => {
+    it('should withhold the links of a private album and send them again once the album is public', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { user: owner } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      const { asset: visible } = await ctx.newAsset({ ownerId: owner.id });
+      const { album } = await ctx.newAlbum({ ownerId: owner.id }, [hidden.id, visible.id]);
+      await ctx.newAlbumUser({ albumId: album.id, userId: auth.user.id, role: AlbumUserRole.Editor });
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AlbumToAssetsV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AlbumToAssetV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumToAssetsV1]);
+
+      await assetRepo.updateAll([hidden.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([hidden.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AlbumToAssetsV1]);
+      expect(restored).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumToAssetV1,
+            data: { albumId: album.id, assetId: hidden.id },
+          }),
+          expect.objectContaining({
+            type: SyncEntityType.AlbumToAssetV1,
+            data: { albumId: album.id, assetId: visible.id },
+          }),
+        ]),
+      );
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumToAssetsV1]);
+    });
+
+    it('should carry the links of a private album for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      const { album } = await ctx.newAlbum({ ownerId: auth.user.id }, [hidden.id]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AlbumToAssetsV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AlbumToAssetV1,
+          data: { albumId: album.id, assetId: hidden.id },
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+  });
 });
