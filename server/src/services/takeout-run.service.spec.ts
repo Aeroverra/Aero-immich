@@ -112,6 +112,17 @@ const coverRow = () =>
     captureDate: new Date('2026-09-30T05:45:17Z'),
   });
 
+// readTags of a downloaded mp4 with no date of its own: zeroed QuickTime dates, no make or model
+const datelessMp4 = () => ({
+  MIMEType: 'video/mp4',
+  FileType: 'MP4',
+  zone: 'UTC',
+  tz: 'UTC',
+  tzSource: 'defaultVideosToUTC',
+  CreateDate: '0000:00:00 00:00:00',
+  MediaCreateDate: '0000:00:00 00:00:00',
+});
+
 const preferences = (mode: DeletedReimportMode, albumId?: string) => [
   { key: UserMetadataKey.Preferences, value: { deletedReimport: { mode, albumId } } },
 ];
@@ -145,6 +156,10 @@ describe(TakeoutRunService.name, () => {
   // Every upsertExif call whose payload actually carries a capture date (the PUT path), ignoring the fileSize upsert.
   const dateUpserts = () =>
     mocks.asset.upsertExif.mock.calls.filter((call) => (call[0] as any)?.exif?.dateTimeOriginal !== undefined);
+
+  // the fallbacks of the last row update that set them
+  const lastFlags = () =>
+    (mocks.takeout.updateRunFile.mock.calls.findLast((c) => (c[1] as any).fallbacks)?.[1] as any)?.fallbacks ?? [];
 
   // the update that records the created asset on its row
   const createdUpdate = () =>
@@ -488,6 +503,167 @@ describe(TakeoutRunService.name, () => {
       );
 
       expect(mocks.asset.upsertMetadata).toHaveBeenCalledWith('asset-uuid', [{ key: 'google-photos', value: extra }]);
+    });
+  });
+
+  describe('a server copy dated from its file times takes the Google moment', () => {
+    // [RWBY MMD] Apple Pie ... .mp4 on family (2026-09-29): uploaded through the web before the Takeout run, no date
+    // in the file, so Immich dated it from the download time 2026-09-28 22:19Z; the Takeout run matched its JSON
+    // (normal) with photoTakenTime 2019-05-26T00:04:52Z, found the bytes on the server and only saved metadata.
+    const name = '[RWBY MMD] Apple Pie - Sisterly HD [JIC JIC] - Pornhub.com.mp4';
+    const googleTaken = new Date('2019-05-26T00:04:52Z');
+    const downloaded = new Date('2026-09-28T22:19:36.520Z');
+    const serverAsset = (over: Record<string, unknown> = {}) => ({
+      id: 'server-asset',
+      originalPath: '/data/upload/user/1b/70/1b70c4a2.mp4',
+      originalFileName: name,
+      fileCreatedAt: downloaded,
+      exifInfo: { dateTimeOriginal: downloaded, timeZone: null, lockedProperties: [] },
+      files: [],
+      ...over,
+    });
+    const duplicateRow = (over: Record<string, unknown> = {}) => ({
+      id: 'rf-dupe',
+      seq: 25_289,
+      takeoutPath: `Takeout/Google Photos/Photos from 2019/${name}`,
+      jsonPath: `Takeout/Google Photos/Photos from 2019/${name}.supplemental-metadata.json`,
+      originalFileName: name,
+      action: TakeoutRunFileAction.ServerDuplicate as string,
+      status: TakeoutRunFileStatus.Planned as string,
+      assetId: 'server-asset',
+      captureDate: googleTaken,
+      rotation: 0,
+      fallbacks: [] as string[],
+      plan: { tags: [] },
+      ...over,
+    });
+
+    beforeEach(() => {
+      mocks.asset.getByIds.mockResolvedValue([serverAsset()] as any);
+      mocks.asset.getById.mockResolvedValue(serverAsset() as any);
+      mocks.metadata.readTags.mockResolvedValue(datelessMp4() as any);
+    });
+
+    it('stores the Google moment as a locked date and lets SidecarWrite write it, like PUT /assets/:id', async () => {
+      const row = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      const puts = dateUpserts();
+      expect(puts).toHaveLength(1);
+      const exif = (puts[0][0] as any).exif;
+      expect(exif.assetId).toBe('server-asset');
+      // no zone evidence: the moment is stored in UTC, as for a new upload
+      expect(exif.dateTimeOriginal).toBe('2019-05-26T00:04:52.000Z');
+      expect(exif.timeZone).toBeNull();
+      expect(exif.lockedProperties).toEqual(expect.arrayContaining(['dateTimeOriginal', 'timeZone']));
+      expect((puts[0][0] as any).lockedPropertiesBehavior).toBe('append');
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.SidecarWrite, data: { id: 'server-asset' } });
+      expect(lastFlags()).toContain('dateFromGoogle');
+    });
+
+    it('does the same for a better copy on the server', async () => {
+      const row = duplicateRow({ action: TakeoutRunFileAction.BetterOnServer });
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(dateUpserts()).toHaveLength(1);
+      expect(lastFlags()).toContain('dateFromGoogle');
+    });
+
+    it('takes the zone of an exact screenshot name, like a new upload', async () => {
+      // Screenshot_20161106-002832.png: a 03:28:32Z Google time is 00:28:32 at UTC-3 (rule 3)
+      const shot = 'Screenshot_20161106-002832.png';
+      mocks.asset.getById.mockResolvedValue(serverAsset({ originalFileName: shot }) as any);
+      mocks.metadata.readTags.mockResolvedValue({ MIMEType: 'image/png', FileType: 'PNG' } as any);
+      const row = duplicateRow({
+        takeoutPath: `Takeout/Google Photos/Photos from 2016/${shot}`,
+        originalFileName: shot,
+        captureDate: new Date('2016-11-06T03:28:32Z'),
+      });
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      const exif = (dateUpserts()[0][0] as any).exif;
+      expect(exif.dateTimeOriginal).toBe('2016-11-06T00:28:32.000-03:00');
+      expect(exif.timeZone).toBe('UTC-3');
+    });
+
+    it('leaves a file that carries its own date', async () => {
+      mocks.metadata.readTags.mockResolvedValue({ ...datelessMp4(), CreateDate: '2026:09:28 22:19:36' } as any);
+      const row = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(dateUpserts()).toHaveLength(0);
+      expect(mocks.job.queue).not.toHaveBeenCalledWith({ name: JobName.SidecarWrite, data: { id: 'server-asset' } });
+      expect(lastFlags()).not.toContain('dateFromGoogle');
+    });
+
+    it('leaves an asset whose sidecar carries a date (set by the user or an uploader)', async () => {
+      mocks.asset.getById.mockResolvedValue(
+        serverAsset({
+          files: [{ id: 'f', type: 'sidecar', path: '/data/upload/user/1b/70/1b70c4a2.mp4.xmp', isEdited: false }],
+        }) as any,
+      );
+      mocks.metadata.readTags.mockImplementation((path: string) =>
+        Promise.resolve((path.endsWith('.xmp') ? { DateTimeOriginal: '2026:09:28 22:19:36' } : datelessMp4()) as any),
+      );
+      const row = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(mocks.metadata.readTags).toHaveBeenCalledWith('/data/upload/user/1b/70/1b70c4a2.mp4.xmp');
+      expect(dateUpserts()).toHaveLength(0);
+    });
+
+    it('keeps a server date that is earlier than the Google one (an old file time may be the real one)', async () => {
+      // Untitled.png: file time 2016-03-15, Google dated the upload 2016-11-06
+      const early = new Date('2016-03-15T00:04:22Z');
+      mocks.asset.getById.mockResolvedValue(
+        serverAsset({ fileCreatedAt: early, exifInfo: { dateTimeOriginal: early, lockedProperties: [] } }) as any,
+      );
+      const row = duplicateRow({ captureDate: new Date('2016-11-06T06:28:38Z') });
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(mocks.metadata.readTags).not.toHaveBeenCalled();
+      expect(dateUpserts()).toHaveLength(0);
+    });
+
+    it('keeps a server date within a minute of the Google one', async () => {
+      const close = new Date(googleTaken.getTime() + 30_000);
+      mocks.asset.getById.mockResolvedValue(
+        serverAsset({ fileCreatedAt: close, exifInfo: { dateTimeOriginal: close, lockedProperties: [] } }) as any,
+      );
+      const row = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(dateUpserts()).toHaveLength(0);
+    });
+
+    it('never overrides a date the user is setting (locked)', async () => {
+      mocks.asset.getById.mockResolvedValue(
+        serverAsset({ exifInfo: { dateTimeOriginal: downloaded, lockedProperties: ['dateTimeOriginal'] } }) as any,
+      );
+      const row = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), row, [row]);
+
+      expect(dateUpserts()).toHaveLength(0);
+    });
+
+    it('does nothing without a Google date, or when the file cannot be read', async () => {
+      const noDate = duplicateRow({ captureDate: null });
+      await (sut as any).processExisting(run(), settings(), noDate, [noDate]);
+      expect(dateUpserts()).toHaveLength(0);
+
+      mocks.metadata.readTags.mockRejectedValue(new Error('ENOENT'));
+      const unreadable = duplicateRow();
+      await (sut as any).processExisting(run(), settings(), unreadable, [unreadable]);
+      expect(dateUpserts()).toHaveLength(0);
+    });
+
+    it('leaves another copy of this run to the row that handled the asset', async () => {
+      const source = duplicateRow({ status: TakeoutRunFileStatus.Done });
+      const copy = { ...copyOf(source.seq), captureDate: googleTaken };
+      await (sut as any).processExisting(run(), settings(), copy, [source, copy]);
+
+      expect(mocks.asset.getById).not.toHaveBeenCalled();
+      expect(dateUpserts()).toHaveLength(0);
     });
   });
 
