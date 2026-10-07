@@ -261,6 +261,18 @@ export interface IDeferrableJob extends IEntityJob {
   deferred?: boolean;
 }
 
+export interface IWorkflowAssetTriggerJob {
+  workflowId: string;
+  assetId: string;
+  /** set when the asset is part of a manual run: logs share this run id and disabled workflows run too */
+  manualRunId?: string;
+}
+
+export interface IWorkflowRunJob {
+  workflowId: string;
+  runId: string;
+}
+
 export interface INightlyJob extends IBaseJob {
   nightly?: boolean;
 }
@@ -487,7 +499,8 @@ export type JobItem =
   | { name: JobName.Ocr; data: IEntityJob }
 
   // Workflow
-  | { name: JobName.WorkflowAssetTrigger; data: { workflowId: string; assetId: string } }
+  | { name: JobName.WorkflowAssetTrigger; data: IWorkflowAssetTriggerJob }
+  | { name: JobName.WorkflowRunQueueAll; data: IWorkflowRunJob }
 
   // Integrity
   | { name: JobName.IntegrityUntrackedFilesQueueAll; data?: IIntegrityJob }
