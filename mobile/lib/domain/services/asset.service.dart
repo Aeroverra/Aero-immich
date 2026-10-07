@@ -1,6 +1,7 @@
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
+import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/store.model.dart';
@@ -52,6 +53,16 @@ class AssetService {
 
   Future<RemoteAsset?> getRemoteAsset(String id) {
     return _remoteRepository.get(id);
+  }
+
+  /// Whether the remote asset is synced and shown under [privateFilter] (private mode and the applied view)
+  Future<bool> isRemoteAssetVisible(String id, PrivateModeFilter privateFilter) {
+    return _remoteRepository.isVisible(id, privateFilter);
+  }
+
+  /// Whether the remote asset passes the rules of [view]
+  Future<bool> isRemoteAssetInView(String id, ViewFilter view) {
+    return _remoteRepository.isInView(id, view);
   }
 
   Future<List<RemoteAsset>> getStack(
