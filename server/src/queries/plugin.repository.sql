@@ -6,6 +6,7 @@ select
   "plugin"."name",
   "plugin"."version",
   "plugin"."wasmBytes",
+  "plugin"."sha256hash",
   (
     select
       coalesce(json_agg(agg), '[]')
@@ -24,6 +25,15 @@ from
   "plugin"
 where
   "enabled" = $1
+
+-- PluginRepository.getHash
+select
+  "plugin"."sha256hash"
+from
+  "plugin"
+where
+  "plugin"."id" = $1
+  and "enabled" = $2
 
 -- PluginRepository.search
 select
