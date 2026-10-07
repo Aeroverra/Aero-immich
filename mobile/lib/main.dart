@@ -24,6 +24,7 @@ import 'package:immich_mobile/platform/background_worker_lock_api.g.dart';
 import 'package:immich_mobile/providers/app_life_cycle.provider.dart';
 import 'package:immich_mobile/providers/app_lock.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/share_intent_upload.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
@@ -178,6 +179,8 @@ class ImmichAppState extends ConsumerState<ImmichApp> with WidgetsBindingObserve
   }
 
   Future<DeepLink> _deepLinkBuilder(PlatformDeepLink deepLink) async {
+    // the handler checks assets against the applied view, which needs the synced views loaded
+    await loadCustomViews(ref);
     final deepLinkHandler = ref.read(deepLinkServiceProvider);
     final currentRouteName = ref.read(currentRouteNameProvider.notifier).state;
 
