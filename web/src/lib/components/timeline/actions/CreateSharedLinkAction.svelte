@@ -6,7 +6,10 @@
   import { t } from 'svelte-i18n';
 
   const handleClick = async () => {
-    await modalManager.show(SharedLinkCreateModal, { assetIds: assetMultiSelectManager.assets.map(({ id }) => id) });
+    await modalManager.show(SharedLinkCreateModal, {
+      assetIds: assetMultiSelectManager.assets.map(({ id }) => id),
+      hasPrivate: assetMultiSelectManager.assets.some((asset) => asset.isPrivate),
+    });
   };
 </script>
 
