@@ -51,6 +51,8 @@ void main() {
       expect(preferences!.stacks.groupAuto, isTrue);
       expect(preferences.autoStack.enabled, isFalse);
       expect(preferences.stackActions.mode, StackActionMode.ask);
+      expect(preferences.privateMode.lockTrigger, LockTrigger.appPause);
+      expect(preferences.customViews.lockTrigger, LockTrigger.screenOff);
 
       final stack = StackResponseDto.fromJson(
         jsonDecode('{"id": "stack-1", "primaryAssetId": "asset-1", "assets": []}'),
@@ -100,6 +102,26 @@ void main() {
       expect(queues.autoStack.queueStatus.isActive, isFalse);
       expect(queues.videoFrameAnalysis.jobCounts.waiting, 0);
       expect(queues.smartSearch.jobCounts.waiting, 2);
+    });
+
+    test('reads tags and features from servers without custom views', () {
+      final tag = TagResponseDto.fromJson(
+        jsonDecode("""
+{"id": "tag", "name": "Gym", "value": "Gym", "createdAt": "2024-01-01T00:00:00.000Z", "updatedAt": "2024-01-01T00:00:00.000Z"}
+"""),
+      );
+      expect(tag, isNotNull);
+      expect(tag!.isHidden, isFalse);
+
+      final features = ServerFeaturesDto.fromJson(
+        jsonDecode("""
+{"configFile": false, "duplicateDetection": true, "email": false, "facialRecognition": true, "importFaces": false,
+ "map": true, "oauth": false, "oauthAutoLaunch": false, "passwordLogin": true, "reverseGeocoding": true,
+ "search": true, "sidecar": true, "smartSearch": true, "trash": true}
+"""),
+      );
+      expect(features, isNotNull);
+      expect(features!.customViews.orElse(null), isFalse);
     });
 
     test('addDefault', () {
