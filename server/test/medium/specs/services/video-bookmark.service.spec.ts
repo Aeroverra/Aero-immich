@@ -21,6 +21,11 @@ const setup = (db?: Kysely<DB>) => {
   });
 };
 
+const newVideo = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string, duration: number | null) => {
+  const { asset } = await ctx.newAsset({ ownerId, type: AssetType.Video, duration });
+  return asset;
+};
+
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
@@ -110,5 +115,104 @@ describe(VideoBookmarkService.name, () => {
     await expect(
       ctx.database.selectFrom('video_bookmark').selectAll().where('assetId', '=', asset.id).execute(),
     ).resolves.toEqual([]);
+  });
+
+  describe('stacked copies', () => {
+    it('should share bookmarks between stacked videos whose lengths match within a second', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const video = await newVideo(ctx, user.id, 439_142);
+      const copy = await newVideo(ctx, user.id, 439_041);
+      const short = await newVideo(ctx, user.id, 300_000);
+      const loose = await newVideo(ctx, user.id, 439_142);
+      await ctx.newStack({ ownerId: user.id }, [video.id, copy.id, short.id]);
+
+      const onVideo = await sut.create(auth, { assetId: video.id, time: 60_000 });
+      const onCopy = await sut.create(auth, { assetId: copy.id, time: 10_000, label: 'Cake' });
+      const onShort = await sut.create(auth, { assetId: short.id, time: 20_000 });
+      const onLoose = await sut.create(auth, { assetId: loose.id, time: 30_000 });
+
+      const shared = [
+        expect.objectContaining({ id: onCopy.id, assetId: copy.id, label: 'Cake' }),
+        expect.objectContaining({ id: onVideo.id, assetId: video.id }),
+      ];
+      await expect(sut.getAll(auth, { assetId: video.id })).resolves.toEqual(shared);
+      await expect(sut.getAll(auth, { assetId: copy.id })).resolves.toEqual(shared);
+      await expect(sut.getAll(auth, { assetId: short.id })).resolves.toEqual([
+        expect.objectContaining({ id: onShort.id }),
+      ]);
+      await expect(sut.getAll(auth, { assetId: loose.id })).resolves.toEqual([
+        expect.objectContaining({ id: onLoose.id }),
+      ]);
+    });
+
+    it('should stop sharing once the videos are unstacked or a copy is trashed', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const video = await newVideo(ctx, user.id, 439_142);
+      const copy = await newVideo(ctx, user.id, 439_041);
+      const trashed = await newVideo(ctx, user.id, 439_100);
+      const { stack } = await ctx.newStack({ ownerId: user.id }, [video.id, copy.id, trashed.id]);
+      const onCopy = await sut.create(auth, { assetId: copy.id, time: 10_000 });
+      await sut.create(auth, { assetId: trashed.id, time: 20_000 });
+
+      await ctx.softDeleteAsset(trashed.id);
+      await expect(sut.getAll(auth, { assetId: video.id })).resolves.toEqual([
+        expect.objectContaining({ id: onCopy.id }),
+      ]);
+
+      await ctx.database.deleteFrom('stack').where('id', '=', stack.id).execute();
+      await expect(sut.getAll(auth, { assetId: video.id })).resolves.toEqual([]);
+      await expect(sut.getAll(auth, { assetId: copy.id })).resolves.toEqual([
+        expect.objectContaining({ id: onCopy.id }),
+      ]);
+    });
+
+    it('should list a moment bookmarked on two copies once and keep bookmarks personal', async () => {
+      const { sut, ctx } = setup();
+      const { user: owner } = await ctx.newUser();
+      const { user: partner } = await ctx.newUser();
+      await ctx.newPartner({ sharedById: owner.id, sharedWithId: partner.id });
+      const ownerAuth = factory.auth({ user: owner });
+      const partnerAuth = factory.auth({ user: partner });
+      const video = await newVideo(ctx, owner.id, 439_142);
+      const copy = await newVideo(ctx, owner.id, 439_041);
+      await ctx.newStack({ ownerId: owner.id }, [video.id, copy.id]);
+
+      const onVideo = await sut.create(ownerAuth, { assetId: video.id, time: 10_000 });
+      const onCopy = await sut.create(ownerAuth, { assetId: copy.id, time: 10_400 });
+      const partnerOnCopy = await sut.create(partnerAuth, { assetId: copy.id, time: 50_000 });
+
+      await expect(sut.getAll(ownerAuth, { assetId: video.id })).resolves.toEqual([
+        expect.objectContaining({ id: onVideo.id }),
+      ]);
+      await expect(sut.getAll(ownerAuth, { assetId: copy.id })).resolves.toEqual([
+        expect.objectContaining({ id: onCopy.id }),
+      ]);
+      await expect(sut.getAll(partnerAuth, { assetId: video.id })).resolves.toEqual([
+        expect.objectContaining({ id: partnerOnCopy.id, assetId: copy.id }),
+      ]);
+      await expect(sut.delete(ownerAuth, partnerOnCopy.id)).rejects.toThrow();
+    });
+
+    it('should edit and delete a bookmark from a stacked copy of its video', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const video = await newVideo(ctx, user.id, 439_142);
+      const copy = await newVideo(ctx, user.id, 439_041);
+      await ctx.newStack({ ownerId: user.id }, [video.id, copy.id]);
+      await sut.create(auth, { assetId: video.id, time: 10_000 });
+
+      const [listed] = await sut.getAll(auth, { assetId: copy.id });
+      await expect(sut.update(auth, listed.id, { label: 'Candles' })).resolves.toEqual(
+        expect.objectContaining({ id: listed.id, assetId: video.id, label: 'Candles' }),
+      );
+      await sut.delete(auth, listed.id);
+
+      await expect(sut.getAll(auth, { assetId: video.id })).resolves.toEqual([]);
+    });
   });
 });
