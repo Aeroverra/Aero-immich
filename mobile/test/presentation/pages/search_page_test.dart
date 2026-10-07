@@ -176,6 +176,21 @@ void main() {
     );
   });
 
+  testWidgets('the filter chips stay put when dragged up and down', (tester) async {
+    await pumpSearchPage(tester, privateModeEnabled: false);
+    final chipList = find.byKey(const Key('search_filter_chip_list'));
+    final top = tester.getTopLeft(chipList).dy;
+
+    // inside the vertical scroll view a drag on them scrolled them away, and the result grid never gave them back
+    expect(
+      find.ancestor(of: chipList, matching: find.byWidgetPredicate((w) => w is Scrollable && w.axis == Axis.vertical)),
+      findsNothing,
+    );
+    await tester.drag(chipList, const Offset(0, -300));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(chipList).dy, top);
+  });
+
   testWidgets('private chip is absent while private mode is off', (tester) async {
     await pumpSearchPage(tester, privateModeEnabled: false);
 
