@@ -342,6 +342,7 @@
   {onPersonUpdate}
   onPersonAssetDelete={handlePersonAssetDelete}
   onAssetsDelete={updateAssetCount}
+  onAssetsRestore={updateAssetCount}
   onAssetsArchive={updateAssetCount}
   onAssetsUnarchive={updateAssetCount}
 />
