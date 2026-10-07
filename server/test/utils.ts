@@ -54,6 +54,7 @@ import { NotificationRepository } from 'src/repositories/notification.repository
 import { OAuthRepository } from 'src/repositories/oauth.repository';
 import { OcrRepository } from 'src/repositories/ocr.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
+import { PersonSuggestionRepository } from 'src/repositories/person-suggestion.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { PluginRepository } from 'src/repositories/plugin.repository';
 import { ProcessRepository } from 'src/repositories/process.repository';
@@ -73,8 +74,8 @@ import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
-import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
+import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -276,6 +277,7 @@ export type ServiceOverrides = {
   oauth: OAuthRepository;
   partner: PartnerRepository;
   person: PersonRepository;
+  personSuggestion: PersonSuggestionRepository;
   plugin: PluginRepository;
   process: ProcessRepository;
   search: SearchRepository;
@@ -368,6 +370,7 @@ export const getMocks = () => {
     oauth: automock(OAuthRepository, { args: [loggerMock] }),
     partner: automock(PartnerRepository, { strict: false }),
     person: automock(PersonRepository, { strict: false }),
+    personSuggestion: newPersonSuggestionRepositoryMock(),
     plugin: automock(PluginRepository, { strict: true, args: [databaseMock, loggerMock] }),
     process: automock(ProcessRepository),
     search: automock(SearchRepository, { strict: false }),
@@ -401,6 +404,17 @@ export const getMocks = () => {
   mocks.clusterGroup.create.mockResolvedValue(ClusterGroupFactory.create());
 
   return mocks;
+};
+
+// nothing was answered unless a test says so
+const newPersonSuggestionRepositoryMock = () => {
+  const mock = automock(PersonSuggestionRepository);
+  mock.getDifferentPersonGroupIds.mockResolvedValue([]);
+  mock.getFacesDifferentFrom.mockResolvedValue([]);
+  mock.getPeopleDifferentFrom.mockResolvedValue([]);
+  mock.getAnswerOutcomes.mockResolvedValue([]);
+  mock.moveToPerson.mockResolvedValue();
+  return mock;
 };
 
 export const newTestService = <T extends BaseService>(
@@ -471,6 +485,7 @@ export const newTestService = <T extends BaseService>(
     overrides.websocket || (mocks.websocket as As<WebsocketRepository>),
     overrides.workflow || (mocks.workflow as As<WorkflowRepository>),
     overrides.takeout || (mocks.takeout as As<TakeoutRepository>),
+    overrides.personSuggestion || (mocks.personSuggestion as As<PersonSuggestionRepository>),
   );
 
   return {
