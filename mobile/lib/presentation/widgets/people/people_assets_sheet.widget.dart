@@ -8,6 +8,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/string_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
@@ -102,7 +103,13 @@ class PeopleAssetsSheet extends HookConsumerWidget {
       return ListTile(
         key: Key('person-${person.id}'),
         leading: CircleAvatar(
-          backgroundImage: RemoteImageProvider(url: getFaceThumbnailUrl(person.id, updatedAt: person.updatedAt)),
+          backgroundImage: RemoteImageProvider(
+            url: getFaceThumbnailUrl(
+              person.id,
+              updatedAt: person.updatedAt,
+              scope: ref.watch(personThumbnailScopeProvider),
+            ),
+          ),
         ),
         title: Text(person.name.nullIfEmpty ?? context.t.no_name),
         subtitle: checked == null ? Text('$count / $total') : null,
