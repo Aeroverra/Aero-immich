@@ -266,6 +266,39 @@ describe(TakeoutRunService.name, () => {
     });
   });
 
+  describe('google-photos metadata', () => {
+    const extra = { url: 'https://photos.google.com/photo/AF1Qip', views: 1 };
+
+    beforeEach(() => {
+      mocks.metadata.readTags.mockResolvedValue({ Make: 'Apple', zone: 'UTC-5', zoneSource: 'offset' } as any);
+      mocks.asset.upsertMetadata.mockResolvedValue(undefined as any);
+    });
+
+    it('saves the Google account of the export with the url', async () => {
+      const withEmail = { ...run(), templateVars: { ...run().templateVars, email: 'someone@example.com' } };
+
+      await (sut as any).processUpload(
+        withEmail,
+        { ...settings(), googlePhotosFields: true },
+        uploadRow({ plan: { tags: [], extra } }),
+      );
+
+      expect(mocks.asset.upsertMetadata).toHaveBeenCalledWith('asset-uuid', [
+        { key: 'google-photos', value: { ...extra, account: 'someone@example.com' } },
+      ]);
+    });
+
+    it('saves no account for a run without an email', async () => {
+      await (sut as any).processUpload(
+        run(),
+        { ...settings(), googlePhotosFields: true },
+        uploadRow({ plan: { tags: [], extra } }),
+      );
+
+      expect(mocks.asset.upsertMetadata).toHaveBeenCalledWith('asset-uuid', [{ key: 'google-photos', value: extra }]);
+    });
+  });
+
   describe('a previously deleted file is handled like an upload of it (utils/deleted-reimport)', () => {
     const remembered = { assetId: 'deleted-asset', originalFileName: 'photo.jpg', deletedAt: new Date() };
 
