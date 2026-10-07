@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
 import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
@@ -1063,6 +1063,151 @@ describe(PersonService.name, () => {
           }),
         ]),
       );
+    });
+  });
+
+  describe('createFace in a video frame', () => {
+    it('should store a located face at a moment of the video', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: video } = await ctx.newAsset({
+        ownerId: user.id,
+        type: AssetType.Video,
+        width: 1920,
+        height: 1080,
+        duration: 30_000,
+      });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 1920, exifImageHeight: 1080 });
+
+      await sut.createFace(auth, {
+        assetId: video.id,
+        personId: person.personGroupId,
+        imageWidth: 1280,
+        imageHeight: 720,
+        x: 600,
+        y: 100,
+        width: 80,
+        height: 90,
+        frameTimestamp: 12_345,
+      });
+
+      const [face] = await sut.getFacesById(auth, { id: video.id });
+      expect(face).toEqual(
+        expect.objectContaining({
+          person: expect.objectContaining({ id: person.personGroupId }),
+          imageWidth: 1280,
+          imageHeight: 720,
+          boundingBoxX1: 600,
+          boundingBoxY1: 100,
+          boundingBoxX2: 680,
+          boundingBoxY2: 190,
+          sourceType: SourceType.Manual,
+          frameTimestamp: 12_345,
+          isWholeAsset: false,
+        }),
+      );
+      await expect(
+        ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
+      ).resolves.toMatchObject({ faceAssetId: face.id });
+
+      // a located face, not a whole-asset mark: adding the person again is a duplicate and removal keeps it
+      await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id] })).resolves.toEqual([
+        { id: video.id, success: false, error: BulkIdErrorReason.DUPLICATE },
+      ]);
+      await expect(sut.removeFromAssets(auth, person.personGroupId, { ids: [video.id] })).resolves.toEqual([
+        { id: video.id, success: false, error: BulkIdErrorReason.VALIDATION },
+      ]);
+      await expect(sut.getFacesById(auth, { id: video.id })).resolves.toEqual([
+        expect.objectContaining({ id: face.id, frameTimestamp: 12_345 }),
+      ]);
+    });
+
+    it('should prefer a frame face over a whole-video mark as the feature photo', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: marked } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: marked.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 10_000 });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 640, exifImageHeight: 480 });
+      await sut.addToAssets(auth, person.personGroupId, { ids: [marked.id] });
+
+      await sut.createFace(auth, {
+        assetId: video.id,
+        personId: person.personGroupId,
+        imageWidth: 640,
+        imageHeight: 480,
+        x: 10,
+        y: 10,
+        width: 50,
+        height: 50,
+        frameTimestamp: 4000,
+      });
+      await sut.createNewFeaturePhoto([{ ownerId: user.id, personGroupId: person.personGroupId }]);
+
+      const [frameFace] = await sut.getFacesById(auth, { id: video.id });
+      await expect(
+        ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
+      ).resolves.toMatchObject({ faceAssetId: frameFace.id });
+    });
+
+    it('should store a given embedding for facial recognition', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 10_000 });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const embedding = Array.from({ length: 512 }, (_, index) => Math.sin(index + 1));
+
+      await sut.createFace(auth, {
+        assetId: video.id,
+        personId: person.personGroupId,
+        imageWidth: 640,
+        imageHeight: 480,
+        x: 10,
+        y: 10,
+        width: 50,
+        height: 50,
+        frameTimestamp: 4000,
+        embedding,
+      });
+
+      const [face] = await sut.getFacesById(auth, { id: video.id });
+      expect(face).toMatchObject({ frameTimestamp: 4000, sourceType: SourceType.Manual, isWholeAsset: false });
+      const { rows } = await sql<{ distance: number }>`
+        select "embedding" <=> ${JSON.stringify(embedding)}::vector as "distance"
+        from "face_search" where "faceId" = ${face.id}
+      `.execute(ctx.database);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].distance).toBeCloseTo(0, 5);
+    });
+
+    it('should refuse a frame timestamp on a photo or past the end of the video', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: photo.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 10_000 });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const box = { imageWidth: 640, imageHeight: 480, x: 10, y: 10, width: 50, height: 50 };
+
+      await expect(
+        sut.createFace(auth, { assetId: photo.id, personId: person.personGroupId, ...box, frameTimestamp: 0 }),
+      ).rejects.toThrow('A frame timestamp can only be set for a video');
+      await expect(
+        sut.createFace(auth, { assetId: video.id, personId: person.personGroupId, ...box, frameTimestamp: 10_001 }),
+      ).rejects.toThrow('Frame timestamp is past the end of the video');
+      await expect(sut.getFacesById(auth, { id: photo.id })).resolves.toEqual([]);
+      await expect(sut.getFacesById(auth, { id: video.id })).resolves.toEqual([]);
     });
   });
 
