@@ -139,6 +139,24 @@ void main() {
         isNull,
       );
     });
+
+    test('opens the link in the account that exported the photo', () {
+      expect(
+        getGooglePhotosUrl([
+          (
+            key: 'google-photos',
+            value: {'url': 'https://photos.google.com/photo/abc', 'account': 'aeroverra@g.minecraft.technology'},
+          ),
+        ]),
+        'https://photos.google.com/photo/abc?authuser=aeroverra%40g.minecraft.technology',
+      );
+      expect(
+        getGooglePhotosUrl([
+          (key: 'google-photos', value: {'url': 'https://photos.google.com/photo/abc', 'account': 'Aeroverra'}),
+        ]),
+        'https://photos.google.com/photo/abc',
+      );
+    });
   });
 
   group('getAssetMetadataJson', () {

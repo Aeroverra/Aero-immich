@@ -66,6 +66,7 @@ const getGooglePhotosRows = (value: Record<string, unknown>, t: Translate): Cust
     rows.push({ label: t(label), value: Array.isArray(formatted) ? formatted : [formatted] });
   };
 
+  add('account', 'asset_metadata_account', formatCustomFieldValue);
   add('takenAt', 'asset_metadata_taken', formatDate);
   add('uploadedAt', 'asset_metadata_uploaded', formatDate);
   add('views', 'asset_metadata_views', formatCustomFieldValue);
@@ -118,7 +119,19 @@ export const getCustomFieldGroups = (items: AssetMetadataResponseDto[], t: Trans
     })
     .filter(({ rows }) => rows.length > 0);
 
+// Google opens a photo link in the browser's default account, and the photo id only exists in the account that
+// exported it, so the link names that account. authuser takes the email; /u/<n>/ depends on the sign-in order.
 export const getGooglePhotosUrl = (items: AssetMetadataResponseDto[]) => {
-  const url = items.find(({ key }) => key === GOOGLE_PHOTOS_KEY)?.value.url;
-  return typeof url === 'string' && url.startsWith('https://photos.google.com/') ? url : undefined;
+  const value = items.find(({ key }) => key === GOOGLE_PHOTOS_KEY)?.value;
+  const url = value?.url;
+  if (typeof url !== 'string' || !url.startsWith('https://photos.google.com/')) {
+    return undefined;
+  }
+  const account = value?.account;
+  if (typeof account !== 'string' || !account.includes('@')) {
+    return url;
+  }
+  const link = new URL(url);
+  link.searchParams.set('authuser', account);
+  return link.href;
 };
