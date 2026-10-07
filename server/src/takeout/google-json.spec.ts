@@ -8,6 +8,7 @@ import {
   isPartner,
   parseGoogleJson,
   sanitizedTitle,
+  withGoogleAccount,
 } from 'src/takeout/google-json';
 import { GoogleMetadata } from 'src/takeout/types';
 import { describe, expect, it } from 'vitest';
@@ -167,5 +168,26 @@ describe('TestGoogleMetadataExtra', () => {
     expect(e.origin).toBe('mobileUpload');
     expect(e.deviceType).toBe('ANDROID_PHONE');
     expect(e.deviceFolder).toBe('Screenshots');
+  });
+});
+
+describe('withGoogleAccount', () => {
+  const extra = { url: 'https://photos.google.com/photo/AF1Qip', views: 1 };
+
+  it('stores the account email next to the url it produced', () => {
+    expect(withGoogleAccount(extra, { email: 'aeroverra@g.minecraft.technology' })).toEqual({
+      ...extra,
+      account: 'aeroverra@g.minecraft.technology',
+    });
+  });
+
+  it('stores no account for a run without an email', () => {
+    expect(withGoogleAccount(extra, { email: 'Nicholas Halka' })).toBe(extra);
+    expect(withGoogleAccount(extra, {} as any)).toBe(extra);
+    expect(withGoogleAccount(extra, null)).toBe(extra);
+  });
+
+  it('stores no account without a url', () => {
+    expect(withGoogleAccount({ views: 1 }, { email: 'a@b.c' })).toEqual({ views: 1 });
   });
 });
