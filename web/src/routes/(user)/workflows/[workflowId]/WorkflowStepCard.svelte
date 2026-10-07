@@ -17,8 +17,10 @@
 </script>
 
 <script lang="ts">
+  import WorkflowFilterGroupSummary from '$lib/components/WorkflowFilterGroupSummary.svelte';
   import { pluginManager } from '$lib/managers/plugin-manager.svelte';
   import type { JSONSchemaProperty } from '$lib/types';
+  import { formatWorkflowConfigValue, isFilterGroupSchema, truncateWorkflowValue } from '$lib/utils/workflow';
   import { type WorkflowStepDto } from '@immich/sdk';
   import { Badge, Card, CardBody, CardDescription, CardHeader, CardTitle, Icon, IconButton } from '@immich/ui';
   import {
@@ -54,40 +56,15 @@
     Object.entries(step.config ?? {}).filter(([, value]) => value !== null && value !== undefined && value !== ''),
   );
   const isGhost = $derived(step.id === 'ghost');
+  const isGroup = $derived(isFilterGroupSchema(method?.schema));
 
   const getUiHint = (key: string) => schema?.properties?.[key]?.uiHint?.type;
   const toIds = (value: unknown): string[] => (Array.isArray(value) ? value.map(String) : [String(value)]);
   let dragImage = $state<Element>();
   let isDropTarget = $state(false);
 
-  const truncate = (input: string, max = 24) => (input.length > max ? input.slice(0, max - 1) + '…' : input);
-
-  const formatConfigValue = (value: unknown): string => {
-    if (value === null || value === undefined) {
-      return '—';
-    }
-    if (typeof value === 'boolean') {
-      return value ? 'on' : 'off';
-    }
-    if (typeof value === 'number') {
-      return String(value);
-    }
-    if (typeof value === 'string') {
-      return `"${truncate(value)}"`;
-    }
-    if (Array.isArray(value)) {
-      if (value.length === 0) {
-        return $t('none');
-      }
-      const items = value.map((v) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v)));
-      const joined = items.join(' · ');
-      if (joined.length <= 28) {
-        return `"${joined}"`;
-      }
-      return $t('items_count', { values: { count: value.length } });
-    }
-    return JSON.stringify(value);
-  };
+  const truncate = truncateWorkflowValue;
+  const formatConfigValue = (value: unknown) => formatWorkflowConfigValue($t, value);
 
   const handleDragStart = (index: number, event: DragEvent) => {
     if (!event.dataTransfer) {
@@ -217,7 +194,11 @@
         </div>
       </CardHeader>
 
-      {#if configEntries.length > 0}
+      {#if isGroup}
+        <CardBody class="py-3">
+          <WorkflowFilterGroupSummary config={step.config} />
+        </CardBody>
+      {:else if configEntries.length > 0}
         <CardBody class="py-3">
           <div class="flex flex-wrap items-center gap-1.5">
             {#snippet badge(key: string, content: string)}

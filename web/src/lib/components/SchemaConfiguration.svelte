@@ -1,6 +1,7 @@
 <script lang="ts">
   import SchemaAlbumPicker from '$lib/components/SchemaAlbumPicker.svelte';
   import Self from '$lib/components/SchemaConfiguration.svelte';
+  import SchemaFilterGroup from '$lib/components/SchemaFilterGroup.svelte';
   import SchemaTagPicker from '$lib/components/SchemaTagPicker.svelte';
   import type { JSONSchemaProperty, SchemaConfig } from '$lib/types';
   import {
@@ -21,10 +22,12 @@
     schema: JSONSchemaProperty;
     root?: boolean;
     key?: string;
+    /** the plugin method the configuration is for, which a filter group needs to offer its filters */
+    methodKey?: string;
     config: SchemaConfig;
   };
 
-  let { schema, key = '', root = false, config = $bindable() }: Props = $props();
+  let { schema, key = '', root = false, methodKey, config = $bindable() }: Props = $props();
 
   const label = $derived(schema.title ?? key);
   const description = $derived(schema.description);
@@ -64,6 +67,9 @@
 <!-- Empty schema object -->
 {#if Object.keys(schema).length === 0}
   <!-- noop -->
+  <!-- a filter group holds other filter steps -->
+{:else if root && methodKey && schema.uiHint?.type === 'FilterGroup'}
+  <SchemaFilterGroup {methodKey} bind:config />
   <!-- nested configuration (also top level objects) -->
 {:else if schema.type === 'object'}
   {#if !root}
