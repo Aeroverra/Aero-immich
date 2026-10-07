@@ -5,6 +5,7 @@
   import WorkflowEditStepModal from '$lib/modals/WorkflowEditStepModal.svelte';
   import WorkflowTriggerPicker from '$lib/modals/WorkflowTriggerPicker.svelte';
   import { Route } from '$lib/route';
+  import { mediaQueryManager } from '$lib/stores/media-query-manager.svelte';
   import { getWorkflowActions, handleUpdateWorkflow } from '$lib/services/workflow.service';
   import { generateId } from '$lib/utils/generate-id';
   import { getTriggerDescription, getTriggerName } from '$lib/utils/workflow';
@@ -265,8 +266,8 @@
 
   $effect(() => console.log(steps));
 
-  const { Download, Duplicate, CopyJson, Delete, Logs } = $derived(
-    getWorkflowActions($t, { ...savedWorkflow, name, description, enabled, trigger, steps }),
+  const { Download, Duplicate, CopyJson, Delete, Logs, Run } = $derived(
+    getWorkflowActions($t, { ...savedWorkflow, name, description, enabled, trigger, steps }, { hasChanges }),
   );
 </script>
 
@@ -280,11 +281,16 @@
       {onClose}
       translations={{ close: $t('back') }}
       closeIcon={mdiArrowLeft}
-      actions={[Logs, Duplicate, CopyJson, Download, Delete].map((item) => ({ ...item, color: undefined }))}
+      actions={(mediaQueryManager.maxMd ? [Run] : [Run, Logs, Duplicate, CopyJson, Download, Delete]).map((item) => ({
+        ...item,
+        color: undefined,
+      }))}
+      overflowActions={mediaQueryManager.maxMd ? [Logs, Duplicate, CopyJson, Download, Delete] : []}
     >
       <ControlBarHeader>
-        <ControlBarTitle>{data.workflow.name}</ControlBarTitle>
-        <ControlBarDescription>{data.workflow.description}</ControlBarDescription>
+        <!-- on phones the header keeps room for the actions -->
+        <ControlBarTitle class="max-w-48 truncate md:max-w-none">{data.workflow.name}</ControlBarTitle>
+        <ControlBarDescription class="hidden md:block">{data.workflow.description}</ControlBarDescription>
       </ControlBarHeader>
       <ControlBarContent class="flex items-center justify-end gap-6">
         {#if hasChanges}
