@@ -1,10 +1,12 @@
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
+import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.drift.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 
 void main() {
@@ -18,7 +20,7 @@ void main() {
     await db.close();
   });
 
-  Future<void> seedAsset({required String id, required String ownerId, required bool isPrivate}) async {
+  Future<void> seedAsset({required String id, required String ownerId, bool isPrivate = false, String? stackId}) async {
     final createdAt = DateTime(2024, 1, 1, 12);
     await db
         .into(db.remoteAssetEntity)
@@ -34,13 +36,95 @@ void main() {
             updatedAt: Value(createdAt),
             uploadedAt: Value(createdAt),
             isPrivate: Value(isPrivate),
+            stackId: Value(stackId),
           ),
         );
+  }
+
+  Future<void> seedStack({
+    required String id,
+    required String ownerId,
+    required List<String> assetIds,
+    required StackSource source,
+  }) async {
+    await db
+        .into(db.stackEntity)
+        .insert(
+          StackEntityCompanion.insert(id: id, ownerId: ownerId, primaryAssetId: assetIds.first, source: Value(source)),
+        );
+    for (final assetId in assetIds) {
+      await seedAsset(id: assetId, ownerId: ownerId, stackId: id);
+    }
   }
 
   Future<void> seedUser(String id) {
     return db.into(db.userEntity).insert(UserEntityCompanion.insert(id: id, email: '$id@test.dev', name: id));
   }
+
+  group('automatic stacks', () {
+    Future<void> seedStacks() async {
+      await seedUser('me');
+      await seedAsset(id: 'single', ownerId: 'me');
+      await seedStack(id: 'manual', ownerId: 'me', assetIds: ['manual-1', 'manual-2'], source: StackSource.manual);
+      await seedStack(id: 'auto', ownerId: 'me', assetIds: ['auto-1', 'auto-2', 'auto-3'], source: StackSource.auto);
+    }
+
+    test('are collapsed to their primary asset like manual stacks while grouped', () async {
+      await seedStacks();
+
+      final rows = await db.mergedAssetDrift
+          .mergedAsset(
+            userIds: ['me'],
+            limit: (_) => Limit(10, 0),
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
+          .get();
+      expect(rows.map((row) => row.remoteId), unorderedEquals(['single', 'manual-1', 'auto-1']));
+      expect(rows.firstWhere((row) => row.remoteId == 'auto-1').stackId, 'auto');
+      expect(rows.firstWhere((row) => row.remoteId == 'manual-1').stackId, 'manual');
+
+      final buckets = await db.mergedAssetDrift
+          .mergedBucket(
+            groupBy: GroupAssetsBy.day.index,
+            userIds: ['me'],
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
+          .get();
+      expect(buckets.single.assetCount, 3);
+    });
+
+    test('list every asset without stack info while not grouped, manual stacks stay collapsed', () async {
+      await seedStacks();
+
+      final rows = await db.mergedAssetDrift
+          .mergedAsset(
+            userIds: ['me'],
+            limit: (_) => Limit(10, 0),
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: false,
+          )
+          .get();
+      expect(rows.map((row) => row.remoteId), unorderedEquals(['single', 'manual-1', 'auto-1', 'auto-2', 'auto-3']));
+      expect(rows.where((row) => row.remoteId!.startsWith('auto')).map((row) => row.stackId), everyElement(isNull));
+      expect(rows.firstWhere((row) => row.remoteId == 'manual-1').stackId, 'manual');
+
+      final buckets = await db.mergedAssetDrift
+          .mergedBucket(
+            groupBy: GroupAssetsBy.day.index,
+            userIds: ['me'],
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: false,
+          )
+          .get();
+      expect(buckets.single.assetCount, 5);
+    });
+  });
 
   group('private mode', () {
     test('mergedAsset and mergedBucket hide private assets when off and show own ones when on', () async {
@@ -49,21 +133,45 @@ void main() {
       await seedAsset(id: 'private', ownerId: 'me', isPrivate: true);
 
       final off = await db.mergedAssetDrift
-          .mergedAsset(userIds: ['me'], limit: (_) => Limit(10, 0), privateMode: false, currentUserId: 'me')
+          .mergedAsset(
+            userIds: ['me'],
+            limit: (_) => Limit(10, 0),
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
           .get();
       expect(off.map((row) => row.remoteId), ['public']);
       final offBuckets = await db.mergedAssetDrift
-          .mergedBucket(groupBy: GroupAssetsBy.day.index, userIds: ['me'], privateMode: false, currentUserId: 'me')
+          .mergedBucket(
+            groupBy: GroupAssetsBy.day.index,
+            userIds: ['me'],
+            privateMode: false,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
           .get();
       expect(offBuckets.single.assetCount, 1);
 
       final on = await db.mergedAssetDrift
-          .mergedAsset(userIds: ['me'], limit: (_) => Limit(10, 0), privateMode: true, currentUserId: 'me')
+          .mergedAsset(
+            userIds: ['me'],
+            limit: (_) => Limit(10, 0),
+            privateMode: true,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
           .get();
       expect(on.map((row) => row.remoteId), containsAll(['public', 'private']));
       expect(on.firstWhere((row) => row.remoteId == 'private').isPrivate, isTrue);
       final onBuckets = await db.mergedAssetDrift
-          .mergedBucket(groupBy: GroupAssetsBy.day.index, userIds: ['me'], privateMode: true, currentUserId: 'me')
+          .mergedBucket(
+            groupBy: GroupAssetsBy.day.index,
+            userIds: ['me'],
+            privateMode: true,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
           .get();
       expect(onBuckets.single.assetCount, 2);
     });
@@ -75,7 +183,13 @@ void main() {
       await seedAsset(id: 'partner-private', ownerId: 'partner', isPrivate: true);
 
       final rows = await db.mergedAssetDrift
-          .mergedAsset(userIds: ['me', 'partner'], limit: (_) => Limit(10, 0), privateMode: true, currentUserId: 'me')
+          .mergedAsset(
+            userIds: ['me', 'partner'],
+            limit: (_) => Limit(10, 0),
+            privateMode: true,
+            currentUserId: 'me',
+            groupAutoStacks: true,
+          )
           .get();
       expect(rows.map((row) => row.remoteId), ['partner-public']);
     });
@@ -107,7 +221,13 @@ void main() {
         );
 
     final buckets = await db.mergedAssetDrift
-        .mergedBucket(groupBy: GroupAssetsBy.day.index, userIds: [userId], privateMode: false, currentUserId: '')
+        .mergedBucket(
+          groupBy: GroupAssetsBy.day.index,
+          userIds: [userId],
+          privateMode: false,
+          currentUserId: '',
+          groupAutoStacks: true,
+        )
         .get();
 
     expect(buckets, hasLength(1));

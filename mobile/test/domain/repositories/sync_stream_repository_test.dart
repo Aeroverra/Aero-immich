@@ -7,6 +7,7 @@ import 'package:immich_mobile/data/db/main/table/remote/album.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart' as model;
 import 'package:immich_mobile/infrastructure/repositories/sync_stream.repository.dart';
 import 'package:openapi/api.dart';
 
@@ -254,6 +255,53 @@ void main() {
 
       final row = await (db.remoteAlbumEntity.select()..where((t) => t.id.equals('album-1'))).getSingle();
       expect(row.isPrivate, isTrue);
+    });
+  });
+
+  group('SyncStreamRepository - stack source', () {
+    SyncStackV2 createStackV2({required String id, required StackSource source}) {
+      return SyncStackV2(
+        id: id,
+        createdAt: DateTime(2024, 1, 1),
+        updatedAt: DateTime(2024, 1, 1),
+        ownerId: 'user-1',
+        primaryAssetId: 'asset-1',
+        source_: source,
+      );
+    }
+
+    test('updateStacksV2 stores the source and updates it on the next upsert', () async {
+      await sut.updateUsersV1([_createUser()]);
+      await sut.updateStacksV2([
+        createStackV2(id: 'manual', source: StackSource.manual),
+        createStackV2(id: 'auto', source: StackSource.auto),
+      ]);
+
+      final rows = await db.stackEntity.select().get();
+      expect(
+        {for (final row in rows) row.id: row.source},
+        {'manual': model.StackSource.manual, 'auto': model.StackSource.auto},
+      );
+
+      await sut.updateStacksV2([createStackV2(id: 'auto', source: StackSource.manual)]);
+      final updated = await (db.stackEntity.select()..where((t) => t.id.equals('auto'))).getSingle();
+      expect(updated.source, model.StackSource.manual);
+    });
+
+    test('updateStacksV1 keeps stacks manual', () async {
+      await sut.updateUsersV1([_createUser()]);
+      await sut.updateStacksV1([
+        SyncStackV1(
+          id: 'stack',
+          createdAt: DateTime(2024, 1, 1),
+          updatedAt: DateTime(2024, 1, 1),
+          ownerId: 'user-1',
+          primaryAssetId: 'asset-1',
+        ),
+      ]);
+
+      final row = await (db.stackEntity.select()..where((t) => t.id.equals('stack'))).getSingle();
+      expect(row.source, model.StackSource.manual);
     });
   });
 
