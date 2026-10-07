@@ -324,6 +324,24 @@
     }
   });
 
+  const onVideoSeek = (positionMs: number) => {
+    const seconds = positionMs / 1000;
+    if (castManager.isCasting) {
+      castManager.seekTo(seconds);
+      return;
+    }
+
+    if (!videoPlayer) {
+      return;
+    }
+
+    // pause on the moment so it can be checked
+    videoPlayer.pause();
+    videoPlayer.currentTime = Number.isFinite(videoPlayer.duration) ? Math.min(seconds, videoPlayer.duration) : seconds;
+  };
+
+  onMount(() => assetViewerManager.on({ VideoSeek: onVideoSeek }));
+
   // The time is only refreshed on HLS fragment decode by default,
   // so manually emit events on seek to update it immediately.
   const onSeeking = (event: Event) => event.currentTarget?.dispatchEvent(new Event('timeupdate'));
