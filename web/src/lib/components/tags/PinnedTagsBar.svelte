@@ -115,6 +115,8 @@
       });
       if (saved) {
         changes.clear();
+        // done with these assets, like after the tag dialog
+        assetMultiSelectManager.clear();
       }
     } finally {
       isSaving = false;

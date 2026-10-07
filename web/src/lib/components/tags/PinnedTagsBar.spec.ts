@@ -125,7 +125,8 @@ describe('PinnedTagsBar', () => {
     });
     expect(sdkMock.untagAssets).toHaveBeenCalledWith({ id: 'Food/Dessert/Cake', bulkIdsDto: { ids: ['a', 'b', 'c'] } });
     expect(tagPicker.recent.current).toEqual(['Travel', 'Food/Fruit']);
-    // the counts are fetched again and the staged changes are gone
+    // the selection is cleared, which closes the selection bar, and the staged changes are gone
+    await waitFor(() => expect(assetMultiSelectManager.assets).toHaveLength(0));
     await waitFor(() => expect(screen.queryByTestId('pinned-tags-save')).not.toBeInTheDocument());
     expect(chip('Travel')).not.toHaveAttribute('data-change');
   });
@@ -237,14 +238,12 @@ describe('PinnedTagsBar', () => {
     await userEvent.click(chipButton('Food/Dessert/Cake'));
     await userEvent.click(screen.getByTestId('pinned-tags-save'));
 
-    await waitFor(() => expect(assetMultiSelectManager.assets.map(({ id }) => id)).toEqual(['b']));
-    expect(privateModeManager.invalidate).toHaveBeenCalled();
-    await waitFor(() =>
-      expect(sdkMock.getTagAssetCounts).toHaveBeenLastCalledWith({ tagAssetCountsDto: { assetIds: ['b'] } }),
-    );
+    await waitFor(() => expect(privateModeManager.invalidate).toHaveBeenCalled());
+    expect(sdkMock.getAssetInfo).toHaveBeenCalledTimes(3);
+    expect(assetMultiSelectManager.assets).toHaveLength(0);
   });
 
-  it('keeps the selection when the saved tags do not touch the view', async () => {
+  it('clears the selection after saving when the saved tags do not touch the view', async () => {
     setView({ includeAll: true, includeTagIds: [], excludeTagIds: ['Food'] });
     select('a', 'b', 'c');
     renderWithTooltips(PinnedTagsBar, {});
@@ -253,8 +252,8 @@ describe('PinnedTagsBar', () => {
     await userEvent.click(chipButton('Travel'));
     await userEvent.click(screen.getByTestId('pinned-tags-save'));
 
-    await waitFor(() => expect(sdkMock.bulkTagAssets).toHaveBeenCalled());
-    expect(assetMultiSelectManager.assets).toHaveLength(3);
+    await waitFor(() => expect(assetMultiSelectManager.assets).toHaveLength(0));
+    expect(sdkMock.bulkTagAssets).toHaveBeenCalled();
     expect(privateModeManager.invalidate).not.toHaveBeenCalled();
     expect(sdkMock.getAssetInfo).not.toHaveBeenCalled();
   });
