@@ -25,6 +25,10 @@ ON remote_asset_entity (owner_id, visibility, deleted_at, created_at DESC)
 @TableIndex.sql(
   'CREATE INDEX IF NOT EXISTS idx_remote_asset_owner_private ON remote_asset_entity (owner_id, is_private)',
 )
+// custom views evaluate the hidden motion part of a live photo with the tags of its still
+@TableIndex.sql(
+  'CREATE INDEX IF NOT EXISTS idx_remote_asset_live_photo_video_id ON remote_asset_entity (live_photo_video_id)',
+)
 class RemoteAssetEntity extends Table with DriftDefaultsMixin, AssetEntityMixin {
   const RemoteAssetEntity();
 
