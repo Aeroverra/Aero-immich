@@ -402,7 +402,8 @@ export class SearchRepository {
 
       frameDistances.clear();
       for (const { id, distance } of frameMatches) {
-        if (!frameDistances.has(id)) {
+        // the index returns rows in nearly exact order, so the first row of a video is not always its closest frame
+        if (distance < (frameDistances.get(id) ?? Infinity)) {
           frameDistances.set(id, distance);
         }
       }
