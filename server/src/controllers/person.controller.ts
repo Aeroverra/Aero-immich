@@ -23,6 +23,8 @@ import {
   MergePersonDto,
   PeopleResponseDto,
   PeopleUpdateDto,
+  PersonAssetCountResponseDto,
+  PersonAssetCountsDto,
   PersonCreateDto,
   PersonResponseDto,
   PersonSearchDto,
@@ -172,12 +174,28 @@ export class PersonController {
     await sendFile(res, next, () => this.service.getThumbnail(auth, id), this.logger);
   }
 
+  @Post('assets/counts')
+  @Authenticated({ permission: Permission.PersonRead })
+  @HttpCode(HttpStatus.OK)
+  @Endpoint({
+    summary: 'Count the people of assets',
+    description:
+      'For every person that is on any of the assets, how many of them the person is on and on how many only through a whole-asset mark (those are the ones removing the person takes them off).',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  getPersonAssetCounts(
+    @Auth() auth: AuthDto,
+    @Body() dto: PersonAssetCountsDto,
+  ): Promise<PersonAssetCountResponseDto[]> {
+    return this.service.getAssetCounts(auth, dto);
+  }
+
   @Put(':id/assets')
   @Authenticated({ permission: Permission.FaceCreate })
   @Endpoint({
-    summary: 'Add a person to videos',
+    summary: 'Add a person to assets',
     description:
-      'Mark videos as having a person in them. A video has no face box to draw, so each one gets a manual face covering the whole frame. Videos the person is already on are reported as duplicate, photos as validation errors (their people are marked on the face itself).',
+      'Mark photos and videos as having a person in them without a location in the picture (close-ups, videos). Each asset gets a manual face covering the whole asset, flagged isWholeAsset. Assets the person is already on in any way (a detected face, a drawn box, an earlier mark) are reported as duplicate, other asset types as validation errors.',
     history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
   })
   addPersonToAssets(
@@ -186,6 +204,22 @@ export class PersonController {
     @Body() dto: BulkIdsDto,
   ): Promise<BulkIdResponseDto[]> {
     return this.service.addToAssets(auth, id, dto);
+  }
+
+  @Delete(':id/assets')
+  @Authenticated({ permission: Permission.FaceDelete })
+  @Endpoint({
+    summary: 'Remove a person from assets',
+    description:
+      'Take a person off assets by removing their whole-asset marks. Where a face of the person is located in the picture (detected or drawn) it stays and the asset is reported as a validation error; assets without the person are reported as not found.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  removePersonFromAssets(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Body() dto: BulkIdsDto,
+  ): Promise<BulkIdResponseDto[]> {
+    return this.service.removeFromAssets(auth, id, dto);
   }
 
   @Put(':id/reassign')
