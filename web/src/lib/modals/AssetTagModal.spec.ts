@@ -1,11 +1,19 @@
-import type { TagResponseDto } from '@immich/sdk';
+import { ViewAccess, ViewPrivateAssets, type TagResponseDto } from '@immich/sdk';
+import { toastManager } from '@immich/ui';
 import { screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { init, register, waitLocale } from 'svelte-i18n';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
+import PinnedTagsBar from '$lib/components/tags/PinnedTagsBar.svelte';
 import { tagPicker } from '$lib/components/tags/tag-picker.svelte';
+import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
+import { authManager } from '$lib/managers/auth-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import { viewManager } from '$lib/managers/view-manager.svelte';
 import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
 import { renderWithTooltips } from '$tests/helpers';
+import { timelineAssetFactory } from '@test-data/factories/asset-factory';
+import { userAdminFactory } from '@test-data/factories/user-factory';
 
 const newTag = (value: string): TagResponseDto => ({
   id: value,
@@ -30,6 +38,7 @@ describe('AssetTagModal', () => {
     vi.clearAllMocks();
     tagPicker.expanded.current = [];
     tagPicker.recent.current = [];
+    tagPicker.pinned.current = [];
     sdkMock.getAllTags.mockResolvedValue([newTag('Beach'), newTag('Family'), newTag('Work')]);
     // all three assets carry Beach, one carries Family, none carries Work
     sdkMock.getTagAssetCounts.mockResolvedValue([
@@ -75,5 +84,63 @@ describe('AssetTagModal', () => {
     await userEvent.click(screen.getByLabelText('Work'));
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('pins a tag to the selection bar from the tree and unpins it', async () => {
+    renderWithTooltips(AssetTagModal, { assetIds, onClose });
+    await waitFor(() => expect(row('Beach')).toHaveAttribute('aria-selected', 'true'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Pin Work to the selection bar' }));
+    expect(tagPicker.pinned.current).toEqual(['Work']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Unpin Work' }));
+    expect(tagPicker.pinned.current).toEqual([]);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('takes assets out of the selection when a saved tag hides them from the view, without counting them again', async () => {
+    const user = userAdminFactory.build();
+    authManager.setUser(user);
+    assetMultiSelectManager.clear();
+    assetMultiSelectManager.selectAssets(assetIds.map((id) => timelineAssetFactory.build({ id, ownerId: user.id })));
+    tagPicker.pinned.current = ['Beach'];
+    viewManager.active = {
+      viewId: 'hide-work',
+      expiresAt: null,
+      view: {
+        id: 'hide-work',
+        name: 'Without work',
+        order: 1,
+        isDefault: false,
+        access: ViewAccess.Open,
+        includeAll: true,
+        includeUntagged: false,
+        includeTagIds: [],
+        excludeTagIds: ['Work'],
+        privateAssets: ViewPrivateAssets.Hide,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    };
+    const invalidate = vi.spyOn(privateModeManager, 'invalidate').mockReturnValue();
+    const danger = vi.spyOn(toastManager, 'danger');
+
+    // the pinned tags bar of the selection is on screen while the dialog tags the assets
+    renderWithTooltips(PinnedTagsBar, {});
+    renderWithTooltips(AssetTagModal, { assetIds, onClose });
+    await waitFor(() => expect(row('Beach')).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() => expect(sdkMock.getTagAssetCounts).toHaveBeenCalledTimes(2));
+
+    await userEvent.click(screen.getByLabelText('Work'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith(true));
+    expect(assetMultiSelectManager.assets).toHaveLength(0);
+    expect(invalidate).toHaveBeenCalled();
+    expect(sdkMock.getTagAssetCounts).toHaveBeenCalledTimes(2);
+    expect(danger).not.toHaveBeenCalled();
+
+    viewManager.reset();
+    invalidate.mockRestore();
   });
 });
