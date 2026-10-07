@@ -101,6 +101,63 @@ const newUploadLibrary = async () => {
   return { sut, ctx, user, auth, phone, google };
 };
 
+/**
+ * Named Ann and Bob, a person without a name and a hidden one, and photos of them: alone, together,
+ * with a face nobody is assigned to, with faces that were hidden or deleted, and with nobody at all
+ */
+const newPeopleLibrary = async () => {
+  const { sut, ctx } = setup();
+  const { user } = await ctx.newUser();
+  const { person: ann } = await ctx.newPerson({ ownerId: user.id, name: 'Ann' });
+  const { person: bob } = await ctx.newPerson({ ownerId: user.id, name: 'Bob' });
+  const { person: unnamed } = await ctx.newPerson({ ownerId: user.id, name: '' });
+  const { person: hidden } = await ctx.newPerson({ ownerId: user.id, name: '', isHidden: true });
+
+  const newPhoto = async (faces: { personGroupId?: string | null; isVisible?: boolean; deletedAt?: Date }[]) => {
+    const { asset } = await ctx.newAsset({ ownerId: user.id });
+    for (const face of faces) {
+      await ctx.newAssetFace({ assetId: asset.id, ...face });
+    }
+    return asset;
+  };
+
+  const annAlone = await newPhoto([{ personGroupId: ann.personGroupId }]);
+  const annTwice = await newPhoto([{ personGroupId: ann.personGroupId }, { personGroupId: ann.personGroupId }]);
+  const annAndBob = await newPhoto([{ personGroupId: ann.personGroupId }, { personGroupId: bob.personGroupId }]);
+  const annAndStranger = await newPhoto([{ personGroupId: ann.personGroupId }, { personGroupId: null }]);
+  const annAndGoneFaces = await newPhoto([
+    { personGroupId: ann.personGroupId },
+    { personGroupId: bob.personGroupId, isVisible: false },
+    { personGroupId: null, deletedAt: new Date() },
+  ]);
+  const unnamedOnly = await newPhoto([{ personGroupId: unnamed.personGroupId }]);
+  const hiddenOnly = await newPhoto([{ personGroupId: hidden.personGroupId }]);
+  const strangerOnly = await newPhoto([{ personGroupId: null }]);
+  const nobody = await newPhoto([]);
+  const onlyHiddenFace = await newPhoto([{ personGroupId: null, isVisible: false }]);
+
+  const auth = factory.auth({ user: { id: user.id } });
+  return {
+    sut,
+    ctx,
+    user,
+    auth,
+    ann,
+    bob,
+    unnamed,
+    annAlone,
+    annTwice,
+    annAndBob,
+    annAndStranger,
+    annAndGoneFaces,
+    unnamedOnly,
+    hiddenOnly,
+    strangerOnly,
+    nobody,
+    onlyHiddenFace,
+  };
+};
+
 const ids = (items: { id: string }[]) => items.map(({ id }) => id).toSorted();
 
 beforeAll(async () => {
@@ -478,6 +535,182 @@ describe(SearchService.name, () => {
       );
 
       expect(ids(items)).toEqual(ids([long]));
+    });
+  });
+
+  describe('people and faces', () => {
+    it('should keep to photos where the picked person is the only one', async () => {
+      const { sut, auth, ann, annAlone, annTwice, annAndGoneFaces } = await newPeopleLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        personIds: [ann.personGroupId],
+        onlyPersonIds: true,
+      });
+
+      // hidden and deleted faces are not in the photo anymore
+      expect(ids(response.assets.items)).toEqual(ids([annAlone, annTwice, annAndGoneFaces]));
+    });
+
+    it('should need every picked person and nobody else', async () => {
+      const { sut, auth, ann, bob, annAndBob } = await newPeopleLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        personIds: [ann.personGroupId, bob.personGroupId],
+        onlyPersonIds: true,
+      });
+
+      expect(ids(response.assets.items)).toEqual(ids([annAndBob]));
+    });
+
+    it('should still find a person with others around without onlyPersonIds', async () => {
+      const { sut, auth, ann, annAlone, annTwice, annAndBob, annAndStranger, annAndGoneFaces } =
+        await newPeopleLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, personIds: [ann.personGroupId] });
+
+      expect(ids(response.assets.items)).toEqual(ids([annAlone, annTwice, annAndBob, annAndStranger, annAndGoneFaces]));
+    });
+
+    it('should keep to photos where someone else is there too', async () => {
+      const { sut, auth, ann, annAndBob, annAndStranger } = await newPeopleLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        personIds: [ann.personGroupId],
+        onlyPersonIds: false,
+      });
+
+      // a face nobody is assigned to is someone else as well
+      expect(ids(response.assets.items)).toEqual(ids([annAndBob, annAndStranger]));
+    });
+
+    it('should ignore onlyPersonIds without people', async () => {
+      const { sut, auth } = await newPeopleLibrary();
+
+      const only = await sut.searchMetadata(auth, { size: 250, onlyPersonIds: true });
+      const withOthers = await sut.searchMetadata(auth, { size: 250, onlyPersonIds: false });
+
+      expect(only.assets.items).toHaveLength(10);
+      expect(withOthers.assets.items).toHaveLength(10);
+    });
+
+    it('should find photos with nobody in them, and with anybody', async () => {
+      const library = await newPeopleLibrary();
+      const { sut, auth, nobody, onlyHiddenFace } = library;
+
+      const without = await sut.searchMetadata(auth, { size: 250, hasPeople: false });
+      const withPeople = await sut.searchMetadata(auth, { size: 250, hasPeople: true });
+
+      expect(ids(without.assets.items)).toEqual(ids([nobody, onlyHiddenFace]));
+      expect(ids(withPeople.assets.items)).toEqual(
+        ids([
+          library.annAlone,
+          library.annTwice,
+          library.annAndBob,
+          library.annAndStranger,
+          library.annAndGoneFaces,
+          library.unnamedOnly,
+          library.hiddenOnly,
+          library.strangerOnly,
+        ]),
+      );
+    });
+
+    it('should find photos with a face nobody has named', async () => {
+      const library = await newPeopleLibrary();
+      const { sut, auth, annAndStranger, unnamedOnly, strangerOnly } = library;
+
+      const unnamed = await sut.searchMetadata(auth, { size: 250, hasUnnamedFaces: true });
+      const named = await sut.searchMetadata(auth, { size: 250, hasUnnamedFaces: false });
+
+      // a hidden person was set aside on purpose, a hidden face is not shown
+      expect(ids(unnamed.assets.items)).toEqual(ids([annAndStranger, unnamedOnly, strangerOnly]));
+      expect(ids(named.assets.items)).toEqual(
+        ids([
+          library.annAlone,
+          library.annTwice,
+          library.annAndBob,
+          library.annAndGoneFaces,
+          library.hiddenOnly,
+          library.nobody,
+          library.onlyHiddenFace,
+        ]),
+      );
+    });
+
+    it('should find photos without anyone named, whether faces were found or not', async () => {
+      const library = await newPeopleLibrary();
+      const { sut, ctx, user, auth, unnamedOnly, hiddenOnly, strangerOnly, nobody, onlyHiddenFace } = library;
+      // a hidden person keeps its name
+      const { person: dan } = await ctx.newPerson({ ownerId: user.id, name: 'Dan', isHidden: true });
+      const { asset: danAlone } = await ctx.newAsset({ ownerId: user.id });
+      await ctx.newAssetFace({ assetId: danAlone.id, personGroupId: dan.personGroupId });
+
+      const nobodyNamed = await sut.searchMetadata(auth, { size: 250, hasNamedFaces: false });
+      const named = await sut.searchMetadata(auth, { size: 250, hasNamedFaces: true });
+      const onlyUnnamed = await sut.searchMetadata(auth, { size: 250, hasNamedFaces: false, hasUnnamedFaces: true });
+
+      expect(ids(nobodyNamed.assets.items)).toEqual(
+        ids([unnamedOnly, hiddenOnly, strangerOnly, nobody, onlyHiddenFace]),
+      );
+      expect(ids(named.assets.items)).toEqual(
+        ids([
+          library.annAlone,
+          library.annTwice,
+          library.annAndBob,
+          library.annAndStranger,
+          library.annAndGoneFaces,
+          danAlone,
+        ]),
+      );
+      expect(ids(onlyUnnamed.assets.items)).toEqual(ids([unnamedOnly, strangerOnly]));
+    });
+
+    it("should go by the searching user's names", async () => {
+      const { sut, ctx, auth, unnamed, unnamedOnly, strangerOnly, annAndStranger } = await newPeopleLibrary();
+      const { user: other } = await ctx.newUser();
+      // another user's name for the same person group does not name it for this user
+      await ctx.newPerson({ ownerId: other.id, personGroupId: unnamed.personGroupId, name: 'Carol' });
+
+      const response = await sut.searchMetadata(auth, { size: 250, hasUnnamedFaces: true });
+
+      expect(ids(response.assets.items)).toEqual(ids([annAndStranger, unnamedOnly, strangerOnly]));
+    });
+
+    it('should combine the face filters with others and count them in statistics', async () => {
+      const { sut, auth, ann } = await newPeopleLibrary();
+
+      await expect(sut.searchStatistics(auth, { hasPeople: false })).resolves.toEqual({ total: 2 });
+      await expect(
+        sut.searchStatistics(auth, { hasUnnamedFaces: true, personIds: [ann.personGroupId] }),
+      ).resolves.toEqual({ total: 1 });
+    });
+
+    it('should apply the face filters to smart search', async () => {
+      const { ctx, user, ann, annAlone, annAndBob, nobody, strangerOnly } = await newPeopleLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      for (const [index, asset] of [annAlone, annAndBob, nobody, strangerOnly].entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      const only = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(1), userIds: [user.id], personIds: [ann.personGroupId], onlyPersonIds: true },
+      );
+      const empty = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(1), userIds: [user.id], hasPeople: false },
+      );
+      const unnamed = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(1), userIds: [user.id], hasUnnamedFaces: true },
+      );
+
+      expect(ids(only.items)).toEqual(ids([annAlone]));
+      expect(ids(empty.items)).toEqual(ids([nobody]));
+      expect(ids(unnamed.items)).toEqual(ids([strangerOnly]));
     });
   });
 
