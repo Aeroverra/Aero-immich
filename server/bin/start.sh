@@ -41,6 +41,9 @@ read_file_and_export "DB_USERNAME_FILE" "DB_USERNAME"
 read_file_and_export "DB_PASSWORD_FILE" "DB_PASSWORD"
 read_file_and_export "REDIS_PASSWORD_FILE" "REDIS_PASSWORD"
 
+# Aero fork: remember whether the user chose a libuv pool size (the takeout default below only applies otherwise)
+UV_THREADPOOL_SIZE_FROM_USER="${UV_THREADPOOL_SIZE:-}"
+
 if CPU_CORES="${CPU_CORES:=$(get-cpus.sh 2>/dev/null)}"; then
   log_message "Detected CPU Cores: $CPU_CORES"
   if [ "$CPU_CORES" -gt 4 ]; then
@@ -48,6 +51,13 @@ if CPU_CORES="${CPU_CORES:=$(get-cpus.sh 2>/dev/null)}"; then
   fi
 else
   log_message "skipping get-cpus.sh - not found in PATH or failed: using default UV_THREADPOOL_SIZE"
+fi
+
+# Aero fork: takeout imports keep up to 16 positional archive reads in flight (4 readers x 4 reads) next to blob
+# writes with their fsync, image decode, zlib and statfs, and a read stuck on an NFS share holds its thread until the
+# share answers. The work waits on latency, not CPU, so extra threads only cost their stacks: at least 24.
+if [ -z "$UV_THREADPOOL_SIZE_FROM_USER" ] && [ "${UV_THREADPOOL_SIZE:-0}" -lt 24 ]; then
+  export UV_THREADPOOL_SIZE=24
 fi
 
 if [ -f "${SERVER_HOME}/dist/main.js" ]; then
