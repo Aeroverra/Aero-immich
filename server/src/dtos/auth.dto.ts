@@ -135,6 +135,8 @@ const AuthStatusResponseSchema = z
     isElevated: z.boolean().describe('Is elevated session'),
     expiresAt: z.string().optional().describe('Session expiration date'),
     pinExpiresAt: z.string().optional().describe('PIN expiration date'),
+    privateMode: z.boolean().describe('Is private mode enabled for this session'),
+    privateModeExpiresAt: z.string().optional().describe('Private mode expiration date'),
   })
   .meta({ id: 'AuthStatusResponseDto' });
 
