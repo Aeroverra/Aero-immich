@@ -231,6 +231,7 @@
       model: $t('camera_model'),
       lensModel: $t('lens_model'),
       personIds: $t('people'),
+      excludePersonIds: $t('search_exclude_people'),
       tagIds: $t('tags'),
       excludeTagIds: $t('search_exclude_tags'),
       minDuration: $t('search_videos_at_least'),
@@ -351,7 +352,7 @@
                 {#await getAlbumNames(value) then albumNames}
                   {albumNames}
                 {/await}
-              {:else if searchKey === 'personIds' && Array.isArray(value)}
+              {:else if (searchKey === 'personIds' || searchKey === 'excludePersonIds') && Array.isArray(value)}
                 {#await getPersonName(value) then personName}
                   {personName}
                 {/await}
