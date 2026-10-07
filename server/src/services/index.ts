@@ -50,6 +50,7 @@ import { TrashService } from 'src/services/trash.service';
 import { UserAdminService } from 'src/services/user-admin.service';
 import { UserService } from 'src/services/user.service';
 import { VersionService } from 'src/services/version.service';
+import { VideoFrameAnalysisService } from 'src/services/video-frame-analysis.service';
 import { ViewService } from 'src/services/view.service';
 import { WorkflowExecutionService } from 'src/services/workflow-execution.service';
 import { WorkflowService } from 'src/services/workflow.service';
@@ -107,6 +108,7 @@ export const services = [
   UserAdminService,
   UserService,
   VersionService,
+  VideoFrameAnalysisService,
   ViewService,
   WorkflowExecutionService,
   WorkflowService,
