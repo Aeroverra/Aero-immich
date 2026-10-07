@@ -1,5 +1,5 @@
 import type { TagResponseDto } from '@immich/sdk';
-import { buildTagRows, groupTagsByParent, pickTagRow, tagName, tagParentPath } from '$lib/utils/tag-tree';
+import { buildTagRows, groupTagsByParent, pickTagRow, tagName, tagParentPath, tagTextColor } from '$lib/utils/tag-tree';
 
 const newTag = (value: string): TagResponseDto => ({
   id: value,
@@ -93,5 +93,21 @@ describe('tag tree', () => {
       ['Food/Dessert', ['Cake', 'Chocolate Ice Cream']],
       ['Food/Drinks', ['Hot Chocolate']],
     ]);
+  });
+});
+
+describe('tagTextColor', () => {
+  it('picks the text color that reads on the tag color', () => {
+    expect(tagTextColor('#ff0000')).toBe('#000000');
+    expect(tagTextColor('#00008b')).toBe('#ffffff');
+    expect(tagTextColor('#FFF')).toBe('#000000');
+    expect(tagTextColor('222222')).toBe('#ffffff');
+  });
+
+  it('leaves tags without a usable color alone', () => {
+    expect(tagTextColor(undefined)).toBeUndefined();
+    expect(tagTextColor(null)).toBeUndefined();
+    expect(tagTextColor('')).toBeUndefined();
+    expect(tagTextColor('red')).toBeUndefined();
   });
 });

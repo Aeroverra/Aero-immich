@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Route } from '$lib/route';
-  import { groupTagsByParent, tagName } from '$lib/utils/tag-tree';
+  import { groupTagsByParent, tagName, tagTextColor } from '$lib/utils/tag-tree';
   import type { TagResponseDto } from '@immich/sdk';
   import { Badge, Link } from '@immich/ui';
   import { t } from 'svelte-i18n';
@@ -28,11 +28,18 @@
       {/if}
       <div class="flex flex-wrap gap-1">
         {#each group.tags as tag (tag.id)}
+          {@const textColor = tagTextColor(tag.color)}
+          <!-- a tag with a color of its own wears it, like on the tags page -->
           <Badge
             onClose={onRemove ? () => onRemove(tag) : undefined}
             size="small"
             shape="round"
             translations={{ close: $t('remove_tag') }}
+            class={textColor ? '[&_a]:text-inherit [&_button]:text-inherit' : undefined}
+            style={textColor
+              ? `background-color: ${tag.color}; border-color: ${tag.color}; color: ${textColor}`
+              : undefined}
+            data-testid="tag-chip"
           >
             {#if link}
               <Link href={Route.tags({ path: tag.value })} underline={false} class="px-2 font-light" title={tag.value}>
