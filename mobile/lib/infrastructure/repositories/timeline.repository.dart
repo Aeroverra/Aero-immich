@@ -11,6 +11,7 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/map.repository.dart';
@@ -214,22 +215,51 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     String albumId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => (
-    bucketSource: () => _watchRemoteAlbumBucket(albumId, groupBy: groupBy, privateFilter: privateFilter),
+    bucketSource: () => _watchRemoteAlbumBucket(
+      albumId,
+      groupBy: groupBy,
+      privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    ),
     assetSource: (offset, count) => _getRemoteAlbumBucketAssets(
       albumId,
       groupBy: groupBy,
       offset: offset,
       count: count,
       privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
     ),
     origin: TimelineOrigin.remoteAlbum,
   );
+
+  /// The album's assets the session shows, one per stack
+  Expression<bool> _albumAssetFilter(
+    $RemoteAssetEntityTable row,
+    String albumId,
+    PrivateModeFilter privateFilter, {
+    required bool groupAutoStacks,
+  }) {
+    Expression<bool> visible($RemoteAssetEntityTable asset) =>
+        asset.deletedAt.isNull() &
+        existsQuery(
+          _db.remoteAlbumAssetEntity.selectOnly()
+            ..addColumns([_db.remoteAlbumAssetEntity.assetId])
+            ..where(
+              _db.remoteAlbumAssetEntity.assetId.equalsExp(asset.id) &
+                  _db.remoteAlbumAssetEntity.albumId.equals(albumId),
+            ),
+        ) &
+        asset.albumPrivateFilter(privateFilter);
+    return visible(row) & row.isStackRepresentative(visible, groupAutoStacks: groupAutoStacks);
+  }
 
   Stream<List<Bucket>> _watchRemoteAlbumBucket(
     String albumId, {
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
     // A private album is hidden as a whole while the mode is off: no album row, no buckets
     final visibleAlbum = _db.remoteAlbumEntity.select()
@@ -238,7 +268,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     if (groupBy == GroupAssetsBy.none) {
       final visibleAssetIds = _db.remoteAssetEntity.selectOnly()
         ..addColumns([_db.remoteAssetEntity.id])
-        ..where(_db.remoteAssetEntity.albumPrivateFilter(privateFilter));
+        ..where(_albumAssetFilter(_db.remoteAssetEntity, albumId, privateFilter, groupAutoStacks: groupAutoStacks));
       return visibleAlbum
           .watch()
           .switchMap((albums) {
@@ -277,9 +307,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
               ),
             ])
             ..where(
-              _db.remoteAssetEntity.deletedAt.isNull() &
-                  _db.remoteAlbumAssetEntity.albumId.equals(albumId) &
-                  _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
+              _db.remoteAlbumAssetEntity.albumId.equals(albumId) &
+                  _albumAssetFilter(_db.remoteAssetEntity, albumId, privateFilter, groupAutoStacks: groupAutoStacks),
             )
             ..groupBy([dateExp]);
 
@@ -305,6 +334,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     required int count,
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) async {
     final albumData =
         await (_db.remoteAlbumEntity.select()
@@ -335,9 +365,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
             useColumns: false,
           ),
         ])..where(
-          _db.remoteAssetEntity.deletedAt.isNull() &
-              _db.remoteAlbumAssetEntity.albumId.equals(albumId) &
-              _db.remoteAssetEntity.albumPrivateFilter(privateFilter),
+          _db.remoteAlbumAssetEntity.albumId.equals(albumId) &
+              _albumAssetFilter(_db.remoteAssetEntity, albumId, privateFilter, groupAutoStacks: groupAutoStacks),
         );
 
     query.orderBy(
@@ -391,18 +420,22 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     String ownerId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() & row.visibility.equalsValue(AssetVisibility.timeline) & row.ownerId.equals(ownerId),
     groupBy: groupBy,
     origin: TimelineOrigin.remoteAssets,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   TimelineQuery privateFolder(
     String userId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() &
@@ -412,12 +445,15 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     groupBy: groupBy,
     origin: TimelineOrigin.privateFolder,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   TimelineQuery recentlyAdded(
     String userId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.uploadedAt.isNotNull() &
@@ -428,6 +464,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     groupBy: groupBy,
     sortBy: SortAssetsBy.uploaded,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   /// The user's assets carrying any of [tagIds] (pass a tag with its descendants to include child tags), in the
@@ -437,6 +475,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     Set<String> tagIds,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() &
@@ -450,12 +489,15 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     groupBy: groupBy,
     origin: TimelineOrigin.tag,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   TimelineQuery favorite(
     String userId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() &
@@ -465,6 +507,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     groupBy: groupBy,
     origin: TimelineOrigin.favorite,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   TimelineQuery trash(
@@ -483,6 +527,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     String userId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() & row.ownerId.equals(userId) & row.visibility.equalsValue(AssetVisibility.archive),
@@ -490,6 +535,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     origin: TimelineOrigin.archive,
     joinLocal: true,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
   TimelineQuery locked(
@@ -508,6 +555,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     String userId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => _remoteQueryBuilder(
     filter: (row) =>
         row.deletedAt.isNull() &
@@ -517,23 +565,62 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     origin: TimelineOrigin.video,
     groupBy: groupBy,
     privateFilter: privateFilter,
+    collapseStacks: true,
+    groupAutoStacks: groupAutoStacks,
   );
 
-  TimelineQuery place(String place, GroupAssetsBy groupBy, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) =>
-      (
-        bucketSource: () => _watchPlaceBucket(place, groupBy: groupBy, privateFilter: privateFilter),
-        assetSource: (offset, count) =>
-            _getPlaceBucketAssets(place, groupBy: groupBy, offset: offset, count: count, privateFilter: privateFilter),
-        origin: TimelineOrigin.place,
-      );
+  TimelineQuery place(
+    String place,
+    GroupAssetsBy groupBy, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
+  }) => (
+    bucketSource: () =>
+        _watchPlaceBucket(place, groupBy: groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+    assetSource: (offset, count) => _getPlaceBucketAssets(
+      place,
+      groupBy: groupBy,
+      offset: offset,
+      count: count,
+      privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    ),
+    origin: TimelineOrigin.place,
+  );
+
+  /// The assets taken in [place] that the session shows, one per stack
+  Expression<bool> _placeAssetFilter(
+    $RemoteAssetEntityTable row,
+    String place,
+    PrivateModeFilter privateFilter, {
+    required bool groupAutoStacks,
+  }) {
+    Expression<bool> visible($RemoteAssetEntityTable asset) =>
+        asset.deletedAt.isNull() &
+        asset.visibility.equalsValue(AssetVisibility.timeline) &
+        existsQuery(
+          _db.remoteExifEntity.selectOnly()
+            ..addColumns([_db.remoteExifEntity.assetId])
+            ..where(_db.remoteExifEntity.assetId.equalsExp(asset.id) & _db.remoteExifEntity.city.equals(place)),
+        ) &
+        asset.privateFilter(privateFilter);
+    return visible(row) & row.isStackRepresentative(visible, groupAutoStacks: groupAutoStacks);
+  }
 
   TimelineQuery person(
     String userId,
     String personId,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => (
-    bucketSource: () => _watchPersonBucket(userId, personId, groupBy: groupBy, privateFilter: privateFilter),
+    bucketSource: () => _watchPersonBucket(
+      userId,
+      personId,
+      groupBy: groupBy,
+      privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    ),
     assetSource: (offset, count) => _getPersonBucketAssets(
       userId,
       personId,
@@ -541,14 +628,40 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
       offset: offset,
       count: count,
       privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
     ),
     origin: TimelineOrigin.person,
   );
+
+  /// The user's assets showing [personId] that the session shows, one per stack
+  Expression<bool> _personAssetFilter(
+    $RemoteAssetEntityTable row,
+    String userId,
+    String personId,
+    PrivateModeFilter privateFilter, {
+    required bool groupAutoStacks,
+  }) {
+    final idQuery = _db.assetFaceEntity.selectOnly()
+      ..addColumns([_db.assetFaceEntity.assetId])
+      ..where(
+        _db.assetFaceEntity.personId.equals(personId) &
+            _db.assetFaceEntity.isVisible.equals(true) &
+            _db.assetFaceEntity.deletedAt.isNull(),
+      );
+    Expression<bool> visible($RemoteAssetEntityTable asset) =>
+        asset.id.isInQuery(idQuery) &
+        asset.deletedAt.isNull() &
+        asset.ownerId.equals(userId) &
+        asset.visibility.equalsValue(AssetVisibility.timeline) &
+        asset.privateFilter(privateFilter);
+    return visible(row) & row.isStackRepresentative(visible, groupAutoStacks: groupAutoStacks);
+  }
 
   Stream<List<Bucket>> _watchPlaceBucket(
     String place, {
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
     if (groupBy == GroupAssetsBy.none) {
       // TODO: implement GroupAssetBy for place
@@ -569,9 +682,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
       ])
       ..where(
         _db.remoteExifEntity.city.equals(place) &
-            _db.remoteAssetEntity.deletedAt.isNull() &
-            _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
-            _db.remoteAssetEntity.privateFilter(privateFilter),
+            _placeAssetFilter(_db.remoteAssetEntity, place, privateFilter, groupAutoStacks: groupAutoStacks),
       )
       ..groupBy([dateExp])
       ..orderBy([OrderingTerm.desc(dateExp)]);
@@ -589,6 +700,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     required int count,
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
     final query =
         _db.remoteAssetEntity.select().join([
@@ -599,10 +711,8 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
             ),
           ])
           ..where(
-            _db.remoteAssetEntity.deletedAt.isNull() &
-                _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
-                _db.remoteExifEntity.city.equals(place) &
-                _db.remoteAssetEntity.privateFilter(privateFilter),
+            _db.remoteExifEntity.city.equals(place) &
+                _placeAssetFilter(_db.remoteAssetEntity, place, privateFilter, groupAutoStacks: groupAutoStacks),
           )
           ..orderBy(_assetDateOrder(groupBy).map((order) => order(_db.remoteAssetEntity)).toList())
           ..limit(count, offset: offset);
@@ -614,25 +724,20 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     String personId, {
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
-    final idQuery = _db.assetFaceEntity.selectOnly()
-      ..addColumns([_db.assetFaceEntity.assetId])
-      ..where(
-        _db.assetFaceEntity.personId.equals(personId) &
-            _db.assetFaceEntity.isVisible.equals(true) &
-            _db.assetFaceEntity.deletedAt.isNull(),
-      );
+    final filter = _personAssetFilter(
+      _db.remoteAssetEntity,
+      userId,
+      personId,
+      privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    );
 
     if (groupBy == GroupAssetsBy.none) {
       final query = _db.remoteAssetEntity.selectOnly()
         ..addColumns([_db.remoteAssetEntity.id.count()])
-        ..where(
-          _db.remoteAssetEntity.id.isInQuery(idQuery) &
-              _db.remoteAssetEntity.deletedAt.isNull() &
-              _db.remoteAssetEntity.ownerId.equals(userId) &
-              _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
-              _db.remoteAssetEntity.privateFilter(privateFilter),
-        );
+        ..where(filter);
 
       return query.map((row) {
         final count = row.read(_db.remoteAssetEntity.id.count())!;
@@ -645,13 +750,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
 
     final query = _db.remoteAssetEntity.selectOnly()
       ..addColumns([assetCountExp, dateExp])
-      ..where(
-        _db.remoteAssetEntity.id.isInQuery(idQuery) &
-            _db.remoteAssetEntity.ownerId.equals(userId) &
-            _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
-            _db.remoteAssetEntity.deletedAt.isNull() &
-            _db.remoteAssetEntity.privateFilter(privateFilter),
-      )
+      ..where(filter)
       ..groupBy([dateExp])
       ..orderBy([OrderingTerm.desc(dateExp)]);
 
@@ -669,24 +768,10 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     required int count,
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
-    final idQuery = _db.assetFaceEntity.selectOnly()
-      ..addColumns([_db.assetFaceEntity.assetId])
-      ..where(
-        _db.assetFaceEntity.personId.equals(personId) &
-            _db.assetFaceEntity.isVisible.equals(true) &
-            _db.assetFaceEntity.deletedAt.isNull(),
-      );
-
     final query = _db.remoteAssetEntity.select()
-      ..where(
-        (row) =>
-            row.id.isInQuery(idQuery) &
-            row.deletedAt.isNull() &
-            row.ownerId.equals(userId) &
-            row.visibility.equalsValue(AssetVisibility.timeline) &
-            row.privateFilter(privateFilter),
-      )
+      ..where((row) => _personAssetFilter(row, userId, personId, privateFilter, groupAutoStacks: groupAutoStacks))
       ..orderBy(_assetDateOrder(groupBy))
       ..limit(count, offset: offset);
 
@@ -840,8 +925,13 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     bool joinLocal = false,
     SortAssetsBy sortBy = SortAssetsBy.taken,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool collapseStacks = false,
+    bool groupAutoStacks = true,
   }) {
-    Expression<bool> privateAwareFilter($RemoteAssetEntityTable row) => filter(row) & row.privateFilter(privateFilter);
+    Expression<bool> visible($RemoteAssetEntityTable row) => filter(row) & row.privateFilter(privateFilter);
+    Expression<bool> privateAwareFilter($RemoteAssetEntityTable row) => collapseStacks
+        ? visible(row) & row.isStackRepresentative(visible, groupAutoStacks: groupAutoStacks)
+        : visible(row);
     return (
       bucketSource: () => _watchRemoteBucket(filter: privateAwareFilter, groupBy: groupBy, sortBy: sortBy),
       assetSource: (offset, count) => _getRemoteAssets(
@@ -946,6 +1036,40 @@ extension on Expression<DateTime> {
 }
 
 extension on $RemoteAssetEntityTable {
+  /// One tile per stack, like the main timeline: an asset outside a stack, every asset of an automatic stack while
+  /// those are listed separately, or the stack's representative among the members that pass [memberFilter] (the view's
+  /// own filter): the primary asset when it passes, otherwise the oldest member that does. So a stack shows once, and a
+  /// view that leaves out the primary (favorites, videos, a tag) still shows the stack through a member it keeps.
+  Expression<bool> isStackRepresentative(
+    Expression<bool> Function($RemoteAssetEntityTable member) memberFilter, {
+    required bool groupAutoStacks,
+  }) {
+    final db = attachedDatabase as Drift;
+    final member = db.alias(db.remoteAssetEntity, 'stack_member');
+    final memberStack = db.alias(db.stackEntity, 'member_stack');
+    final representative =
+        member.selectOnly().join([innerJoin(memberStack, memberStack.id.equalsExp(member.stackId), useColumns: false)])
+          ..addColumns([member.id])
+          ..where(member.stackId.equalsExp(stackId) & memberFilter(member))
+          ..orderBy([
+            OrderingTerm.desc(member.id.equalsExp(memberStack.primaryAssetId)),
+            OrderingTerm.asc(member.createdAt),
+            OrderingTerm.asc(member.id),
+          ])
+          ..limit(1);
+
+    final autoStack = db.alias(db.stackEntity, 'auto_stack');
+    final inAutoStack = existsQuery(
+      autoStack.selectOnly()
+        ..addColumns([autoStack.id])
+        ..where(autoStack.id.equalsExp(stackId) & autoStack.source.equalsValue(StackSource.auto)),
+    );
+
+    return stackId.isNull() |
+        (groupAutoStacks ? const Constant(false) : inAutoStack) |
+        id.equalsExp(subqueryExpression<String>(representative));
+  }
+
   Expression<String> effectiveCreatedAt(GroupAssetsBy groupBy, {SortAssetsBy sortBy = SortAssetsBy.taken}) {
     if (sortBy == SortAssetsBy.uploaded) {
       return uploadedAt.dateFmt(groupBy, toLocal: true);
