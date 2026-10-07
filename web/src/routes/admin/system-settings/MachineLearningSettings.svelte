@@ -375,6 +375,41 @@
       </SettingAccordion>
 
       <SettingAccordion
+        key="person-suggestions"
+        title={$t('admin.machine_learning_person_suggestions')}
+        subtitle={$t('admin.machine_learning_person_suggestions_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_person_suggestions_enabled')}
+            subtitle={$t('admin.machine_learning_person_suggestions_enabled_description')}
+            bind:checked={configToEdit.machineLearning.personSuggestions.enabled}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.facialRecognition.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_person_suggestions_min_score')}
+            description={$t('admin.machine_learning_person_suggestions_min_score_description')}
+            bind:value={configToEdit.machineLearning.personSuggestions.minScore}
+            step="0.01"
+            min={0}
+            max={1}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.facialRecognition.enabled ||
+              !configToEdit.machineLearning.personSuggestions.enabled}
+            isEdited={configToEdit.machineLearning.personSuggestions.minScore !==
+              config.machineLearning.personSuggestions.minScore}
+          />
+        </div>
+      </SettingAccordion>
+
+      <SettingAccordion
         key="face-attributes"
         title={$t('admin.machine_learning_face_attributes')}
         subtitle={$t('admin.machine_learning_face_attributes_description')}
