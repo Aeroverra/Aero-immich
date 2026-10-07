@@ -435,6 +435,41 @@ describe(SearchService.name, () => {
       );
     });
 
+    it('should search everything in the searched albums after an album access check', async () => {
+      mocks.access.album.checkOwnerAccess.mockImplementation((_, ids) => Promise.resolve(ids));
+
+      await sut.searchSmart(authStub.user1, {
+        size: 100,
+        query: 'test',
+        albumIds: ['album-1'],
+        excludeAlbumIds: ['album-2'],
+      });
+
+      expect(mocks.access.album.checkOwnerAccess).toHaveBeenCalledWith(
+        authStub.user1.user.id,
+        new Set(['album-2']),
+        false,
+      );
+      expect(mocks.access.album.checkOwnerAccess).toHaveBeenCalledWith(
+        authStub.user1.user.id,
+        new Set(['album-1']),
+        false,
+      );
+      expect(mocks.search.searchSmart).toHaveBeenCalledWith(
+        { page: 1, size: 100 },
+        expect.objectContaining({ albumIds: ['album-1'], excludeAlbumIds: ['album-2'], userIds: undefined }),
+      );
+    });
+
+    it('should refuse an album the user cannot read', async () => {
+      mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set());
+
+      await expect(
+        sut.searchSmart(authStub.user1, { size: 100, query: 'test', albumIds: ['album-1'] }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.search.searchSmart).not.toHaveBeenCalled();
+    });
+
     it('should consider page and size parameters', async () => {
       await sut.searchSmart(authStub.user1, { query: 'test', page: 2, size: 50 });
 
