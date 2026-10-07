@@ -109,6 +109,7 @@ export interface SearchPeopleOptions {
 
 export interface SearchTagOptions {
   tagIds?: string[] | null;
+  excludeTagIds?: string[];
 }
 
 export interface SearchAlbumOptions {
