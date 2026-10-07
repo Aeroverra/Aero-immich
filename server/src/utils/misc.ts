@@ -104,6 +104,8 @@ export const isFaceAttributesEnabled = (machineLearning: SystemConfig['machineLe
   isMachineLearningEnabled(machineLearning) && machineLearning.faceAttributes.enabled;
 export const isDuplicateDetectionEnabled = (machineLearning: SystemConfig['machineLearning']) =>
   isSmartSearchEnabled(machineLearning) && machineLearning.duplicateDetection.enabled;
+export const isPersonSuggestionsEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isFacialRecognitionEnabled(machineLearning) && machineLearning.personSuggestions.enabled;
 export const isAutoStackEnabled = (machineLearning: SystemConfig['machineLearning']) =>
   isSmartSearchEnabled(machineLearning) && machineLearning.autoStack.enabled;
 export const isVideoFrameFaceDetectionEnabled = (machineLearning: SystemConfig['machineLearning']) =>

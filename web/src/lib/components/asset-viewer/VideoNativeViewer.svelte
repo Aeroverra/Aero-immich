@@ -1,7 +1,8 @@
 <script lang="ts">
   import FaceEditor from '$lib/components/asset-viewer/face-editor/FaceEditor.svelte';
+  import { page } from '$app/state';
   import VideoRemoteViewer from '$lib/components/asset-viewer/VideoRemoteViewer.svelte';
-  import { assetViewerFadeDuration } from '$lib/constants';
+  import { assetViewerFadeDuration, QueryParameter } from '$lib/constants';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { castManager } from '$lib/managers/cast-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
@@ -9,6 +10,7 @@
   import { mediaCapabilitiesManager } from '$lib/managers/media-capabilities-manager.svelte';
   import { videoBookmarkManager } from '$lib/managers/video-bookmark-manager.svelte';
   import { videoSearchMatchManager } from '$lib/managers/video-search-match-manager.svelte';
+  import { faceManager } from '$lib/stores/face.svelte';
   import { autoPlayVideo, lang, loopVideo as loopVideoPreference } from '$lib/stores/preferences.store';
   import { getAssetHlsSessionUrl, getAssetHlsUrl, getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
   import { formatVideoPosition } from '$lib/utils/people-utils';
@@ -359,6 +361,22 @@
     if (assetViewerManager.isFaceEditMode) {
       videoPlayer?.pause();
     }
+  });
+
+  // a face picked elsewhere (a face of a Same person? question) found in a video frame: show that frame
+  const pinnedFrame = $derived.by(() => {
+    const faceId = page.url.searchParams.get(QueryParameter.FACE);
+    const frame = faceId ? faceManager.data.find((face) => face.id === faceId)?.frameTimestamp : undefined;
+    return typeof frame === 'number' ? frame : undefined;
+  });
+  let pinnedFrameShownFor: string | undefined;
+  $effect(() => {
+    if (pinnedFrame === undefined || isLoading || pinnedFrameShownFor === assetId) {
+      return;
+    }
+
+    pinnedFrameShownFor = assetId;
+    onVideoSeek(pinnedFrame);
   });
 
   const onVideoSeek = (positionMs: number, play = false) => {
