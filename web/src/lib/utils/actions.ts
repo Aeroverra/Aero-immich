@@ -2,6 +2,7 @@ import { AssetVisibility, deleteAssets as deleteBulk, restoreAssets } from '@imm
 import { toastManager } from '@immich/ui';
 import { t } from 'svelte-i18n';
 import { get } from 'svelte/store';
+import { eventManager } from '$lib/managers/event-manager.svelte';
 import { TimelineManager } from '$lib/managers/timeline-manager/timeline-manager.svelte';
 import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
 import type { StackResponse } from '$lib/utils/asset-utils';
@@ -33,33 +34,50 @@ export const deleteAssets = async (
     await deleteBulk({ assetBulkDeleteDto: { ids, force } });
     onAssetDelete(ids);
 
+    if (force) {
+      toastManager.primary(
+        { description: $t('assets_permanently_deleted_count', { values: { count: ids.length } }) },
+        { timeout: 5000 },
+      );
+      return;
+    }
+
+    // every trash can be undone, also from views that do not know how to put the assets back themselves
     toastManager.primary(
       {
-        description: force
-          ? $t('assets_permanently_deleted_count', { values: { count: ids.length } })
-          : $t('assets_trashed_count', { values: { count: ids.length } }),
-        button:
-          onUndoDelete && !force
-            ? {
-                label: $t('undo'),
-                color: 'secondary',
-                onclick: () => undoDeleteAssets(onUndoDelete, assets, stackedAssetIds),
-              }
-            : undefined,
+        description: $t('assets_trashed_count', { values: { count: ids.length } }),
+        button: (close) => ({
+          label: $t('undo'),
+          color: 'secondary',
+          onclick: () => {
+            close();
+            void undoDeleteAssets(assets, stackedAssetIds, onUndoDelete);
+          },
+        }),
       },
-      { timeout: 5000 },
+      { timeout: UNDO_TOAST_TIMEOUT },
     );
   } catch (error) {
     handleError(error, $t('errors.unable_to_delete_assets'));
   }
 };
 
-const undoDeleteAssets = async (onUndoDelete: OnUndoDelete, assets: TimelineAsset[], stackedAssetIds: string[]) => {
+/** how long the "Undo" button of a trash toast stays clickable */
+export const UNDO_TOAST_TIMEOUT = 8000;
+
+export const undoDeleteAssets = async (
+  assets: TimelineAsset[],
+  stackedAssetIds: string[] = [],
+  onUndoDelete?: OnUndoDelete,
+) => {
   const $t = get(t);
   try {
     const ids = [...assets.map((a) => a.id), ...stackedAssetIds];
     await restoreAssets({ bulkIdsDto: { ids } });
-    onUndoDelete?.(assets);
+    const restored = assets.map((asset) => ({ ...asset, isTrashed: false }));
+    eventManager.emit('AssetsRestore', restored);
+    onUndoDelete?.(restored);
+    toastManager.primary($t('assets_restored_count', { values: { count: ids.length } }));
   } catch (error) {
     handleError(error, $t('errors.unable_to_restore_assets'));
   }
