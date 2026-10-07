@@ -57,7 +57,14 @@ class SearchService {
         return stackIds.add(stack.id);
       });
 
-      return SearchResult(assets: items.map((e) => e.toDto()).toList(), nextPage: response.assets.nextPage?.toInt());
+      return SearchResult(
+        assets: items.map((e) => e.toDto()).toList(),
+        nextPage: response.assets.nextPage?.toInt(),
+        matchedFrames: {
+          for (final match in response.assets.matchedFrames.orElse(null) ?? const <SearchMatchedFrameResponseDto>[])
+            match.assetId: match.frameTimestamp,
+        },
+      );
     } catch (error, stackTrace) {
       _log.severe("Failed to search for assets", error, stackTrace);
     }
