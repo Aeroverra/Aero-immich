@@ -51,7 +51,7 @@ import { isViewUnrestricted } from 'src/utils/database';
 import { ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
 import { batched, findOrFail, isFacialRecognitionEnabled, isVideoFrameAnalysisEnabled } from 'src/utils/misc';
-import { Point, transformPoints } from 'src/utils/transform';
+import { getOutputDimensions, Point, transformEditedFaceToOriginal, transformPoints } from 'src/utils/transform';
 
 const personKey = ({ ownerId, personGroupId }: PersonId) => `${ownerId}/${personGroupId}`;
 
@@ -406,31 +406,48 @@ export class PersonService extends BaseService {
       }
     }
 
-    const heightScale = imageHeight / (previewFaces[0]?.imageHeight || 1);
-    const widthScale = imageWidth / (previewFaces[0]?.imageWidth || 1);
+    // faces are stored relative to the unedited image, so a face found on the edited preview is mapped back first
+    const isEditedPreview = previewFile.isEdited && asset.edits.length > 0;
+    const original = getDimensions(asset.exifInfo);
+    const edited =
+      original.width && original.height
+        ? getOutputDimensions(asset.edits, original)
+        : { width: asset.width ?? imageWidth, height: asset.height ?? imageHeight };
+
     for (const { boundingBox, embedding } of faces) {
-      const scaledBox = {
-        x1: boundingBox.x1 * widthScale,
-        y1: boundingBox.y1 * heightScale,
-        x2: boundingBox.x2 * widthScale,
-        y2: boundingBox.y2 * heightScale,
-      };
-      const match = previewFaces.find((face) => this.iou(face, scaledBox) > 0.5);
+      const box = isEditedPreview
+        ? transformEditedFaceToOriginal(boundingBox, asset.edits, {
+            source: { width: imageWidth, height: imageHeight },
+            edited,
+            original,
+          })
+        : {
+            imageWidth,
+            imageHeight,
+            boundingBoxX1: boundingBox.x1,
+            boundingBoxY1: boundingBox.y1,
+            boundingBoxX2: boundingBox.x2,
+            boundingBoxY2: boundingBox.y2,
+          };
+
+      // compare in the space each existing face is stored in
+      const match = previewFaces.find((face) => {
+        const scaleX = face.imageWidth / (box.imageWidth || 1);
+        const scaleY = face.imageHeight / (box.imageHeight || 1);
+        const scaledBox = {
+          x1: box.boundingBoxX1 * scaleX,
+          y1: box.boundingBoxY1 * scaleY,
+          x2: box.boundingBoxX2 * scaleX,
+          y2: box.boundingBoxY2 * scaleY,
+        };
+        return this.iou(face, scaledBox) > 0.5;
+      });
 
       if (match && !mlFaceIds.delete(match.id)) {
         embeddings.push({ faceId: match.id, embedding });
       } else if (!match) {
         const faceId = this.cryptoRepository.randomUUID();
-        facesToAdd.push({
-          id: faceId,
-          assetId: asset.id,
-          imageHeight,
-          imageWidth,
-          boundingBoxX1: boundingBox.x1,
-          boundingBoxY1: boundingBox.y1,
-          boundingBoxX2: boundingBox.x2,
-          boundingBoxY2: boundingBox.y2,
-        });
+        facesToAdd.push({ id: faceId, assetId: asset.id, ...box });
         embeddings.push({ faceId, embedding });
       }
     }
