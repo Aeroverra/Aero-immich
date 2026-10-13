@@ -307,4 +307,34 @@ describe(ActivityService.name, () => {
       await expect(sut.getAll(auth, { albumId: album.id })).resolves.toEqual([]);
     });
   });
+
+  describe('private mode', () => {
+    it('should refuse activity on a private album outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { album, owner, sharedWith } = await ctx.newSharedAlbum();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      await ctx.newAlbumAsset({ albumId: album.id, assetId: hidden.id });
+      const on = factory.auth({ user: owner, session: { privateMode: true } });
+      const off = factory.auth({ user: owner });
+      await sut.create(on, { albumId: album.id, assetId: hidden.id, type: ReactionType.COMMENT, comment: 'secret' });
+      await sut.create(on, { albumId: album.id, type: ReactionType.COMMENT, comment: 'album level' });
+
+      for (const auth of [off, factory.auth({ user: sharedWith })]) {
+        await expect(sut.getAll(auth, { albumId: album.id })).rejects.toThrow('Not found or no album.read access');
+        await expect(sut.getStatistics(auth, { albumId: album.id })).rejects.toThrow(
+          'Not found or no album.read access',
+        );
+        await expect(
+          sut.create(auth, { albumId: album.id, type: ReactionType.COMMENT, comment: 'blind' }),
+        ).rejects.toThrow('Not found or no activity.create access');
+      }
+
+      const all = await sut.getAll(on, { albumId: album.id });
+      expect(all).toHaveLength(2);
+      const onStats = await sut.getStatistics(on, { albumId: album.id });
+      expect(Number(onStats.comments)).toBe(2);
+      const viewer = factory.auth({ user: sharedWith, session: { privateMode: true } });
+      await expect(sut.getAll(viewer, { albumId: album.id })).resolves.toHaveLength(2);
+    });
+  });
 });

@@ -111,6 +111,64 @@ export function withDefaultVisibility<O>(qb: SelectQueryBuilder<DB, 'asset', O>)
   return qb.where('asset.visibility', 'in', [sql.lit(AssetVisibility.Archive), sql.lit(AssetVisibility.Timeline)]);
 }
 
+/**
+ * Private-mode scope for the current request. `privateMode` is true only when the
+ * session has been unlocked with the PIN; `userId` is the requesting user.
+ */
+export type PrivateScope = {
+  privateMode: boolean;
+  userId: string;
+};
+
+/**
+ * Mixed-owner feeds (timeline with partners, search, map, memories, people, stats):
+ * private assets are visible only to their owner and only while private mode is on.
+ */
+export function withPrivateScope<O>(scope: PrivateScope) {
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) =>
+    scope.privateMode
+      ? qb.where((eb) => eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)]))
+      : qb.where('asset.isPrivate', '=', false);
+}
+
+/**
+ * Album-scoped reads: a viewer with their own private mode on may see the owner's
+ * private assets. With it off, private assets are hidden regardless of owner.
+ */
+export function withPrivateAlbumScope<O>(scope: PrivateScope) {
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) => (scope.privateMode ? qb : qb.where('asset.isPrivate', '=', false));
+}
+
+/**
+ * Album listings and access checks: a private album is hidden as a whole while the
+ * caller's session is not in private mode, whoever owns it.
+ */
+export function withPrivateAlbumVisibility<O>(scope: Pick<PrivateScope, 'privateMode'>) {
+  return (qb: SelectQueryBuilder<DB, 'album', O>) => (scope.privateMode ? qb : qb.where('album.isPrivate', '=', false));
+}
+
+/**
+ * Memory listings and reads: a memory that contains any private asset is private as a
+ * whole and hidden while the caller's session is not in private mode, for the owner too.
+ */
+export function withPrivateMemoryVisibility<O>(scope: Pick<PrivateScope, 'privateMode'>) {
+  return (qb: SelectQueryBuilder<DB, 'memory', O>) =>
+    scope.privateMode
+      ? qb
+      : qb.where((eb) =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('memory_asset')
+                .innerJoin('asset', 'asset.id', 'memory_asset.assetId')
+                .select((eb) => eb.val(1).as('one'))
+                .whereRef('memory_asset.memoriesId', '=', 'memory.id')
+                .where('asset.isPrivate', '=', true),
+            ),
+          ),
+        );
+}
+
 const selectExifInfo = (eb: AssetExpressionBuilder) =>
   eb.fn
     .toJson(eb.table('asset_exif'))
@@ -426,6 +484,7 @@ const joinDeduplicationPlugin = new DeduplicateJoinsPlugin();
 export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearchBuilderOptions) {
   options.withDeleted ||= !!(options.trashedAfter || options.trashedBefore || options.isOffline);
 
+  // a missing private scope is treated as private mode off: private assets are never returned by accident
   return kysely
     .withPlugin(joinDeduplicationPlugin)
     .selectFrom('asset')
@@ -434,6 +493,7 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
         ? qb.where('asset.visibility', '!=', AssetVisibility.Locked)
         : qb.where('asset.visibility', '=', options.visibility!),
     )
+    .$call(withPrivateScope(options.privateScope ?? { privateMode: false, userId: '' }))
     .$if(!!options.albumIds && options.albumIds.length > 0, (qb) => inAlbums(qb, options.albumIds!))
     .$if(!!options.tagIds && options.tagIds.length > 0, (qb) => hasTags(qb, options.tagIds!))
     .$if(options.tagIds === null, (qb) =>
@@ -519,6 +579,7 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
     )
     .$if(!!options.type, (qb) => qb.where('asset.type', '=', options.type!))
     .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
+    .$if(options.isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', options.isPrivate!))
     .$if(options.isOffline !== undefined, (qb) => qb.where('asset.isOffline', '=', options.isOffline!))
     .$if(options.isEncoded !== undefined, (qb) =>
       qb.where((eb) => {
@@ -741,6 +802,7 @@ function branchPredicates(eb: AssetExpressionBuilder, branch: SearchFilterBranch
     ...comparisonPredicates(eb, 'asset.type', branch.type),
     ...comparisonPredicates(eb, 'asset.visibility', branch.visibility),
     ...(branch.isFavorite ? [eb('asset.isFavorite', '=', branch.isFavorite.eq)] : []),
+    ...(branch.isPrivate ? [eb('asset.isPrivate', '=', branch.isPrivate.eq)] : []),
     ...(branch.isOffline ? [eb('asset.isOffline', '=', branch.isOffline.eq)] : []),
     ...(branch.isMotion ? [eb('asset.livePhotoVideoId', branch.isMotion.eq ? 'is not' : 'is', null)] : []),
     ...existsPredicates(eb, branch.isEncoded, () => encodedVideoFiles(eb)),
@@ -814,6 +876,12 @@ export function searchAssetBuilder(kysely: Kysely<DB>, options: AssetSearchBuild
       .where((eb) =>
         eb.or([eb('asset.visibility', '!=', AssetVisibility.Locked), eb('asset.ownerId', '=', scope.lockedOwnerId)]),
       )
+      // private assets belong to their owner alone, and only while that owner's session is in private mode
+      .where((eb) =>
+        scope.privateOwnerId
+          ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.privateOwnerId)])
+          : eb('asset.isPrivate', '=', false),
+      )
       .$if(!!(options.withFaces || options.withPeople), (qb) =>
         qb.select(withFacesAndPeople({ viewingUserId: scope.viewingUserId! })),
       )
@@ -859,7 +927,11 @@ export function withSearchOrder(qb: ReturnType<typeof searchAssetBuilder>, order
   );
 }
 
-const scopeExample: AssetSearchScope = { userIds: [DummyValue.UUID], lockedOwnerId: DummyValue.UUID };
+const scopeExample: AssetSearchScope = {
+  userIds: [DummyValue.UUID],
+  lockedOwnerId: DummyValue.UUID,
+  privateOwnerId: null,
+};
 
 export const searchMetadataV3Examples: GenerateSqlQueries[] = [
   { name: 'baseline', params: [{ take: 100 }, {}, scopeExample] },

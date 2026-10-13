@@ -16,6 +16,7 @@ const TimeBucketQueryBaseSchema = z
     isTrashed: stringToBool
       .optional()
       .describe('Filter by trash status (true for trashed assets only, false for non-trashed only)'),
+    isPrivate: stringToBool.optional().describe('Only private assets (requires private mode)'),
     withStacked: stringToBool
       .optional()
       .describe('Include stacked assets in the response. When true, only primary assets from stacks are returned.'),
@@ -79,6 +80,7 @@ const TimeBucketAssetResponseSchema = z
       .array(z.number().meta({ format: 'double' }))
       .describe('Array of aspect ratios (width/height) for each asset'),
     isFavorite: z.array(z.boolean()).describe('Array indicating whether each asset is favorited'),
+    isPrivate: z.array(z.boolean()).describe('Array indicating whether each asset is private'),
     visibility: z
       .array(AssetVisibilitySchema)
       .describe('Array of visibility statuses for each asset (e.g., ARCHIVE, TIMELINE, HIDDEN, LOCKED)'),

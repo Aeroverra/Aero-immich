@@ -32,5 +32,6 @@ abstract class RemoteAlbum with _$RemoteAlbum {
     required int assetCount,
     required String ownerName,
     required bool isShared,
+    @Default(false) bool isPrivate,
   }) = _RemoteAlbum;
 }

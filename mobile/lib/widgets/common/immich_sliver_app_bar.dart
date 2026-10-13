@@ -13,6 +13,7 @@ import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/sync_status.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
@@ -68,6 +69,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
           title: title ?? const _ImmichLogoWithText(),
           actions: [
             const _SyncStatusIndicator(),
+            if (!isReadonlyModeEnabled) const _PrivateModeIndicator(),
             if (isCasting && !isReadonlyModeEnabled)
               IconButton(
                 onPressed: () => showDialog(context: context, builder: (context) => const CastDialog()),
@@ -79,6 +81,39 @@ class ImmichSliverAppBar extends ConsumerWidget {
             const SizedBox(width: 8),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PrivateModeIndicator extends ConsumerWidget {
+  const _PrivateModeIndicator();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isPrivateMode = ref.watch(isPrivateModeProvider);
+
+    Future<void> toggle() async {
+      if (!isPrivateMode) {
+        await context.pushRoute(PrivatePinAuthRoute());
+        return;
+      }
+
+      await ref.read(privateModeProvider.notifier).disable();
+      if (!context.mounted) {
+        return;
+      }
+      context.scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text(context.t.private_mode_disable), duration: const Duration(seconds: 2)),
+      );
+    }
+
+    return IconButton(
+      tooltip: isPrivateMode ? context.t.private_mode_disable : context.t.private_mode_enable,
+      onPressed: () => unawaited(toggle()),
+      icon: Icon(
+        isPrivateMode ? Icons.lock_open_rounded : Icons.lock_person_outlined,
+        color: isPrivateMode ? context.primaryColor : null,
       ),
     );
   }

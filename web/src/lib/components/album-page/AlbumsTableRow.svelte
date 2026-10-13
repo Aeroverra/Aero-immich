@@ -7,7 +7,7 @@
   import type { ContextMenuPosition } from '$lib/utils/context-menu';
   import { AlbumUserRole, type AlbumResponseDto } from '@immich/sdk';
   import { Icon } from '@immich/ui';
-  import { mdiShareVariantOutline } from '@mdi/js';
+  import { mdiLockOutline, mdiShareVariantOutline } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
   interface Props {
@@ -49,6 +49,9 @@
               values: { user: album.albumUsers[0].user.name },
             })}
       />
+    {/if}
+    {#if album.isPrivate}
+      <Icon icon={mdiLockOutline} size="16" class="ms-1 inline opacity-70" title={$t('private')} />
     {/if}
   </td>
   <td class="text-md text-center text-ellipsis sm:w-2/12 md:w-2/12 xl:w-[15%] 2xl:w-[12%]">

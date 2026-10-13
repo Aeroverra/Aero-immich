@@ -19,6 +19,21 @@ class UserApiRepository extends ApiRepository {
     return UserConverter.fromAdminDto(adminDto, preferenceDto);
   }
 
+  Future<int> getPrivateModeTimeout() async {
+    final preferences = await checkNull(_api.getMyPreferences());
+    return preferences.privateMode.timeoutMinutes;
+  }
+
+  Future<void> updatePrivateModeTimeout(int minutes) async {
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(
+          privateMode: Optional.present(PrivateModeUpdate(timeoutMinutes: Optional.present(minutes))),
+        ),
+      ),
+    );
+  }
+
   Future<String> createProfileImage({required String name, required Uint8List data}) async {
     final res = await checkNull(_api.createProfileImage(MultipartFile.fromBytes('file', data, filename: name)));
     return res.profileImagePath;

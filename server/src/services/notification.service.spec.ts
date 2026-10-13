@@ -222,6 +222,35 @@ describe(NotificationService.name, () => {
     });
   });
 
+  describe('onAssetsPrivateUpdate', () => {
+    it('should send connected clients an event and tell every album user the album followed', async () => {
+      mocks.album.getAlbumUserIdsByAssetIds.mockResolvedValue([
+        { albumId: 'album-id', userId: 'user-id' },
+        { albumId: 'album-id', userId: 'shared-user-id' },
+      ]);
+
+      await sut.onAssetsPrivateUpdate({ assetIds: ['asset-id', 'sibling-id'], userId: 'user-id' });
+
+      expect(mocks.websocket.clientSend).toHaveBeenCalledWith('on_asset_private_update', 'user-id', [
+        'asset-id',
+        'sibling-id',
+      ]);
+      expect(mocks.album.getAlbumUserIdsByAssetIds).toHaveBeenCalledWith(['asset-id', 'sibling-id']);
+      expect(mocks.websocket.clientSend).toHaveBeenCalledWith('on_album_update', 'user-id', 'album-id');
+      expect(mocks.websocket.clientSend).toHaveBeenCalledWith('on_album_update', 'shared-user-id', 'album-id');
+    });
+
+    it('should not send album events when the assets are in no album', async () => {
+      mocks.album.getAlbumUserIdsByAssetIds.mockResolvedValue([]);
+
+      await sut.onAssetsPrivateUpdate({ assetIds: ['asset-id'], userId: 'user-id' });
+
+      expect(mocks.websocket.clientSend).toHaveBeenCalledExactlyOnceWith('on_asset_private_update', 'user-id', [
+        'asset-id',
+      ]);
+    });
+  });
+
   describe('onStackCreate', () => {
     it('should send connected clients an event', () => {
       sut.onStackCreate({ stackId: 'stack-id', userId: 'user-id' });

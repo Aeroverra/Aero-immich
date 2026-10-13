@@ -15,6 +15,7 @@ export const isSharedLinkRoute = (route?: string | null) =>
 export const isAlbumsRoute = (route?: string | null) => !!route?.startsWith('/(user)/albums/[albumId=id]');
 export const isPeopleRoute = (route?: string | null) => !!route?.startsWith('/(user)/people/[personId]');
 export const isLockedFolderRoute = (route?: string | null) => !!route?.startsWith('/(user)/locked');
+export const isPrivateRoute = (route?: string | null) => !!route?.startsWith('/(user)/private');
 
 export const isAssetViewerRoute = (
   target?: { route?: { id?: RouteId | null }; params?: Record<string, string> | null } | null,

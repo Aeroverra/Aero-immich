@@ -619,4 +619,21 @@ describe(DuplicateService.name, () => {
       });
     });
   });
+
+  describe('private mode', () => {
+    it('should hide a group that has fewer than two visible assets outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const duplicateId = factory.uuid();
+      const plain = await newDuplicateAsset(ctx, { ownerId: user.id, duplicateId });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, duplicateId, isPrivate: true });
+      await ctx.newExif({ assetId: hidden.id, fileSizeInByte: 1000 });
+
+      await expect(sut.getDuplicates(factory.auth({ user: { id: user.id } }))).resolves.toEqual([]);
+
+      const on = await sut.getDuplicates(factory.auth({ user: { id: user.id }, session: { privateMode: true } }));
+      expect(on).toHaveLength(1);
+      expect(on[0].assets.map(({ id }) => id).sort()).toEqual([plain.id, hidden.id].sort());
+    });
+  });
 });

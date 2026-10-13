@@ -1,7 +1,8 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { hash } from 'bcrypt';
 import { Kysely } from 'kysely';
-import { AuthType } from 'src/enum';
+import { DateTime } from 'luxon';
+import { AuthType, UserMetadataKey } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { ClusterGroupRepository } from 'src/repositories/cluster-group.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
@@ -16,6 +17,7 @@ import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { DB } from 'src/schema';
 import { AuthService } from 'src/services/auth.service';
+import { requirePrivateMode } from 'src/utils/access';
 import { mediumFactory, newMediumService } from 'test/medium.factory';
 import { factory } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
@@ -153,6 +155,158 @@ describe(AuthService.name, () => {
       const response = sut.changePassword(auth, dto);
       await expect(response).rejects.toThrow(BadRequestException);
       await expect(response).rejects.toThrow('Wrong password');
+    });
+  });
+  describe('private mode', () => {
+    const pinCode = '123456';
+    const metadata = { adminRoute: false, sharedLinkRoute: false, uri: '/assets' };
+
+    const newPrivateUser = async (ctx: ReturnType<typeof setup>['ctx']) => {
+      const { user } = await ctx.newUser({ pinCode: await hash(pinCode, 10) });
+      const { session } = await ctx.newSession({ userId: user.id });
+      const auth = factory.auth({ session, user });
+      // sessionInsert stores sha256(id) as the token, so the bearer token is the raw session id
+      const headers = { authorization: `Bearer ${session.id}` };
+      return { user, session, auth, headers };
+    };
+
+    it('should reject enabling without a session token', async () => {
+      const { sut } = setup();
+      await expect(sut.enablePrivateMode(factory.auth(), { pinCode })).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('should reject a wrong pin code', async () => {
+      const { sut, ctx } = setup();
+      const { auth } = await newPrivateUser(ctx);
+      await expect(sut.enablePrivateMode(auth, { pinCode: '000000' })).rejects.toThrow('Wrong PIN code');
+    });
+
+    it('should reject a user without a pin code', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { session } = await ctx.newSession({ userId: user.id });
+      const auth = factory.auth({ session, user });
+      await expect(sut.enablePrivateMode(auth, { pinCode })).rejects.toThrow('User does not have a PIN code');
+    });
+
+    it('should enable, report, and disable private mode on the session', async () => {
+      const { sut, ctx } = setup();
+      const { auth, headers, session } = await newPrivateUser(ctx);
+
+      await expect(sut.getAuthStatus(auth)).resolves.toEqual(
+        expect.objectContaining({ privateMode: false, privateModeExpiresAt: undefined, isElevated: false }),
+      );
+
+      await sut.enablePrivateMode(auth, { pinCode });
+      const enabled = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(enabled.session).toEqual({ id: session.id, hasElevatedPermission: false, privateMode: true });
+
+      const status = await sut.getAuthStatus(enabled);
+      expect(status.privateMode).toBe(true);
+      expect(status.isElevated).toBe(false);
+      const expiresAt = DateTime.fromISO(status.privateModeExpiresAt!);
+      expect(expiresAt.diffNow('minutes').minutes).toBeGreaterThan(25);
+      expect(expiresAt.diffNow('minutes').minutes).toBeLessThanOrEqual(30);
+
+      await sut.disablePrivateMode(enabled);
+      const disabled = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(disabled.session).toEqual({ id: session.id, hasElevatedPermission: false, privateMode: false });
+    });
+
+    it('should keep private mode independent from the locked folder unlock', async () => {
+      const { sut, ctx } = setup();
+      const { auth, headers } = await newPrivateUser(ctx);
+
+      await sut.unlockSession(auth, { pinCode });
+      const unlocked = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(unlocked.session).toEqual(expect.objectContaining({ hasElevatedPermission: true, privateMode: false }));
+
+      await sut.enablePrivateMode(auth, { pinCode });
+      await sut.lockSession(auth);
+      const locked = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(locked.session).toEqual(expect.objectContaining({ hasElevatedPermission: false, privateMode: true }));
+    });
+
+    it('should treat an expired timestamp as off', async () => {
+      const { sut, ctx } = setup();
+      const { headers, session } = await newPrivateUser(ctx);
+      await ctx
+        .get(SessionRepository)
+        .update(session.id, { privateModeExpiresAt: DateTime.now().minus({ minutes: 1 }).toJSDate() });
+
+      const result = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(result.session?.privateMode).toBe(false);
+    });
+
+    it('should slide the expiry by the configured timeout when close to expiring', async () => {
+      const { sut, ctx } = setup();
+      const { user, headers, session } = await newPrivateUser(ctx);
+      await ctx.get(UserRepository).upsertMetadata(user.id, {
+        key: UserMetadataKey.Preferences,
+        value: { privateMode: { timeoutMinutes: 120 } },
+      });
+      await ctx
+        .get(SessionRepository)
+        .update(session.id, { privateModeExpiresAt: DateTime.now().plus({ minutes: 2 }).toJSDate() });
+
+      const result = await sut.authenticate({ headers, queryParams: {}, metadata });
+      expect(result.session?.privateMode).toBe(true);
+
+      const updated = await ctx.get(SessionRepository).get(session.id);
+      const minutesLeft = DateTime.fromJSDate(updated!.privateModeExpiresAt!).diffNow('minutes').minutes;
+      expect(minutesLeft).toBeGreaterThan(115);
+    });
+
+    it('should not slide the expiry when far from expiring', async () => {
+      const { sut, ctx } = setup();
+      const { headers, session } = await newPrivateUser(ctx);
+      const expiresAt = DateTime.now().plus({ minutes: 20 }).toJSDate();
+      await ctx.get(SessionRepository).update(session.id, { privateModeExpiresAt: expiresAt });
+
+      await sut.authenticate({ headers, queryParams: {}, metadata });
+      const updated = await ctx.get(SessionRepository).get(session.id);
+      expect(updated!.privateModeExpiresAt!.getTime()).toBe(expiresAt.getTime());
+    });
+
+    it('should use the configured timeout when enabling', async () => {
+      const { sut, ctx } = setup();
+      const { user, auth } = await newPrivateUser(ctx);
+      await ctx.get(UserRepository).upsertMetadata(user.id, {
+        key: UserMetadataKey.Preferences,
+        value: { privateMode: { timeoutMinutes: 5 } },
+      });
+
+      await sut.enablePrivateMode(auth, { pinCode });
+      const status = await sut.getAuthStatus(auth);
+      const minutes = DateTime.fromISO(status.privateModeExpiresAt!).diffNow('minutes').minutes;
+      expect(minutes).toBeGreaterThan(4);
+      expect(minutes).toBeLessThanOrEqual(5);
+    });
+
+    it('should clear private mode on every session when the pin code is reset', async () => {
+      const { sut, ctx } = setup();
+      const { user, auth } = await newPrivateUser(ctx);
+      const { session: other } = await ctx.newSession({ userId: user.id });
+      await sut.enablePrivateMode(auth, { pinCode });
+      await sut.enablePrivateMode(factory.auth({ session: other, user }), { pinCode });
+
+      await sut.resetPinCode(auth, { pinCode });
+
+      const sessionRepo = ctx.get(SessionRepository);
+      await expect(sessionRepo.get(auth.session!.id)).resolves.toEqual(
+        expect.objectContaining({ privateModeExpiresAt: null, pinExpiresAt: null }),
+      );
+      await expect(sessionRepo.get(other.id)).resolves.toEqual(
+        expect.objectContaining({ privateModeExpiresAt: null, pinExpiresAt: null }),
+      );
+    });
+
+    it('should reject the private-only checks without the flag', () => {
+      expect(() => requirePrivateMode(factory.auth())).toThrow(UnauthorizedException);
+      expect(() => requirePrivateMode(factory.auth({ session: { privateMode: false } }))).toThrow(
+        UnauthorizedException,
+      );
+      expect(() => requirePrivateMode(factory.auth({ session: { privateMode: true } }))).not.toThrow();
     });
   });
 });

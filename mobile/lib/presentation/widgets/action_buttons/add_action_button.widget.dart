@@ -17,6 +17,7 @@ import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart'
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_ui/immich_ui.dart';
 
@@ -112,9 +113,14 @@ class _AddActionButtonState extends ConsumerState<AddActionButton> {
       return;
     }
 
-    final result = await ref.read(actionProvider.notifier).addToAlbum(ActionSource.viewer, album);
+    final result = await addWithPrivateShareConfirmation(
+      context,
+      warning: privateAddWarning(context, album, [latest]),
+      add: ({required confirmPrivate}) =>
+          ref.read(actionProvider.notifier).addToAlbum(ActionSource.viewer, album, confirmPrivate: confirmPrivate),
+    );
 
-    if (!mounted) {
+    if (result == null || !mounted) {
       return;
     }
 

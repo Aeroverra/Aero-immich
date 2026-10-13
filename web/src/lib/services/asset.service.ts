@@ -68,7 +68,10 @@ export const getAssetBulkActions = ($t: MessageFormatter) => {
     icon: mdiPlus,
     shortcuts: [{ key: 'l' }],
     onAction: () =>
-      modalManager.show(AssetAddToAlbumModal, { assetIds: assetMultiSelectManager.assets.map((asset) => asset.id) }),
+      modalManager.show(AssetAddToAlbumModal, {
+        assetIds: assetMultiSelectManager.assets.map((asset) => asset.id),
+        hasPrivate: assetMultiSelectManager.assets.some((asset) => asset.isPrivate),
+      }),
   };
 
   const RefreshFacesJob: ActionItem = {
@@ -109,7 +112,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     title: $t('share'),
     icon: mdiShareVariantOutline,
     $if: () => !!(authUser && !asset.isTrashed && asset.visibility !== AssetVisibility.Locked),
-    onAction: () => modalManager.show(SharedLinkCreateModal, { assetIds: [asset.id] }),
+    onAction: () => modalManager.show(SharedLinkCreateModal, { assetIds: [asset.id], hasPrivate: asset.isPrivate }),
   };
 
   const Download: ActionItem = {
@@ -178,7 +181,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     icon: mdiPlus,
     shortcuts: [{ key: 'l' }],
     $if: () => asset.visibility !== AssetVisibility.Locked && !asset.isTrashed,
-    onAction: () => modalManager.show(AssetAddToAlbumModal, { assetIds: [asset.id] }),
+    onAction: () => modalManager.show(AssetAddToAlbumModal, { assetIds: [asset.id], hasPrivate: asset.isPrivate }),
   };
 
   const Offline: ActionItem = {

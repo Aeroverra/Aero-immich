@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:immich_mobile/data/db/main/dao/person.dart';
 import 'package:immich_mobile/data/server/person.dart';
 import 'package:immich_mobile/domain/models/person.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 
 /// Accesses People; entities mapped to assets for presence and face detection
 class PeopleService {
@@ -19,8 +20,8 @@ class PeopleService {
     return _repository.getAssetPeople(assetId);
   }
 
-  Stream<List<Person>> watch({int minFaces = 3}) {
-    return _repository.watch(minFaces: minFaces);
+  Stream<List<Person>> watch({int minFaces = 3, PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.watch(minFaces: minFaces, privateFilter: privateFilter);
   }
 
   Future<int> updateName(String personId, String name) async {

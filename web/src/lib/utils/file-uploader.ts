@@ -3,10 +3,14 @@ import {
   AssetUploadAction,
   AssetVisibility,
   checkBulkUpload,
+  getAlbumInfo,
+  getAssetInfo,
   getBaseUrl,
+  type AlbumResponseDto,
   type AssetMediaResponseDto,
 } from '@immich/sdk';
-import { toastManager } from '@immich/ui';
+import { modalManager, toastManager } from '@immich/ui';
+import { mdiLockOutline } from '@mdi/js';
 import { tick } from 'svelte';
 import { t } from 'svelte-i18n';
 import { get } from 'svelte/store';
@@ -89,6 +93,38 @@ export const fileUploadHandler = async ({
   isLockedAssets = false,
 }: FileUploadHandlerParams): Promise<string[]> => {
   const extensions = uploadManager.getExtensions();
+
+  // adding a private asset to an album needs an acknowledgement (it turns private, or it is shared), so fetch it once
+  let album: AlbumResponseDto | undefined;
+  if (albumId && !authManager.isSharedLink) {
+    try {
+      album = await getAlbumInfo({ id: albumId });
+    } catch {
+      // the add-to-album request reports its own error
+    }
+  }
+
+  // everything uploaded into a private album becomes private through the album, ask once for the whole batch
+  let acknowledgedPrivateAlbum = false;
+  if (album?.isPrivate) {
+    const $t = get(t);
+    const sentences = [$t('upload_to_private_album_prompt', { values: { album: album.albumName } })];
+    if (album.shared || album.hasSharedLink) {
+      sentences.push($t('add_to_album_shared_private_prompt', { values: { count: 1 } }));
+    }
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: sentences.join(' '),
+      confirmText: $t('upload_to_private_album_confirm'),
+      confirmColor: 'primary',
+      icon: mdiLockOutline,
+    });
+    if (!confirmed) {
+      return [];
+    }
+    acknowledgedPrivateAlbum = true;
+  }
+
   const promises = [];
   for (const file of files) {
     const name = file.name.toLowerCase();
@@ -96,7 +132,9 @@ export const fileUploadHandler = async ({
       const deviceAssetId = getDeviceAssetId(file);
       uploadAssetsStore.addItem({ id: deviceAssetId, file, albumId });
       promises.push(
-        uploadExecutionQueue.addTask(() => fileUploader({ deviceAssetId, assetFile: file, albumId, isLockedAssets })),
+        uploadExecutionQueue.addTask(() =>
+          fileUploader({ deviceAssetId, assetFile: file, albumId, album, acknowledgedPrivateAlbum, isLockedAssets }),
+        ),
       );
     } else {
       toastManager.warning(get(t)('unsupported_file_type', { values: { file: file.name, type: file.type } }), {
@@ -140,6 +178,8 @@ function hashFile(file: File): Promise<string> {
 type FileUploaderParams = {
   assetFile: File;
   albumId?: string;
+  album?: AlbumResponseDto;
+  acknowledgedPrivateAlbum?: boolean;
   replaceAssetId?: string;
   isLockedAssets?: boolean;
   // TODO rework the asset uploader and remove this
@@ -151,6 +191,8 @@ async function fileUploader({
   assetFile,
   deviceAssetId,
   albumId,
+  album,
+  acknowledgedPrivateAlbum = false,
   isLockedAssets = false,
 }: FileUploaderParams): Promise<string | undefined> {
   const fileCreatedAt = new Date(assetFile.lastModified).toISOString();
@@ -221,7 +263,20 @@ async function fileUploader({
 
     if (albumId && !authManager.isSharedLink) {
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_adding_to_album') });
-      await addAssetsToAlbums([albumId], [responseData.id], { notify: false });
+      // an upload can resolve to an existing asset, and that one may be private
+      const hasPrivate =
+        album && responseData.status === AssetMediaStatus.Duplicate
+          ? await getAssetInfo({ id: responseData.id })
+              .then((asset) => asset.isPrivate)
+              .catch(() => false)
+          : false;
+      await addAssetsToAlbums([albumId], [responseData.id], {
+        notify: false,
+        hasPrivate,
+        albums: album ? [album] : [],
+        // the batch dialog already covered the shared-album consequences
+        confirmPrivate: acknowledgedPrivateAlbum ? true : undefined,
+      });
       uploadAssetsStore.updateItem(deviceAssetId, { message: $t('asset_added_to_album') });
     }
 

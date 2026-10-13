@@ -4,6 +4,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
@@ -161,6 +162,25 @@ void main() {
     expect(route, isA<AssetViewerRoute>());
     expect((route!.args! as AssetViewerRouteArgs).currentAlbum, isNull);
     verifyNever(() => remoteAlbumService.get(any()));
+  });
+
+  test('album link resolves the album with the session private mode filter', () async {
+    const filter = PrivateModeFilter(enabled: true, userId: _userId);
+    sut = DeepLinkService(
+      timelineFactory,
+      assetService,
+      remoteAlbumService,
+      memoryService,
+      MockPeopleService(),
+      _user,
+      filter,
+    );
+    when(() => remoteAlbumService.get(_albumId, privateFilter: filter)).thenAnswer((_) async => _album);
+
+    final route = await sut.handleMyImmichApp(link('/albums/$_albumId'), ref);
+
+    expect(route, isA<RemoteAlbumRoute>());
+    verify(() => remoteAlbumService.get(_albumId, privateFilter: filter)).called(1);
   });
 
   test('memory scheme link without an id opens the memory lane', () async {

@@ -1,16 +1,17 @@
 <script lang="ts">
   import { Permission } from '@immich/sdk';
-  import { Checkbox, Label } from '@immich/ui';
+  import { Checkbox, Label, Text } from '@immich/ui';
 
   interface Props {
     title: string;
+    description?: string;
     subItems: Permission[];
     selectedItems: Permission[];
     handleSelectItems: (permissions: Permission[]) => void;
     handleDeselectItems: (permissions: Permission[]) => void;
   }
 
-  let { title, subItems, selectedItems, handleSelectItems, handleDeselectItems }: Props = $props();
+  let { title, description, subItems, selectedItems, handleSelectItems, handleDeselectItems }: Props = $props();
 
   let selectAllSubItems = $derived(subItems.filter((item) => selectedItems.includes(item)).length === subItems.length);
 
@@ -41,6 +42,9 @@
     />
     <Label label={title} for="permission-{title}" class="font-mono text-lg text-primary" />
   </div>
+  {#if description}
+    <Text size="small" color="muted" class="mx-6 mt-1">{description}</Text>
+  {/if}
   <div class="mx-6 mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 lg:grid-cols-3">
     {#each subItems as item (item)}
       <div class="flex items-center gap-2">

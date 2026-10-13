@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/data/db/main/dao/person.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 
 import '../repository_context.dart';
 
@@ -14,6 +15,32 @@ void main() {
 
   tearDown(() async {
     await ctx.dispose();
+  });
+
+  group('watch with private mode', () {
+    test('a person seen only on private assets is hidden while off and listed when on', () async {
+      final user = await ctx.newUser();
+      final person = await ctx.newPerson(ownerId: user.id, name: 'Hidden');
+      for (var i = 0; i < 3; i++) {
+        final asset = await ctx.newRemoteAsset(ownerId: user.id, isPrivate: true);
+        await ctx.newFace(assetId: asset.id, personId: person.id);
+      }
+
+      expect(await sut.watch().first, isEmpty);
+
+      final on = await sut.watch(privateFilter: PrivateModeFilter(enabled: true, userId: user.id)).first;
+      expect(on.map((p) => p.id), [person.id]);
+    });
+
+    test('a partner private asset never counts towards the person', () async {
+      final user = await ctx.newUser();
+      final partner = await ctx.newUser();
+      final person = await ctx.newPerson(ownerId: partner.id, name: 'Partner face');
+      final asset = await ctx.newRemoteAsset(ownerId: partner.id, isPrivate: true);
+      await ctx.newFace(assetId: asset.id, personId: person.id);
+
+      expect(await sut.watch(privateFilter: PrivateModeFilter(enabled: true, userId: user.id)).first, isEmpty);
+    });
   });
 
   group('getAssetPeople', () {

@@ -74,6 +74,8 @@ export type SearchFilter = {
   display: SearchDisplayFilters;
   mediaType: MediaType;
   rating?: number | null;
+  /** true = only private assets, false = exclude private assets, undefined = all (only meaningful while private mode is on) */
+  isPrivate?: boolean;
 };
 
 export type JSONSchemaType = 'string' | 'number' | 'integer' | 'boolean' | 'object';

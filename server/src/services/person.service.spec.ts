@@ -57,9 +57,14 @@ describe(PersonService.name, () => {
           }),
         ],
       });
-      expect(mocks.person.getAllForUser).toHaveBeenCalledWith({ skip: 0, take: 10 }, auth.user.id, {
-        withHidden: true,
-      });
+      expect(mocks.person.getAllForUser).toHaveBeenCalledWith(
+        { skip: 0, take: 10 },
+        auth.user.id,
+        { privateMode: false, userId: expect.any(String) },
+        {
+          withHidden: true,
+        },
+      );
     });
 
     it('should get all visible people and favorites should be first in the array', async () => {
@@ -83,9 +88,14 @@ describe(PersonService.name, () => {
           expect.objectContaining({ id: person.personGroupId, isFavorite: false }),
         ],
       });
-      expect(mocks.person.getAllForUser).toHaveBeenCalledWith({ skip: 0, take: 10 }, auth.user.id, {
-        withHidden: false,
-      });
+      expect(mocks.person.getAllForUser).toHaveBeenCalledWith(
+        { skip: 0, take: 10 },
+        auth.user.id,
+        { privateMode: false, userId: expect.any(String) },
+        {
+          withHidden: false,
+        },
+      );
     });
   });
 
@@ -1301,7 +1311,10 @@ describe(PersonService.name, () => {
       mocks.person.getStatistics.mockResolvedValue({ assets: 3 });
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
       await expect(sut.getStatistics(auth, person.personGroupId)).resolves.toEqual({ assets: 3 });
-      expect(mocks.person.getStatistics).toHaveBeenCalledWith(person.personGroupId, auth.user.id);
+      expect(mocks.person.getStatistics).toHaveBeenCalledWith(person.personGroupId, auth.user.id, {
+        privateMode: false,
+        userId: expect.any(String),
+      });
       expect(mocks.access.person.checkOwnerAccess).toHaveBeenCalledWith(auth.user.id, new Set([person.personGroupId]));
     });
 

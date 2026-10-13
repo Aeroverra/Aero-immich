@@ -24,6 +24,7 @@ extension DTOToAsset on api.AssetResponseDto {
       type: type.toAssetType(),
       stackId: stack.orElse(null)?.id,
       isEdited: isEdited,
+      isPrivate: isPrivate,
     );
   }
 
@@ -47,6 +48,7 @@ extension DTOToAsset on api.AssetResponseDto {
       type: type.toAssetType(),
       stackId: stack.orElse(null)?.id,
       isEdited: isEdited,
+      isPrivate: isPrivate,
       exifInfo: exifInfo.orElse(null) != null ? ExifDtoConverter.fromDto(exifInfo.orElse(null)!) : const ExifInfo(),
     );
   }

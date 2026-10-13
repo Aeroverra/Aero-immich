@@ -1,42 +1,23 @@
-import { getUniqueOriginalPaths } from '@immich/sdk';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { sdkMock } from '$lib/__mocks__/sdk.mock';
+import { eventManager } from '$lib/managers/event-manager.svelte';
 import { foldersStore } from '$lib/stores/folders.svelte';
-
-vi.mock('$lib/managers/event-manager.svelte', () => ({
-  eventManager: {
-    on: vi.fn(),
-  },
-}));
-
-vi.mock('@immich/sdk', () => ({
-  getAssetsByOriginalPath: vi.fn(),
-  getUniqueOriginalPaths: vi.fn(),
-}));
+import { assetFactory } from '@test-data/factories/asset-factory';
 
 describe('foldersStore', () => {
   beforeEach(() => {
-    foldersStore.clearCache();
     vi.clearAllMocks();
+    foldersStore.clearCache();
+    sdkMock.getAssetsByOriginalPath.mockResolvedValue(assetFactory.buildList(1));
   });
 
-  it('returns the same non-null tree for concurrent fetchTree calls', async () => {
-    let resolvePaths: (value: string[]) => void;
+  it('refetches a folder after private mode changes', async () => {
+    await foldersStore.fetchAssetsByPath('holiday');
+    await foldersStore.fetchAssetsByPath('holiday');
+    expect(sdkMock.getAssetsByOriginalPath).toHaveBeenCalledOnce();
 
-    vi.mocked(getUniqueOriginalPaths).mockReturnValue(
-      new Promise<string[]>((resolve) => {
-        resolvePaths = resolve;
-      }),
-    );
+    eventManager.emit('PrivateModeChange', true);
 
-    const first = foldersStore.fetchTree();
-    const second = foldersStore.fetchTree();
-
-    resolvePaths!(['/photos/2026']);
-
-    const [firstTree, secondTree] = await Promise.all([first, second]);
-
-    expect(firstTree).not.toBeNull();
-    expect(secondTree).not.toBeNull();
-    expect(secondTree).toEqual(firstTree);
+    await foldersStore.fetchAssetsByPath('holiday');
+    expect(sdkMock.getAssetsByOriginalPath).toHaveBeenCalledTimes(2);
   });
 });

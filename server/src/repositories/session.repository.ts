@@ -30,7 +30,7 @@ export class SessionRepository {
   get(id: string) {
     return this.db
       .selectFrom('session')
-      .select(['id', 'expiresAt', 'pinExpiresAt', 'oauthBearerToken'])
+      .select(['id', 'expiresAt', 'pinExpiresAt', 'privateModeExpiresAt', 'oauthBearerToken'])
       .where('id', '=', id)
       .executeTakeFirst();
   }
@@ -132,7 +132,11 @@ export class SessionRepository {
 
   @GenerateSql({ params: [DummyValue.UUID] })
   async lockAll(userId: string) {
-    await this.db.updateTable('session').set({ pinExpiresAt: null }).where('userId', '=', userId).execute();
+    await this.db
+      .updateTable('session')
+      .set({ pinExpiresAt: null, privateModeExpiresAt: null })
+      .where('userId', '=', userId)
+      .execute();
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })

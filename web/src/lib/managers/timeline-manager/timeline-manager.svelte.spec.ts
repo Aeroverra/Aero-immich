@@ -2,11 +2,13 @@ import { AssetOrderBy, AssetVisibility, type AssetResponseDto, type TimeBucketAs
 import { tick } from 'svelte';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { getTimelineMonthByDate } from '$lib/managers/timeline-manager/internal/search-support.svelte';
 import { AbortError } from '$lib/utils';
 import { fromISODateTimeUTCToObject } from '$lib/utils/timeline-util';
 import { assetFactory, timelineAssetFactory, toResponseDto } from '@test-data/factories/asset-factory';
 import { TimelineManager } from './timeline-manager.svelte';
+import type { TimelineMonth } from './timeline-month.svelte';
 import type { TimelineAsset } from './types';
 
 async function getAssets(timelineManager: TimelineManager) {
@@ -15,6 +17,17 @@ async function getAssets(timelineManager: TimelineManager) {
     assets.push(asset);
   }
   return assets;
+}
+
+// a class instance, so the manager's $state field does not wrap it in a proxy
+class FakeScrollable {
+  scrollTop = 0;
+  scrollTo({ top }: { top: number }) {
+    this.scrollTop = top;
+  }
+  scrollBy(_: number, y: number) {
+    this.scrollTop += y;
+  }
 }
 
 function deriveLocalDateTimeFromFileCreatedAt(arg: TimelineAsset): TimelineAsset {
@@ -482,6 +495,324 @@ describe('TimelineManager', () => {
 
       expect(timelineManager.assetCount).toEqual(1);
       expect(timelineManager.months[0].getFirstAsset().isFavorite).toEqual(true);
+    });
+  });
+
+  describe('private mode', () => {
+    let timelineManager: TimelineManager;
+
+    beforeEach(async () => {
+      privateModeManager.enabled = false;
+      timelineManager = new TimelineManager();
+      sdkMock.getTimeBuckets.mockResolvedValue([]);
+
+      await timelineManager.updateViewport({ width: 1588, height: 1000 });
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+      sdkMock.getTimeBuckets.mockClear();
+    });
+
+    afterEach(() => {
+      privateModeManager.enabled = false;
+      timelineManager.destroy();
+    });
+
+    it('does not refetch through updateOptions when the options are unchanged', async () => {
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalled();
+    });
+
+    it('refetches with the same options on reset', async () => {
+      await timelineManager.reset();
+
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({ visibility: AssetVisibility.Timeline }),
+      );
+    });
+
+    it('resets when private mode changes', async () => {
+      const reset = vi.spyOn(timelineManager, 'reset');
+
+      eventManager.emit('PrivateModeChange', true);
+
+      await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(sdkMock.getTimeBuckets).toHaveBeenCalled());
+    });
+
+    it('drops private assets while the mode is off', () => {
+      const asset = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: true, visibility: AssetVisibility.Timeline }),
+      );
+
+      timelineManager.upsertAssets([asset]);
+
+      expect(timelineManager.isExcluded(asset)).toBe(true);
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+
+    it('keeps private assets while the mode is on', () => {
+      privateModeManager.enabled = true;
+      const asset = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: true, visibility: AssetVisibility.Timeline }),
+      );
+
+      timelineManager.upsertAssets([asset]);
+
+      expect(timelineManager.isExcluded(asset)).toBe(false);
+      expect(timelineManager.assetCount).toEqual(1);
+    });
+
+    it('removes an asset that becomes private through an AssetUpdate event while the mode is off', () => {
+      const existing = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isPrivate: false, visibility: AssetVisibility.Timeline }),
+      );
+      timelineManager.upsertAssets([existing]);
+      expect(timelineManager.assetCount).toEqual(1);
+
+      eventManager.emit(
+        'AssetUpdate',
+        assetFactory.build({
+          id: existing.id,
+          ownerId: existing.ownerId,
+          isPrivate: true,
+          isFavorite: existing.isFavorite,
+          isTrashed: existing.isTrashed,
+          visibility: existing.visibility,
+        }),
+      );
+
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+
+    it('only keeps private assets on a private-only timeline', async () => {
+      privateModeManager.enabled = true;
+      await timelineManager.updateOptions({ isPrivate: true });
+
+      const plain = deriveLocalDateTimeFromFileCreatedAt(timelineAssetFactory.build({ isPrivate: false }));
+      const secret = deriveLocalDateTimeFromFileCreatedAt(timelineAssetFactory.build({ isPrivate: true }));
+
+      expect(timelineManager.isExcluded(plain)).toBe(true);
+      expect(timelineManager.isExcluded(secret)).toBe(false);
+    });
+
+    it('does not reload a private-only timeline once the mode is off', async () => {
+      privateModeManager.enabled = true;
+      await timelineManager.updateOptions({ isPrivate: true });
+      sdkMock.getTimeBuckets.mockClear();
+
+      privateModeManager.enabled = false;
+      await timelineManager.reset();
+
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalled();
+    });
+
+    it('refetches on PrivateModeChange for every live instance', async () => {
+      // e.g. the favorites page after navigating away from the photos page
+      const favorites = new TimelineManager();
+      await favorites.updateViewport({ width: 1588, height: 1000 });
+      await favorites.updateOptions({ isFavorite: true, withStacked: true });
+      sdkMock.getTimeBuckets.mockClear();
+
+      eventManager.emit('PrivateModeChange', true);
+
+      // managers from other describes are still subscribed, so only look for these two option sets
+      await vi.waitFor(() =>
+        expect(sdkMock.getTimeBuckets).toHaveBeenCalledWith(
+          expect.objectContaining({ visibility: AssetVisibility.Timeline }),
+        ),
+      );
+      await vi.waitFor(() =>
+        expect(sdkMock.getTimeBuckets).toHaveBeenCalledWith(
+          expect.objectContaining({ isFavorite: true, withStacked: true }),
+        ),
+      );
+      favorites.destroy();
+    });
+
+    it('still refetches on a manager created before an older one was destroyed (page navigation)', async () => {
+      // the new page's manager subscribes first, then the old page's manager is destroyed
+      const older = timelineManager;
+      const newer = new TimelineManager();
+      await newer.updateViewport({ width: 1588, height: 1000 });
+      await newer.updateOptions({ isFavorite: true });
+      older.destroy();
+      sdkMock.getTimeBuckets.mockClear();
+
+      eventManager.emit('PrivateModeChange', false);
+
+      await vi.waitFor(() =>
+        expect(sdkMock.getTimeBuckets).toHaveBeenCalledWith(expect.objectContaining({ isFavorite: true })),
+      );
+      expect(sdkMock.getTimeBuckets).not.toHaveBeenCalledWith(
+        expect.objectContaining({ visibility: AssetVisibility.Timeline }),
+      );
+      newer.destroy();
+      timelineManager = new TimelineManager();
+    });
+
+    it('does not let months discarded by a reset shift the new layout', async () => {
+      sdkMock.getTimeBuckets.mockResolvedValue([{ count: 100, timeBucket: '2024-02-01T00:00:00.000Z' }]);
+      // the first bucket request (the only month, so it is in the viewport) stays in flight across the reset
+      let finishStaleLoad: (response: TimeBucketAssetResponseDto) => void = () => {};
+      sdkMock.getTimeBucket.mockImplementationOnce(() => new Promise((resolve) => (finishStaleLoad = resolve)));
+      sdkMock.getTimeBucket.mockResolvedValue(toResponseDto());
+      await timelineManager.reset();
+      const stale = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      expect(stale.loader?.loading).toBe(true);
+
+      await timelineManager.reset();
+
+      const fresh = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      expect(fresh).not.toBe(stale);
+      const freshTops = timelineManager.months.map((month) => month.top);
+
+      // the reset cancelled the stale load, and even a late layout of the stale month leaves the new months alone
+      expect(stale.loader?.loading).toBe(false);
+      finishStaleLoad(
+        toResponseDto(
+          ...timelineAssetFactory.buildList(100).map((asset) =>
+            deriveLocalDateTimeFromFileCreatedAt({
+              ...asset,
+              fileCreatedAt: fromISODateTimeUTCToObject('2024-02-01T00:00:00.000Z'),
+            }),
+          ),
+        ),
+      );
+      await tick();
+      stale.height += 5000;
+
+      expect(stale.isLoaded).toBe(false);
+      expect(timelineManager.months.map((month) => month.top)).toEqual(freshTops);
+    });
+
+    it('stays initialized across repeated resets', async () => {
+      // the init task re-arms without releasing the websocket, so connect() used to throw on the second run
+      await timelineManager.reset();
+      await timelineManager.reset();
+
+      expect(timelineManager.initTask.executed).toBe(true);
+      expect(timelineManager.isInitialized).toBe(true);
+      expect(sdkMock.getTimeBuckets).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('scroll anchor across resets', () => {
+    let timelineManager: TimelineManager;
+    let hiddenAssetId: string | undefined;
+    const scrollable = new FakeScrollable();
+    const bucketAssets: Record<string, TimelineAsset[]> = {
+      '2024-03-01T00:00:00.000Z': timelineAssetFactory.buildList(1).map((asset) =>
+        deriveLocalDateTimeFromFileCreatedAt({
+          ...asset,
+          fileCreatedAt: fromISODateTimeUTCToObject('2024-03-01T00:00:00.000Z'),
+        }),
+      ),
+      '2024-02-01T00:00:00.000Z': timelineAssetFactory.buildList(100).map((asset) =>
+        deriveLocalDateTimeFromFileCreatedAt({
+          ...asset,
+          fileCreatedAt: fromISODateTimeUTCToObject('2024-02-01T00:00:00.000Z'),
+        }),
+      ),
+      '2024-01-01T00:00:00.000Z': timelineAssetFactory.buildList(3).map((asset) =>
+        deriveLocalDateTimeFromFileCreatedAt({
+          ...asset,
+          fileCreatedAt: fromISODateTimeUTCToObject('2024-01-01T00:00:00.000Z'),
+        }),
+      ),
+    };
+
+    // the first asset whose box crosses the viewport top, and how far below the viewport top it starts
+    const findAnchor = (month: TimelineMonth, viewportTop: number) => {
+      for (const asset of month.assetsIterator()) {
+        const position = month.findAssetAbsolutePosition(asset.id)!;
+        if (position.top + position.height > viewportTop) {
+          return { id: asset.id, offset: position.top - viewportTop };
+        }
+      }
+      throw new Error('no asset intersects the viewport top');
+    };
+
+    beforeEach(async () => {
+      privateModeManager.enabled = false;
+      hiddenAssetId = undefined;
+      scrollable.scrollTop = 0;
+      timelineManager = new TimelineManager();
+      timelineManager.scrollableElement = scrollable as unknown as HTMLElement;
+      sdkMock.getTimeBuckets.mockResolvedValue([
+        { count: 1, timeBucket: '2024-03-01T00:00:00.000Z' },
+        { count: 100, timeBucket: '2024-02-01T00:00:00.000Z' },
+        { count: 3, timeBucket: '2024-01-01T00:00:00.000Z' },
+      ]);
+      sdkMock.getTimeBucket.mockImplementation(({ timeBucket }) =>
+        Promise.resolve(toResponseDto(...bucketAssets[timeBucket].filter((asset) => asset.id !== hiddenAssetId))),
+      );
+
+      await timelineManager.updateViewport({ width: 1588, height: 1000 });
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+      await timelineManager.loadTimelineMonth({ year: 2024, month: 2 });
+
+      // scroll into the middle of February, then let the manager see the new position
+      scrollable.scrollTop = 2000;
+      timelineManager.updateSlidingWindow();
+    });
+
+    afterEach(() => {
+      timelineManager.destroy();
+    });
+
+    it('keeps the anchored asset at the same offset after a reset', async () => {
+      const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const anchor = findAnchor(before, 2000);
+
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      expect(after).not.toBe(before);
+      expect(after.isLoaded).toBe(true);
+      const position = after.findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+      expect(timelineManager.scrollTop).toBe(2000);
+    });
+
+    it('falls back to the same relative position in the month when the anchored asset is gone', async () => {
+      const before = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      const anchor = findAnchor(before, 2000);
+      const viewportTopRatioInMonth = (2000 - before.top) / before.height;
+      // the anchored asset became hidden (e.g. it is private and the mode turned off)
+      hiddenAssetId = anchor.id;
+
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, { year: 2024, month: 2 })!;
+      expect(after.isLoaded).toBe(true);
+      expect(after.findAssetById({ id: anchor.id })).toBeUndefined();
+      expect(timelineManager.scrollTop).toBeCloseTo(after.top + after.height * viewportTopRatioInMonth, 5);
+      expect(timelineManager.scrollTop).not.toBe(2000);
+    });
+
+    it('restores the anchor after a reset while scrolled to the bottom with every month loaded', async () => {
+      for (const month of timelineManager.months) {
+        await timelineManager.loadTimelineMonth(month.yearMonth);
+      }
+      const bottom = timelineManager.totalViewerHeight - 1000;
+      timelineManager.scrollTo(bottom);
+      const before = timelineManager.months.find((month) => month.isInViewport)!;
+      const anchor = findAnchor(before, bottom);
+
+      await timelineManager.reset();
+
+      const after = getTimelineMonthByDate(timelineManager, before.yearMonth)!;
+      expect(after).not.toBe(before);
+      const position = after.findAssetAbsolutePosition(anchor.id)!;
+      expect(position.top - timelineManager.scrollTop).toBe(anchor.offset);
+    });
+
+    it('leaves a timeline scrolled to the top alone', async () => {
+      timelineManager.scrollTo(0);
+
+      await timelineManager.reset();
+
+      expect(timelineManager.scrollTop).toBe(0);
     });
   });
 

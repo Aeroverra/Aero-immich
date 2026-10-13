@@ -8,6 +8,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/shared_link/shared_link.model.dart';
+import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/shared_link.provider.dart';
 import 'package:immich_mobile/services/shared_link.service.dart';
@@ -323,11 +324,36 @@ class SharedLinkEditPage extends HookConsumerWidget {
     DateTime? calculateExpiry() => expiryAfter.value;
 
     Future<void> handleNewLink() async {
+      // A private album or private assets become visible to anyone with the link
+      final assetService = ref.read(assetServiceProvider);
+      final sharesPrivate = albumId != null
+          ? await assetService.isAlbumPrivate(albumId!)
+          : await assetService.hasPrivateAssets(assetsList ?? const []);
+      if (!context.mounted) {
+        return;
+      }
+      if (sharesPrivate) {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (_) => ConfirmDialog(
+            title: context.t.private,
+            content: albumId != null
+                ? context.t.share_private_album_confirmation
+                : context.t.share_private_assets_confirmation,
+            ok: context.t.confirm,
+          ),
+        );
+        if (confirmed != true || !context.mounted) {
+          return;
+        }
+      }
+
       final newLink = await ref
           .read(sharedLinkServiceProvider)
           .createSharedLink(
             albumId: albumId,
             assetIds: assetsList,
+            confirmPrivate: sharesPrivate,
             showMeta: showMetadata.value,
             allowDownload: allowDownload.value,
             allowUpload: allowUpload.value,

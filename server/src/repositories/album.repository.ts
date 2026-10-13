@@ -18,7 +18,14 @@ import { AlbumUserRole } from 'src/enum';
 import { DB } from 'src/schema';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { asUuid, dummy, withDefaultVisibility } from 'src/utils/database';
+import {
+  asUuid,
+  dummy,
+  PrivateScope,
+  withDefaultVisibility,
+  withPrivateAlbumScope,
+  withPrivateAlbumVisibility,
+} from 'src/utils/database';
 
 export interface AlbumAssetCount {
   albumId: string;
@@ -28,8 +35,17 @@ export interface AlbumAssetCount {
   lastModifiedAssetTimestamp: Date | null;
 }
 
+export interface AlbumListOptions {
+  isOwned?: boolean;
+  isShared?: boolean;
+  /** Private albums are listed only while the caller's session is in private mode; defaults to hidden. */
+  privateMode?: boolean;
+}
+
 export interface AlbumInfoOptions {
   withAssets: boolean;
+  /** Required when `withAssets` is true; defaults to hiding private assets. */
+  scope?: PrivateScope;
 }
 
 const withAlbumUsers = (authUserId?: string) => (eb: ExpressionBuilder<DB, 'album'>) =>
@@ -52,7 +68,7 @@ const withSharedLink = (eb: ExpressionBuilder<DB, 'album'>) =>
     eb.selectFrom('shared_link').selectAll('shared_link').whereRef('shared_link.albumId', '=', 'album.id'),
   ).as('sharedLinks');
 
-const withAssets = (eb: ExpressionBuilder<DB, 'album'>) => {
+const withAssets = (scope: PrivateScope) => (eb: ExpressionBuilder<DB, 'album'>) => {
   return eb
     .selectFrom((eb) =>
       eb
@@ -66,6 +82,7 @@ const withAssets = (eb: ExpressionBuilder<DB, 'album'>) => {
         .whereRef('album_asset.albumId', '=', 'album.id')
         .where('asset.deletedAt', 'is', null)
         .$call(withDefaultVisibility)
+        .$call(withPrivateAlbumScope(scope))
         .orderBy('asset.fileCreatedAt', 'desc')
         .as('asset'),
     )
@@ -86,8 +103,15 @@ const isAlbumOwned = (ownerId: string) => (eb: ExpressionBuilder<DB, 'album'>) =
 export class AlbumRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [DummyValue.UUID, { withAssets: true }, DummyValue.UUID] })
+  @GenerateSql({
+    params: [
+      DummyValue.UUID,
+      { withAssets: true, scope: { privateMode: false, userId: DummyValue.UUID } },
+      DummyValue.UUID,
+    ],
+  })
   getById(id: string, options: AlbumInfoOptions, authUserId?: string) {
+    const scope = options.scope ?? { privateMode: false, userId: authUserId ?? '' };
     return this.db
       .with('album_user', (qb) => qb.selectFrom('album_user').selectAll().where('album_user.albumId', '=', id))
       .selectFrom('album')
@@ -96,15 +120,16 @@ export class AlbumRepository {
       .where('album.deletedAt', 'is', null)
       .select(withAlbumUsers(authUserId))
       .select(withSharedLink)
-      .$if(options.withAssets, (eb) => eb.select(withAssets))
+      .$if(options.withAssets, (eb) => eb.select(withAssets(scope)))
       .$narrowType<{ assets: NotNull }>()
       .executeTakeFirst();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
-  getByAssetId(ownerId: string, assetId: string) {
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getByAssetId(ownerId: string, assetId: string, scope: PrivateScope) {
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility(scope))
       .selectAll('album')
       .innerJoin('album_asset', 'album_asset.albumId', 'album.id')
       .where((eb) =>
@@ -122,15 +147,16 @@ export class AlbumRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
   @ChunkedSet({ paramIndex: 1 })
-  async getByAssetIds(ownerId: string, assetIds: string[]): Promise<Map<string, string[]>> {
+  async getByAssetIds(ownerId: string, assetIds: string[], scope: PrivateScope): Promise<Map<string, string[]>> {
     if (assetIds.length === 0) {
       return new Map();
     }
 
     const results = await this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility(scope))
       .select('album.id')
       .innerJoin('album_asset', 'album_asset.albumId', 'album.id')
       .where((eb) =>
@@ -157,9 +183,28 @@ export class AlbumRepository {
     return map;
   }
 
+  /** The users of every album the assets are in, so they can be told when an album follows its assets */
   @GenerateSql({ params: [[DummyValue.UUID]] })
   @ChunkedArray()
-  async getMetadataForIds(ids: string[]): Promise<AlbumAssetCount[]> {
+  async getAlbumUserIdsByAssetIds(assetIds: string[]): Promise<{ albumId: string; userId: string }[]> {
+    if (assetIds.length === 0) {
+      return [];
+    }
+
+    return this.db
+      .selectFrom('album_asset')
+      .innerJoin('album', 'album.id', 'album_asset.albumId')
+      .innerJoin('album_user', 'album_user.albumId', 'album.id')
+      .select(['album.id as albumId', 'album_user.userId'])
+      .distinct()
+      .where('album_asset.assetId', 'in', assetIds)
+      .where('album.deletedAt', 'is', null)
+      .execute();
+  }
+
+  @GenerateSql({ params: [[DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
+  @ChunkedArray()
+  async getMetadataForIds(ids: string[], scope: PrivateScope): Promise<AlbumAssetCount[]> {
     // Guard against running invalid query when ids list is empty.
     if (ids.length === 0) {
       return [];
@@ -169,6 +214,7 @@ export class AlbumRepository {
       this.db
         .selectFrom('asset')
         .$call(withDefaultVisibility)
+        .$call(withPrivateAlbumScope(scope))
         .innerJoin('album_asset', 'album_asset.assetId', 'asset.id')
         .select('album_asset.albumId as albumId')
         .select((eb) => eb.fn.min(sql<Date>`("asset"."localDateTime" AT TIME ZONE 'UTC'::text)::date`).as('startDate'))
@@ -183,9 +229,10 @@ export class AlbumRepository {
     );
   }
 
-  private buildAlbumBaseQuery(ownerId: string, { isOwned, isShared }: { isOwned?: boolean; isShared?: boolean }) {
+  private buildAlbumBaseQuery(ownerId: string, { isOwned, isShared, privateMode }: AlbumListOptions) {
     return this.db
       .selectFrom('album')
+      .$call(withPrivateAlbumVisibility({ privateMode: privateMode ?? false }))
       .innerJoin('album_user', (join) =>
         join.onRef('album_user.albumId', '=', 'album.id').on('album_user.userId', '=', ownerId),
       )
@@ -208,11 +255,8 @@ export class AlbumRepository {
       );
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true }] })
-  getAll(
-    ownerId: string,
-    options: { id?: string; isOwned?: boolean; isShared?: boolean; name?: string } = {},
-  ): Promise<MapAlbumDto[]> {
+  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true, privateMode: false }] })
+  getAll(ownerId: string, options: AlbumListOptions & { id?: string; name?: string } = {}): Promise<MapAlbumDto[]> {
     return this.buildAlbumBaseQuery(ownerId, options)
       .selectAll('album')
       .select(withAlbumUsers(ownerId))
@@ -223,8 +267,8 @@ export class AlbumRepository {
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true }] })
-  async getAllIds(ownerId: string, options: { isOwned?: boolean; isShared?: boolean } = {}): Promise<string[]> {
+  @GenerateSql({ params: [DummyValue.UUID, { isOwned: true, isShared: true, privateMode: false }] })
+  async getAllIds(ownerId: string, options: AlbumListOptions = {}): Promise<string[]> {
     const rows = await this.buildAlbumBaseQuery(ownerId, options)
       .select('album.id')
       .orderBy('album.createdAt', 'desc')
@@ -351,7 +395,8 @@ export class AlbumRepository {
       .selectFrom('album')
       .selectAll('album')
       .select(withAlbumUsers(authUserId))
-      .select(withAssets)
+      // every asset id was already access-checked against the creator's session, so nothing needs hiding here
+      .select(withAssets({ privateMode: true, userId: authUserId }))
       .$narrowType<{ assets: NotNull }>()
       .executeTakeFirstOrThrow();
 
@@ -402,6 +447,8 @@ export class AlbumRepository {
       .set((eb) => ({
         albumThumbnailAssetId: this.updateThumbnailBuilder(eb)
           .select('album_asset.assetId')
+          // prefer a non-private cover so the album stays presentable outside private mode
+          .orderBy('asset.isPrivate', 'asc')
           .orderBy('asset.fileCreatedAt', 'desc')
           .limit(sql.lit(1)),
       }))
@@ -441,13 +488,14 @@ export class AlbumRepository {
    * Get per-user asset contribution counts for a single album.
    * Excludes deleted assets, orders by count desc.
    */
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getContributorCounts(id: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getContributorCounts(id: string, scope: PrivateScope) {
     return this.db
       .selectFrom('album_asset')
       .innerJoin('asset', 'asset.id', 'assetId')
       .where('asset.deletedAt', 'is', sql.lit(null))
       .where('album_asset.albumId', '=', id)
+      .$call(withPrivateAlbumScope(scope))
       .select('asset.ownerId as userId')
       .select((eb) => eb.fn.countAll<number>().as('assetCount'))
       .groupBy('asset.ownerId')

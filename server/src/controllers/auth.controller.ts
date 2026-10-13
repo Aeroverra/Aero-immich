@@ -179,4 +179,29 @@ export class AuthController {
   async lockAuthSession(@Auth() auth: AuthDto): Promise<void> {
     return this.service.lockSession(auth);
   }
+
+  @Post('session/private-mode')
+  @Authenticated()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Endpoint({
+    summary: 'Enable private mode',
+    description:
+      'Turn on private mode for the current session by providing the correct PIN code. While enabled, assets marked private are included in all responses.',
+    history: new HistoryBuilder().added('v1').beta('v1').stable('v2'),
+  })
+  async enablePrivateMode(@Auth() auth: AuthDto, @Body() dto: SessionUnlockDto): Promise<void> {
+    return this.service.enablePrivateMode(auth, dto);
+  }
+
+  @Delete('session/private-mode')
+  @Authenticated()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Endpoint({
+    summary: 'Disable private mode',
+    description: 'Turn off private mode for the current session. Assets marked private are hidden again.',
+    history: new HistoryBuilder().added('v1').beta('v1').stable('v2'),
+  })
+  async disablePrivateMode(@Auth() auth: AuthDto): Promise<void> {
+    return this.service.disablePrivateMode(auth);
+  }
 }

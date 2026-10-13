@@ -5,10 +5,12 @@
 
   type Props = {
     assetIds: string[];
+    /** whether any of the assets is private, so adding them to a shared album asks for confirmation */
+    hasPrivate?: boolean;
     onClose: () => void;
   };
 
-  const { assetIds, onClose }: Props = $props();
+  const { assetIds, hasPrivate = false, onClose }: Props = $props();
 
   const handleClose = async (albums?: AlbumResponseDto[]) => {
     const albumIds = (albums ?? []).map(({ id }) => id);
@@ -17,7 +19,7 @@
       return;
     }
 
-    const success = await addAssetsToAlbums(albumIds, assetIds, { notify: true });
+    const success = await addAssetsToAlbums(albumIds, assetIds, { notify: true, hasPrivate, albums });
     if (success) {
       onClose();
     }

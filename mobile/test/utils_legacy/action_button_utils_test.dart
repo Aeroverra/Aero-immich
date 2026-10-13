@@ -39,6 +39,7 @@ RemoteAsset createRemoteAsset({
   DateTime? uploadedAt,
   bool isFavorite = false,
   DateTime? deletedAt,
+  bool isPrivate = false,
 }) {
   return RemoteAsset(
     id: 'remote-id',
@@ -53,6 +54,7 @@ RemoteAsset createRemoteAsset({
     isFavorite: isFavorite,
     isEdited: false,
     deletedAt: deletedAt,
+    isPrivate: isPrivate,
   );
 }
 
@@ -109,6 +111,88 @@ void main() {
 
     setUp(() {
       mergedAsset = createLocalAsset(remoteId: 'remote-id');
+    });
+
+    group('markPrivate / unmarkPrivate buttons', () {
+      ActionButtonContext contextFor({
+        required bool isPrivateMode,
+        bool isPrivate = false,
+        bool isInPrivateView = false,
+        bool isInLockedView = false,
+        bool isOwner = true,
+      }) => ActionButtonContext(
+        asset: createRemoteAsset(isPrivate: isPrivate),
+        isOwner: isOwner,
+        isArchived: false,
+        isTrashEnabled: true,
+        isInLockedView: isInLockedView,
+        currentAlbum: null,
+        advancedTroubleshooting: false,
+        isStacked: false,
+        source: ActionSource.viewer,
+        isPrivateMode: isPrivateMode,
+        isInPrivateView: isInPrivateView,
+      );
+
+      test('markPrivate shows for an owned public remote asset whether the mode is on or off', () {
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false)), isTrue);
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true)), isTrue);
+        expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true)), isFalse);
+      });
+
+      test('unmarkPrivate shows for a private asset only while the mode is on', () {
+        expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true)), isTrue);
+        expect(ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: false, isPrivate: true)), isFalse);
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true)), isFalse);
+      });
+
+      test('markPrivate is hidden inside the private view, unmarkPrivate is not', () {
+        expect(
+          ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: true, isInPrivateView: true)),
+          isFalse,
+        );
+        expect(
+          ActionButtonType.unmarkPrivate.shouldShow(
+            contextFor(isPrivateMode: true, isPrivate: true, isInPrivateView: true),
+          ),
+          isTrue,
+        );
+      });
+
+      test('both are hidden for non-owners and inside the locked view', () {
+        expect(ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false, isOwner: false)), isFalse);
+        expect(
+          ActionButtonType.unmarkPrivate.shouldShow(contextFor(isPrivateMode: true, isPrivate: true, isOwner: false)),
+          isFalse,
+        );
+        expect(
+          ActionButtonType.markPrivate.shouldShow(contextFor(isPrivateMode: false, isInLockedView: true)),
+          isFalse,
+        );
+        expect(
+          ActionButtonType.unmarkPrivate.shouldShow(
+            contextFor(isPrivateMode: true, isPrivate: true, isInLockedView: true),
+          ),
+          isFalse,
+        );
+      });
+
+      test('both are hidden for a local-only asset', () {
+        final context = ActionButtonContext(
+          asset: createLocalAsset(),
+          isOwner: true,
+          isArchived: false,
+          isTrashEnabled: true,
+          isInLockedView: false,
+          currentAlbum: null,
+          advancedTroubleshooting: false,
+          isStacked: false,
+          source: ActionSource.timeline,
+          isPrivateMode: true,
+        );
+        expect(ActionButtonType.markPrivate.shouldShow(context), isFalse);
+        expect(ActionButtonType.unmarkPrivate.shouldShow(context), isFalse);
+      });
     });
 
     group('share button', () {

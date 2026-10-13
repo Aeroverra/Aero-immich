@@ -17,6 +17,7 @@ from
 where
   "asset"."deletedAt" is null
   and "album_asset"."albumId" = $1
+  and "asset"."isPrivate" = $2
 order by
   "fileCreatedAt" desc
 
@@ -35,16 +36,17 @@ from
   and "asset_exif"."longitude" is not null
 where
   "asset"."deletedAt" is null
-  and "asset"."visibility" = $1
+  and "asset"."isPrivate" = $1
+  and "asset"."visibility" = $2
   and (
-    "ownerId" in ($2)
+    "ownerId" in ($3)
     or exists (
       select
       from
         "album_asset"
       where
         "asset"."id" = "album_asset"."assetId"
-        and "album_asset"."albumId" in ($3)
+        and "album_asset"."albumId" in ($4)
     )
   )
 order by

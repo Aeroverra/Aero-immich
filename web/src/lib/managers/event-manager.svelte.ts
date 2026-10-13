@@ -81,6 +81,8 @@ export type Events = {
   SessionLocked: [];
   SessionDelete: [];
 
+  PrivateModeChange: [boolean];
+
   SystemConfigUpdate: [AdminConfigDto];
 
   IntegrityReportDeleteStatus: [{ type?: IntegrityReport; id?: string; isDeleting: boolean }];

@@ -7,7 +7,7 @@ import { DummyValue, GenerateSql } from 'src/decorators';
 import { AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { ActivityTable } from 'src/schema/tables/activity.table';
-import { asUuid, dummy } from 'src/utils/database';
+import { asUuid, dummy, PrivateScope } from 'src/utils/database';
 
 export interface ActivitySearch {
   albumId?: string;
@@ -20,30 +20,36 @@ export interface ActivitySearch {
 export class ActivityRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [{ albumId: DummyValue.UUID }] })
-  search(options: ActivitySearch) {
+  @GenerateSql({ params: [{ albumId: DummyValue.UUID }, { privateMode: false, userId: DummyValue.UUID }] })
+  search(options: ActivitySearch, scope: PrivateScope) {
     const { userId, assetId, albumId, isLiked } = options;
 
-    return this.db
-      .selectFrom('activity')
-      .selectAll('activity')
-      .innerJoin('user as user2', (join) =>
-        join.onRef('user2.id', '=', 'activity.userId').on('user2.deletedAt', 'is', null),
-      )
-      .innerJoinLateral(
-        (eb) => eb.selectFrom(dummy).select(columns.userWithPrefix).as('user'),
-        (join) => join.onTrue(),
-      )
-      .select((eb) => eb.fn.toJson('user').as('user'))
-      .leftJoin('asset', 'asset.id', 'activity.assetId')
-      .$if(!!userId, (qb) => qb.where('activity.userId', '=', userId!))
-      .$if(assetId === null, (qb) => qb.where('assetId', 'is', null))
-      .$if(!!assetId, (qb) => qb.where('activity.assetId', '=', assetId!))
-      .$if(!!albumId, (qb) => qb.where('activity.albumId', '=', albumId!))
-      .$if(isLiked !== undefined, (qb) => qb.where('activity.isLiked', '=', isLiked!))
-      .where('asset.deletedAt', 'is', null)
-      .orderBy('activity.createdAt', 'asc')
-      .execute();
+    return (
+      this.db
+        .selectFrom('activity')
+        .selectAll('activity')
+        .innerJoin('user as user2', (join) =>
+          join.onRef('user2.id', '=', 'activity.userId').on('user2.deletedAt', 'is', null),
+        )
+        .innerJoinLateral(
+          (eb) => eb.selectFrom(dummy).select(columns.userWithPrefix).as('user'),
+          (join) => join.onTrue(),
+        )
+        .select((eb) => eb.fn.toJson('user').as('user'))
+        .leftJoin('asset', 'asset.id', 'activity.assetId')
+        .$if(!!userId, (qb) => qb.where('activity.userId', '=', userId!))
+        .$if(assetId === null, (qb) => qb.where('assetId', 'is', null))
+        .$if(!!assetId, (qb) => qb.where('activity.assetId', '=', assetId!))
+        .$if(!!albumId, (qb) => qb.where('activity.albumId', '=', albumId!))
+        .$if(isLiked !== undefined, (qb) => qb.where('activity.isLiked', '=', isLiked!))
+        .where('asset.deletedAt', 'is', null)
+        // album-level activity has no asset; asset-level activity on a private asset stays hidden outside private mode
+        .$if(!scope.privateMode, (qb) =>
+          qb.where((eb) => eb.or([eb('asset.id', 'is', null), eb('asset.isPrivate', '=', false)])),
+        )
+        .orderBy('activity.createdAt', 'asc')
+        .execute()
+    );
   }
 
   @GenerateSql({ params: [{ albumId: DummyValue.UUID, userId: DummyValue.UUID }] })
@@ -66,14 +72,22 @@ export class ActivityRepository {
     await this.db.deleteFrom('activity').where('id', '=', asUuid(id)).execute();
   }
 
-  @GenerateSql({ params: [{ albumId: DummyValue.UUID, assetId: DummyValue.UUID }] })
-  async getStatistics({
-    albumId,
-    assetId,
-  }: {
-    albumId: string;
-    assetId?: string;
-  }): Promise<{ comments: number; likes: number }> {
+  @GenerateSql({
+    params: [
+      { albumId: DummyValue.UUID, assetId: DummyValue.UUID },
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
+  async getStatistics(
+    {
+      albumId,
+      assetId,
+    }: {
+      albumId: string;
+      assetId?: string;
+    },
+    scope: PrivateScope,
+  ): Promise<{ comments: number; likes: number }> {
     const result = await this.db
       .selectFrom('activity')
       .select((eb) => [
@@ -89,6 +103,9 @@ export class ActivityRepository {
           and([eb('asset.deletedAt', 'is', null), eb('asset.visibility', '!=', sql.lit(AssetVisibility.Locked))]),
           eb('asset.id', 'is', null),
         ]),
+      )
+      .$if(!scope.privateMode, (qb) =>
+        qb.where((eb) => eb.or([eb('asset.id', 'is', null), eb('asset.isPrivate', '=', false)])),
       )
       .executeTakeFirstOrThrow();
 

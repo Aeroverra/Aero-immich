@@ -1,6 +1,7 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/services/asset.service.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/repositories/asset_api.repository.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
@@ -25,5 +26,5 @@ final placesProvider = FutureProvider<List<(String, String)>>((ref) {
     return Future.value(const []);
   }
 
-  return assetService.getPlaces(auth.id);
+  return assetService.getPlaces(auth.id, privateFilter: ref.watch(privateModeFilterProvider));
 });

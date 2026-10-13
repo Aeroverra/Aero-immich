@@ -184,6 +184,16 @@ export class NotificationService extends BaseService {
     this.websocketRepository.clientSend('on_asset_restore', userId, assetIds);
   }
 
+  @OnEvent({ name: 'AssetPrivateUpdateAll' })
+  async onAssetsPrivateUpdate({ assetIds, userId }: ArgOf<'AssetPrivateUpdateAll'>) {
+    this.websocketRepository.clientSend('on_asset_private_update', userId, assetIds);
+
+    // an album is private as soon as it holds a private asset, so everyone it is shared with reloads it
+    for (const { albumId, userId: albumUserId } of await this.albumRepository.getAlbumUserIdsByAssetIds(assetIds)) {
+      this.websocketRepository.clientSend('on_album_update', albumUserId, albumId);
+    }
+  }
+
   @OnEvent({ name: 'StackCreate' })
   onStackCreate({ userId }: ArgOf<'StackCreate'>) {
     this.websocketRepository.clientSend('on_asset_stack_update', userId);

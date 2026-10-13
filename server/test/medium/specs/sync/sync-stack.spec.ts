@@ -80,7 +80,7 @@ describe(SyncEntityType.StackV1, () => {
     ]);
     await ctx.syncAckAll(auth, response);
 
-    await stackRepo.update(stack.id, { primaryAssetId: asset2.id });
+    await stackRepo.update(stack.id, { primaryAssetId: asset2.id }, { privateMode: true, userId: user.id });
     const newResponse = await ctx.syncStream(auth, [SyncRequestType.StacksV1]);
     expect(newResponse).toEqual([
       expect.objectContaining({ type: SyncEntityType.StackV1 }),

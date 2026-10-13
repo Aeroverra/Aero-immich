@@ -9,6 +9,7 @@ bool isRouteInStack(Ref ref, String routeName) {
 }
 
 final inLockedViewProvider = Provider<bool>((ref) => isRouteInStack(ref, LockedFolderRoute.name));
+final inPrivateViewProvider = Provider<bool>((ref) => isRouteInStack(ref, PrivateFolderRoute.name));
 final isAssetViewerOpenProvider = Provider<bool>((ref) => isRouteInStack(ref, AssetViewerRoute.name));
 
 final currentRouteNameProvider = StateProvider<String?>((ref) => null);

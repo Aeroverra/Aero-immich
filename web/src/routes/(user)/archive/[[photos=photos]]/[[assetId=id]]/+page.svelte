@@ -12,6 +12,7 @@
   import Timeline from '$lib/components/timeline/Timeline.svelte';
   import { AssetAction } from '$lib/constants';
 
+  import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import SetVisibilityAction from '$lib/components/timeline/actions/SetVisibilityAction.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { TimelineManager } from '$lib/managers/timeline-manager/timeline-manager.svelte';
@@ -74,6 +75,10 @@
     <FavoriteAction
       removeFavorite={assetMultiSelectManager.isAllFavorite}
       onFavorite={(ids, isFavorite) => timelineManager.update(ids, (asset) => (asset.isFavorite = isFavorite))}
+    />
+    <SetPrivateAction
+      onSetPrivate={(ids, isPrivate) => timelineManager.update(ids, (asset) => (asset.isPrivate = isPrivate))}
+      onRemove={handleSetVisibility}
     />
     <ButtonContextMenu icon={mdiDotsVertical} title={$t('menu')}>
       <DownloadAction menuItem />

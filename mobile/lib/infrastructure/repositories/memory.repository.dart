@@ -2,8 +2,10 @@ import 'package:drift/drift.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/memory/memory.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/memory.repository.drift.dart';
 
 @DriftAccessor()
@@ -12,7 +14,12 @@ class MemoryRepository extends DatabaseAccessor<Drift> with $MemoryRepositoryMix
 
   Drift get _db => attachedDatabase;
 
-  Future<List<Memory>> getAll(String ownerId, {bool onlyToday = true, bool onlyFavorites = false}) async {
+  Future<List<Memory>> getAll(
+    String ownerId, {
+    bool onlyToday = true,
+    bool onlyFavorites = false,
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) async {
     final query =
         _db.select(_db.memoryEntity).join([
             innerJoin(_db.memoryAssetEntity, _db.memoryAssetEntity.memoryId.equalsExp(_db.memoryEntity.id)),
@@ -20,7 +27,8 @@ class MemoryRepository extends DatabaseAccessor<Drift> with $MemoryRepositoryMix
               _db.remoteAssetEntity,
               _db.remoteAssetEntity.id.equalsExp(_db.memoryAssetEntity.assetId) &
                   _db.remoteAssetEntity.deletedAt.isNull() &
-                  _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline),
+                  _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
+                  _db.remoteAssetEntity.privateFilter(privateFilter),
             ),
           ])
           ..where(_db.memoryEntity.ownerId.equals(ownerId))
@@ -58,7 +66,7 @@ class MemoryRepository extends DatabaseAccessor<Drift> with $MemoryRepositoryMix
     return memories.values.map((e) => e.memory.toDto().copyWith(assets: e.assets)).toList(growable: false);
   }
 
-  Future<Memory?> get(String memoryId) async {
+  Future<Memory?> get(String memoryId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) async {
     final query =
         _db.select(_db.memoryEntity).join([
             leftOuterJoin(_db.memoryAssetEntity, _db.memoryAssetEntity.memoryId.equalsExp(_db.memoryEntity.id)),
@@ -66,7 +74,8 @@ class MemoryRepository extends DatabaseAccessor<Drift> with $MemoryRepositoryMix
               _db.remoteAssetEntity,
               _db.remoteAssetEntity.id.equalsExp(_db.memoryAssetEntity.assetId) &
                   _db.remoteAssetEntity.deletedAt.isNull() &
-                  _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline),
+                  _db.remoteAssetEntity.visibility.equalsValue(AssetVisibility.timeline) &
+                  _db.remoteAssetEntity.privateFilter(privateFilter),
             ),
           ])
           ..where(_db.memoryEntity.id.equals(memoryId))
@@ -83,8 +92,11 @@ class MemoryRepository extends DatabaseAccessor<Drift> with $MemoryRepositoryMix
     final assets = <RemoteAsset>[];
 
     for (final row in rows) {
-      final asset = row.readTable(_db.remoteAssetEntity);
-      assets.add(asset.toDto());
+      // Outer join: a memory whose assets are all hidden (trashed, archived, private) has no asset row
+      final asset = row.readTableOrNull(_db.remoteAssetEntity);
+      if (asset != null) {
+        assets.add(asset.toDto());
+      }
     }
 
     return memory.toDto().copyWith(assets: assets);

@@ -715,11 +715,26 @@ class _GridAlbumCard extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    Text(
-                      album.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                    Row(
+                      children: [
+                        if (album.isPrivate)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Icon(
+                              Icons.lock_person_outlined,
+                              size: 16,
+                              color: context.colorScheme.onSurfaceSecondary,
+                            ),
+                          ),
+                        Expanded(
+                          child: Text(
+                            album.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
                     ),
                     Text(
                       '${context.t.items_count(count: album.assetCount)} • ${album.ownerId != userId ? context.t.shared_by_user(user: album.ownerName) : context.t.owned}',

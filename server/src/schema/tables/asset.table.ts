@@ -1,5 +1,6 @@
 import {
   AfterDeleteTrigger,
+  AfterUpdateTrigger,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -14,7 +15,7 @@ import {
 import { UpdatedAtTrigger, UpdateIdColumn } from 'src/decorators';
 import { AssetStatus, AssetType, AssetVisibility, ChecksumAlgorithm } from 'src/enum';
 import { asset_checksum_algorithm_enum, asset_visibility_enum, assets_status_enum } from 'src/schema/enums';
-import { asset_delete_audit } from 'src/schema/functions';
+import { asset_delete_audit, asset_private_after_update } from 'src/schema/functions';
 import { LibraryTable } from 'src/schema/tables/library.table';
 import { StackTable } from 'src/schema/tables/stack.table';
 import { UserTable } from 'src/schema/tables/user.table';
@@ -22,6 +23,13 @@ import { ASSET_CHECKSUM_CONSTRAINT } from 'src/utils/database';
 
 @Table('asset')
 @UpdatedAtTrigger('asset_updatedAt')
+@AfterUpdateTrigger({
+  name: 'asset_private_after_update',
+  scope: 'statement',
+  referencingNewTableAs: 'new',
+  function: asset_private_after_update,
+  when: 'pg_trigger_depth() <= 1',
+})
 @AfterDeleteTrigger({
   scope: 'statement',
   function: asset_delete_audit,
@@ -48,6 +56,7 @@ import { ASSET_CHECKSUM_CONSTRAINT } from 'src/utils/database';
   name: 'asset_localDateTime_month_idx',
   expression: `date_trunc('MONTH'::text, ("localDateTime" AT TIME ZONE 'UTC'::text)) AT TIME ZONE 'UTC'::text`,
 })
+@Index({ name: 'asset_owner_private_idx', columns: ['ownerId'], where: '"isPrivate" = true' })
 @Index({ columns: ['originalPath', 'libraryId'] })
 @Index({ columns: ['id', 'stackId'] })
 @Index({
@@ -82,6 +91,9 @@ export class AssetTable {
 
   @Column({ type: 'boolean', default: false })
   isFavorite!: Generated<boolean>;
+
+  @Column({ type: 'boolean', default: false })
+  isPrivate!: Generated<boolean>;
 
   @Column({ type: 'integer', nullable: true })
   duration!: number | null;

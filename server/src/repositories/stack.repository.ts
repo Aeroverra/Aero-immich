@@ -6,14 +6,14 @@ import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { DB } from 'src/schema';
 import { StackTable } from 'src/schema/tables/stack.table';
-import { asUuid, withDefaultVisibility } from 'src/utils/database';
+import { asUuid, PrivateScope, withDefaultVisibility, withPrivateScope } from 'src/utils/database';
 
 export interface StackSearch {
   ownerId: string;
   primaryAssetId?: string;
 }
 
-const withAssets = (eb: ExpressionBuilder<DB, 'stack'>, withTags = false) => {
+const withAssets = (eb: ExpressionBuilder<DB, 'stack'>, scope: PrivateScope, withTags = false) => {
   return jsonArrayFrom(
     eb
       .selectFrom('asset')
@@ -42,6 +42,7 @@ const withAssets = (eb: ExpressionBuilder<DB, 'stack'>, withTags = false) => {
       .where('asset.deletedAt', 'is', null)
       .whereRef('asset.stackId', '=', 'stack.id')
       .$call(withDefaultVisibility)
+      .$call(withPrivateScope(scope))
       .orderBy('asset.fileCreatedAt', 'asc'),
   ).as('assets');
 };
@@ -50,18 +51,18 @@ const withAssets = (eb: ExpressionBuilder<DB, 'stack'>, withTags = false) => {
 export class StackRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [{ ownerId: DummyValue.UUID }] })
-  search(query: StackSearch) {
+  @GenerateSql({ params: [{ ownerId: DummyValue.UUID }, { privateMode: false, userId: DummyValue.UUID }] })
+  search(query: StackSearch, scope: PrivateScope) {
     return this.db
       .selectFrom('stack')
       .selectAll('stack')
-      .select(withAssets)
+      .select((eb) => withAssets(eb, scope))
       .where('stack.ownerId', '=', query.ownerId)
       .$if(!!query.primaryAssetId, (eb) => eb.where('stack.primaryAssetId', '=', query.primaryAssetId!))
       .execute();
   }
 
-  async create(entity: Omit<Insertable<StackTable>, 'primaryAssetId'>, assetIds: string[]) {
+  async create(entity: Omit<Insertable<StackTable>, 'primaryAssetId'>, assetIds: string[], scope: PrivateScope) {
     return this.db.transaction().execute(async (tx) => {
       const stacks = await tx
         .selectFrom('stack')
@@ -119,7 +120,7 @@ export class StackRepository {
       return tx
         .selectFrom('stack')
         .selectAll('stack')
-        .select(withAssets)
+        .select((eb) => withAssets(eb, scope))
         .where('id', '=', newRecord.id)
         .executeTakeFirstOrThrow();
     });
@@ -134,22 +135,22 @@ export class StackRepository {
     await this.db.deleteFrom('stack').where('id', 'in', ids).execute();
   }
 
-  update(id: string, entity: Updateable<StackTable>) {
+  update(id: string, entity: Updateable<StackTable>, scope: PrivateScope) {
     return this.db
       .updateTable('stack')
       .set(entity)
       .where('id', '=', asUuid(id))
       .returningAll('stack')
-      .returning((eb) => withAssets(eb, true))
+      .returning((eb) => withAssets(eb, scope, true))
       .executeTakeFirstOrThrow();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getById(id: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getById(id: string, scope: PrivateScope) {
     return this.db
       .selectFrom('stack')
       .selectAll()
-      .select((eb) => withAssets(eb, true))
+      .select((eb) => withAssets(eb, scope, true))
       .where('id', '=', asUuid(id))
       .executeTakeFirst();
   }

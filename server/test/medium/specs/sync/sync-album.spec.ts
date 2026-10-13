@@ -2,6 +2,7 @@ import { Kysely } from 'kysely';
 import { AlbumUserRole, SyncEntityType, SyncRequestType } from 'src/enum';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
 import { getKyselyDB } from 'test/utils';
@@ -230,5 +231,49 @@ describe(SyncRequestType.AlbumsV1, () => {
       await ctx.syncAckAll(auth, newResponse);
       await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumsV1]);
     });
+  });
+});
+
+describe(SyncRequestType.AlbumsV2, () => {
+  it('should carry the private flag and emit an upsert whenever the derived flag flips', async () => {
+    const { auth, ctx } = await setup();
+    const { album } = await ctx.newAlbum({ ownerId: auth.user.id });
+    const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+
+    const initial = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(initial).toEqual([
+      {
+        ack: expect.any(String),
+        data: expect.objectContaining({ id: album.id, isPrivate: false }),
+        type: SyncEntityType.AlbumV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+    await ctx.syncAckAll(auth, initial);
+    await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumsV2]);
+
+    await ctx.get(AlbumRepository).addAssetIds(album.id, [asset.id]);
+    const flipped = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(flipped).toEqual([
+      {
+        ack: expect.any(String),
+        data: expect.objectContaining({ id: album.id, isPrivate: true }),
+        type: SyncEntityType.AlbumV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+    await ctx.syncAckAll(auth, flipped);
+    await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumsV2]);
+
+    await ctx.get(AssetRepository).update({ id: asset.id, isPrivate: false });
+    const cleared = await ctx.syncStream(auth, [SyncRequestType.AlbumsV2]);
+    expect(cleared).toEqual([
+      {
+        ack: expect.any(String),
+        data: expect.objectContaining({ id: album.id, isPrivate: false }),
+        type: SyncEntityType.AlbumV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
   });
 });

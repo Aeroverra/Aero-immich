@@ -9,6 +9,7 @@
   import RemoveAssetFromStack from '$lib/components/asset-viewer/actions/RemoveAssetFromStack.svelte';
   import RestoreAction from '$lib/components/asset-viewer/actions/RestoreAction.svelte';
   import SetFeaturedPhotoAction from '$lib/components/asset-viewer/actions/SetPersonFeaturedAction.svelte';
+  import SetPrivateAction from '$lib/components/asset-viewer/actions/SetPrivateAction.svelte';
   import SetStackPrimaryAsset from '$lib/components/asset-viewer/actions/SetStackPrimaryAsset.svelte';
   import SetVisibilityAction from '$lib/components/asset-viewer/actions/SetVisibilityAction.svelte';
   import UnstackAction from '$lib/components/asset-viewer/actions/UnstackAction.svelte';
@@ -175,6 +176,9 @@
 
         {#if isOwner && !isLocked}
           <ArchiveAction {asset} {onAction} {preAction} />
+        {/if}
+        {#if isOwner}
+          <SetPrivateAction {asset} {onAction} {preAction} />
         {/if}
         <ActionMenuItem action={Actions.ViewInTimeline} />
         <ActionMenuItem action={Actions.ViewSimilar} />

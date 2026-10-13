@@ -14,6 +14,9 @@ class PinVerificationForm extends HookConsumerWidget {
   final IconData? icon;
   final IconData? successIcon;
 
+  /// Verifies the PIN; defaults to unlocking the auth session (locked folder)
+  final Future<bool> Function(String pinCode)? verify;
+
   const PinVerificationForm({
     super.key,
     required this.onSuccess,
@@ -22,6 +25,7 @@ class PinVerificationForm extends HookConsumerWidget {
     this.description,
     this.icon,
     this.successIcon,
+    this.verify,
   });
 
   @override
@@ -30,7 +34,7 @@ class PinVerificationForm extends HookConsumerWidget {
     final isVerified = useState(false);
 
     Future<void> verifyPin(String pinCode) async {
-      final isUnlocked = await ref.read(authProvider.notifier).unlockPinCode(pinCode);
+      final isUnlocked = await (verify ?? ref.read(authProvider.notifier).unlockPinCode)(pinCode);
 
       if (isUnlocked) {
         isVerified.value = true;

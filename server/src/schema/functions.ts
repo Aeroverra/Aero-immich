@@ -35,6 +35,75 @@ export const album_user_after_insert = registerFunction({
     END`,
 });
 
+export const album_asset_private_after_insert = registerFunction({
+  name: 'album_asset_private_after_insert',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      -- adding an asset to a private album makes the asset private
+      UPDATE asset SET "isPrivate" = true
+      WHERE "id" IN (
+        SELECT n."assetId" FROM new n
+        INNER JOIN album a ON a."id" = n."albumId"
+        WHERE a."isPrivate" = true
+      ) AND "isPrivate" = false;
+
+      -- adding a private asset makes the album private
+      UPDATE album SET "isPrivate" = true, "updatedAt" = clock_timestamp(), "updateId" = immich_uuid_v7(clock_timestamp())
+      WHERE "id" IN (
+        SELECT n."albumId" FROM new n
+        INNER JOIN asset s ON s."id" = n."assetId"
+        WHERE s."isPrivate" = true AND s."deletedAt" IS NULL
+      ) AND "isPrivate" = false;
+      RETURN NULL;
+    END`,
+});
+
+export const album_asset_private_after_delete = registerFunction({
+  name: 'album_asset_private_after_delete',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      UPDATE album SET "isPrivate" = false, "updatedAt" = clock_timestamp(), "updateId" = immich_uuid_v7(clock_timestamp())
+      WHERE "id" IN (SELECT DISTINCT "albumId" FROM old)
+        AND "isPrivate" = true
+        AND NOT EXISTS (
+          SELECT FROM album_asset aa
+          INNER JOIN asset s ON s."id" = aa."assetId"
+          WHERE aa."albumId" = album."id" AND s."isPrivate" = true AND s."deletedAt" IS NULL
+        );
+      RETURN NULL;
+    END`,
+});
+
+export const asset_private_after_update = registerFunction({
+  name: 'asset_private_after_update',
+  returnType: 'TRIGGER',
+  language: 'PLPGSQL',
+  body: `
+    BEGIN
+      UPDATE album SET "isPrivate" = true, "updatedAt" = clock_timestamp(), "updateId" = immich_uuid_v7(clock_timestamp())
+      WHERE "isPrivate" = false
+        AND "id" IN (
+          SELECT aa."albumId" FROM new n
+          INNER JOIN album_asset aa ON aa."assetId" = n."id"
+          WHERE n."isPrivate" = true AND n."deletedAt" IS NULL
+        );
+
+      UPDATE album SET "isPrivate" = false, "updatedAt" = clock_timestamp(), "updateId" = immich_uuid_v7(clock_timestamp())
+      WHERE "isPrivate" = true
+        AND "id" IN (SELECT aa."albumId" FROM new n INNER JOIN album_asset aa ON aa."assetId" = n."id")
+        AND NOT EXISTS (
+          SELECT FROM album_asset aa
+          INNER JOIN asset s ON s."id" = aa."assetId"
+          WHERE aa."albumId" = album."id" AND s."isPrivate" = true AND s."deletedAt" IS NULL
+        );
+      RETURN NULL;
+    END`,
+});
+
 export const updated_at = registerFunction({
   name: 'updated_at',
   returnType: 'TRIGGER',

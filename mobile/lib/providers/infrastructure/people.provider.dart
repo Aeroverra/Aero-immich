@@ -4,6 +4,7 @@ import 'package:immich_mobile/domain/models/person.model.dart';
 import 'package:immich_mobile/domain/services/people.service.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 
 final peopleServiceProvider = Provider<PeopleService>(
   (ref) => PeopleService(ref.watch(driftProvider).peopleRepository, ref.watch(personApiRepositoryProvider)),
@@ -17,5 +18,5 @@ final peopleAssetProvider = FutureProvider.family<List<Person>, String>((ref, as
 final getAllPeopleProvider = StreamProvider<List<Person>>((ref) async* {
   final service = ref.watch(peopleServiceProvider);
   final prefs = await ref.watch(userMetadataPreferencesProvider.future);
-  yield* service.watch(minFaces: prefs?.minimumFaces ?? 3);
+  yield* service.watch(minFaces: prefs?.minimumFaces ?? 3, privateFilter: ref.watch(privateModeFilterProvider));
 });

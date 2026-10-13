@@ -114,6 +114,10 @@ describe(SharedLinkService.name, () => {
   });
 
   describe('create', () => {
+    beforeEach(() => {
+      mocks.sharedLink.hasPrivateAssets.mockResolvedValue(false);
+    });
+
     it('should not allow an album shared link without an albumId', async () => {
       await expect(sut.create(authStub.admin, { type: SharedLinkType.Album, assetIds: [] })).rejects.toBeInstanceOf(
         BadRequestException,
@@ -146,7 +150,11 @@ describe(SharedLinkService.name, () => {
 
       await sut.create(authStub.admin, { type: SharedLinkType.Album, albumId: album.id });
 
-      expect(mocks.access.album.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([album.id]));
+      expect(mocks.access.album.checkOwnerAccess).toHaveBeenCalledWith(
+        authStub.admin.user.id,
+        new Set([album.id]),
+        false,
+      );
       expect(mocks.sharedLink.create).toHaveBeenCalledWith({
         type: SharedLinkType.Album,
         userId: authStub.admin.user.id,
@@ -177,11 +185,10 @@ describe(SharedLinkService.name, () => {
         allowUpload: true,
       });
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        false,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.sharedLink.create).toHaveBeenCalledWith({
         type: SharedLinkType.Individual,
         userId: authStub.admin.user.id,
@@ -213,11 +220,10 @@ describe(SharedLinkService.name, () => {
         allowUpload: true,
       });
 
-      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(
-        authStub.admin.user.id,
-        new Set([asset.id]),
-        false,
-      );
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(authStub.admin.user.id, new Set([asset.id]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
       expect(mocks.sharedLink.create).toHaveBeenCalledWith({
         type: SharedLinkType.Individual,
         userId: authStub.admin.user.id,

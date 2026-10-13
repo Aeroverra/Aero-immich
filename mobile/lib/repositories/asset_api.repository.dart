@@ -98,11 +98,13 @@ class AssetApiRepository extends ApiRepository {
     Option<AssetVisibility> visibility = const .none(),
     Option<String> dateTimeOriginal = const .none(),
     Option<LatLng> location = const .none(),
+    Option<bool> isPrivate = const .none(),
   }) {
     return _api.updateAssets(
       AssetBulkUpdateDto(
         ids: remoteIds,
         isFavorite: isFavorite.toOptional(),
+        isPrivate: isPrivate.toOptional(),
         visibility: visibility.map(_mapVisibility).toOptional(),
         dateTimeOriginal: dateTimeOriginal.toOptional(),
         latitude: location.map((loc) => loc.latitude).toOptional(),

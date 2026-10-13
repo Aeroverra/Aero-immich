@@ -27,6 +27,7 @@ export type TimelineAsset = {
   visibility: AssetVisibility;
   isFavorite: boolean;
   isTrashed: boolean;
+  isPrivate: boolean;
   isVideo: boolean;
   isImage: boolean;
   stack: AssetStackResponseDto | null;

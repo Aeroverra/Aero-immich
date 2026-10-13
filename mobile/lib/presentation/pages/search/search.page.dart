@@ -20,6 +20,7 @@ import 'package:immich_mobile/presentation/widgets/search/quick_date_picker.dart
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/search/search_input_focus.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
@@ -32,6 +33,7 @@ import 'package:immich_mobile/widgets/search/search_filter/filter_bottom_sheet_s
 import 'package:immich_mobile/widgets/search/search_filter/location_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/media_type_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/people_picker.dart';
+import 'package:immich_mobile/widgets/search/search_filter/private_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_chip.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_utils.dart';
 import 'package:immich_mobile/widgets/search/search_filter/star_rating_picker.dart';
@@ -74,8 +76,10 @@ class SearchPage extends HookConsumerWidget {
     final mediaTypeCurrentFilterWidget = useState<Widget?>(null);
     final ratingCurrentFilterWidget = useState<Widget?>(null);
     final displayOptionCurrentFilterWidget = useState<Widget?>(null);
+    final privateCurrentFilterWidget = useState<Widget?>(null);
 
     final userPreferences = ref.watch(userMetadataPreferencesProvider);
+    final isPrivateMode = ref.watch(isPrivateModeProvider);
 
     void search(SearchFilter f) {
       if (f == filter.value) {
@@ -94,6 +98,15 @@ class SearchPage extends HookConsumerWidget {
     void loadMoreSearchResults() {
       unawaited(ref.read(paginatedSearchProvider.notifier).search(filter.value));
     }
+
+    // The server refuses an explicit private filter once the mode is off, so drop it and search again
+    ref.listen(isPrivateModeProvider, (_, enabled) {
+      if (enabled || filter.value.private == SearchPrivateFilter.all) {
+        return;
+      }
+      privateCurrentFilterWidget.value = null;
+      search(filter.value.copyWith(private: SearchPrivateFilter.all));
+    });
 
     // TODO: Use ref.listen with `fireImmediately` in the new riverpod version.
     final preFilter = ref.watch(searchPreFilterProvider);
@@ -116,6 +129,7 @@ class SearchPage extends HookConsumerWidget {
           mediaTypeCurrentFilterWidget.value = null;
           ratingCurrentFilterWidget.value = null;
           displayOptionCurrentFilterWidget.value = null;
+          privateCurrentFilterWidget.value = null;
           locationCurrentFilterWidget.value = preFilter.location.city != null
               ? Text(preFilter.location.city!, style: context.textTheme.labelLarge)
               : null;
@@ -492,6 +506,41 @@ class SearchPage extends HookConsumerWidget {
       );
     }
 
+    // PRIVATE
+    void showPrivatePicker() {
+      var private = filter.value.private;
+
+      void handleOnSelected(SearchPrivateFilter value) {
+        private = value;
+      }
+
+      void handleClear() {
+        privateCurrentFilterWidget.value = null;
+        search(filter.value.copyWith(private: SearchPrivateFilter.all));
+      }
+
+      void handleApply() {
+        privateCurrentFilterWidget.value = switch (private) {
+          SearchPrivateFilter.all => null,
+          SearchPrivateFilter.onlyPrivate => Text(context.t.search_private_only, style: context.textTheme.labelLarge),
+          SearchPrivateFilter.notPrivate => Text(context.t.search_private_exclude, style: context.textTheme.labelLarge),
+        };
+        search(filter.value.copyWith(private: private));
+      }
+
+      unawaited(
+        showFilterBottomSheet(
+          context: context,
+          child: FilterBottomSheetScaffold(
+            title: context.t.search_private_filter,
+            onSearch: handleApply,
+            onClear: handleClear,
+            child: PrivatePicker(onSelect: handleOnSelected, filter: filter.value.private),
+          ),
+        ),
+      );
+    }
+
     void handleTextSubmitted(String value) => search(switch (textSearchType.value) {
       TextSearchType.context => filter.value.copyWith(filename: '', context: value, description: '', ocr: ''),
       TextSearchType.filename => filter.value.copyWith(filename: value, context: '', description: '', ocr: ''),
@@ -708,6 +757,14 @@ class SearchPage extends HookConsumerWidget {
                       label: context.t.search_filter_display_options,
                       currentFilter: displayOptionCurrentFilterWidget.value,
                     ),
+                    if (isPrivateMode)
+                      SearchFilterChip(
+                        key: const Key('private_chip'),
+                        icon: Icons.lock_outline_rounded,
+                        onTap: showPrivatePicker,
+                        label: context.t.search_private_filter,
+                        currentFilter: privateCurrentFilterWidget.value,
+                      ),
                   ],
                 ),
               ),

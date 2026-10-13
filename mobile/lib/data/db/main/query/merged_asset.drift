@@ -4,7 +4,7 @@ import '../table/local/asset.dart';
 import '../table/local/album.dart';
 import '../table/local/album_asset.dart';
 
-mergedAsset:
+mergedAsset(:private_mode AS BOOLEAN, :current_user_id AS TEXT):
 SELECT
 	rae.id as remote_id,
 	(SELECT lae.id FROM local_asset_entity lae WHERE lae.checksum = rae.checksum LIMIT 1) as local_id,
@@ -28,7 +28,8 @@ SELECT
 	NULL as adjustmentTime,
 	rae.is_edited,
 	0 as playback_style,
-	rae.uploaded_at
+	rae.uploaded_at,
+	rae.is_private
 FROM
 	remote_asset_entity rae
 LEFT JOIN
@@ -40,6 +41,10 @@ WHERE
 	AND (
 		rae.stack_id IS NULL
 		OR rae.id = se.primary_asset_id
+	)
+	AND (
+		rae.is_private = 0
+		OR (:private_mode AND rae.owner_id = :current_user_id)
 	)
 
 UNION ALL
@@ -67,7 +72,8 @@ SELECT
 	lae.adjustment_time,
 	0 as is_edited,
 	lae.playback_style,
-	NULL as uploaded_at
+	NULL as uploaded_at,
+	0 as is_private
 FROM
 	local_asset_entity lae
 WHERE NOT EXISTS (
@@ -86,7 +92,7 @@ AND NOT EXISTS (
 ORDER BY created_at DESC
 LIMIT $limit;
 
-mergedBucket(:group_by AS INTEGER):
+mergedBucket(:group_by AS INTEGER, :private_mode AS BOOLEAN, :current_user_id AS TEXT):
 SELECT
 	COUNT(*) as asset_count,
 	bucket_date
@@ -114,6 +120,10 @@ FROM
 		AND (
 			rae.stack_id IS NULL
 			OR rae.id = se.primary_asset_id
+		)
+		AND (
+			rae.is_private = 0
+			OR (:private_mode AND rae.owner_id = :current_user_id)
 		)
 	UNION ALL
 	SELECT

@@ -78,7 +78,7 @@ export class SessionService extends BaseService {
 
   async lock(auth: AuthDto, id: string): Promise<void> {
     await this.requireAccess({ auth, permission: Permission.SessionLock, ids: [id] });
-    await this.sessionRepository.update(id, { pinExpiresAt: null });
+    await this.sessionRepository.update(id, { pinExpiresAt: null, privateModeExpiresAt: null });
   }
 
   @OnEvent({ name: 'AuthChangePassword' })

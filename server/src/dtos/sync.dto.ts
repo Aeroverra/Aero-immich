@@ -97,6 +97,7 @@ const SyncAssetV2Schema = z
     type: AssetTypeSchema,
     deletedAt: isoDatetimeToDate.nullable().describe('Deleted at'),
     isFavorite: z.boolean().describe('Is favorite'),
+    isPrivate: z.boolean().describe('Is private'),
     visibility: AssetVisibilitySchema,
     livePhotoVideoId: z.string().nullable().describe('Live photo video ID'),
     stackId: z.string().nullable().describe('Stack ID'),
@@ -241,6 +242,7 @@ const SyncAlbumV2Schema = z
     thumbnailAssetId: z.string().nullable().describe('Thumbnail asset ID'),
     isActivityEnabled: z.boolean().describe('Is activity enabled'),
     order: AssetOrderSchema,
+    isPrivate: z.boolean().describe('Album contains at least one private asset'),
   })
   .meta({ id: 'SyncAlbumV2' });
 

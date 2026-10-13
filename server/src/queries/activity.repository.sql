@@ -26,6 +26,10 @@ from
 where
   "activity"."albumId" = $1
   and "asset"."deletedAt" is null
+  and (
+    "asset"."id" is null
+    or "asset"."isPrivate" = $2
+  )
 order by
   "activity"."createdAt" asc
 
@@ -84,4 +88,8 @@ where
       and "asset"."visibility" != 'locked'
     )
     or "asset"."id" is null
+  )
+  and (
+    "asset"."id" is null
+    or "asset"."isPrivate" = $5
   )
