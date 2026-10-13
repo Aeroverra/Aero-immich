@@ -13,13 +13,17 @@ export interface BoundingBox {
 
 export enum ModelTask {
   FACIAL_RECOGNITION = 'facial-recognition',
+  FACE_ATTRIBUTES = 'face-attributes',
+  IMAGE_QUALITY = 'image-quality',
   SEARCH = 'clip',
   OCR = 'ocr',
 }
 
 export enum ModelType {
   DETECTION = 'detection',
+  LANDMARKS = 'landmarks',
   PIPELINE = 'pipeline',
+  QUALITY = 'quality',
   RECOGNITION = 'recognition',
   TEXTUAL = 'textual',
   VISUAL = 'visual',
@@ -72,7 +76,40 @@ export interface Face {
 }
 
 export type FacialRecognitionResponse = { [ModelTask.FACIAL_RECOGNITION]: Face[] } & VisualResponse;
-export type MachineLearningRequest = ClipVisualRequest | ClipTextualRequest | FacialRecognitionRequest | OcrRequest;
+
+/** The image quality measures have no model file, the name identifies how they were computed. */
+export const IMAGE_QUALITY_MODEL_NAME = 'laplacian';
+
+/** A face box in the coordinates of the image size it was stored with. */
+export type FaceAttributesBox = BoundingBox & { imageWidth: number; imageHeight: number };
+export type FaceAttributesOptions = ModelOptions & { faces: FaceAttributesBox[] };
+
+export type FaceAttributes = {
+  detected: boolean;
+  eyeBlinkLeft: number | null;
+  eyeBlinkRight: number | null;
+  smile: number | null;
+  yaw: number | null;
+  pitch: number | null;
+  roll: number | null;
+  sharpness: number | null;
+};
+
+export type ImageQuality = { sharpness: number; exposureClipped: number; brightness: number };
+
+export type FaceAttributesRequest = {
+  [ModelTask.FACE_ATTRIBUTES]: {
+    [ModelType.LANDMARKS]: ModelOptions & { options: { faces: FaceAttributesBox[] } };
+  };
+  [ModelTask.IMAGE_QUALITY]: { [ModelType.QUALITY]: ModelOptions };
+};
+export type FaceAttributesResponse = {
+  [ModelTask.FACE_ATTRIBUTES]: FaceAttributes[];
+  [ModelTask.IMAGE_QUALITY]: ImageQuality;
+} & VisualResponse;
+
+export type MachineLearningRequest =
+  ClipVisualRequest | ClipTextualRequest | FacialRecognitionRequest | FaceAttributesRequest | OcrRequest;
 export type TextEncodingOptions = ModelOptions & { language?: string };
 
 @Injectable()
@@ -199,6 +236,22 @@ export class MachineLearningRepository {
       imageHeight: response.imageHeight,
       imageWidth: response.imageWidth,
       faces: response[ModelTask.FACIAL_RECOGNITION],
+    };
+  }
+
+  /**
+   * Describes the given faces (in request order) and measures the image quality in one request.
+   * Faces are not detected again.
+   */
+  async detectFaceAttributes(imagePath: string, { modelName, faces }: FaceAttributesOptions) {
+    const request = {
+      [ModelTask.FACE_ATTRIBUTES]: { [ModelType.LANDMARKS]: { modelName, options: { faces } } },
+      [ModelTask.IMAGE_QUALITY]: { [ModelType.QUALITY]: { modelName: IMAGE_QUALITY_MODEL_NAME } },
+    };
+    const response = await this.predict<FaceAttributesResponse>({ imagePath }, request);
+    return {
+      faces: response[ModelTask.FACE_ATTRIBUTES],
+      quality: response[ModelTask.IMAGE_QUALITY],
     };
   }
 

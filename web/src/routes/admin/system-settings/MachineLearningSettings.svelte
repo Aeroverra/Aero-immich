@@ -255,6 +255,21 @@
       </SettingAccordion>
 
       <SettingAccordion
+        key="face-attributes"
+        title={$t('admin.machine_learning_face_attributes')}
+        subtitle={$t('admin.machine_learning_face_attributes_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_face_attributes_setting')}
+            subtitle={$t('admin.machine_learning_face_attributes_setting_description')}
+            bind:checked={configToEdit.machineLearning.faceAttributes.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled}
+          />
+        </div>
+      </SettingAccordion>
+
+      <SettingAccordion
         key="ocr"
         title={$t('admin.machine_learning_ocr')}
         subtitle={$t('admin.machine_learning_ocr_description')}

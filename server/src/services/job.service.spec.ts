@@ -79,7 +79,7 @@ describe(JobService.name, () => {
       },
       {
         item: { name: JobName.AssetDetectFaces, data: { id: 'asset-1' } },
-        jobs: [],
+        jobs: [JobName.AssetDetectFaceAttributes],
       },
       {
         item: { name: JobName.FacialRecognition, data: { id: 'asset-1' } },

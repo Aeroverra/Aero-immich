@@ -13,6 +13,7 @@ import { DatabaseBackupService } from 'src/services/database-backup.service';
 import { DatabaseService } from 'src/services/database.service';
 import { DownloadService } from 'src/services/download.service';
 import { DuplicateService } from 'src/services/duplicate.service';
+import { FaceAttributeService } from 'src/services/face-attribute.service';
 import { HlsService } from 'src/services/hls.service';
 import { IntegrityService } from 'src/services/integrity.service';
 import { JobService } from 'src/services/job.service';
@@ -79,6 +80,7 @@ export const services = [
   NotificationService,
   NotificationAdminService,
   OcrService,
+  FaceAttributeService,
   ClusterGroupService,
   PartnerService,
   PersonService,

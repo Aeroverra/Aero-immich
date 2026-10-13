@@ -37,6 +37,7 @@ import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
 import { EmailRepository } from 'src/repositories/email.repository';
 import { EventRepository } from 'src/repositories/event.repository';
+import { FaceAttributeRepository } from 'src/repositories/face-attribute.repository';
 import { IntegrityRepository } from 'src/repositories/integrity.repository';
 import { JobRepository } from 'src/repositories/job.repository';
 import { LibraryRepository } from 'src/repositories/library.repository';
@@ -488,6 +489,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case LibraryRepository:
     case NotificationRepository:
     case OcrRepository:
+    case FaceAttributeRepository:
     case PartnerRepository:
     case PersonRepository:
     case SearchRepository:
@@ -572,6 +574,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case IntegrityRepository:
     case NotificationRepository:
     case OcrRepository:
+    case FaceAttributeRepository:
     case PartnerRepository:
     case PersonRepository:
     case SessionRepository:

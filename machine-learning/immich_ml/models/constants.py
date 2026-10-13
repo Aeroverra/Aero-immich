@@ -75,6 +75,16 @@ _INSIGHTFACE_MODELS = {
 }
 
 
+_MEDIAPIPE_MODELS = {
+    "face_landmarker",
+}
+
+
+_OPENCV_MODELS = {
+    "laplacian",
+}
+
+
 _PADDLE_MODELS = {
     "PP-OCRv5_server",
     "PP-OCRv5_mobile",
@@ -174,5 +184,11 @@ def get_model_source(model_name: str) -> ModelSource | None:
 
     if cleaned_name in _PADDLE_MODELS:
         return ModelSource.PADDLE
+
+    if cleaned_name in _MEDIAPIPE_MODELS:
+        return ModelSource.MEDIAPIPE
+
+    if cleaned_name in _OPENCV_MODELS:
+        return ModelSource.OPENCV
 
     return None

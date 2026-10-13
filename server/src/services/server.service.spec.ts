@@ -143,6 +143,7 @@ describe(ServerService.name, () => {
         oauth: false,
         oauthAutoLaunch: false,
         ocr: true,
+        faceAttributes: true,
         passwordLogin: true,
         search: true,
         sidecar: true,

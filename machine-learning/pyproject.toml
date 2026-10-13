@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.95.2,<1.0",
     "gunicorn>=21.1.0",
     "huggingface-hub>=1.0,<2.0",
+    "mediapipe>=1.0.1,<2.0",
     "numpy>=2.4.0,<3.0",
     "onnx>=1.22.0",
     "opencv-python-headless>=4.7.0.72,<5.0",
@@ -56,6 +57,12 @@ rocm = ["onnxruntime-migraphx>=1.23.2,<2"]
 
 [tool.uv]
 compile-bytecode = true
+# mediapipe declares dependencies for features that are not used here: its vision tasks only need cv2,
+# which opencv-python-headless already provides, and audio support is never imported
+override-dependencies = [
+    "opencv-contrib-python; sys_platform == 'never'",
+    "sounddevice; sys_platform == 'never'",
+]
 
 [tool.hatch.build.targets.sdist]
 include = ["immich_ml"]
