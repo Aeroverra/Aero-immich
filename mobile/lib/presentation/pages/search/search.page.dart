@@ -36,7 +36,7 @@ import 'package:immich_mobile/widgets/search/search_filter/display_option_picker
 import 'package:immich_mobile/widgets/search/search_filter/filter_bottom_sheet_scaffold.dart';
 import 'package:immich_mobile/widgets/search/search_filter/location_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/media_type_picker.dart';
-import 'package:immich_mobile/widgets/search/search_filter/people_picker.dart';
+import 'package:immich_mobile/widgets/search/search_filter/people_filter_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/private_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_chip.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_utils.dart';
@@ -163,20 +163,43 @@ class SearchPage extends HookConsumerWidget {
 
     void showPeoplePicker() {
       var people = filter.value.people;
+      PeopleFilterOptions options = (
+        onlyPeople: filter.value.onlyPeople,
+        hasPeople: filter.value.hasPeople,
+        hasNamedFaces: filter.value.hasNamedFaces,
+        hasUnnamedFaces: filter.value.hasUnnamedFaces,
+      );
 
-      void handleOnSelect(Set<Person> value) {
+      void handleOnChanged(Set<Person> value, PeopleFilterOptions next) {
         people = value;
+        options = next;
       }
 
       void handleClear() {
         peopleCurrentFilterWidget.value = null;
-        search(filter.value.copyWith(people: {}));
+        search(
+          filter.value.copyWith(
+            people: {},
+            onlyPeople: null,
+            hasPeople: null,
+            hasNamedFaces: null,
+            hasUnnamedFaces: null,
+          ),
+        );
       }
 
       void handleApply() {
-        final label = people.map((e) => e.name != '' ? e.name : context.t.no_name).join(', ');
+        final label = peopleFilterLabel(context, people, options);
         peopleCurrentFilterWidget.value = label.isNotEmpty ? Text(label, style: context.textTheme.labelLarge) : null;
-        search(filter.value.copyWith(people: people));
+        search(
+          filter.value.copyWith(
+            people: people,
+            onlyPeople: options.onlyPeople,
+            hasPeople: options.hasPeople,
+            hasNamedFaces: options.hasNamedFaces,
+            hasUnnamedFaces: options.hasUnnamedFaces,
+          ),
+        );
       }
 
       unawaited(
@@ -190,7 +213,11 @@ class SearchPage extends HookConsumerWidget {
               expanded: true,
               onSearch: handleApply,
               onClear: handleClear,
-              child: PeoplePicker(onSelect: handleOnSelect, initialSelection: filter.value.people),
+              child: PeopleFilterPicker(
+                initialPeople: filter.value.people,
+                initialOptions: options,
+                onChanged: handleOnChanged,
+              ),
             ),
           ),
         ),
