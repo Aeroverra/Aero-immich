@@ -1,7 +1,16 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import { AssetFileType, AssetMetadataKey, AssetStatus, CalendarHeatmapType, JobName, SharedLinkType } from 'src/enum';
+import {
+  AssetFileType,
+  AssetMetadataKey,
+  AssetStatus,
+  CalendarHeatmapType,
+  JobName,
+  SharedLinkType,
+  StackSource,
+  StackUserEditAction,
+} from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
@@ -183,14 +192,26 @@ describe(AssetService.name, () => {
       await ctx.newExif({ assetId: newAsset.id, description: 'bar' });
       await ctx.newExif({ assetId: asset2.id, description: 'foo' });
 
-      await ctx.newStack({ ownerId: user.id }, [oldAsset.id, asset1.id]);
+      const {
+        stack: { id: oldStackId },
+      } = await ctx.newStack({ ownerId: user.id, source: StackSource.Auto }, [oldAsset.id, asset1.id]);
 
       const {
         stack: { id: newStackId },
       } = await ctx.newStack({ ownerId: user.id }, [newAsset.id, asset2.id]);
 
+      ctx.getMock(EventRepository).emit.mockResolvedValue();
       const auth = factory.auth({ user: { id: user.id } });
       await sut.copy(auth, { sourceId: oldAsset.id, targetId: newAsset.id });
+
+      expect(ctx.getMock(EventRepository).emit).toHaveBeenCalledWith('StackUserEdit', {
+        userId: user.id,
+        stackId: oldStackId,
+        source: StackSource.Auto,
+        action: StackUserEditAction.Merge,
+        assetIds: expect.arrayContaining([oldAsset.id, asset1.id]),
+        targetStackId: newStackId,
+      });
 
       await expect(stackRepo.getById(oldAsset.id, { privateMode: true, userId: user.id })).resolves.toEqual(undefined);
 

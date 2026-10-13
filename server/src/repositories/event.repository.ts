@@ -6,7 +6,16 @@ import { Asset } from 'src/database';
 import { EventConfig } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { SystemConfig } from 'src/dtos/config.dto';
-import { ImmichWorker, JobStatus, MetadataKey, QueueName, UserAvatarColor, UserStatus } from 'src/enum';
+import {
+  ImmichWorker,
+  JobStatus,
+  MetadataKey,
+  QueueName,
+  StackSource,
+  StackUserEditAction,
+  UserAvatarColor,
+  UserStatus,
+} from 'src/enum';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { JobItem, JobSource, UploadFile } from 'src/types';
@@ -88,6 +97,12 @@ type EventMap = {
   // stack bulk events
   StackDeleteAll: [{ stackIds: string[]; userId: string }];
 
+  /**
+   * a user changed a stack by hand (deleted it, took assets out, picked another primary asset or merged it into
+   * another stack); emitted for manual and automatic stacks so that automatic stacking never undoes the change
+   */
+  StackUserEdit: [StackUserEditEvent];
+
   // user events
   UserSignup: [{ notify: boolean; id: string; password?: string }];
   UserCreate: [UserEvent];
@@ -113,6 +128,21 @@ type EventMap = {
 
 export type AppRestartEvent = {
   isMaintenanceMode: boolean;
+};
+
+export type StackUserEditEvent = {
+  userId: string;
+  /** the stack as it was before the change */
+  stackId: string;
+  source: StackSource;
+  action: StackUserEditAction;
+  /**
+   * delete: every member of the deleted stack; removeAssets: the assets taken out; updatePrimary: the new primary
+   * asset; merge: the members that moved into `targetStackId`
+   */
+  assetIds: string[];
+  /** merge only: the stack that received the assets */
+  targetStackId?: string;
 };
 
 type JobSuccessEvent = { job: JobItem; response?: JobStatus };

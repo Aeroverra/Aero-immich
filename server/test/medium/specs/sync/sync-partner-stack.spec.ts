@@ -1,5 +1,5 @@
 import { Kysely } from 'kysely';
-import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { StackSource, SyncEntityType, SyncRequestType } from 'src/enum';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
 import { StackRepository } from 'src/repositories/stack.repository';
@@ -288,5 +288,72 @@ describe(SyncRequestType.PartnerStacksV1, () => {
         expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
       ]);
     });
+  });
+});
+
+describe(SyncRequestType.PartnerStacksV2, () => {
+  it('should sync the source of a partner stack', async () => {
+    const { auth, user, ctx } = await setup();
+    const { user: user2 } = await ctx.newUser();
+    await ctx.newPartner({ sharedById: user2.id, sharedWithId: user.id });
+    const { asset } = await ctx.newAsset({ ownerId: user2.id });
+    const { stack } = await ctx.newStack({ ownerId: user2.id, source: StackSource.Auto }, [asset.id]);
+
+    const response = await ctx.syncStream(auth, [SyncRequestType.PartnerStacksV2]);
+    expect(response).toEqual([
+      {
+        ack: expect.stringContaining(SyncEntityType.PartnerStackV2),
+        data: {
+          id: stack.id,
+          ownerId: stack.ownerId,
+          createdAt: (stack.createdAt as Date).toISOString(),
+          updatedAt: (stack.updatedAt as Date).toISOString(),
+          primaryAssetId: stack.primaryAssetId,
+          source: StackSource.Auto,
+        },
+        type: SyncEntityType.PartnerStackV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+
+    await ctx.syncAckAll(auth, response);
+    await ctx.assertSyncIsComplete(auth, [SyncRequestType.PartnerStacksV2]);
+  });
+
+  it('should backfill partner stacks with their source, and without it for V1', async () => {
+    const { auth, user, ctx } = await setup();
+    const { user: user2 } = await ctx.newUser();
+    const { user: user3 } = await ctx.newUser();
+    const { asset: asset3 } = await ctx.newAsset({ ownerId: user3.id });
+    const { stack: stack3 } = await ctx.newStack({ ownerId: user3.id, source: StackSource.Auto }, [asset3.id]);
+    await wait(2);
+    const { asset: asset2 } = await ctx.newAsset({ ownerId: user2.id });
+    await ctx.newStack({ ownerId: user2.id }, [asset2.id]);
+    await ctx.newPartner({ sharedById: user2.id, sharedWithId: auth.user.id });
+
+    for (const type of [SyncRequestType.PartnerStacksV1, SyncRequestType.PartnerStacksV2]) {
+      const response = await ctx.syncStream(auth, [type]);
+      await ctx.syncAckAll(auth, response);
+    }
+    await ctx.newPartner({ sharedById: user3.id, sharedWithId: user.id });
+
+    const v2 = await ctx.syncStream(auth, [SyncRequestType.PartnerStacksV2]);
+    expect(v2).toEqual([
+      expect.objectContaining({
+        type: SyncEntityType.PartnerStackBackfillV2,
+        data: expect.objectContaining({ id: stack3.id, source: StackSource.Auto }),
+      }),
+      expect.objectContaining({ type: SyncEntityType.SyncAckV1 }),
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
+
+    const v1 = await ctx.syncStream(auth, [SyncRequestType.PartnerStacksV1]);
+    expect(v1[0]).toEqual(
+      expect.objectContaining({
+        type: SyncEntityType.PartnerStackBackfillV1,
+        data: expect.objectContaining({ id: stack3.id }),
+      }),
+    );
+    expect(v1[0].data).not.toHaveProperty('source');
   });
 });

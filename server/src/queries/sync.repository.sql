@@ -1094,6 +1094,7 @@ select
   "stack"."updatedAt",
   "stack"."primaryAssetId",
   "stack"."ownerId",
+  "stack"."source",
   "updateId"
 from
   "stack" as "stack"
@@ -1120,6 +1121,7 @@ select
   "stack"."updatedAt",
   "stack"."primaryAssetId",
   "stack"."ownerId",
+  "stack"."source",
   "stack"."updateId",
   "asset"."isPrivate" as "isAssetPrivate"
 from
@@ -1224,6 +1226,7 @@ select
   "stack"."updatedAt",
   "stack"."primaryAssetId",
   "stack"."ownerId",
+  "stack"."source",
   "stack"."updateId",
   "asset"."isPrivate" as "isAssetPrivate"
 from

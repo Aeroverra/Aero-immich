@@ -21,6 +21,7 @@
   import { assetsSnapshot } from '$lib/managers/timeline-manager/utils.svelte';
   import { keyboardManager } from '$lib/stores/keyboard-manager.svelte';
   import { mediaQueryManager } from '$lib/stores/media-query-manager.svelte';
+  import { isGroupingAutoStacks } from '$lib/utils/asset-utils';
   import { isAssetViewerRoute, navigate } from '$lib/utils/navigation';
   import { getTimes, type ScrubberListener } from '$lib/utils/timeline-util';
   import { type AlbumResponseDto, type PersonResponseDto, type UserResponseDto } from '@immich/sdk';
@@ -87,7 +88,13 @@
 
   timelineManager = new TimelineManager();
   onDestroy(() => timelineManager.destroy());
-  $effect(() => options && void timelineManager.updateOptions(options));
+  // wherever stacks are collapsed, stacks created automatically follow the user preference
+  const timelineOptions = $derived(
+    options?.withStacked && options.withAutoStacked === undefined && !isGroupingAutoStacks()
+      ? { ...options, withAutoStacked: false }
+      : options,
+  );
+  $effect(() => timelineOptions && void timelineManager.updateOptions(timelineOptions));
 
   let scrollableElement: HTMLElement | undefined = $state();
   let timelineElement: HTMLElement | undefined = $state();

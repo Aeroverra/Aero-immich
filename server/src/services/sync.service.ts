@@ -10,6 +10,7 @@ import {
   syncAlbumV2ToV1,
   SyncAssetV2,
   SyncItem,
+  syncStackV2ToV1,
   SyncStreamDto,
 } from 'src/dtos/sync.dto';
 import { JobName, QueueName, SyncEntityType, SyncRequestType } from 'src/enum';
@@ -68,9 +69,11 @@ export const SYNC_TYPES_ORDER = [
   SyncRequestType.AssetsV1,
   SyncRequestType.AssetsV2,
   SyncRequestType.StacksV1,
+  SyncRequestType.StacksV2,
   SyncRequestType.PartnerAssetsV1,
   SyncRequestType.PartnerAssetsV2,
   SyncRequestType.PartnerStacksV1,
+  SyncRequestType.PartnerStacksV2,
   SyncRequestType.AlbumAssetsV1,
   SyncRequestType.AlbumAssetsV2,
   SyncRequestType.AlbumsV1,
@@ -208,8 +211,18 @@ export class SyncService extends BaseService {
         this.syncAlbumAssetExifsV1(options, response, checkpointMap, session.id),
       [SyncRequestType.MemoriesV1]: () => this.syncMemoriesV1(options, response, checkpointMap),
       [SyncRequestType.MemoryToAssetsV1]: () => this.syncMemoryAssetsV1(options, response, checkpointMap),
-      [SyncRequestType.StacksV1]: () => this.syncStackV1(options, response, checkpointMap),
-      [SyncRequestType.PartnerStacksV1]: () => this.syncPartnerStackV1(options, response, checkpointMap, session.id),
+      [SyncRequestType.StacksV1]: () => this.syncStacks(options, response, checkpointMap, SyncEntityType.StackV1),
+      [SyncRequestType.StacksV2]: () => this.syncStacks(options, response, checkpointMap, SyncEntityType.StackV2),
+      [SyncRequestType.PartnerStacksV1]: () =>
+        this.syncPartnerStacks(options, response, checkpointMap, session.id, {
+          backfillType: SyncEntityType.PartnerStackBackfillV1,
+          upsertType: SyncEntityType.PartnerStackV1,
+        }),
+      [SyncRequestType.PartnerStacksV2]: () =>
+        this.syncPartnerStacks(options, response, checkpointMap, session.id, {
+          backfillType: SyncEntityType.PartnerStackBackfillV2,
+          upsertType: SyncEntityType.PartnerStackV2,
+        }),
       [SyncRequestType.PeopleV1]: () => this.syncPeopleV1(options, response, checkpointMap),
       [SyncRequestType.AssetFacesV2]: () => this.syncAssetFacesV2(options, response, checkpointMap),
       [SyncRequestType.UserMetadataV1]: () => this.syncUserMetadataV1(options, response, checkpointMap),
@@ -880,43 +893,56 @@ export class SyncService extends BaseService {
     }
   }
 
-  private async syncStackV1(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+  private async syncStacks(
+    options: SyncQueryOptions,
+    response: Writable,
+    checkpointMap: CheckpointMap,
+    upsertType: SyncEntityType.StackV1 | SyncEntityType.StackV2,
+  ) {
     const deleteType = SyncEntityType.StackDeleteV1;
     const deletes = this.syncRepository.stack.getDeletes({ ...options, ack: checkpointMap[deleteType] });
     for await (const { id, ...data } of deletes) {
       await send(response, { type: deleteType, ids: [id], data });
     }
 
-    const upsertType = SyncEntityType.StackV1;
     const upserts = this.syncRepository.stack.getUpserts({ ...options, ack: checkpointMap[upsertType] });
     for await (const { updateId, isAssetPrivate, ...data } of upserts) {
       if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
-      await send(response, { type: upsertType, ids: [updateId], data });
+      const stack = upsertType === SyncEntityType.StackV1 ? syncStackV2ToV1(data) : data;
+      await send(response, { type: upsertType, ids: [updateId], data: stack });
     }
   }
 
-  private async syncPartnerStackV1(
+  private async syncPartnerStacks(
     options: SyncQueryOptions,
     response: Writable,
     checkpointMap: CheckpointMap,
     sessionId: string,
+    {
+      backfillType,
+      upsertType,
+    }: {
+      backfillType: SyncEntityType.PartnerStackBackfillV1 | SyncEntityType.PartnerStackBackfillV2;
+      upsertType: SyncEntityType.PartnerStackV1 | SyncEntityType.PartnerStackV2;
+    },
   ) {
+    // V1 predates the stack source
+    const mapStack = upsertType === SyncEntityType.PartnerStackV1 ? syncStackV2ToV1 : <T>(stack: T) => stack;
+
     const deleteType = SyncEntityType.PartnerStackDeleteV1;
     const deletes = this.syncRepository.partnerStack.getDeletes({ ...options, ack: checkpointMap[deleteType] });
     for await (const { id, ...data } of deletes) {
       await send(response, { type: deleteType, ids: [id], data });
     }
 
-    const backfillType = SyncEntityType.PartnerStackBackfillV1;
     const backfillCheckpoint = checkpointMap[backfillType];
     const partners = await this.syncRepository.partner.getCreatedAfter({
       ...options,
       afterCreateId: backfillCheckpoint?.updateId,
     });
-    const upsertType = SyncEntityType.PartnerStackV1;
     const upsertCheckpoint = checkpointMap[upsertType];
     if (upsertCheckpoint) {
       const endId = upsertCheckpoint.updateId;
@@ -937,7 +963,7 @@ export class SyncService extends BaseService {
           await send(response, {
             type: backfillType,
             ids: [createId, updateId],
-            data,
+            data: mapStack(data),
           });
         }
 
@@ -957,7 +983,7 @@ export class SyncService extends BaseService {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
-      await send(response, { type: upsertType, ids: [updateId], data });
+      await send(response, { type: upsertType, ids: [updateId], data: mapStack(data) });
     }
   }
 

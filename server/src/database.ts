@@ -10,6 +10,7 @@ import {
   Permission,
   SharedLinkType,
   SourceType,
+  StackSource,
   UserAvatarColor,
   UserStatus,
 } from 'src/enum';
@@ -156,6 +157,7 @@ export type StorageAsset = {
 export type Stack = {
   id: string;
   primaryAssetId: string;
+  source: StackSource;
   owner?: ShallowDehydrateObject<User>;
   ownerId: string;
   assets: ShallowDehydrateObject<MapAsset>[];
@@ -479,7 +481,14 @@ export const columns = {
     'asset.isEdited',
   ],
   syncAlbumUser: ['album_user.albumId as albumId', 'album_user.userId as userId', 'album_user.role'],
-  syncStack: ['stack.id', 'stack.createdAt', 'stack.updatedAt', 'stack.primaryAssetId', 'stack.ownerId'],
+  syncStack: [
+    'stack.id',
+    'stack.createdAt',
+    'stack.updatedAt',
+    'stack.primaryAssetId',
+    'stack.ownerId',
+    'stack.source',
+  ],
   syncUser: ['id', 'name', 'email', 'avatarColor', 'deletedAt', 'updateId', 'profileImagePath', 'profileChangedAt'],
   stack: ['stack.id', 'stack.primaryAssetId', 'ownerId'],
   syncAssetExif: [

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/map.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
 import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_asset.repository.dart';
@@ -343,6 +344,38 @@ void main() {
       final remote = assets.single as RemoteAsset;
       expect(remote.id, private.id);
       expect(remote.isPrivate, isTrue);
+    });
+  });
+
+  group('automatic stacks', () {
+    test('main timeline collapses automatic stacks only while groupAutoStacks is on', () async {
+      final user = await ctx.newUser();
+      final manualPrimary = await ctx.newRemoteAsset(ownerId: user.id, stackId: 'manual');
+      await ctx.newRemoteAsset(ownerId: user.id, stackId: 'manual');
+      final autoPrimary = await ctx.newRemoteAsset(ownerId: user.id, stackId: 'auto');
+      final autoChild = await ctx.newRemoteAsset(ownerId: user.id, stackId: 'auto');
+      await ctx.newStack(id: 'manual', ownerId: user.id, primaryAssetId: manualPrimary.id);
+      await ctx.newStack(id: 'auto', ownerId: user.id, primaryAssetId: autoPrimary.id, source: StackSource.auto);
+
+      Future<List<RemoteAsset>> assetsOf(TimelineQuery query) async {
+        final buckets = await query.bucketSource().first;
+        final total = buckets.fold<int>(0, (sum, bucket) => sum + bucket.assetCount);
+        final assets = await query.assetSource(0, 100);
+        expect(assets, hasLength(total), reason: 'bucket count and asset count agree');
+        return assets.cast<RemoteAsset>();
+      }
+
+      final grouped = await assetsOf(sut.main([user.id], .day));
+      expect(grouped.map((asset) => asset.id), unorderedEquals([manualPrimary.id, autoPrimary.id]));
+      expect(grouped.every((asset) => asset.isStacked), isTrue);
+
+      final separate = await assetsOf(sut.main([user.id], .day, groupAutoStacks: false));
+      expect(separate.map((asset) => asset.id), unorderedEquals([manualPrimary.id, autoPrimary.id, autoChild.id]));
+      expect(separate.firstWhere((asset) => asset.id == manualPrimary.id).stackId, 'manual');
+      expect(
+        separate.where((asset) => asset.id != manualPrimary.id).map((asset) => asset.stackId),
+        everyElement(isNull),
+      );
     });
   });
 

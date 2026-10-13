@@ -18,6 +18,7 @@
   import StackAction from '$lib/components/timeline/actions/StackAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
+  import GroupAutoStacksButton from '$lib/components/timeline/GroupAutoStacksButton.svelte';
   import Timeline from '$lib/components/timeline/Timeline.svelte';
   import { AssetAction } from '$lib/constants';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
@@ -97,6 +98,9 @@
 </script>
 
 <UserPageLayout hideNavbar={assetMultiSelectManager.selectionActive} scrollbar={false}>
+  {#snippet navbarButtons()}
+    <GroupAutoStacksButton />
+  {/snippet}
   <Timeline
     enableRouting={true}
     bind:timelineManager

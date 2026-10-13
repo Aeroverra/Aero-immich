@@ -106,6 +106,16 @@ const RecentlyAddedUpdateSchema = z
   .optional()
   .meta({ id: 'RecentlyAddedUpdate' });
 
+const StacksUpdateSchema = z
+  .object({
+    groupAuto: z
+      .boolean()
+      .optional()
+      .describe('Whether stacks created automatically are shown grouped in the timeline, like manual stacks'),
+  })
+  .optional()
+  .meta({ id: 'StacksUpdate' });
+
 const PrivateModeUpdateSchema = z
   .object({
     timeoutMinutes: z.int().min(1).max(1440).optional().describe('Minutes of inactivity before private mode turns off'),
@@ -138,6 +148,7 @@ const UserPreferencesUpdateSchema = z
     sharedLinks: SharedLinksUpdateSchema,
     tags: TagsUpdateSchema,
     recentlyAdded: RecentlyAddedUpdateSchema,
+    stacks: StacksUpdateSchema,
     privateMode: PrivateModeUpdateSchema,
   })
   .meta({ id: 'UserPreferencesUpdateDto' });
@@ -225,6 +236,14 @@ const RecentlyAddedResponseSchema = z
   })
   .meta({ id: 'RecentlyAddedResponse' });
 
+const StacksResponseSchema = z
+  .object({
+    groupAuto: z
+      .boolean()
+      .describe('Whether stacks created automatically are shown grouped in the timeline, like manual stacks'),
+  })
+  .meta({ id: 'StacksResponse' });
+
 const PrivateModeResponseSchema = z
   .object({
     timeoutMinutes: z.int().describe('Minutes of inactivity before private mode turns off'),
@@ -257,6 +276,7 @@ const UserPreferencesResponseSchema = z
     purchase: PurchaseResponseSchema,
     cast: CastResponseSchema,
     recentlyAdded: RecentlyAddedResponseSchema,
+    stacks: StacksResponseSchema,
     privateMode: PrivateModeResponseSchema,
     deletedReimport: DeletedReimportResponseSchema,
   })

@@ -152,10 +152,34 @@ from
 where
   "id" = $2::uuid
 
+-- StackRepository.getForUserEdit
+select
+  "stack"."id",
+  "stack"."primaryAssetId",
+  "stack"."source",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "asset"."id"
+        from
+          "asset"
+        where
+          "asset"."stackId" = "stack"."id"
+      ) as agg
+  ) as "assets"
+from
+  "stack"
+where
+  "stack"."id" in ($1)
+
 -- StackRepository.getForAssetRemoval
 select
   "stackId" as "id",
-  "stack"."primaryAssetId"
+  "stack"."primaryAssetId",
+  "stack"."source"
 from
   "asset"
   left join "stack" on "stack"."id" = "asset"."stackId"

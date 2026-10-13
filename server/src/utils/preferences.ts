@@ -54,6 +54,9 @@ const getDefaultPreferences = (): UserPreferences => {
     recentlyAdded: {
       sidebarWeb: false,
     },
+    stacks: {
+      groupAuto: true,
+    },
     privateMode: {
       timeoutMinutes: 30,
       sidebarWeb: true,

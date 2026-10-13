@@ -95,6 +95,38 @@ void main() {
     expect(body['types'], isNotEmpty);
   });
 
+  group('stack source', () {
+    Future<List<dynamic>> requestedTypes({required bool supportsStackSource}) async {
+      final future = sut.streamChanges(
+        (_, _, _) async {},
+        batchSize: testBatchSize,
+        httpClient: mockHttpClient,
+        serverVersion: const SemVer(major: 3, minor: 2, patch: 1),
+        supportsStackSource: supportsStackSource,
+      );
+      await Future.delayed(const Duration(milliseconds: 50));
+      await responseStreamController.close();
+      await expectLater(future, completes);
+
+      final request = verify(() => mockHttpClient.send(captureAny())).captured.single as http.Request;
+      return (jsonDecode(request.body) as Map<String, dynamic>)['types'] as List<dynamic>;
+    }
+
+    test('requests the V2 stack streams when the server reports the stackSource feature', () async {
+      final types = await requestedTypes(supportsStackSource: true);
+      expect(types, containsAll(['StacksV2', 'PartnerStacksV2']));
+      expect(types, isNot(contains('StacksV1')));
+      expect(types, isNot(contains('PartnerStacksV1')));
+    });
+
+    test('keeps the V1 stack streams for servers without it, whatever their version', () async {
+      final types = await requestedTypes(supportsStackSource: false);
+      expect(types, containsAll(['StacksV1', 'PartnerStacksV1']));
+      expect(types, isNot(contains('StacksV2')));
+      expect(types, isNot(contains('PartnerStacksV2')));
+    });
+  });
+
   test('streamChanges stops processing stream when abort is called', () async {
     int onDataCallCount = 0;
     bool abortWasCalledInCallback = false;
