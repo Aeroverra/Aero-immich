@@ -38,6 +38,42 @@ beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
 
+/** Family, Family/Kids and Friends, one asset tagged Family/Kids */
+const newTree = async () => {
+  const { sut, ctx } = setup();
+  ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+  ctx.getMock(EventRepository).emit.mockResolvedValue();
+  const { user } = await ctx.newUser();
+  const auth = factory.auth({ user });
+  const tags = ctx.get(TagRepository);
+  const [family, kids, friends] = await upsertTags(tags, {
+    userId: user.id,
+    tags: ['Family', 'Family/Kids', 'Friends'],
+  });
+  const { asset } = await ctx.newAsset({ ownerId: user.id });
+  await sut.addAssets(auth, kids.id, { ids: [asset.id] });
+  return { sut, ctx, auth, user, family, kids, friends, asset };
+};
+
+const ancestorsOf = async (ctx: ReturnType<typeof setup>['ctx'], tagId: string) => {
+  const rows = await ctx.database
+    .selectFrom('tag_closure')
+    .innerJoin('tag', 'tag.id', 'tag_closure.id_ancestor')
+    .select('tag.value')
+    .where('tag_closure.id_descendant', '=', tagId)
+    .execute();
+  return rows.map(({ value }) => value).toSorted();
+};
+
+const exifTags = async (ctx: ReturnType<typeof setup>['ctx'], assetId: string) => {
+  const { tags } = await ctx.database
+    .selectFrom('asset_exif')
+    .select('tags')
+    .where('assetId', '=', assetId)
+    .executeTakeFirstOrThrow();
+  return tags;
+};
+
 describe(TagService.name, () => {
   describe('get', () => {
     it('should not return a tag of another user', async () => {
@@ -45,6 +81,52 @@ describe(TagService.name, () => {
       const { tag, otherAuth } = await newTagOfAnotherUser(ctx);
 
       await expect(sut.get(otherAuth, tag.id)).rejects.toThrow('Not found or no tag.read access');
+    });
+  });
+
+  describe('getAssetCounts', () => {
+    it('should count how many of the assets carry each tag', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: first } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: second } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: outside } = await ctx.newAsset({ ownerId: user.id });
+      const { tag: both } = await ctx.newTag({ userId: user.id, value: 'Both' });
+      const { tag: one } = await ctx.newTag({ userId: user.id, value: 'One' });
+      const { tag: elsewhere } = await ctx.newTag({ userId: user.id, value: 'Elsewhere' });
+      await ctx.newTagAsset({ tagIds: [both.id], assetIds: [first.id, second.id] });
+      await ctx.newTagAsset({ tagIds: [one.id], assetIds: [first.id] });
+      await ctx.newTagAsset({ tagIds: [elsewhere.id], assetIds: [outside.id] });
+
+      const counts = await sut.getAssetCounts(auth, { assetIds: [first.id, second.id] });
+
+      expect(counts.toSorted((a, b) => a.tagId.localeCompare(b.tagId))).toEqual(
+        [
+          { tagId: both.id, count: 2 },
+          { tagId: one.id, count: 1 },
+        ].toSorted((a, b) => a.tagId.localeCompare(b.tagId)),
+      );
+    });
+
+    it('should leave out hidden tags while private mode is locked', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset } = await ctx.newAsset({ ownerId: user.id });
+      const { tag: secret } = await ctx.newTag({ userId: user.id, value: 'Secret', isHidden: true });
+      await ctx.newTagAsset({ tagIds: [secret.id], assetIds: [asset.id] });
+
+      expect(await sut.getAssetCounts(auth, { assetIds: [asset.id] })).toEqual([]);
+    });
+
+    it('should refuse assets the user cannot read', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: other } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: other.id });
+
+      await expect(sut.getAssetCounts(factory.auth({ user }), { assetIds: [asset.id] })).rejects.toThrow();
     });
   });
 
@@ -57,42 +139,6 @@ describe(TagService.name, () => {
         'Not found or no tag.update access',
       );
     });
-
-    /** Family, Family/Kids and Friends, one asset tagged Family/Kids */
-    const newTree = async () => {
-      const { sut, ctx } = setup();
-      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
-      ctx.getMock(EventRepository).emit.mockResolvedValue();
-      const { user } = await ctx.newUser();
-      const auth = factory.auth({ user });
-      const tags = ctx.get(TagRepository);
-      const [family, kids, friends] = await upsertTags(tags, {
-        userId: user.id,
-        tags: ['Family', 'Family/Kids', 'Friends'],
-      });
-      const { asset } = await ctx.newAsset({ ownerId: user.id });
-      await sut.addAssets(auth, kids.id, { ids: [asset.id] });
-      return { sut, ctx, auth, user, family, kids, friends, asset };
-    };
-
-    const ancestorsOf = async (ctx: ReturnType<typeof setup>['ctx'], tagId: string) => {
-      const rows = await ctx.database
-        .selectFrom('tag_closure')
-        .innerJoin('tag', 'tag.id', 'tag_closure.id_ancestor')
-        .select('tag.value')
-        .where('tag_closure.id_descendant', '=', tagId)
-        .execute();
-      return rows.map(({ value }) => value).toSorted();
-    };
-
-    const exifTags = async (ctx: ReturnType<typeof setup>['ctx'], assetId: string) => {
-      const { tags } = await ctx.database
-        .selectFrom('asset_exif')
-        .select('tags')
-        .where('assetId', '=', assetId)
-        .executeTakeFirstOrThrow();
-      return tags;
-    };
 
     it('should move a tag with its children under another tag', async () => {
       const { sut, ctx, auth, family, kids, friends, asset } = await newTree();
