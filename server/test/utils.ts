@@ -33,6 +33,7 @@ import { ClusterGroupRepository } from 'src/repositories/cluster-group.repositor
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { CustomViewRepository } from 'src/repositories/custom-view.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
 import { DownloadRepository } from 'src/repositories/download.repository';
 import { DuplicateRepository } from 'src/repositories/duplicate.repository';
@@ -251,6 +252,7 @@ export type ServiceOverrides = {
   config: ConfigRepository;
   cron: CronRepository;
   crypto: CryptoRepository;
+  customView: CustomViewRepository;
   database: DatabaseRepository;
   downloadRepository: DownloadRepository;
   duplicateRepository: DuplicateRepository;
@@ -327,6 +329,7 @@ export const getMocks = () => {
     // eslint-disable-next-line no-sparse-arrays
     cron: automock(CronRepository, { args: [, loggerMock] }),
     crypto: newCryptoRepositoryMock(),
+    customView: automock(CustomViewRepository),
     activity: automock(ActivityRepository),
     album: automock(AlbumRepository, { strict: false }),
     albumUser: automock(AlbumUserRepository),
@@ -418,6 +421,7 @@ export const newTestService = <T extends BaseService>(
     overrides.config || (mocks.config as As<ConfigRepository> as ConfigRepository),
     overrides.cron || (mocks.cron as As<CronRepository>),
     overrides.crypto || (mocks.crypto as As<CryptoRepository>),
+    overrides.customView || (mocks.customView as As<CustomViewRepository>),
     overrides.database || (mocks.database as As<DatabaseRepository>),
     overrides.downloadRepository || (mocks.downloadRepository as As<DownloadRepository>),
     overrides.duplicateRepository || (mocks.duplicateRepository as As<DuplicateRepository>),

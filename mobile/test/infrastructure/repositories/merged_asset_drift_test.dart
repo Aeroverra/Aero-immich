@@ -5,9 +5,13 @@ import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.drift.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/timeline.model.dart';
+
+PrivateModeFilter _filter(bool enabled, String userId) => PrivateModeFilter(enabled: enabled, userId: userId);
 
 void main() {
   late Drift db;
@@ -76,8 +80,10 @@ void main() {
           .mergedAsset(
             userIds: ['me'],
             limit: (_) => Limit(10, 0),
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -89,8 +95,10 @@ void main() {
           .mergedBucket(
             groupBy: GroupAssetsBy.day.index,
             userIds: ['me'],
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -104,8 +112,10 @@ void main() {
           .mergedAsset(
             userIds: ['me'],
             limit: (_) => Limit(10, 0),
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: false,
           )
           .get();
@@ -117,8 +127,10 @@ void main() {
           .mergedBucket(
             groupBy: GroupAssetsBy.day.index,
             userIds: ['me'],
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: false,
           )
           .get();
@@ -136,8 +148,10 @@ void main() {
           .mergedAsset(
             userIds: ['me'],
             limit: (_) => Limit(10, 0),
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -146,8 +160,10 @@ void main() {
           .mergedBucket(
             groupBy: GroupAssetsBy.day.index,
             userIds: ['me'],
-            privateMode: false,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(false, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(false, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -157,8 +173,10 @@ void main() {
           .mergedAsset(
             userIds: ['me'],
             limit: (_) => Limit(10, 0),
-            privateMode: true,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(true, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(true, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -168,8 +186,10 @@ void main() {
           .mergedBucket(
             groupBy: GroupAssetsBy.day.index,
             userIds: ['me'],
-            privateMode: true,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(true, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(true, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -186,8 +206,10 @@ void main() {
           .mergedAsset(
             userIds: ['me', 'partner'],
             limit: (_) => Limit(10, 0),
-            privateMode: true,
-            currentUserId: 'me',
+            viewActive: false,
+            showLocal: true,
+            member_filter: (_, _, member) => member.privateFilter(_filter(true, 'me')),
+            asset_filter: (asset, _) => asset.privateFilter(_filter(true, 'me')),
             groupAutoStacks: true,
           )
           .get();
@@ -224,8 +246,10 @@ void main() {
         .mergedBucket(
           groupBy: GroupAssetsBy.day.index,
           userIds: [userId],
-          privateMode: false,
-          currentUserId: '',
+          viewActive: false,
+          showLocal: true,
+          member_filter: (_, _, member) => member.privateFilter(_filter(false, '')),
+          asset_filter: (asset, _) => asset.privateFilter(_filter(false, '')),
           groupAutoStacks: true,
         )
         .get();

@@ -211,6 +211,13 @@ export const AlbumResponseSchema = z
     order: AssetOrderSchema.optional(),
     contributorCounts: z.array(ContributorCountResponseSchema).optional(),
     isPrivate: z.boolean().describe('Album contains at least one private asset'),
+    hiddenByViewCount: z
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        'Number of assets the active view hides in this album; only sent while private mode is unlocked and a view hides some of them',
+      ),
   })
   .meta({ id: 'AlbumResponseDto' });
 

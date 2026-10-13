@@ -23,4 +23,50 @@ class TagsApiRepository extends ApiRepository {
   Future<List<TagResponseDto>?> upsertTags(List<String> tags) async {
     return _api.upsertTags(TagUpsertDto(tags: tags));
   }
+
+  /// Creates the tag [name] below [parentId]
+  Future<TagResponseDto> createTag(String name, {String? parentId, bool? isHidden}) {
+    return checkNull(
+      _api.createTag(
+        TagCreateDto(
+          name: name,
+          parentId: parentId == null ? const Optional.absent() : Optional.present(parentId),
+          isHidden: isHidden == null ? const Optional.absent() : Optional.present(isHidden),
+        ),
+      ),
+    );
+  }
+
+  Future<TagResponseDto> updateTag(String id, {bool? isHidden, String? color, String? name}) {
+    return checkNull(
+      _api.updateTag(
+        id,
+        TagUpdateDto(
+          name: name == null ? const Optional.absent() : Optional.present(name),
+          isHidden: isHidden == null ? const Optional.absent() : Optional.present(isHidden),
+          color: color == null ? const Optional.absent() : Optional.present(color),
+        ),
+      ),
+    );
+  }
+
+  Future<void> deleteTag(String id) => _api.deleteTag(id);
+
+  /// Ids of [assetIds] the tag was added to
+  Future<List<String>> tagAssets(String tagId, List<String> assetIds) async {
+    final results = await _api.tagAssets(tagId, BulkIdsDto(ids: assetIds));
+    return [
+      for (final result in results ?? const <BulkIdResponseDto>[])
+        if (result.success) result.id,
+    ];
+  }
+
+  /// Ids of [assetIds] the tag was removed from
+  Future<List<String>> untagAssets(String tagId, List<String> assetIds) async {
+    final results = await _api.untagAssets(tagId, BulkIdsDto(ids: assetIds));
+    return [
+      for (final result in results ?? const <BulkIdResponseDto>[])
+        if (result.success) result.id,
+    ];
+  }
 }

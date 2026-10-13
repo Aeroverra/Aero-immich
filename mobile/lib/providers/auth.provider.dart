@@ -11,6 +11,7 @@ import 'package:immich_mobile/entities/store.entity.dart';
 import 'package:immich_mobile/models/auth/auth_state.model.dart';
 import 'package:immich_mobile/models/auth/login_response.model.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
@@ -91,6 +92,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> logout() async {
     try {
       await _ref.read(privateModeProvider.notifier).disable();
+      _ref.read(activeViewProvider.notifier).resetToDefault();
       await _secureStorageService.delete(kSecuredPinCode);
       await _widgetService.clearCredentials();
 
@@ -179,6 +181,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
     // Mirror the server-side private mode state of this session
     unawaited(_ref.read(privateModeProvider.notifier).refresh());
+    // and the view it switched to
+    unawaited(_ref.read(activeViewProvider.notifier).refresh());
 
     return true;
   }

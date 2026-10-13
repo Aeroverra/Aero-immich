@@ -40,10 +40,12 @@ import {
   asUuid,
   hasPeople,
   inSharedAlbum,
+  isViewUnrestricted,
   type PrivateScope,
   removeUndefinedKeys,
   truncatedDate,
   unnest,
+  viewAssetPredicate,
   withDefaultVisibility,
   withEdits,
   withExif,
@@ -190,6 +192,34 @@ const isInAutoStack = (eb: ExpressionBuilder<DB, 'asset'>) =>
       .selectFrom('stack as auto_stack')
       .whereRef('auto_stack.id', '=', 'asset.stackId')
       .where('auto_stack.source', '=', StackSource.Auto),
+  );
+
+/**
+ * While a view hides some stack members, the stack is represented by its primary asset when that passes the view and
+ * otherwise by the first member that does (oldest first), so a stack disappears only when every member is hidden.
+ * Members are private together, so the privacy of the row itself applies to all of them.
+ */
+const isStackRepresentative = (eb: ExpressionBuilder<DB, 'asset'>, scope: PrivateScope) =>
+  eb(
+    'asset.id',
+    '=',
+    eb
+      .selectFrom('asset as member')
+      .innerJoin('stack as member_stack', 'member_stack.id', 'member.stackId')
+      .select('member.id')
+      .whereRef('member.stackId', '=', 'asset.stackId')
+      .where('member.deletedAt', 'is', null)
+      .where((eb) =>
+        eb.or([
+          eb('member.id', '=', eb.ref('member_stack.primaryAssetId')),
+          eb('member.visibility', '=', AssetVisibility.Timeline),
+        ]),
+      )
+      .where((eb) => viewAssetPredicate(eb, scope.view!, { assetIdRef: 'member.id', isPrivateRef: 'member.isPrivate' }))
+      .orderBy((eb) => eb('member.id', '=', eb.ref('member_stack.primaryAssetId')), 'desc')
+      .orderBy('member.fileCreatedAt', 'asc')
+      .orderBy('member.id', 'asc')
+      .limit(1),
   );
 
 @Injectable()
@@ -705,6 +735,14 @@ export class AssetRepository {
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
                     .$if(!!scope && !scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
+                    .$if(!!scope && !isViewUnrestricted(scope.view), (qb) =>
+                      qb.where((eb) =>
+                        viewAssetPredicate(eb, scope!.view!, {
+                          assetIdRef: 'stacked.id',
+                          isPrivateRef: 'stacked.isPrivate',
+                        }),
+                      ),
+                    )
                     .groupBy('stack.id')
                     .as('stacked_assets'),
                 (join) => join.on('stack.id', 'is not', null),
@@ -892,7 +930,7 @@ export class AssetRepository {
               .where('album_asset.albumId', '=', asUuid(options.albumId!)),
           )
           .$if(!!options.personId, (qb) => hasPeople(qb, [options.personId!]))
-          .$if(!!options.withStacked, (qb) =>
+          .$if(!!options.withStacked && isViewUnrestricted(scope.view), (qb) =>
             qb
               .leftJoin('stack', (join) =>
                 join.onRef('stack.id', '=', 'asset.stackId').onRef('stack.primaryAssetId', '=', 'asset.id'),
@@ -904,6 +942,15 @@ export class AssetRepository {
                   ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
                 ]),
               ),
+          )
+          .$if(!!options.withStacked && !isViewUnrestricted(scope.view), (qb) =>
+            qb.where((eb) =>
+              eb.or([
+                eb('asset.stackId', 'is', null),
+                ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
+                isStackRepresentative(eb, scope),
+              ]),
+            ),
           )
           .$if(!!options.userIds, (qb) =>
             qb.where((eb) => {
@@ -1011,17 +1058,28 @@ export class AssetRepository {
           .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
           .$if(!!options.withStacked, (qb) =>
             qb
-              .where((eb) =>
-                eb.not(
-                  eb.exists(
-                    eb
-                      .selectFrom('stack')
-                      .whereRef('stack.id', '=', 'asset.stackId')
-                      .whereRef('stack.primaryAssetId', '!=', 'asset.id')
-                      .$if(options.withAutoStacked === false, (qb) =>
-                        qb.where('stack.source', '=', StackSource.Manual),
-                      ),
+              .$if(isViewUnrestricted(scope.view), (qb) =>
+                qb.where((eb) =>
+                  eb.not(
+                    eb.exists(
+                      eb
+                        .selectFrom('stack')
+                        .whereRef('stack.id', '=', 'asset.stackId')
+                        .whereRef('stack.primaryAssetId', '!=', 'asset.id')
+                        .$if(options.withAutoStacked === false, (qb) =>
+                          qb.where('stack.source', '=', StackSource.Manual),
+                        ),
+                    ),
                   ),
+                ),
+              )
+              .$if(!isViewUnrestricted(scope.view), (qb) =>
+                qb.where((eb) =>
+                  eb.or([
+                    eb('asset.stackId', 'is', null),
+                    ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
+                    isStackRepresentative(eb, scope),
+                  ]),
                 ),
               )
               .leftJoinLateral(
@@ -1033,6 +1091,14 @@ export class AssetRepository {
                     .where('stacked.deletedAt', 'is', null)
                     .where('stacked.visibility', '=', AssetVisibility.Timeline)
                     .$if(!scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
+                    .$if(!isViewUnrestricted(scope.view), (qb) =>
+                      qb.where((eb) =>
+                        viewAssetPredicate(eb, scope.view!, {
+                          assetIdRef: 'stacked.id',
+                          isPrivateRef: 'stacked.isPrivate',
+                        }),
+                      ),
+                    )
                     .$if(options.withAutoStacked === false, (qb) => qb.where((eb) => eb.not(isInAutoStack(eb))))
                     .groupBy('stacked.stackId')
                     .as('stacked_assets'),

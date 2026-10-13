@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/services/auth.service.dart';
@@ -23,11 +24,13 @@ final privateModeProvider = StateNotifierProvider<PrivateModeNotifier, bool>((re
 
 final isPrivateModeProvider = Provider<bool>((ref) => ref.watch(privateModeProvider));
 
-/// The filter every asset-listing query receives: private mode state plus the current user id
+/// The filter every asset-listing query receives: private mode state plus the current user id, and the applied
+/// custom view
 final privateModeFilterProvider = Provider<PrivateModeFilter>(
   (ref) => PrivateModeFilter(
     enabled: ref.watch(privateModeProvider),
     userId: ref.watch(currentUserProvider.select((user) => user?.id)),
+    view: ref.watch(appliedViewFilterProvider),
   ),
 );
 

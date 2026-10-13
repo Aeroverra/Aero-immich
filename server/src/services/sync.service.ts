@@ -2,6 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/com
 import { Insertable } from 'kysely';
 import { DateTime, Duration } from 'luxon';
 import { Writable } from 'node:stream';
+import { setTimeout } from 'node:timers/promises';
+import { ViewFilter } from 'src/database';
 import { OnJob } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
@@ -14,13 +16,14 @@ import {
   SyncStreamDto,
 } from 'src/dtos/sync.dto';
 import { JobName, QueueName, SyncEntityType, SyncRequestType } from 'src/enum';
-import { SyncQueryOptions } from 'src/repositories/sync.repository';
+import { AlbumViewStateChanges, AlbumViewStateRow, SyncQueryOptions } from 'src/repositories/sync.repository';
 import { SessionSyncCheckpointTable } from 'src/schema/tables/sync-checkpoint.table';
 import { BaseService } from 'src/services/base.service';
 import { SyncAck } from 'src/types';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
+import { isViewUnrestricted } from 'src/utils/database';
 import { ClientDisconnectedError, waitForDrain } from 'src/utils/response';
-import { fromAck, serialize, SerializeOptions, toAck } from 'src/utils/sync';
+import { fromAck, mapJsonLine, serialize, SerializeOptions, toAck } from 'src/utils/sync';
 
 type CheckpointMap = Partial<Record<SyncEntityType, SyncAck>>;
 type AssetLike = Omit<SyncAssetV2, 'checksum' | 'thumbhash'> & {
@@ -44,18 +47,144 @@ const isEntityBackfillComplete = (createId: string, checkpoint: SyncAck | undefi
 const getStartId = (createId: string, checkpoint: SyncAck | undefined): string | undefined =>
   createId === checkpoint?.updateId ? checkpoint?.extraId : undefined;
 
-export const send = async <T extends keyof SyncItem, D extends SyncItem[T]>(
+/** sync types that read albums; a client limited to the default view brings album_view_state up to date for them */
+const ALBUM_SYNC_TYPES = new Set<SyncRequestType>([
+  SyncRequestType.AlbumsV1,
+  SyncRequestType.AlbumsV2,
+  SyncRequestType.AlbumUsersV1,
+  SyncRequestType.AlbumAssetsV2,
+  SyncRequestType.AlbumAssetExifsV1,
+  SyncRequestType.AlbumToAssetsV1,
+]);
+
+/** an album row with the cover a client limited to the default view receives, when the album has a view state */
+const withViewThumbnail = <T extends { thumbnailAssetId: string | null }>(
+  album: T,
+  viewStateAlbumId?: string | null,
+  viewThumbnailAssetId?: string | null,
+): T => (viewStateAlbumId ? { ...album, thumbnailAssetId: viewThumbnailAssetId ?? null } : album);
+
+/**
+ * The state an album has under the default view of a user, compared with the state stored for it: a non-empty album
+ * whose assets the view all hides is hidden, and a cover the view hides is replaced by the newest asset it shows (as
+ * the album endpoints do). Only a real change (hidden or shown, or another cover) sends the album again.
+ */
+export const toAlbumViewStateChanges = (rows: AlbumViewStateRow[]): AlbumViewStateChanges => {
+  const changes: AlbumViewStateChanges = { upserts: [], deletes: [], touched: [], shown: [] };
+  for (const row of rows) {
+    const isHidden = row.hasAssets && !row.hasVisibleAssets;
+    const thumbnailAssetId = isHidden ? null : row.visibleThumbnailAssetId;
+    const hasState = !!row.stateAlbumId;
+    const wasHidden = hasState && !!row.stateIsHidden;
+    const previousThumbnailAssetId = hasState ? row.stateThumbnailAssetId : row.albumThumbnailAssetId;
+
+    if (isHidden || thumbnailAssetId !== row.albumThumbnailAssetId) {
+      if (!hasState || wasHidden !== isHidden || row.stateThumbnailAssetId !== thumbnailAssetId) {
+        changes.upserts.push({ albumId: row.albumId, isHidden, thumbnailAssetId });
+      }
+    } else if (hasState) {
+      changes.deletes.push(row.albumId);
+    }
+
+    if (isHidden !== wasHidden) {
+      changes.touched.push(row.albumId);
+      if (!isHidden) {
+        changes.shown.push(row.albumId);
+      }
+    } else if (!isHidden && thumbnailAssetId !== previousThumbnailAssetId) {
+      changes.touched.push(row.albumId);
+    }
+  }
+  return changes;
+};
+
+/** the type and ack of the event written last to a response, and whether it was the ack of withheld rows */
+type LastWrite = { type: SyncEntityType; ackType: SyncEntityType; ack: string; withheld: boolean };
+const lastWrites = new WeakMap<Writable, LastWrite>();
+
+const write = async <T extends keyof SyncItem, D extends SyncItem[T]>(
   response: Writable,
   item: SerializeOptions<T, D>,
+  { withheld = false }: { withheld?: boolean } = {},
 ) => {
   if (response.destroyed || response.writableEnded) {
     throw new ClientDisconnectedError();
   }
 
+  // The mobile apps handle every run of consecutive events of one type as one batch and acknowledge only its last
+  // ack. Two checkpoint events in a row for different streams (a withheld run ending one stream, a skipped row or a
+  // backfill marker starting the next) would lose the first ack, and the rows behind it would be scanned and sent
+  // again on every sync. SyncAckV1 and SyncCompleteV1 are both no-ops for the apps and carry any ack, so the second
+  // one is written with the other type to start its own batch. Only done next to the acks of withheld rows, so the
+  // stream of a client that receives everything stays exactly as upstream writes it.
+  const ackType = item.ackType ?? item.type;
+  const last = lastWrites.get(response);
+  let type: SyncEntityType = item.type;
+  let lines = '';
+  if (last && (withheld || last.withheld) && last.ackType !== ackType && last.type === type) {
+    if (type === SyncEntityType.SyncAckV1) {
+      type = SyncEntityType.SyncCompleteV1;
+    } else if (type === SyncEntityType.SyncCompleteV1) {
+      lines += mapJsonLine({ type: SyncEntityType.SyncAckV1, data: {}, ack: last.ack });
+    }
+  }
+
+  const ack = toAck({ type: ackType, updateId: item.ids[0], extraId: item.ids[1] });
+  lines += type === item.type ? serialize(item) : mapJsonLine({ type, data: item.data, ack });
+  lastWrites.set(response, { type, ackType, ack, withheld });
+
   // indicates back pressure, so we wait for 'drain' event
-  if (!response.write(serialize(item))) {
+  if (!response.write(lines)) {
     await waitForDrain(response);
   }
+};
+
+/** the checkpoint move of the withheld rows written last, not sent yet (see deferWithheldAck) */
+type PendingAck = { ackType: SyncEntityType; updateId: string; count: number };
+const pendingAcks = new WeakMap<Writable, PendingAck>();
+
+/** a long run of withheld rows still moves the checkpoint now and then, so an interrupted sync keeps its progress */
+export const WITHHELD_ACK_INTERVAL = 1000;
+
+const flushWithheldAck = async (response: Writable) => {
+  const pending = pendingAcks.get(response);
+  if (!pending) {
+    return;
+  }
+  pendingAcks.delete(response);
+  await write(
+    response,
+    { type: SyncEntityType.SyncAckV1, data: {}, ackType: pending.ackType, ids: [pending.updateId] },
+    { withheld: true },
+  );
+};
+
+/**
+ * Moves the checkpoint of `ackType` past a withheld row. Consecutive withheld rows share one SyncAckV1: the mobile
+ * apps process (and acknowledge over HTTP) every run of events of the same type as one batch, so a delete followed by
+ * an ack per row turned a view change over tens of thousands of assets into one database transaction and one ack
+ * request per event, and the official app needed hours to drop them.
+ */
+const deferWithheldAck = async (response: Writable, ackType: SyncEntityType, updateId: string) => {
+  const pending = pendingAcks.get(response);
+  if (pending && pending.ackType !== ackType) {
+    await flushWithheldAck(response);
+  }
+
+  const count = pending?.ackType === ackType ? pending.count + 1 : 1;
+  pendingAcks.set(response, { ackType, updateId, count });
+  if (count >= WITHHELD_ACK_INTERVAL) {
+    await flushWithheldAck(response);
+  }
+};
+
+export const send = async <T extends keyof SyncItem, D extends SyncItem[T]>(
+  response: Writable,
+  item: SerializeOptions<T, D>,
+) => {
+  // anything else written ends a run of withheld rows; their ack goes first so checkpoints never move backwards
+  await flushWithheldAck(response);
+  await write(response, item);
 };
 
 const sendEntityBackfillCompleteAck = async (response: Writable, ackType: SyncEntityType, id: string) => {
@@ -92,6 +221,10 @@ export const SYNC_TYPES_ORDER = [
   SyncRequestType.UserMetadataV1,
   SyncRequestType.AssetMetadataV1,
   SyncRequestType.AssetEditsV1,
+  SyncRequestType.TagsV1,
+  SyncRequestType.TagAssetsV1,
+  SyncRequestType.ViewsV1,
+  SyncRequestType.ViewTagsV1,
 ];
 
 const throwSessionRequired = () => {
@@ -182,8 +315,24 @@ export class SyncService extends BaseService {
       return;
     }
 
+    // a client without the views flag only receives the assets that pass the default view
+    const view = dto.includeViews ? null : ((await this.customViewRepository.getDefault(auth.user.id)) ?? null);
+    if (!dto.includeViews && dto.types.some((type) => ALBUM_SYNC_TYPES.has(type))) {
+      const touched = await this.refreshAlbumViewState(auth.user.id, view);
+      if (touched) {
+        // nowId leaves out the current millisecond, so the rows touched just now are only part of this run once the
+        // clock moved past it
+        await setTimeout(2);
+      }
+    }
+
     const { nowId } = await this.syncCheckpointRepository.getNow();
-    const options: SyncQueryOptions = { nowId, userId: auth.user.id, includePrivate: dto.includePrivate ?? false };
+    const options: SyncQueryOptions = {
+      nowId,
+      userId: auth.user.id,
+      includePrivate: dto.includePrivate ?? false,
+      view,
+    };
 
     const handlers: Record<SyncRequestType, () => Promise<void>> = {
       // deprecated handlers
@@ -227,6 +376,10 @@ export class SyncService extends BaseService {
       [SyncRequestType.AssetFacesV2]: () => this.syncAssetFacesV2(options, response, checkpointMap),
       [SyncRequestType.UserMetadataV1]: () => this.syncUserMetadataV1(options, response, checkpointMap),
       [SyncRequestType.AssetOcrV1]: () => this.syncAssetOcrV1(options, response, checkpointMap, auth),
+      [SyncRequestType.TagsV1]: () => this.syncTagsV1(options, response, checkpointMap),
+      [SyncRequestType.TagAssetsV1]: () => this.syncTagAssetsV1(options, response, checkpointMap),
+      [SyncRequestType.ViewsV1]: () => this.syncViewsV1(options, response, checkpointMap),
+      [SyncRequestType.ViewTagsV1]: () => this.syncViewTagsV1(options, response, checkpointMap),
     } as const;
 
     for (const type of SYNC_TYPES_ORDER) {
@@ -263,6 +416,44 @@ export class SyncService extends BaseService {
     await this.syncRepository.user.cleanupAuditTable(pruneThreshold);
     await this.syncRepository.userMetadata.cleanupAuditTable(pruneThreshold);
     await this.syncRepository.assetOcr.cleanupAuditTable(pruneThreshold);
+    await this.syncRepository.tag.cleanupAuditTable(pruneThreshold);
+    await this.syncRepository.tagAsset.cleanupAuditTable(pruneThreshold);
+    await this.syncRepository.view.cleanupAuditTable(pruneThreshold);
+    await this.syncRepository.viewTag.cleanupAuditTable(pruneThreshold);
+  }
+
+  /**
+   * Brings album_view_state up to date for a client limited to the default view: an album whose assets the default view
+   * all hides is withheld, and a cover it hides is replaced. Only albums that changed since the last run are evaluated,
+   * and only albums whose state really changes are sent again, so the album list of the official app does not reorder.
+   */
+  private async refreshAlbumViewState(userId: string, view: ViewFilter | null): Promise<boolean> {
+    const repository = this.syncRepository.albumViewState;
+    if (isViewUnrestricted(view)) {
+      const rows = await repository.getAll(userId);
+      const checkpoint = await repository.getCheckpoint(userId);
+      if (rows.length === 0 && !checkpoint) {
+        return false;
+      }
+      const changes = toAlbumViewStateChanges(rows);
+      await repository.update(userId, changes, null);
+      return changes.touched.length > 0;
+    }
+
+    const { updateId: next } = await repository.getNextCheckpoint();
+    const checkpoint = await repository.getCheckpoint(userId);
+    const albumIds = await repository.getChangedAlbumIds(userId, checkpoint?.updateId);
+    const rows = await repository.getStates(userId, view, albumIds);
+    const changes = toAlbumViewStateChanges(rows);
+    await repository.update(userId, changes, next);
+    if (changes.touched.length === 0) {
+      return false;
+    }
+
+    this.logger.debug(
+      `Album view state of ${userId}: ${rows.length} album(s) evaluated, ${changes.touched.length} sent again`,
+    );
+    return true;
   }
 
   private needsFullSync(checkpointMap: CheckpointMap) {
@@ -333,8 +524,8 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.AssetV2;
     const upserts = this.syncRepository.asset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, data)) {
+    for await (const { updateId, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate, isViewHidden })) {
         await this.withholdPrivate(response, { type: deleteType, data: { assetId: data.id } }, upsertType, updateId);
         continue;
       }
@@ -342,9 +533,12 @@ export class SyncService extends BaseService {
     }
   }
 
-  /** true when the stream should not carry this row because it is private and the client did not opt in */
-  private isWithheldPrivate(options: SyncQueryOptions, row: { isPrivate: boolean }) {
-    return !options.includePrivate && row.isPrivate;
+  /**
+   * true when the stream should not carry this row: it is private and the client did not opt in, or the client is
+   * limited to the default view (no views flag) and the view hides the asset of the row
+   */
+  private isWithheldPrivate(options: SyncQueryOptions, row: { isPrivate: boolean; isViewHidden?: boolean }) {
+    return (!options.includePrivate && row.isPrivate) || !!row.isViewHidden;
   }
 
   /**
@@ -352,7 +546,7 @@ export class SyncService extends BaseService {
    * on the next sync. Nothing is deleted: the client never held the row, or drops it through a cascade.
    */
   private skipPrivate(response: Writable, upsertType: SyncEntityType, updateId: string) {
-    return send(response, { type: SyncEntityType.SyncAckV1, data: {}, ackType: upsertType, ids: [updateId] });
+    return deferWithheldAck(response, upsertType, updateId);
   }
 
   /**
@@ -365,7 +559,8 @@ export class SyncService extends BaseService {
     upsertType: SyncEntityType,
     updateId: string,
   ) {
-    await send(response, { type: deletion.type, ids: [updateId], data: deletion.data });
+    // written without ending the run, so the deletes of consecutive withheld rows reach the client as one batch
+    await write(response, { type: deletion.type, ids: [updateId], data: deletion.data });
     await this.skipPrivate(response, upsertType, updateId);
   }
 
@@ -429,8 +624,8 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.partnerAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, data)) {
+    for await (const { updateId, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate, isViewHidden })) {
         await this.withholdPrivate(response, { type: deleteType, data: { assetId: data.id } }, upsertType, updateId);
         continue;
       }
@@ -456,8 +651,8 @@ export class SyncService extends BaseService {
     const upsertType = SyncEntityType.AssetEditV1;
     const upserts = this.syncRepository.assetEdit.getUpserts({ ...options, ack: checkpointMap[upsertType] });
 
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -524,8 +719,9 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.AlbumV1;
     const upserts = this.syncRepository.album.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, data)) {
+    for await (const { updateId, isViewHidden, viewStateAlbumId, viewThumbnailAssetId, ...album } of upserts) {
+      const data = withViewThumbnail(album, viewStateAlbumId, viewThumbnailAssetId);
+      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate, isViewHidden })) {
         await this.withholdPrivate(response, { type: deleteType, data: { albumId: data.id } }, upsertType, updateId);
         continue;
       }
@@ -548,8 +744,9 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.AlbumV2;
     const upserts = this.syncRepository.album.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, data)) {
+    for await (const { updateId, isViewHidden, viewStateAlbumId, viewThumbnailAssetId, ...album } of upserts) {
+      const data = withViewThumbnail(album, viewStateAlbumId, viewThumbnailAssetId);
+      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate, isViewHidden })) {
         // the client drops the album and, through its cascade, every link it holds for it
         await this.withholdPrivate(response, { type: deleteType, data: { albumId: data.id } }, upsertType, updateId);
         continue;
@@ -613,8 +810,8 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.albumUser.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isAlbumPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+    for await (const { updateId, isAlbumPrivate, isAlbumViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate, isViewHidden: isAlbumViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -679,8 +876,8 @@ export class SyncService extends BaseService {
         { ...options, ack: updateCheckpoint },
         createCheckpoint,
       );
-      for await (const { updateId, isAlbumPrivate, ...data } of updates) {
-        if (this.isWithheldPrivate(options, data)) {
+      for await (const { updateId, isAlbumPrivate, isViewHidden, isAlbumViewHidden, ...data } of updates) {
+        if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate, isViewHidden })) {
           await this.withholdPrivate(
             response,
             { type: SyncEntityType.AssetDeleteV1, data: { assetId: data.id } },
@@ -689,7 +886,7 @@ export class SyncService extends BaseService {
           );
           continue;
         }
-        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate, isViewHidden: isAlbumViewHidden })) {
           await this.skipPrivate(response, updateType, updateId);
           continue;
         }
@@ -699,7 +896,7 @@ export class SyncService extends BaseService {
 
     const creates = this.syncRepository.albumAsset.getCreates({ ...options, ack: createCheckpoint });
     let isFirst = true;
-    for await (const { updateId, isAlbumPrivate, ...data } of creates) {
+    for await (const { updateId, isAlbumPrivate, isViewHidden, isAlbumViewHidden, ...data } of creates) {
       if (isFirst) {
         await send(response, {
           type: SyncEntityType.SyncAckV1,
@@ -709,7 +906,12 @@ export class SyncService extends BaseService {
         });
         isFirst = false;
       }
-      if (this.isWithheldPrivate(options, { isPrivate: data.isPrivate || isAlbumPrivate })) {
+      if (
+        this.isWithheldPrivate(options, {
+          isPrivate: data.isPrivate || isAlbumPrivate,
+          isViewHidden: isViewHidden || isAlbumViewHidden,
+        })
+      ) {
         // never delivered, so nothing to delete; just move the checkpoint past it
         await this.skipPrivate(response, createType, updateId);
         continue;
@@ -768,8 +970,8 @@ export class SyncService extends BaseService {
         { ...options, ack: upsertCheckpoint },
         createCheckpoint,
       );
-      for await (const { updateId, isAlbumPrivate, ...data } of updates) {
-        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+      for await (const { updateId, isAlbumPrivate, isAlbumViewHidden, ...data } of updates) {
+        if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate, isViewHidden: isAlbumViewHidden })) {
           await this.skipPrivate(response, updateType, updateId);
           continue;
         }
@@ -779,7 +981,7 @@ export class SyncService extends BaseService {
 
     const creates = this.syncRepository.albumAssetExif.getCreates({ ...options, ack: createCheckpoint });
     let isFirst = true;
-    for await (const { updateId, isAlbumPrivate, ...data } of creates) {
+    for await (const { updateId, isAlbumPrivate, isAlbumViewHidden, ...data } of creates) {
       if (isFirst) {
         await send(response, {
           type: SyncEntityType.SyncAckV1,
@@ -789,7 +991,7 @@ export class SyncService extends BaseService {
         });
         isFirst = false;
       }
-      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate, isViewHidden: isAlbumViewHidden })) {
         await this.skipPrivate(response, createType, updateId);
         continue;
       }
@@ -847,8 +1049,10 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.albumToAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isAlbumPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate })) {
+    for await (const { updateId, isAlbumPrivate, isViewHidden, isAlbumViewHidden, ...data } of upserts) {
+      if (
+        this.isWithheldPrivate(options, { isPrivate: isAlbumPrivate, isViewHidden: isViewHidden || isAlbumViewHidden })
+      ) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -884,8 +1088,8 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.MemoryToAssetV1;
     const upserts = this.syncRepository.memoryToAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isMemoryPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isMemoryPrivate })) {
+    for await (const { updateId, isMemoryPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isMemoryPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -906,8 +1110,8 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.stack.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -978,8 +1182,8 @@ export class SyncService extends BaseService {
     }
 
     const upserts = this.syncRepository.partnerStack.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -996,9 +1200,10 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.PersonV1;
     const upserts = this.syncRepository.person.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate })) {
-        // every visible face of this person sits on a private asset, so the person does not exist for this client
+    for await (const { updateId, isPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate, isViewHidden })) {
+        // every visible face of this person sits on a private asset (or one the default view hides), so the person
+        // does not exist for this client
         await this.withholdPrivate(response, { type: deleteType, data: { personId: data.id } }, upsertType, updateId);
         continue;
       }
@@ -1021,8 +1226,8 @@ export class SyncService extends BaseService {
 
     const upsertType = SyncEntityType.AssetFaceV2;
     const upserts = this.syncRepository.assetFace.getUpserts({ ...options, ack: checkpointMap[upsertType] });
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -1068,8 +1273,8 @@ export class SyncService extends BaseService {
       auth.user.id,
     );
 
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
@@ -1099,11 +1304,72 @@ export class SyncService extends BaseService {
       auth.user.id,
     );
 
-    for await (const { updateId, isAssetPrivate, ...data } of upserts) {
-      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate })) {
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
         await this.skipPrivate(response, upsertType, updateId);
         continue;
       }
+      await send(response, { type: upsertType, ids: [updateId], data });
+    }
+  }
+
+  private async syncTagsV1(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+    const deleteType = SyncEntityType.TagDeleteV1;
+    const deletes = this.syncRepository.tag.getDeletes({ ...options, ack: checkpointMap[deleteType] });
+    for await (const { id, ...data } of deletes) {
+      await send(response, { type: deleteType, ids: [id], data });
+    }
+
+    const upsertType = SyncEntityType.TagV1;
+    const upserts = this.syncRepository.tag.getUpserts({ ...options, ack: checkpointMap[upsertType] });
+    for await (const { updateId, ...data } of upserts) {
+      await send(response, { type: upsertType, ids: [updateId], data });
+    }
+  }
+
+  private async syncTagAssetsV1(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+    const deleteType = SyncEntityType.TagAssetDeleteV1;
+    const deletes = this.syncRepository.tagAsset.getDeletes({ ...options, ack: checkpointMap[deleteType] });
+    for await (const { id, ...data } of deletes) {
+      await send(response, { type: deleteType, ids: [id], data });
+    }
+
+    const upsertType = SyncEntityType.TagAssetV1;
+    const upserts = this.syncRepository.tagAsset.getUpserts({ ...options, ack: checkpointMap[upsertType] });
+    for await (const { updateId, isAssetPrivate, isViewHidden, ...data } of upserts) {
+      // the client never holds the asset, so it never needs the link either
+      if (this.isWithheldPrivate(options, { isPrivate: isAssetPrivate, isViewHidden })) {
+        await this.skipPrivate(response, upsertType, updateId);
+        continue;
+      }
+      await send(response, { type: upsertType, ids: [updateId], data });
+    }
+  }
+
+  private async syncViewsV1(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+    const deleteType = SyncEntityType.ViewDeleteV1;
+    const deletes = this.syncRepository.view.getDeletes({ ...options, ack: checkpointMap[deleteType] });
+    for await (const { id, ...data } of deletes) {
+      await send(response, { type: deleteType, ids: [id], data });
+    }
+
+    const upsertType = SyncEntityType.ViewV1;
+    const upserts = this.syncRepository.view.getUpserts({ ...options, ack: checkpointMap[upsertType] });
+    for await (const { updateId, ...data } of upserts) {
+      await send(response, { type: upsertType, ids: [updateId], data });
+    }
+  }
+
+  private async syncViewTagsV1(options: SyncQueryOptions, response: Writable, checkpointMap: CheckpointMap) {
+    const deleteType = SyncEntityType.ViewTagDeleteV1;
+    const deletes = this.syncRepository.viewTag.getDeletes({ ...options, ack: checkpointMap[deleteType] });
+    for await (const { id, ...data } of deletes) {
+      await send(response, { type: deleteType, ids: [id], data });
+    }
+
+    const upsertType = SyncEntityType.ViewTagV1;
+    const upserts = this.syncRepository.viewTag.getUpserts({ ...options, ack: checkpointMap[upsertType] });
+    for await (const { updateId, ...data } of upserts) {
       await send(response, { type: upsertType, ids: [updateId], data });
     }
   }

@@ -127,6 +127,12 @@ export class TimelineManager extends VirtualScrollManager {
   #updatingViewportProximities = false;
   #scrollableElement: HTMLElement | undefined = $state();
   #unsubscribes: Array<() => void> = [];
+  /**
+   * The anchor of the last restore that had to use a stand-in asset, and where that stand-in was put. While the
+   * stand-in is still exactly there (the user did not scroll), the next reload anchors on the original asset again,
+   * so toggling a filter away and back returns to the very same asset instead of drifting to its stand-in.
+   */
+  #replacedAnchor: { anchor: ScrollAnchor; assetId: string; assetOffset: number } | undefined;
 
   get showAssetOwners() {
     return userPreferencesManager.showAssetOwners;
@@ -339,7 +345,12 @@ export class TimelineManager extends VirtualScrollManager {
 
   async #reload(options: TimelineManagerOptions, { keepScrollPosition = false } = {}) {
     this.suspendTransitions = true;
-    const anchor = keepScrollPosition ? this.#captureScrollAnchor() : undefined;
+    let anchor = keepScrollPosition ? this.#captureScrollAnchor() : undefined;
+    const replaced = this.#replacedAnchor;
+    this.#replacedAnchor = undefined;
+    if (anchor && replaced && this.#isStillAt(replaced.assetId, replaced.assetOffset)) {
+      anchor = replaced.anchor;
+    }
     try {
       // the init task only disconnects when it is cancelled mid-flight; an executed task is simply re-armed,
       // so the websocket must be released here or the loaded callback throws on connect()
@@ -402,6 +413,17 @@ export class TimelineManager extends VirtualScrollManager {
     return anchor;
   }
 
+  /** whether the asset still sits at this offset from the viewport top, i.e. the user did not scroll since */
+  #isStillAt(assetId: string, offset: number) {
+    for (const month of this.months) {
+      const position = month.isLoaded ? month.findAssetAbsolutePosition(assetId) : undefined;
+      if (position) {
+        return Math.abs(position.top - this.visibleWindow.top - offset) < 2;
+      }
+    }
+    return false;
+  }
+
   /**
    * Put the anchored asset back at the same offset from the viewport top. When the asset is not shown any more, the
    * asset standing in for it takes its place (see #findAnchorReplacement). When its month is gone, land on the nearest
@@ -427,6 +449,11 @@ export class TimelineManager extends VirtualScrollManager {
         const position = assetId ? month.findAssetAbsolutePosition(assetId) : undefined;
         if (position) {
           this.scrollTo(position.top - anchor.assetOffset);
+          if (assetId !== anchor.asset.id) {
+            // where the stand-in really landed: near the end of a shorter timeline the scroll position is clamped
+            const assetOffset = position.top - this.visibleWindow.top;
+            this.#replacedAnchor = { anchor, assetId: assetId!, assetOffset };
+          }
           return;
         }
       }

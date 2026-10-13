@@ -16,6 +16,9 @@ abstract class ServerFeatures with _$ServerFeatures {
 
     /// Stacks know whether they were created manually or automatically
     @Default(false) bool stackSource,
+
+    /// Saved custom views over the user's tags, and hidden tags
+    @Default(false) bool customViews,
   }) = _ServerFeatures;
 
   factory ServerFeatures.fromDto(ServerFeaturesDto dto) => ServerFeatures(
@@ -26,5 +29,6 @@ abstract class ServerFeatures with _$ServerFeatures {
     ocr: dto.ocr,
     smartSearch: dto.smartSearch,
     stackSource: dto.stackSource.orElse(null) ?? false,
+    customViews: dto.customViews.orElse(null) ?? false,
   );
 }

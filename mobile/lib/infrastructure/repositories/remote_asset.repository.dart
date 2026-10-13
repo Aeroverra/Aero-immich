@@ -6,6 +6,7 @@ import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
+import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
@@ -68,14 +69,24 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
     return query.map((row) => row.toDto()).get();
   }
 
-  Future<List<RemoteAsset>> getStackChildren(RemoteAsset asset) {
+  /// The other assets of the stack of [asset]; with a view applied only the ones that pass it
+  Future<List<RemoteAsset>> getStackChildren(
+    RemoteAsset asset, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
     final stackId = asset.stackId;
     if (stackId == null) {
       return Future.value(const []);
     }
 
+    final view = privateFilter.restrictingView;
     final query = _db.remoteAssetEntity.select()
-      ..where((row) => row.stackId.equals(stackId) & row.id.equals(asset.id).not())
+      ..where(
+        (row) =>
+            row.stackId.equals(stackId) &
+            row.id.equals(asset.id).not() &
+            (view == null ? const Constant(true) : row.viewFilter(view)),
+      )
       ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]);
 
     return query.map((row) => row.toDto()).get();
@@ -112,7 +123,10 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
   Future<List<(String, String)>> getPlaces(String userId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final asset = Subquery(
       _db.remoteAssetEntity.select()
-        ..where((row) => row.ownerId.equals(userId))
+        ..where((row) {
+          final view = privateFilter.restrictingView;
+          return row.ownerId.equals(userId) & (view == null ? const Constant(true) : row.viewFilter(view));
+        })
         ..orderBy([(row) => OrderingTerm.desc(row.createdAt)]),
       "asset",
     );

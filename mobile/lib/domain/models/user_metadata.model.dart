@@ -35,6 +35,23 @@ enum StackActionMode {
   stack,
 }
 
+/// When the app locks private mode, or returns to the default view, again
+enum LockTrigger {
+  /// as soon as the app leaves the foreground, so every app switch relocks
+  appPause,
+
+  /// when the screen turns off or the device locks, so app switches keep the unlock
+  screenOff,
+
+  /// only when the inactivity timeout passes, the user locks manually or logs out
+  timeout,
+}
+
+LockTrigger _lockTriggerFromMap(Map<String, Object?> map, String group, LockTrigger fallback) {
+  final value = (map[group] as Map<String, Object?>?)?["lockTrigger"] as String?;
+  return LockTrigger.values.firstWhere((trigger) => trigger.name == value, orElse: () => fallback);
+}
+
 @freezed
 abstract class Onboarding with _$Onboarding {
   const Onboarding._();
@@ -62,6 +79,9 @@ abstract class Preferences with _$Preferences {
     @Default(true) bool showSupportBadge,
     @Default(3) int minimumFaces,
     @Default(true) bool groupAutoStacks,
+    @Default(LockTrigger.appPause) LockTrigger privateModeLockTrigger,
+    @Default(LockTrigger.screenOff) LockTrigger customViewLockTrigger,
+    @Default(30) int privateModeTimeoutMinutes,
   }) = _Preferences;
 
   factory Preferences.fromMap(Map<String, Object?> map) {
@@ -83,6 +103,9 @@ abstract class Preferences with _$Preferences {
       showSupportBadge: (map["purchase"] as Map<String, Object?>?)?["showSupportBadge"] as bool? ?? true,
       minimumFaces: (map["people"] as Map<String, Object?>?)?["minimumFaces"] as int? ?? 3,
       groupAutoStacks: (map["stacks"] as Map<String, Object?>?)?["groupAuto"] as bool? ?? true,
+      privateModeLockTrigger: _lockTriggerFromMap(map, "privateMode", LockTrigger.appPause),
+      customViewLockTrigger: _lockTriggerFromMap(map, "customViews", LockTrigger.screenOff),
+      privateModeTimeoutMinutes: (map["privateMode"] as Map<String, Object?>?)?["timeoutMinutes"] as int? ?? 30,
     );
   }
 }

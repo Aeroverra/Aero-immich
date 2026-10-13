@@ -40,6 +40,31 @@ class UserMetadataRepository extends DatabaseAccessor<Drift> {
     });
   }
 
+  /// Applies a privateMode.lockTrigger change the server accepted, so the app locks the new way right away
+  Future<void> setPrivateModeLockTrigger(String userId, LockTrigger trigger) =>
+      _setPreference(userId, 'privateMode', 'lockTrigger', trigger.name);
+
+  /// Applies a customViews.lockTrigger change the server accepted, so the app resets the view the new way right away
+  Future<void> setCustomViewLockTrigger(String userId, LockTrigger trigger) =>
+      _setPreference(userId, 'customViews', 'lockTrigger', trigger.name);
+
+  /// Merges [key] into the [group] block of the stored preferences, leaving every other preference alone
+  Future<void> _setPreference(String userId, String group, String key, Object? value) async {
+    await _db.transaction(() async {
+      final query = _db.userMetadataEntity.select()
+        ..where((e) => e.userId.equals(userId) & e.key.equalsValue(UserMetadataKey.preferences));
+      final current = await query.getSingleOrNull();
+      final preferences = <String, Object?>{...?current?.value};
+      preferences[group] = <String, Object?>{...?(preferences[group] as Map<String, Object?>?), key: value};
+
+      await _db
+          .into(_db.userMetadataEntity)
+          .insertOnConflictUpdate(
+            UserMetadataEntityCompanion.insert(userId: userId, key: UserMetadataKey.preferences, value: preferences),
+          );
+    });
+  }
+
   Future<List<UserMetadata>> getUserMetadata(String userId) {
     final query = _db.userMetadataEntity.select()..where((e) => e.userId.equals(userId));
 

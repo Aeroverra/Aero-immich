@@ -39,12 +39,16 @@ export class StackUpdateDto extends createZodDto(StackUpdateSchema) {}
 export class StackResponseDto extends createZodDto(StackResponseSchema) {}
 
 export const mapStack = (stack: Stack, { auth }: { auth?: AuthDto }) => {
-  const primary = stack.assets.filter((asset) => asset.id === stack.primaryAssetId);
-  const others = stack.assets.filter((asset) => asset.id !== stack.primaryAssetId);
+  // when the active view hides the primary asset, the first visible member stands in for it
+  const primaryAssetId = stack.assets.some((asset) => asset.id === stack.primaryAssetId)
+    ? stack.primaryAssetId
+    : (stack.assets[0]?.id ?? stack.primaryAssetId);
+  const primary = stack.assets.filter((asset) => asset.id === primaryAssetId);
+  const others = stack.assets.filter((asset) => asset.id !== primaryAssetId);
 
   return {
     id: stack.id,
-    primaryAssetId: stack.primaryAssetId,
+    primaryAssetId,
     assets: [...primary, ...others].map((asset) => mapAsset(asset, { auth })),
     source: stack.source,
   };

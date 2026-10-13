@@ -1,3 +1,4 @@
+import { LockTrigger } from '@immich/sdk';
 import '@testing-library/jest-dom';
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
@@ -40,7 +41,7 @@ describe('FeatureSettings component', () => {
     authManager.setPreferences(preferences);
     sdkMock.updateMyPreferences.mockResolvedValue({
       ...preferences,
-      privateMode: { sidebarWeb: true, timeoutMinutes: 45, includeInMemories: true },
+      privateMode: { sidebarWeb: true, timeoutMinutes: 45, includeInMemories: true, lockTrigger: LockTrigger.AppPause },
     });
     const user = userEvent.setup();
 

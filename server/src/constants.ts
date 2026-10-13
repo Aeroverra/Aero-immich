@@ -154,6 +154,8 @@ export const endpointTags: Record<ApiTag, string> = {
   [ApiTag.AuthenticationAdmin]: 'Administrative endpoints related to authentication.',
   [ApiTag.ClusterGroups]:
     'A cluster group is a set of users whose faces are clustered together, so that a person can be shared between them.',
+  [ApiTag.CustomViews]:
+    'A custom view is a saved filter over your tags that the whole library can be switched to, such as a default view that hides unreviewed photos.',
   [ApiTag.ConfigUser]: 'The system configuration properties that are visible to logged in users.',
   [ApiTag.ConfigAdmin]: 'Endpoints to view and modify the full system configuration.',
   [ApiTag.ConfigPublic]: 'The system configuration properties that are visible to everyone.',

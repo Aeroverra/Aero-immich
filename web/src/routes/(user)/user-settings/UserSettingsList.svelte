@@ -20,6 +20,7 @@
     mdiDeleteRestore,
     mdiDevices,
     mdiDownload,
+    mdiFilterVariant,
     mdiFeatureSearchOutline,
     mdiFormTextboxPassword,
     mdiImageMultipleOutline,
@@ -38,6 +39,7 @@
   import StackActionsSettings from './StackActionsSettings.svelte';
   import UserApiKeyList from './UserApiKeyList.svelte';
   import UserProfileSettings from './UserProfileSettings.svelte';
+  import ViewsSettings from './ViewsSettings.svelte';
 
   interface Props {
     keys?: ApiKeyResponseDto[];
@@ -120,6 +122,17 @@
 >
   <StackActionsSettings />
 </SettingAccordion>
+
+{#if featureFlagsManager.value.customViews}
+  <SettingAccordion
+    icon={mdiFilterVariant}
+    key="views"
+    title={$t('custom_views')}
+    subtitle={$t('custom_views_settings_subtitle')}
+  >
+    <ViewsSettings />
+  </SettingAccordion>
+{/if}
 
 <SettingAccordion
   icon={mdiBellOutline}

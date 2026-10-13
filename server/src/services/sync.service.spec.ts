@@ -1,6 +1,7 @@
 import { Writable } from 'node:stream';
 import { SyncEntityType } from 'src/enum';
-import { send } from 'src/services/sync.service';
+import { AlbumViewStateRow } from 'src/repositories/sync.repository';
+import { send, toAlbumViewStateChanges } from 'src/services/sync.service';
 import { ClientDisconnectedError } from 'src/utils/response';
 import { serialize } from 'src/utils/sync';
 
@@ -107,5 +108,89 @@ describe('send', () => {
     stream.emit('error', error);
 
     await expect(sendPromise).rejects.toBe(error);
+  });
+});
+
+const row = (overrides: Partial<AlbumViewStateRow> = {}): AlbumViewStateRow => ({
+  albumId: 'album',
+  albumThumbnailAssetId: 'cover',
+  hasAssets: true,
+  hasVisibleAssets: true,
+  visibleThumbnailAssetId: 'cover',
+  stateAlbumId: null,
+  stateIsHidden: null,
+  stateThumbnailAssetId: null,
+  ...overrides,
+});
+
+describe(toAlbumViewStateChanges.name, () => {
+  it('should change nothing for an album the view shows with its own cover', () => {
+    expect(toAlbumViewStateChanges([row()])).toEqual({ upserts: [], deletes: [], touched: [], shown: [] });
+  });
+
+  it('should keep an album without assets visible', () => {
+    const empty = row({
+      albumThumbnailAssetId: null,
+      hasAssets: false,
+      hasVisibleAssets: false,
+      visibleThumbnailAssetId: null,
+    });
+    expect(toAlbumViewStateChanges([empty])).toEqual({ upserts: [], deletes: [], touched: [], shown: [] });
+  });
+
+  it('should hide an album whose assets the view all hides', () => {
+    expect(toAlbumViewStateChanges([row({ hasVisibleAssets: false, visibleThumbnailAssetId: null })])).toEqual({
+      upserts: [{ albumId: 'album', isHidden: true, thumbnailAssetId: null }],
+      deletes: [],
+      touched: ['album'],
+      shown: [],
+    });
+  });
+
+  it('should not send a hidden album again while it stays hidden', () => {
+    const hidden = row({
+      hasVisibleAssets: false,
+      visibleThumbnailAssetId: null,
+      stateAlbumId: 'album',
+      stateIsHidden: true,
+    });
+    expect(toAlbumViewStateChanges([hidden])).toEqual({ upserts: [], deletes: [], touched: [], shown: [] });
+  });
+
+  it('should show a hidden album again with its links', () => {
+    expect(toAlbumViewStateChanges([row({ stateAlbumId: 'album', stateIsHidden: true })])).toEqual({
+      upserts: [],
+      deletes: ['album'],
+      touched: ['album'],
+      shown: ['album'],
+    });
+  });
+
+  it('should replace a hidden cover and send the album once', () => {
+    const replaced = row({ visibleThumbnailAssetId: 'newest' });
+    expect(toAlbumViewStateChanges([replaced])).toEqual({
+      upserts: [{ albumId: 'album', isHidden: false, thumbnailAssetId: 'newest' }],
+      deletes: [],
+      touched: ['album'],
+      shown: [],
+    });
+
+    const unchanged = row({
+      visibleThumbnailAssetId: 'newest',
+      stateAlbumId: 'album',
+      stateIsHidden: false,
+      stateThumbnailAssetId: 'newest',
+    });
+    expect(toAlbumViewStateChanges([unchanged])).toEqual({ upserts: [], deletes: [], touched: [], shown: [] });
+  });
+
+  it('should send the album cover again once the view shows it', () => {
+    const restored = row({ stateAlbumId: 'album', stateIsHidden: false, stateThumbnailAssetId: 'newest' });
+    expect(toAlbumViewStateChanges([restored])).toEqual({
+      upserts: [],
+      deletes: ['album'],
+      touched: ['album'],
+      shown: [],
+    });
   });
 });

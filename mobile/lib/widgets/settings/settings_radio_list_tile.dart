@@ -3,9 +3,12 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 
 class SettingsRadioGroup<T> {
   final String title;
+
+  /// One line explaining what the option does, left out when the title says it all
+  final String? subtitle;
   final T value;
 
-  const SettingsRadioGroup({required this.title, required this.value});
+  const SettingsRadioGroup({required this.title, required this.value, this.subtitle});
 }
 
 class SettingsRadioListTile<T> extends StatelessWidget {
@@ -28,6 +31,7 @@ class SettingsRadioListTile<T> extends StatelessWidget {
                 dense: true,
                 activeColor: context.primaryColor,
                 title: Text(g.title, style: context.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w500)),
+                subtitle: g.subtitle == null ? null : Text(g.subtitle!, style: context.textTheme.bodyMedium),
                 value: g.value,
                 controlAffinity: ListTileControlAffinity.trailing,
               ),

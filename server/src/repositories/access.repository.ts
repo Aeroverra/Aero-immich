@@ -1,14 +1,39 @@
 import { Injectable } from '@nestjs/common';
-import { Kysely, NotNull, sql } from 'kysely';
+import { ExpressionBuilder, Kysely, NotNull, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
+import { ViewFilter } from 'src/database';
 import { ChunkedSet, DummyValue, GenerateSql } from 'src/decorators';
 import { AlbumUserRole, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
-import { asUuid, withPrivateAlbumVisibility } from 'src/utils/database';
+import {
+  asUuid,
+  isTagHidden,
+  isViewUnrestricted,
+  viewAssetPredicate,
+  withPrivateAlbumVisibility,
+} from 'src/utils/database';
 
 export type AssetAccessOptions = {
   hasElevatedPermission: boolean;
   privateMode: boolean;
+  /** read access only: assets hidden by the session's view are treated as not found */
+  view?: ViewFilter | null;
+};
+
+/**
+ * An album is hidden by a view when it holds assets and none of them passes the view. Empty albums stay visible.
+ */
+const albumVisibleInView = (eb: ExpressionBuilder<DB, 'album'>, view: ViewFilter) => {
+  const albumAssets = () =>
+    eb
+      .selectFrom('album_asset')
+      .innerJoin('asset', 'asset.id', 'album_asset.assetId')
+      .whereRef('album_asset.albumId', '=', 'album.id')
+      .where('asset.deletedAt', 'is', null);
+  return eb.or([
+    eb.not(eb.exists(albumAssets())),
+    eb.exists(albumAssets().where((eb) => viewAssetPredicate(eb, view))),
+  ]);
 };
 
 class ActivityAccess {
@@ -79,7 +104,7 @@ class AlbumAccess {
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkOwnerAccess(userId: string, albumIds: Set<string>, privateMode: boolean) {
+  async checkOwnerAccess(userId: string, albumIds: Set<string>, privateMode: boolean, view?: ViewFilter | null) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
@@ -87,6 +112,7 @@ class AlbumAccess {
     return this.db
       .selectFrom('album')
       .$call(withPrivateAlbumVisibility({ privateMode }))
+      .$if(!isViewUnrestricted(view), (qb) => qb.where((eb) => albumVisibleInView(eb, view!)))
       .select('album.id')
       .where('album.id', 'in', [...albumIds])
       .innerJoin('album_user', (join) =>
@@ -102,7 +128,13 @@ class AlbumAccess {
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, AlbumUserRole.Viewer, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkSharedAlbumAccess(userId: string, albumIds: Set<string>, access: AlbumUserRole, privateMode: boolean) {
+  async checkSharedAlbumAccess(
+    userId: string,
+    albumIds: Set<string>,
+    access: AlbumUserRole,
+    privateMode: boolean,
+    view?: ViewFilter | null,
+  ) {
     if (albumIds.size === 0) {
       return new Set<string>();
     }
@@ -113,6 +145,7 @@ class AlbumAccess {
     return this.db
       .selectFrom('album')
       .$call(withPrivateAlbumVisibility({ privateMode }))
+      .$if(!isViewUnrestricted(view), (qb) => qb.where((eb) => albumVisibleInView(eb, view!)))
       .select('album.id')
       .innerJoin('album_user', 'album_user.albumId', 'album.id')
       .innerJoin('user', (join) => join.onRef('user.id', '=', 'album_user.userId').on('user.deletedAt', 'is', null))
@@ -151,7 +184,7 @@ class AssetAccess {
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkAlbumAccess(userId: string, assetIds: Set<string>, privateMode: boolean) {
+  async checkAlbumAccess(userId: string, assetIds: Set<string>, privateMode: boolean, view?: ViewFilter | null) {
     if (assetIds.size === 0) {
       return new Set<string>();
     }
@@ -166,6 +199,7 @@ class AssetAccess {
         )
         // only through albums (and assets) that are visible under the caller's mode
         .$if(!privateMode, (qb) => qb.where('album.isPrivate', '=', false).where('asset.isPrivate', '=', false))
+        .$if(!isViewUnrestricted(view), (qb) => qb.where((eb) => viewAssetPredicate(eb, view!)))
         .leftJoin('album_user as albumUsers', 'albumUsers.albumId', 'album.id')
         .leftJoin('user', (join) => join.onRef('user.id', '=', 'albumUsers.userId').on('user.deletedAt', 'is', null))
         .crossJoin('target')
@@ -208,13 +242,14 @@ class AssetAccess {
       .where('asset.ownerId', '=', userId)
       .$if(!options.hasElevatedPermission, (eb) => eb.where('asset.visibility', '!=', AssetVisibility.Locked))
       .$if(!options.privateMode, (eb) => eb.where('asset.isPrivate', '=', false))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
       .execute()
       .then((assets) => new Set(assets.map((asset) => asset.id)));
   }
 
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkPartnerAccess(userId: string, assetIds: Set<string>) {
+  async checkPartnerAccess(userId: string, assetIds: Set<string>, view?: ViewFilter | null) {
     if (assetIds.size === 0) {
       return new Set<string>();
     }
@@ -234,7 +269,7 @@ class AssetAccess {
         ]),
       )
       .where('asset.isPrivate', '=', false)
-
+      .$if(!isViewUnrestricted(view), (qb) => qb.where((eb) => viewAssetPredicate(eb, view!)))
       .where('asset.id', 'in', [...assetIds])
       .execute()
       .then((assets) => new Set(assets.map((asset) => asset.id)));
@@ -308,6 +343,7 @@ class AssetFileAccess {
       .innerJoin('asset', 'asset.id', 'asset_file.assetId')
       .$if(!options.hasElevatedPermission, (eb) => eb.where('asset.visibility', '!=', AssetVisibility.Locked))
       .$if(!options.privateMode, (eb) => eb.where('asset.isPrivate', '=', false))
+      .$if(!isViewUnrestricted(options.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, options.view!)))
       .where('asset.ownerId', '=', userId)
       .where('asset_file.id', 'in', [...fileIds])
       .execute()
@@ -591,20 +627,44 @@ class PartnerAccess {
 class TagAccess {
   constructor(private db: Kysely<DB>) {}
 
-  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET, false] })
   @ChunkedSet({ paramIndex: 1 })
-  async checkOwnerAccess(userId: string, tagIds: Set<string>) {
+  async checkOwnerAccess(userId: string, tagIds: Set<string>, includeHidden = true) {
     if (tagIds.size === 0) {
       return new Set<string>();
     }
 
+    return (
+      this.db
+        .selectFrom('tag')
+        .select('tag.id')
+        .where('tag.id', 'in', [...tagIds])
+        .where('tag.userId', '=', userId)
+        // hidden tags do not exist while private mode is locked
+        .$if(!includeHidden, (qb) => qb.where((eb) => eb.not(isTagHidden(eb, 'tag.id'))))
+        .execute()
+        .then((tags) => new Set(tags.map((tag) => tag.id)))
+    );
+  }
+}
+
+class ViewAccess {
+  constructor(private db: Kysely<DB>) {}
+
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @ChunkedSet({ paramIndex: 1 })
+  async checkOwnerAccess(userId: string, viewIds: Set<string>) {
+    if (viewIds.size === 0) {
+      return new Set<string>();
+    }
+
     return this.db
-      .selectFrom('tag')
-      .select('tag.id')
-      .where('tag.id', 'in', [...tagIds])
-      .where('tag.userId', '=', userId)
+      .selectFrom('view')
+      .select('view.id')
+      .where('view.id', 'in', [...viewIds])
+      .where('view.ownerId', '=', userId)
       .execute()
-      .then((tags) => new Set(tags.map((tag) => tag.id)));
+      .then((views) => new Set(views.map((view) => view.id)));
   }
 }
 
@@ -646,6 +706,7 @@ export class AccessRepository {
   stack: StackAccess;
   tag: TagAccess;
   timeline: TimelineAccess;
+  view: ViewAccess;
   workflow: WorkflowAccess;
 
   constructor(@InjectKysely() db: Kysely<DB>) {
@@ -665,6 +726,7 @@ export class AccessRepository {
     this.stack = new StackAccess(db);
     this.tag = new TagAccess(db);
     this.timeline = new TimelineAccess(db);
+    this.view = new ViewAccess(db);
     this.workflow = new WorkflowAccess(db);
   }
 }

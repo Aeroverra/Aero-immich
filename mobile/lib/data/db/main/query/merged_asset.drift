@@ -4,7 +4,7 @@ import '../table/local/asset.dart';
 import '../table/local/album.dart';
 import '../table/local/album_asset.dart';
 
-mergedAsset(:private_mode AS BOOLEAN, :current_user_id AS TEXT, :group_auto_stacks AS BOOLEAN):
+mergedAsset(:group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN, :show_local AS BOOLEAN):
 SELECT
 	rae.id as remote_id,
 	(SELECT lae.id FROM local_asset_entity lae WHERE lae.checksum = rae.checksum LIMIT 1) as local_id,
@@ -40,13 +40,20 @@ WHERE
 	AND rae.owner_id IN :user_ids
 	AND (
 		rae.stack_id IS NULL
-		OR rae.id = se.primary_asset_id
 		OR (se.source = 1 AND NOT :group_auto_stacks) -- 1 = auto
+		OR (NOT :view_active AND rae.id = se.primary_asset_id)
+		-- a view can hide the primary asset: the stack is shown by its first visible member
+		OR (:view_active AND rae.id = (
+			SELECT m.id FROM remote_asset_entity m
+			WHERE m.stack_id = rae.stack_id
+				AND m.deleted_at IS NULL
+				AND (m.id = se.primary_asset_id OR m.visibility = 0)
+				AND $member_filter
+			ORDER BY m.id = se.primary_asset_id DESC, m.created_at ASC, m.id ASC
+			LIMIT 1
+		))
 	)
-	AND (
-		rae.is_private = 0
-		OR (:private_mode AND rae.owner_id = :current_user_id)
-	)
+	AND $asset_filter
 
 UNION ALL
 
@@ -77,7 +84,9 @@ SELECT
 	0 as is_private
 FROM
 	local_asset_entity lae
-WHERE NOT EXISTS (
+-- local only assets carry no tags and are never private: every view shows them except a private only one
+WHERE :show_local
+AND NOT EXISTS (
 	SELECT 1 FROM remote_asset_entity rae WHERE rae.checksum = lae.checksum AND rae.owner_id IN :user_ids
 )
 AND EXISTS (
@@ -93,7 +102,7 @@ AND NOT EXISTS (
 ORDER BY created_at DESC
 LIMIT $limit;
 
-mergedBucket(:group_by AS INTEGER, :private_mode AS BOOLEAN, :current_user_id AS TEXT, :group_auto_stacks AS BOOLEAN):
+mergedBucket(:group_by AS INTEGER, :group_auto_stacks AS BOOLEAN, :view_active AS BOOLEAN, :show_local AS BOOLEAN):
 SELECT
 	COUNT(*) as asset_count,
 	bucket_date
@@ -120,13 +129,20 @@ FROM
 		AND rae.owner_id in :user_ids
 		AND (
 			rae.stack_id IS NULL
-			OR rae.id = se.primary_asset_id
 			OR (se.source = 1 AND NOT :group_auto_stacks) -- 1 = auto
+			OR (NOT :view_active AND rae.id = se.primary_asset_id)
+			-- a view can hide the primary asset: the stack is shown by its first visible member
+			OR (:view_active AND rae.id = (
+				SELECT m.id FROM remote_asset_entity m
+				WHERE m.stack_id = rae.stack_id
+					AND m.deleted_at IS NULL
+					AND (m.id = se.primary_asset_id OR m.visibility = 0)
+					AND $member_filter
+				ORDER BY m.id = se.primary_asset_id DESC, m.created_at ASC, m.id ASC
+				LIMIT 1
+			))
 		)
-		AND (
-			rae.is_private = 0
-			OR (:private_mode AND rae.owner_id = :current_user_id)
-		)
+		AND $asset_filter
 	UNION ALL
 	SELECT
 		CASE
@@ -135,7 +151,8 @@ FROM
 		END as bucket_date
 	FROM
 		local_asset_entity lae
-	WHERE NOT EXISTS (
+	WHERE :show_local
+	AND NOT EXISTS (
 		SELECT 1 FROM remote_asset_entity rae WHERE rae.checksum = lae.checksum AND rae.owner_id IN :user_ids
 	)
 	AND EXISTS (

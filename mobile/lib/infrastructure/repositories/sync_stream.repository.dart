@@ -18,13 +18,18 @@ import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/cloud_id.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/exif.drift.dart';
 import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
+import 'package:immich_mobile/data/db/main/table/tag/tag.drift.dart';
+import 'package:immich_mobile/data/db/main/table/tag/tag_asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/auth_user.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/metadata.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/partner.drift.dart';
 import 'package:immich_mobile/data/db/main/table/user/user.drift.dart';
+import 'package:immich_mobile/data/db/main/table/view/view.drift.dart';
+import 'package:immich_mobile/data/db/main/table/view/view_tag.drift.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
+import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
@@ -35,8 +40,25 @@ import 'package:immich_mobile/infrastructure/utils/exif.converter.dart';
 import 'package:logging/logging.dart';
 import 'package:openapi/api.dart'
     as api
-    show AlbumUserRole, AssetEditAction, AssetVisibility, StackSource, UserMetadataKey;
-import 'package:openapi/api.dart' hide AlbumUserRole, AssetEditAction, AssetVisibility, StackSource, UserMetadataKey;
+    show
+        AlbumUserRole,
+        AssetEditAction,
+        AssetVisibility,
+        StackSource,
+        UserMetadataKey,
+        ViewAccess,
+        ViewPrivateAssets,
+        ViewTagMode;
+import 'package:openapi/api.dart'
+    hide
+        AlbumUserRole,
+        AssetEditAction,
+        AssetVisibility,
+        StackSource,
+        UserMetadataKey,
+        ViewAccess,
+        ViewPrivateAssets,
+        ViewTagMode;
 
 @DriftAccessor()
 class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepositoryMixin {
@@ -77,6 +99,10 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
             await _db.remoteAssetCloudIdEntity.deleteAll();
             await _db.assetEditEntity.deleteAll();
             await _db.assetOcrEntity.deleteAll();
+            await _db.tagEntity.deleteAll();
+            await _db.tagAssetEntity.deleteAll();
+            await _db.viewEntity.deleteAll();
+            await _db.viewTagEntity.deleteAll();
           });
         } finally {
           // re-enable FK even if the transaction throws, otherwise the connection
@@ -193,6 +219,8 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
       await _db.batch((batch) {
         for (final asset in data) {
           batch.deleteWhere(_db.remoteAssetEntity, (row) => row.id.equals(asset.assetId));
+          // tag links have no foreign key, see TagAssetEntity
+          batch.deleteWhere(_db.tagAssetEntity, (row) => row.assetId.equals(asset.assetId));
         }
       });
     } catch (error, stack) {
@@ -732,6 +760,133 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
     }
   }
 
+  Future<void> updateTagsV1(Iterable<SyncTagV1> data) async {
+    try {
+      await _db.batch((batch) {
+        for (final tag in data) {
+          final companion = TagEntityCompanion(
+            ownerId: Value(tag.ownerId),
+            value: Value(tag.value),
+            parentId: Value(tag.parentId),
+            color: Value(tag.color),
+            isHidden: Value(tag.isHidden),
+            createdAt: Value(tag.createdAt),
+            updatedAt: Value(tag.updatedAt),
+          );
+          batch.insert(_db.tagEntity, companion.copyWith(id: Value(tag.id)), onConflict: DoUpdate((_) => companion));
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: updateTagsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  /// Deletes the tags with their child tags, asset links and the view rules naming them
+  Future<void> deleteTagsV1(Iterable<SyncTagDeleteV1> data) async {
+    try {
+      await _db.customViewRepository.deleteTags(data.map((tag) => tag.tagId));
+    } catch (error, stack) {
+      _logger.severe('Error: deleteTagsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  Future<void> updateTagAssetsV1(Iterable<SyncTagAssetV1> data) async {
+    try {
+      await _db.batch((batch) {
+        batch.insertAll(_db.tagAssetEntity, [
+          for (final link in data) TagAssetEntityCompanion(tagId: Value(link.tagId), assetId: Value(link.assetId)),
+        ], mode: InsertMode.insertOrIgnore);
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: updateTagAssetsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  Future<void> deleteTagAssetsV1(Iterable<SyncTagAssetDeleteV1> data) async {
+    try {
+      await _db.batch((batch) {
+        for (final link in data) {
+          batch.deleteWhere(
+            _db.tagAssetEntity,
+            (row) => row.tagId.equals(link.tagId) & row.assetId.equals(link.assetId),
+          );
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: deleteTagAssetsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  Future<void> updateViewsV1(Iterable<SyncViewV1> data) async {
+    try {
+      await _db.batch((batch) {
+        for (final view in data) {
+          final companion = ViewEntityCompanion(
+            ownerId: Value(view.ownerId),
+            name: Value(view.name),
+            order: Value(view.order),
+            isDefault: Value(view.isDefault),
+            access: Value(view.access.toViewAccess()),
+            includeAll: Value(view.includeAll),
+            includeUntagged: Value(view.includeUntagged),
+            privateAssets: Value(view.privateAssets.toViewPrivateAssets()),
+            createdAt: Value(view.createdAt),
+            updatedAt: Value(view.updatedAt),
+          );
+          batch.insert(_db.viewEntity, companion.copyWith(id: Value(view.id)), onConflict: DoUpdate((_) => companion));
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: updateViewsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  /// Deletes the views with their tag rules
+  Future<void> deleteViewsV1(Iterable<SyncViewDeleteV1> data) async {
+    try {
+      await _db.customViewRepository.deleteViews(data.map((view) => view.viewId));
+    } catch (error, stack) {
+      _logger.severe('Error: deleteViewsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  Future<void> updateViewTagsV1(Iterable<SyncViewTagV1> data) async {
+    try {
+      await _db.batch((batch) {
+        for (final rule in data) {
+          final companion = ViewTagEntityCompanion(mode: Value(rule.mode.toViewTagMode()));
+          batch.insert(
+            _db.viewTagEntity,
+            companion.copyWith(viewId: Value(rule.viewId), tagId: Value(rule.tagId)),
+            onConflict: DoUpdate((_) => companion),
+          );
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: updateViewTagsV1', error, stack);
+      rethrow;
+    }
+  }
+
+  Future<void> deleteViewTagsV1(Iterable<SyncViewTagDeleteV1> data) async {
+    try {
+      await _db.batch((batch) {
+        for (final rule in data) {
+          batch.deleteWhere(_db.viewTagEntity, (row) => row.viewId.equals(rule.viewId) & row.tagId.equals(rule.tagId));
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: deleteViewTagsV1', error, stack);
+      rethrow;
+    }
+  }
+
   Future<void> updateUserMetadatasV1(Iterable<SyncUserMetadataV1> data) async {
     try {
       await _db.batch((batch) {
@@ -1009,6 +1164,30 @@ extension on api.StackSource {
   StackSource toStackSource() => switch (this) {
     api.StackSource.manual => StackSource.manual,
     api.StackSource.auto => StackSource.auto,
+  };
+}
+
+extension on api.ViewAccess {
+  ViewAccess toViewAccess() => switch (this) {
+    api.ViewAccess.open => ViewAccess.open,
+    api.ViewAccess.private => ViewAccess.private,
+    // locked for anything newer, the strictest tier that is still listed
+    _ => ViewAccess.locked,
+  };
+}
+
+extension on api.ViewPrivateAssets {
+  ViewPrivateAssets toViewPrivateAssets() => switch (this) {
+    api.ViewPrivateAssets.unlocked => ViewPrivateAssets.unlocked,
+    api.ViewPrivateAssets.only => ViewPrivateAssets.only,
+    _ => ViewPrivateAssets.hide,
+  };
+}
+
+extension on api.ViewTagMode {
+  ViewTagMode toViewTagMode() => switch (this) {
+    api.ViewTagMode.include => ViewTagMode.include,
+    _ => ViewTagMode.exclude,
   };
 }
 

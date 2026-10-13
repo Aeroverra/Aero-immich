@@ -7,7 +7,8 @@ select
   "tag"."createdAt",
   "tag"."updatedAt",
   "tag"."color",
-  "tag"."parentId"
+  "tag"."parentId",
+  "tag"."isHidden"
 from
   "tag"
 where
@@ -20,7 +21,8 @@ select
   "tag"."createdAt",
   "tag"."updatedAt",
   "tag"."color",
-  "tag"."parentId"
+  "tag"."parentId",
+  "tag"."isHidden"
 from
   "tag"
 where
@@ -69,11 +71,21 @@ select
   "tag"."createdAt",
   "tag"."updatedAt",
   "tag"."color",
-  "tag"."parentId"
+  "tag"."parentId",
+  "tag"."isHidden"
 from
   "tag"
 where
   "userId" = $1
+  and not exists (
+    select
+    from
+      "tag_closure"
+      inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+    where
+      "tag_closure"."id_descendant" = "tag"."id"
+      and "hidden_tag"."isHidden" = $2
+  )
 order by
   "value"
 

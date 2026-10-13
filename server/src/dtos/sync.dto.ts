@@ -14,6 +14,9 @@ import {
   SyncRequestTypeSchema,
   UserAvatarColorSchema,
   UserMetadataKeySchema,
+  ViewAccessSchema,
+  ViewPrivateAssetsSchema,
+  ViewTagModeSchema,
 } from 'src/enum';
 import { isoDatetimeToDate } from 'src/validation';
 import z from 'zod';
@@ -396,6 +399,89 @@ const SyncUserMetadataDeleteV1Schema = z
   })
   .meta({ id: 'SyncUserMetadataDeleteV1' });
 
+const SyncTagV1Schema = z
+  .object({
+    id: z.uuidv4().describe('Tag ID'),
+    ownerId: z.uuidv4().describe('Owner ID'),
+    value: z.string().describe('Tag value (full path)'),
+    parentId: z.uuidv4().nullable().describe('Parent tag ID'),
+    color: z.string().nullable().describe('Tag color (hex)'),
+    isHidden: z.boolean().describe('Hidden unless private mode is unlocked; children of a hidden tag are hidden too'),
+    createdAt: isoDatetimeToDate.describe('Created at'),
+    updatedAt: isoDatetimeToDate.describe('Updated at'),
+  })
+  .meta({ id: 'SyncTagV1' });
+
+const SyncTagDeleteV1Schema = z
+  .object({ tagId: z.uuidv4().describe('Tag ID; its child tags, asset links and view rules are deleted with it') })
+  .meta({ id: 'SyncTagDeleteV1' });
+
+const SyncTagAssetV1Schema = z
+  .object({
+    tagId: z.uuidv4().describe('Tag ID'),
+    assetId: z.uuidv4().describe('Asset ID'),
+  })
+  .meta({ id: 'SyncTagAssetV1' });
+
+const SyncTagAssetDeleteV1Schema = z
+  .object({
+    tagId: z.uuidv4().describe('Tag ID'),
+    assetId: z.uuidv4().describe('Asset ID'),
+  })
+  .meta({ id: 'SyncTagAssetDeleteV1' });
+
+const SyncViewV1Schema = z
+  .object({
+    id: z.uuidv4().describe('View ID'),
+    ownerId: z.uuidv4().describe('Owner ID'),
+    name: z.string().describe('View name'),
+    order: z.int().describe('Position in the view list'),
+    isDefault: z.boolean().describe('Whether this is the default view'),
+    access: ViewAccessSchema,
+    includeAll: z.boolean().describe('Include every asset'),
+    includeUntagged: z.boolean().describe('Include assets without any of the owner tags'),
+    privateAssets: ViewPrivateAssetsSchema,
+    createdAt: isoDatetimeToDate.describe('Created at'),
+    updatedAt: isoDatetimeToDate.describe('Updated at'),
+  })
+  .meta({ id: 'SyncViewV1' });
+
+const SyncViewDeleteV1Schema = z
+  .object({ viewId: z.uuidv4().describe('View ID; its tag rules are deleted with it') })
+  .meta({ id: 'SyncViewDeleteV1' });
+
+const SyncViewTagV1Schema = z
+  .object({
+    viewId: z.uuidv4().describe('View ID'),
+    tagId: z.uuidv4().describe('Tag ID'),
+    mode: ViewTagModeSchema,
+  })
+  .meta({ id: 'SyncViewTagV1' });
+
+const SyncViewTagDeleteV1Schema = z
+  .object({
+    viewId: z.uuidv4().describe('View ID'),
+    tagId: z.uuidv4().describe('Tag ID'),
+  })
+  .meta({ id: 'SyncViewTagDeleteV1' });
+
+@ExtraModel()
+class SyncTagV1 extends createZodDto(SyncTagV1Schema) {}
+@ExtraModel()
+class SyncTagDeleteV1 extends createZodDto(SyncTagDeleteV1Schema) {}
+@ExtraModel()
+class SyncTagAssetV1 extends createZodDto(SyncTagAssetV1Schema) {}
+@ExtraModel()
+class SyncTagAssetDeleteV1 extends createZodDto(SyncTagAssetDeleteV1Schema) {}
+@ExtraModel()
+class SyncViewV1 extends createZodDto(SyncViewV1Schema) {}
+@ExtraModel()
+class SyncViewDeleteV1 extends createZodDto(SyncViewDeleteV1Schema) {}
+@ExtraModel()
+class SyncViewTagV1 extends createZodDto(SyncViewTagV1Schema) {}
+@ExtraModel()
+class SyncViewTagDeleteV1 extends createZodDto(SyncViewTagDeleteV1Schema) {}
+
 const SyncAckV1Schema = z.object({}).meta({ id: 'SyncAckV1' });
 const SyncResetV1Schema = z.object({}).meta({ id: 'SyncResetV1' });
 const SyncCompleteV1Schema = z.object({}).meta({ id: 'SyncCompleteV1' });
@@ -530,6 +616,14 @@ export type SyncItem = {
   [SyncEntityType.AssetFaceDeleteV1]: SyncAssetFaceDeleteV1;
   [SyncEntityType.UserMetadataV1]: SyncUserMetadataV1;
   [SyncEntityType.UserMetadataDeleteV1]: SyncUserMetadataDeleteV1;
+  [SyncEntityType.TagV1]: SyncTagV1;
+  [SyncEntityType.TagDeleteV1]: SyncTagDeleteV1;
+  [SyncEntityType.TagAssetV1]: SyncTagAssetV1;
+  [SyncEntityType.TagAssetDeleteV1]: SyncTagAssetDeleteV1;
+  [SyncEntityType.ViewV1]: SyncViewV1;
+  [SyncEntityType.ViewDeleteV1]: SyncViewDeleteV1;
+  [SyncEntityType.ViewTagV1]: SyncViewTagV1;
+  [SyncEntityType.ViewTagDeleteV1]: SyncViewTagDeleteV1;
   [SyncEntityType.SyncAckV1]: SyncAckV1;
   [SyncEntityType.SyncCompleteV1]: SyncCompleteV1;
   [SyncEntityType.SyncResetV1]: SyncResetV1;
@@ -544,6 +638,12 @@ const SyncStreamSchema = z
       .optional()
       .describe(
         'Include assets marked private. Without it, private assets are left out of the stream and a delete is emitted when an asset becomes private.',
+      ),
+    includeViews: z
+      .boolean()
+      .optional()
+      .describe(
+        'Include every asset regardless of views; the client filters with the views it syncs. Without it, only assets that pass the user default view are sent, and a delete is emitted when an asset leaves the default view.',
       ),
   })
   .meta({ id: 'SyncStreamDto' });

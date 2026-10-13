@@ -3,7 +3,7 @@ import { parse } from 'cookie';
 import { DateTime } from 'luxon';
 import { IncomingHttpHeaders } from 'node:http';
 import { LOGIN_DUMMY_HASH, LOGIN_URL, MOBILE_REDIRECT, SALT_ROUNDS } from 'src/constants';
-import { AuthSharedLink, AuthUser, UserAdmin } from 'src/database';
+import { AuthSharedLink, AuthUser, UserAdmin, ViewFilter } from 'src/database';
 import {
   AuthDto,
   AuthStatusResponseDto,
@@ -21,7 +21,7 @@ import {
   mapLoginResponse,
 } from 'src/dtos/auth.dto';
 import { UserAdminResponseDto, mapUserAdmin } from 'src/dtos/user.dto';
-import { AuthType, ImmichCookie, ImmichHeader, ImmichQuery, JobName, Permission } from 'src/enum';
+import { AuthType, ImmichCookie, ImmichHeader, ImmichQuery, JobName, Permission, ViewAccess } from 'src/enum';
 import { OAuthProfile } from 'src/repositories/oauth.repository';
 import { BaseService } from 'src/services/base.service';
 import { isGranted, isPrivateMode } from 'src/utils/access';
@@ -579,18 +579,30 @@ export class AuthService extends BaseService {
 
       // Private mode check (sliding window, renewed on activity)
       let privateMode = false;
+      let privateModeRelocked = false;
+      let renewedPrivateModeExpiresAt: Date | undefined;
 
       if (session.privateModeExpiresAt) {
         const privateModeExpiresAt = DateTime.fromJSDate(session.privateModeExpiresAt);
         privateMode = privateModeExpiresAt > now;
+        privateModeRelocked = !privateMode;
 
         if (privateMode && now.plus({ minutes: 5 }) > privateModeExpiresAt) {
           const timeoutMinutes = await this.getPrivateModeTimeout(session.user.id);
-          await this.sessionRepository.update(session.id, {
-            privateModeExpiresAt: DateTime.now().plus({ minutes: timeoutMinutes }).toJSDate(),
-          });
+          renewedPrivateModeExpiresAt = DateTime.now().plus({ minutes: timeoutMinutes }).toJSDate();
+          await this.sessionRepository.update(session.id, { privateModeExpiresAt: renewedPrivateModeExpiresAt });
         }
       }
+
+      const { viewId, view } = await this.resolveSessionView(
+        { ...session, user: session.user },
+        {
+          now,
+          privateMode,
+          privateModeRelocked,
+          renewedPrivateModeExpiresAt,
+        },
+      );
 
       return {
         user: session.user,
@@ -598,11 +610,62 @@ export class AuthService extends BaseService {
           id: session.id,
           hasElevatedPermission,
           privateMode,
+          ...(viewId && { viewId }),
+          ...(view && { view }),
         },
       };
     }
 
     throw new UnauthorizedException('Invalid user token');
+  }
+
+  /**
+   * The view that applies to a session request. A switched view falls back to the default view whenever private mode
+   * relocks (its timeout passed or it was locked), when the view's own timeout passes while private mode is off, and
+   * when a private-mode-only view is active without private mode. While private mode is on, the view follows the
+   * private mode timeout exactly.
+   */
+  private async resolveSessionView(
+    session: {
+      id: string;
+      user: { id: string };
+      viewId: string | null;
+      viewExpiresAt: Date | null;
+      view: ViewFilter | null;
+      defaultView: ViewFilter | null;
+    },
+    context: { now: DateTime; privateMode: boolean; privateModeRelocked: boolean; renewedPrivateModeExpiresAt?: Date },
+  ): Promise<{ viewId: string | null; view: ViewFilter | null }> {
+    const defaultView = session.defaultView ?? null;
+    if (!session.viewId) {
+      return { viewId: null, view: defaultView };
+    }
+
+    const { now, privateMode, privateModeRelocked, renewedPrivateModeExpiresAt } = context;
+    const view = session.view;
+    const viewExpired = !privateMode && (!session.viewExpiresAt || DateTime.fromJSDate(session.viewExpiresAt) <= now);
+    const needsPrivateMode = view?.access === ViewAccess.Private && !privateMode;
+
+    if (!view || privateModeRelocked || viewExpired || needsPrivateMode) {
+      await this.sessionRepository.update(session.id, {
+        viewId: null,
+        viewExpiresAt: null,
+        // the relock was noticed, so a later switch does not fall back again
+        ...(privateModeRelocked && { privateModeExpiresAt: null }),
+      });
+      return { viewId: null, view: defaultView };
+    }
+
+    if (renewedPrivateModeExpiresAt) {
+      await this.sessionRepository.update(session.id, { viewExpiresAt: renewedPrivateModeExpiresAt });
+    } else if (!privateMode && now.plus({ minutes: 5 }) > DateTime.fromJSDate(session.viewExpiresAt!)) {
+      const timeoutMinutes = await this.getPrivateModeTimeout(session.user.id);
+      await this.sessionRepository.update(session.id, {
+        viewExpiresAt: DateTime.now().plus({ minutes: timeoutMinutes }).toJSDate(),
+      });
+    }
+
+    return { viewId: view.id, view };
   }
 
   async unlockSession(auth: AuthDto, dto: SessionUnlockDto): Promise<void> {
@@ -645,7 +708,12 @@ export class AuthService extends BaseService {
       throw new BadRequestException('This endpoint can only be used with a session token');
     }
 
-    await this.sessionRepository.update(auth.session.id, { privateModeExpiresAt: null });
+    // locking private mode also returns the session to the default view
+    await this.sessionRepository.update(auth.session.id, {
+      privateModeExpiresAt: null,
+      viewId: null,
+      viewExpiresAt: null,
+    });
   }
 
   private async getPrivateModeTimeout(userId: string): Promise<number> {

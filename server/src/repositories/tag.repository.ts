@@ -7,6 +7,7 @@ import { LoggingRepository } from 'src/repositories/logging.repository';
 import { DB } from 'src/schema';
 import { TagAssetTable } from 'src/schema/tables/tag-asset.table';
 import { TagTable } from 'src/schema/tables/tag.table';
+import { isTagHidden } from 'src/utils/database';
 @Injectable()
 export class TagRepository {
   constructor(
@@ -43,9 +44,18 @@ export class TagRepository {
     );
   }
 
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getAll(userId: string) {
-    return this.db.selectFrom('tag').select(columns.tag).where('userId', '=', userId).orderBy('value').execute();
+  @GenerateSql({ params: [DummyValue.UUID, { withHidden: false }] })
+  getAll(userId: string, { withHidden = true }: { withHidden?: boolean } = {}) {
+    return (
+      this.db
+        .selectFrom('tag')
+        .select(columns.tag)
+        .where('userId', '=', userId)
+        // hidden tags and their descendants do not exist while private mode is locked
+        .$if(!withHidden, (qb) => qb.where((eb) => eb.not(isTagHidden(eb, 'tag.id'))))
+        .orderBy('value')
+        .execute()
+    );
   }
 
   @GenerateSql({ params: [{ userId: DummyValue.UUID, color: DummyValue.STRING, value: DummyValue.STRING }] })
@@ -205,6 +215,16 @@ export class TagRepository {
             selectFrom('tag_closure')
               .whereRef('tag.id', '=', 'tag_closure.id_ancestor')
               .innerJoin('tag_asset', 'tag_closure.id_descendant', 'tag_asset.tagId'),
+          ),
+        ),
+      )
+      // a tag a view rule names (or the parent of one) stays, so a view never loses a rule while it is unused
+      .where(({ not, exists, selectFrom }) =>
+        not(
+          exists(
+            selectFrom('tag_closure')
+              .whereRef('tag.id', '=', 'tag_closure.id_ancestor')
+              .innerJoin('view_tag', 'tag_closure.id_descendant', 'view_tag.tagId'),
           ),
         ),
       )

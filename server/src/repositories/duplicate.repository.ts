@@ -2,14 +2,20 @@ import { Injectable } from '@nestjs/common';
 import { Kysely, NotNull, Selectable, ShallowDehydrateObject, sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { InjectKysely } from 'nestjs-kysely';
-import { columns } from 'src/database';
 import { Chunked, DummyValue, GenerateSql } from 'src/decorators';
 import { MapAsset } from 'src/dtos/asset-response.dto';
 import { AssetType, VectorIndex } from 'src/enum';
 import { probes } from 'src/repositories/database.repository';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
-import { anyUuid, asUuid, PrivateScope, withDefaultVisibility, withPrivateScope } from 'src/utils/database';
+import {
+  anyUuid,
+  asUuid,
+  PrivateScope,
+  withDefaultVisibility,
+  withEffectiveTagColumns,
+  withPrivateScope,
+} from 'src/utils/database';
 
 // Maximum number of candidate duplicates to return from vector search
 const DUPLICATE_SEARCH_LIMIT = 64;
@@ -61,7 +67,7 @@ export class DuplicateRepository {
                     jsonArrayFrom(
                       eb
                         .selectFrom('tag')
-                        .select(columns.tag)
+                        .select(withEffectiveTagColumns)
                         .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
                         .whereRef('tag_asset.assetId', '=', 'asset.id'),
                     ).as('tags'),
@@ -135,7 +141,7 @@ export class DuplicateRepository {
               jsonArrayFrom(
                 eb
                   .selectFrom('tag')
-                  .select(columns.tag)
+                  .select(withEffectiveTagColumns)
                   .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
                   .whereRef('tag_asset.assetId', '=', 'asset.id'),
               ).as('tags'),

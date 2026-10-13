@@ -18,7 +18,7 @@ import {
 import { PostgresJSDialect } from 'kysely-postgres-js';
 import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
 import { Notice, PostgresError } from 'postgres';
-import { columns, lockableProperties, LockableProperty, Person } from 'src/database';
+import { columns, lockableProperties, LockableProperty, Person, ViewFilter } from 'src/database';
 import { DummyValue, GenerateSqlQueries } from 'src/decorators';
 import { AssetEditActionItem } from 'src/dtos/editing.dto';
 import {
@@ -38,6 +38,9 @@ import {
   DatabaseExtension,
   ExifOrientation,
   SearchOrderField,
+  ViewAccess,
+  ViewPrivateAssets,
+  ViewTagMode,
 } from 'src/enum';
 import {
   AssetSearchBuilderOptions,
@@ -118,7 +121,171 @@ export function withDefaultVisibility<O>(qb: SelectQueryBuilder<DB, 'asset', O>)
 export type PrivateScope = {
   privateMode: boolean;
   userId: string;
+  /** the view that applies to the request; null or undefined shows everything */
+  view?: ViewFilter | null;
 };
+
+/** a restrictive view for the generated SQL query files */
+export const dummyViewFilter: ViewFilter = {
+  id: DummyValue.UUID,
+  ownerId: DummyValue.UUID,
+  access: ViewAccess.Open,
+  includeAll: false,
+  includeUntagged: true,
+  includeTagIds: [DummyValue.UUID],
+  excludeTagIds: [DummyValue.UUID_1],
+  privateAssets: ViewPrivateAssets.Hide,
+};
+
+/** true when the view lets every asset through, so the read paths can skip its predicate */
+export const isViewUnrestricted = (view?: ViewFilter | null): view is null | undefined =>
+  !view || (view.includeAll && view.excludeTagIds.length === 0 && view.privateAssets === ViewPrivateAssets.Unlocked);
+
+type TagMatch = (eb: ExpressionBuilder<DB, any>, assetIdRef: string) => Expression<SqlBool>;
+
+const viewTagMatch =
+  (tagIds: string[]): TagMatch =>
+  (eb, assetIdRef) =>
+    eb.exists(
+      eb
+        .selectFrom('tag_asset')
+        .innerJoin('tag_closure', 'tag_closure.id_descendant', 'tag_asset.tagId')
+        .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
+        .where('tag_closure.id_ancestor', '=', anyUuid(tagIds)),
+    );
+
+const ownerTagMatch =
+  (ownerId: string): TagMatch =>
+  (eb, assetIdRef) =>
+    eb.exists(
+      eb
+        .selectFrom('tag_asset')
+        .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+        .whereRef('tag_asset.assetId', '=', eb.ref(assetIdRef))
+        .where('tag.userId', '=', ownerId),
+    );
+
+/**
+ * The tags of an asset as views see them: its own, plus for the hidden motion part of a live photo the tags of its
+ * still, so tagging the still moves the clip in or out of a view with it. The negated form is written as NOT EXISTS
+ * terms joined by AND, which Postgres can still plan as an anti join.
+ */
+const withLivePhotoStill = (
+  eb: ExpressionBuilder<DB, any>,
+  match: TagMatch,
+  { assetIdRef, visibilityRef }: { assetIdRef: string; visibilityRef: string },
+  { negate = false }: { negate?: boolean } = {},
+) => {
+  const own = match(eb, assetIdRef);
+  const still = eb.exists(
+    eb
+      .selectFrom('asset as live_photo_still')
+      .whereRef('live_photo_still.livePhotoVideoId', '=', eb.ref(assetIdRef))
+      .where((eb) => match(eb, 'live_photo_still.id')),
+  );
+  const visibility = eb.ref(visibilityRef);
+  return negate
+    ? eb.and([eb.not(own), eb.or([eb(visibility, '!=', sql.lit(AssetVisibility.Hidden)), eb.not(still)])])
+    : eb.or([own, eb.and([eb(visibility, '=', sql.lit(AssetVisibility.Hidden)), still])]);
+};
+
+/**
+ * Whether the asset referenced by `assetIdRef` (with `isPrivate` and `visibility` next to it) passes the view. Exclude
+ * wins over include; `includeUntagged` looks at every tag of the view owner, hidden ones included. The hidden motion
+ * part of a live photo also carries the tags of its still.
+ */
+export const viewAssetPredicate = (
+  eb: ExpressionBuilder<DB, any>,
+  view: ViewFilter,
+  { assetIdRef = 'asset.id', isPrivateRef = 'asset.isPrivate' }: { assetIdRef?: string; isPrivateRef?: string } = {},
+): Expression<SqlBool> => {
+  // every caller passes columns of the same asset row
+  const refs = { assetIdRef, visibilityRef: isPrivateRef.replace(/isPrivate$/, 'visibility') };
+  const included: Expression<SqlBool>[] = [];
+  if (view.includeAll) {
+    included.push(eb.lit(true));
+  } else {
+    if (view.includeUntagged) {
+      included.push(withLivePhotoStill(eb, ownerTagMatch(view.ownerId), refs, { negate: true }));
+    }
+    if (view.includeTagIds.length > 0) {
+      included.push(withLivePhotoStill(eb, viewTagMatch(view.includeTagIds), refs));
+    }
+  }
+
+  const predicates: Expression<SqlBool>[] = [included.length > 0 ? eb.or(included) : eb.lit(false)];
+  if (view.excludeTagIds.length > 0) {
+    predicates.push(withLivePhotoStill(eb, viewTagMatch(view.excludeTagIds), refs, { negate: true }));
+  }
+  if (view.privateAssets === ViewPrivateAssets.Hide) {
+    predicates.push(eb(eb.ref(isPrivateRef), '=', false));
+  } else if (view.privateAssets === ViewPrivateAssets.Only) {
+    predicates.push(eb(eb.ref(isPrivateRef), '=', true));
+  }
+
+  return eb.and(predicates);
+};
+
+/** Keeps only the assets that pass the view; a missing or unrestricted view changes nothing */
+export function withViewScope<O>(view?: ViewFilter | null) {
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) =>
+    isViewUnrestricted(view) ? qb : qb.where((eb) => viewAssetPredicate(eb, view));
+}
+
+/** The columns that make up a {@link ViewFilter}, with the include and exclude tag ids aggregated */
+export const viewFilterColumns = (eb: ExpressionBuilder<DB, 'view'>) =>
+  [
+    'view.id',
+    'view.ownerId',
+    'view.access',
+    'view.includeAll',
+    'view.includeUntagged',
+    'view.privateAssets',
+    eb
+      .fn<string[]>('coalesce', [
+        eb
+          .selectFrom('view_tag')
+          .select((eb) => eb.fn.agg<string[]>('array_agg', ['view_tag.tagId']).as('ids'))
+          .whereRef('view_tag.viewId', '=', 'view.id')
+          .where('view_tag.mode', '=', sql.lit(ViewTagMode.Include)),
+        sql.lit('{}'),
+      ])
+      .$notNull()
+      .as('includeTagIds'),
+    eb
+      .fn<string[]>('coalesce', [
+        eb
+          .selectFrom('view_tag')
+          .select((eb) => eb.fn.agg<string[]>('array_agg', ['view_tag.tagId']).as('ids'))
+          .whereRef('view_tag.viewId', '=', 'view.id')
+          .where('view_tag.mode', '=', sql.lit(ViewTagMode.Exclude)),
+        sql.lit('{}'),
+      ])
+      .$notNull()
+      .as('excludeTagIds'),
+  ] as const;
+
+/** Whether the tag referenced by `tagIdRef` is hidden itself or through one of its ancestors */
+export const isTagHidden = (eb: ExpressionBuilder<DB, any>, tagIdRef: string) =>
+  eb.exists(
+    eb
+      .selectFrom('tag_closure')
+      .innerJoin('tag as hidden_tag', 'hidden_tag.id', 'tag_closure.id_ancestor')
+      .whereRef('tag_closure.id_descendant', '=', eb.ref(tagIdRef))
+      .where('hidden_tag.isHidden', '=', true),
+  );
+
+/** tag columns for asset responses, where isHidden is the effective flag (a child of a hidden tag is hidden too) */
+export const withEffectiveTagColumns = (eb: ExpressionBuilder<DB, 'tag'>) =>
+  [
+    'tag.id',
+    'tag.value',
+    'tag.createdAt',
+    'tag.updatedAt',
+    'tag.color',
+    'tag.parentId',
+    isTagHidden(eb, 'tag.id').$castTo<boolean>().as('isHidden'),
+  ] as const;
 
 /**
  * Mixed-owner feeds (timeline with partners, search, map, memories, people, stats):
@@ -126,9 +293,10 @@ export type PrivateScope = {
  */
 export function withPrivateScope<O>(scope: PrivateScope) {
   return (qb: SelectQueryBuilder<DB, 'asset', O>) =>
-    scope.privateMode
+    (scope.privateMode
       ? qb.where((eb) => eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)]))
-      : qb.where('asset.isPrivate', '=', false);
+      : qb.where('asset.isPrivate', '=', false)
+    ).$call(withViewScope(scope.view));
 }
 
 /**
@@ -136,7 +304,8 @@ export function withPrivateScope<O>(scope: PrivateScope) {
  * private assets. With it off, private assets are hidden regardless of owner.
  */
 export function withPrivateAlbumScope<O>(scope: PrivateScope) {
-  return (qb: SelectQueryBuilder<DB, 'asset', O>) => (scope.privateMode ? qb : qb.where('asset.isPrivate', '=', false));
+  return (qb: SelectQueryBuilder<DB, 'asset', O>) =>
+    (scope.privateMode ? qb : qb.where('asset.isPrivate', '=', false)).$call(withViewScope(scope.view));
 }
 
 /**
@@ -405,7 +574,7 @@ export function withTags(eb: ExpressionBuilder<DB, 'asset'>) {
   return jsonArrayFrom(
     eb
       .selectFrom('tag')
-      .select(columns.tag)
+      .select(withEffectiveTagColumns)
       .innerJoin('tag_asset', 'tag.id', 'tag_asset.tagId')
       .whereRef('asset.id', '=', 'tag_asset.assetId'),
   ).as('tags');
@@ -882,6 +1051,7 @@ export function searchAssetBuilder(kysely: Kysely<DB>, options: AssetSearchBuild
           ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.privateOwnerId)])
           : eb('asset.isPrivate', '=', false),
       )
+      .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
       .$if(!!(options.withFaces || options.withPeople), (qb) =>
         qb.select(withFacesAndPeople({ viewingUserId: scope.viewingUserId! })),
       )
