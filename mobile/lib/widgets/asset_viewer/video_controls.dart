@@ -110,6 +110,7 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
         : ref.watch(_provider.select((v) => (v.position, v.duration)));
 
     final videoStatus = ref.watch(_provider.select((v) => v.status));
+    final (source, resolution) = ref.watch(_provider.select((v) => (v.source, v.resolution)));
     final isPlaying = isCasting
         ? cast.castState == CastState.playing
         : videoStatus == VideoPlaybackStatus.playing || videoStatus == VideoPlaybackStatus.buffering;
@@ -162,7 +163,17 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
                   ),
                   onPressed: isLoaded ? () => _addBookmark(bookmarkAssetId, position) : null,
                 ),
-              const Spacer(),
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: source == null || isCasting
+                      ? null
+                      : Padding(
+                          padding: const EdgeInsets.only(left: 8, right: 12),
+                          child: VideoPlaybackSourceChip(source: source, resolution: resolution),
+                        ),
+                ),
+              ),
               IgnorePointer(
                 child: Text(
                   "${position.format()} / ${duration.format()}",
@@ -201,6 +212,43 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Says which file is playing: the transcoded copy, the original or the copy on this device.
+class VideoPlaybackSourceChip extends StatelessWidget {
+  final VideoPlaybackSource source;
+  final int? resolution;
+
+  const VideoPlaybackSourceChip({super.key, required this.source, this.resolution});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, description) = switch (source) {
+      VideoPlaybackSource.transcoded => (
+        context.t.video_source_transcoded,
+        context.t.video_source_transcoded_description,
+      ),
+      VideoPlaybackSource.original => (context.t.video_source_original, context.t.video_source_original_description),
+      VideoPlaybackSource.device => (context.t.video_source_on_device, context.t.video_source_on_device_description),
+    };
+
+    return Tooltip(
+      message: description,
+      triggerMode: TooltipTriggerMode.tap,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Colors.black45, borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Text(
+            resolution == null ? label : '$label · ${resolution}p',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ),
       ),
     );
   }

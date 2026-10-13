@@ -83,6 +83,7 @@ export class AssetService extends BaseService {
         stack: { assets: true },
         edits: true,
         tags: true,
+        files: true,
       },
       scope,
     );
