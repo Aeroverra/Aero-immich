@@ -248,6 +248,39 @@ void main() {
       expect(metadata.hasNamedFaces, const Optional<bool?>.present(false));
       expect(metadata.hasUnnamedFaces, const Optional<bool?>.present(true));
     });
+
+    test('sends the left out people next to the picked ones, for both searches', () async {
+      const bob = Person(id: 'bob', name: 'Bob');
+      final picked = filter.copyWith(people: {ann}, excludedPeople: {bob});
+
+      await repo.search(picked, 1);
+      await repo.search(picked.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.personIds.value, ['ann']);
+      expect(metadata.excludePersonIds.value, ['bob']);
+      expect(sentSmart().excludePersonIds.value, ['bob']);
+    });
+
+    test('leaves the left out people out when there are none or they do not apply, never sending null', () async {
+      const bob = Person(id: 'bob', name: 'Bob');
+
+      await repo.search(filter, 1);
+      expect(sentMetadata().excludePersonIds.isPresent, isFalse);
+
+      await repo.search(filter.copyWith(excludedPeople: {bob}, hasPeople: false), 1);
+      expect(sentMetadata().excludePersonIds.isPresent, isFalse);
+
+      await repo.search(filter.copyWith(excludedPeople: {bob}, hasNamedFaces: false), 1);
+      expect(sentMetadata().excludePersonIds.isPresent, isFalse);
+    });
+
+    test('counts left out people as a filter', () {
+      const bob = Person(id: 'bob', name: 'Bob');
+
+      expect(filter.isEmpty, isTrue);
+      expect(filter.copyWith(excludedPeople: {bob}).isEmpty, isFalse);
+    });
   });
 
   group('smart search', () {

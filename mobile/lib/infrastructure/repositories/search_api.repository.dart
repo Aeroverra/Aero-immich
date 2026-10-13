@@ -49,7 +49,11 @@ class SearchApiRepository extends ApiRepository {
         : Optional.present(filter.excludeAlbumIds);
     // an asset without any face, or without anyone named, shows none of the picked people
     final noFaces = filter.hasPeople == false;
-    final personIds = noFaces || filter.hasNamedFaces == false ? <String>[] : filter.people.map((e) => e.id).toList();
+    final peopleApply = !noFaces && filter.hasNamedFaces != false;
+    final personIds = peopleApply ? filter.people.map((e) => e.id).toList() : <String>[];
+    final Optional<List<String>?> excludePersonIds = !peopleApply || filter.excludedPeople.isEmpty
+        ? const Optional.absent()
+        : Optional.present(filter.excludedPeople.map((e) => e.id).toList());
     final Optional<bool?> onlyPersonIds = personIds.isEmpty || filter.onlyPeople == null
         ? const Optional.absent()
         : Optional.present(filter.onlyPeople);
@@ -98,6 +102,7 @@ class SearchApiRepository extends ApiRepository {
           isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
           isPrivate: isPrivate,
           personIds: Optional.present(personIds),
+          excludePersonIds: excludePersonIds,
           onlyPersonIds: onlyPersonIds,
           hasPeople: hasPeople,
           hasNamedFaces: hasNamedFaces,
@@ -141,6 +146,7 @@ class SearchApiRepository extends ApiRepository {
         isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
         isPrivate: isPrivate,
         personIds: Optional.present(personIds),
+        excludePersonIds: excludePersonIds,
         onlyPersonIds: onlyPersonIds,
         hasPeople: hasPeople,
         hasNamedFaces: hasNamedFaces,

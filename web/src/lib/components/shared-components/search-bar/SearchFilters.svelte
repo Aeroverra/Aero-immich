@@ -40,6 +40,7 @@
     getSearchAlbumsTitle,
     getSearchDateFilterTitle,
     getSearchMediaTitle,
+    getSearchExcludedPeopleTitle,
     getSearchPeopleFilterTitle,
     getSearchPeopleTitle,
     getSearchPlacesTitle,
@@ -90,9 +91,10 @@
   let albums = $state<AlbumResponseDto[]>();
 
   let typeTitle = $derived(getSearchTypeTitle(searchManager.filter.queryType));
-  // the picked people's names, set here and by the People section
+  // the picked and the left out people's names, set here and by the People section
   let peopleNames = $state<string>();
-  let peopleTitle = $derived(getSearchPeopleFilterTitle(peopleNames, searchManager.filter));
+  let excludedPeopleNames = $state<string>();
+  let peopleTitle = $derived(getSearchPeopleFilterTitle(peopleNames, excludedPeopleNames, searchManager.filter));
   let dateTitle = $derived(getSearchDateFilterTitle(searchManager.filter.date));
   let placesTitle = $derived(
     getSearchPlacesTitle(
@@ -174,12 +176,13 @@
 
   const clear = () => {
     searchManager.reset();
-    peopleNames = tagsTitle = undefined;
+    peopleNames = excludedPeopleNames = tagsTitle = undefined;
   };
 
   onMount(() => {
-    if (searchManager.filter.personIds.size > 0 && !peoplePromise) {
-      peoplePromise = getPeople(searchManager.filter.personIds);
+    const { personIds, excludePersonIds } = searchManager.filter;
+    if ((personIds.size > 0 || excludePersonIds.size > 0) && !peoplePromise) {
+      peoplePromise = getPeople(new Set([...personIds, ...excludePersonIds]));
       void peoplePromise.then((res) => (people = res));
     }
 
@@ -194,9 +197,11 @@
   });
 
   $effect(() => {
-    if (people) {
-      peopleNames = getSearchPeopleTitle(people, searchManager.filter.personIds);
+    if (!people) {
+      return;
     }
+    peopleNames = getSearchPeopleTitle(people, searchManager.filter.personIds);
+    excludedPeopleNames = getSearchExcludedPeopleTitle(people, searchManager.filter.excludePersonIds);
   });
 
   $effect(() => {
@@ -266,7 +271,11 @@
             {#if activeFilter === 'type'}
               <SearchTextSection />
             {:else if activeFilter === 'people'}
-              <SearchPeopleSection bind:title={peopleNames} parentPromise={peoplePromise} />
+              <SearchPeopleSection
+                bind:title={peopleNames}
+                bind:excludedTitle={excludedPeopleNames}
+                parentPromise={peoplePromise}
+              />
             {:else if activeFilter === 'date'}
               <SearchDateSection />
             {:else if activeFilter === 'places'}

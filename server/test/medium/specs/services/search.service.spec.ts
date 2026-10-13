@@ -586,6 +586,56 @@ describe(SearchService.name, () => {
       expect(ids(response.assets.items)).toEqual(ids([annAndBob, annAndStranger]));
     });
 
+    it('should leave out photos that show an excluded person', async () => {
+      const library = await newPeopleLibrary();
+      const { sut, auth, bob } = library;
+
+      const response = await sut.searchMetadata(auth, { size: 250, excludePersonIds: [bob.personGroupId] });
+
+      // Bob's hidden face is not in the photo anymore, so that photo stays
+      expect(ids(response.assets.items)).toEqual(
+        ids([
+          library.annAlone,
+          library.annTwice,
+          library.annAndStranger,
+          library.annAndGoneFaces,
+          library.unnamedOnly,
+          library.hiddenOnly,
+          library.strangerOnly,
+          library.nobody,
+          library.onlyHiddenFace,
+        ]),
+      );
+    });
+
+    it('should leave out photos that show any of the excluded people', async () => {
+      const { sut, auth, ann, bob, unnamed } = await newPeopleLibrary();
+
+      const response = await sut.searchStatistics(auth, {
+        excludePersonIds: [ann.personGroupId, bob.personGroupId, unnamed.personGroupId],
+      });
+
+      expect(response).toEqual({ total: 4 });
+    });
+
+    it('should combine searched and excluded people', async () => {
+      const { sut, auth, ann, bob, annAlone, annTwice, annAndStranger, annAndGoneFaces } = await newPeopleLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        personIds: [ann.personGroupId],
+        excludePersonIds: [bob.personGroupId],
+      });
+      const both = await sut.searchMetadata(auth, {
+        size: 250,
+        personIds: [ann.personGroupId],
+        excludePersonIds: [ann.personGroupId],
+      });
+
+      expect(ids(response.assets.items)).toEqual(ids([annAlone, annTwice, annAndStranger, annAndGoneFaces]));
+      expect(both.assets.items).toHaveLength(0);
+    });
+
     it('should ignore onlyPersonIds without people', async () => {
       const { sut, auth } = await newPeopleLibrary();
 
@@ -707,10 +757,15 @@ describe(SearchService.name, () => {
         { page: 1, size: 100 },
         { embedding: unitVector(1), userIds: [user.id], hasUnnamedFaces: true },
       );
+      const withoutAnn = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(1), userIds: [user.id], excludePersonIds: [ann.personGroupId] },
+      );
 
       expect(ids(only.items)).toEqual(ids([annAlone]));
       expect(ids(empty.items)).toEqual(ids([nobody]));
       expect(ids(unnamed.items)).toEqual(ids([strangerOnly]));
+      expect(ids(withoutAnn.items)).toEqual(ids([nobody, strangerOnly]));
     });
   });
 
