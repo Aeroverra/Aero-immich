@@ -108,6 +108,7 @@ import {
   sampleRotationProbe,
   sidecarDateString,
   wallTimeAsUtc,
+  withGoogleAccount,
 } from 'src/takeout';
 import { JobOf } from 'src/types';
 import { updateLockedColumns } from 'src/utils/database';
@@ -2317,7 +2318,7 @@ export class TakeoutRunService extends BaseService {
     row.fallbacks = fallbacks;
 
     resultFlags.push(...(await this.addAlbums(run, settings, row, asset.id, plan)));
-    if (await this.saveGoogleMetadata(settings, asset.id, plan, false)) {
+    if (await this.saveGoogleMetadata(run, settings, asset.id, plan, false)) {
       resultFlags.push('metadataSaved');
     }
     await this.addResultFlags(row, resultFlags);
@@ -2387,7 +2388,7 @@ export class TakeoutRunService extends BaseService {
       resultFlags.push('tagged');
     }
     const alreadyHasMeta = row.action === TakeoutRunFileAction.AlreadyProcessed;
-    if (await this.saveGoogleMetadata(settings, assetId, plan, alreadyHasMeta)) {
+    if (await this.saveGoogleMetadata(run, settings, assetId, plan, alreadyHasMeta)) {
       resultFlags.push('metadataSaved');
     }
     await this.addResultFlags(row, resultFlags);
@@ -2576,6 +2577,7 @@ export class TakeoutRunService extends BaseService {
   }
 
   private async saveGoogleMetadata(
+    run: any,
     settings: any,
     assetId: string,
     plan: any,
@@ -2591,7 +2593,8 @@ export class TakeoutRunService extends BaseService {
         return false;
       }
     }
-    return Promise.resolve(this.assetRepository.upsertMetadata(assetId, [{ key: 'google-photos', value: plan.extra }]))
+    const value = withGoogleAccount(plan.extra, run.templateVars as TemplateVars);
+    return Promise.resolve(this.assetRepository.upsertMetadata(assetId, [{ key: 'google-photos', value }]))
       .then(() => true)
       .catch(() => false);
   }

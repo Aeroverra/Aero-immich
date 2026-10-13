@@ -1,4 +1,11 @@
-import { AlbumFromJson, AssetMetadataFromJson, CompactGoogleJson, GoogleMetadata, GoogleTime } from 'src/takeout/types';
+import {
+  AlbumFromJson,
+  AssetMetadataFromJson,
+  CompactGoogleJson,
+  GoogleMetadata,
+  GoogleTime,
+  TemplateVars,
+} from 'src/takeout/types';
 
 // Shape of Go's GoogleMetadata (adapters/googlePhotos/json.go). A value of the wrong JSON type makes Go's
 // json.Unmarshal fail for the whole file, which turns it into an "unknown JSONfile"; the checks below mirror that.
@@ -259,6 +266,17 @@ export function asMetadata(md: GoogleMetadata): AssetMetadataFromJson {
     fromPartner: isPartner(md),
     people: (md.people ?? []).map((person) => person?.name ?? ''),
   };
+}
+
+// The Google account of the export, next to the url it produced: a photo id exists only in that account, and the
+// web and mobile links add it as authuser so they do not open in the browser's default account. A run that has no
+// account email (created before {email} existed, or an export without an index) stores none.
+export function withGoogleAccount(extra: Record<string, unknown>, vars: Pick<TemplateVars, 'email'> | null) {
+  const account = vars?.email;
+  if (typeof extra.url !== 'string' || typeof account !== 'string' || !account.includes('@')) {
+    return extra;
+  }
+  return { ...extra, account };
 }
 
 // Go GoogleMetadata.Extra(): the "google-photos" asset metadata, only present values
