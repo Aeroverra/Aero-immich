@@ -3,7 +3,11 @@ import { modalManager } from '@immich/ui';
 import { sdkMock } from '$lib/__mocks__/sdk.mock';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import StackSelectionModal from '$lib/modals/StackSelectionModal.svelte';
-import { getCollapsedStackIds, resolveStackSelection } from '$lib/services/stack-selection.service';
+import {
+  getCollapsedStackIds,
+  resolveAssetStackIds,
+  resolveStackSelection,
+} from '$lib/services/stack-selection.service';
 import { assetFactory, timelineAssetFactory } from '@test-data/factories/asset-factory';
 import { preferencesFactory } from '@test-data/factories/preferences-factory';
 import { userAdminFactory } from '@test-data/factories/user-factory';
@@ -28,10 +32,15 @@ vi.mock('$lib/utils/i18n', () => ({
   getPreferredLocale: vi.fn(),
 }));
 
-const buildStack = (id: string, primaryAssetId: string, memberIds: string[]): StackResponseDto => ({
+const buildStack = (
+  id: string,
+  primaryAssetId: string,
+  memberIds: string[],
+  source: StackSource = StackSource.Auto,
+): StackResponseDto => ({
   id,
   primaryAssetId,
-  source: StackSource.Manual,
+  source,
   assets: [primaryAssetId, ...memberIds].map((assetId) => assetFactory.build({ id: assetId })),
 });
 
@@ -81,7 +90,6 @@ describe('stack selection service', () => {
       await expect(resolveStackSelection([stacked, plain])).resolves.toEqual(['primary', 'plain']);
 
       expect(modalManager.show).toHaveBeenCalledExactlyOnceWith(StackSelectionModal, { stackCount: 1 });
-      expect(sdkMock.getStack).not.toHaveBeenCalled();
       expect(sdkMock.updateMyPreferences).not.toHaveBeenCalled();
     });
 
@@ -102,8 +110,6 @@ describe('stack selection service', () => {
       vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
 
       await expect(resolveStackSelection([stacked])).resolves.toBeUndefined();
-
-      expect(sdkMock.getStack).not.toHaveBeenCalled();
     });
 
     it('remembers the choice in the user preferences', async () => {
@@ -125,7 +131,45 @@ describe('stack selection service', () => {
       await expect(resolveStackSelection([stacked])).resolves.toEqual(['primary']);
 
       expect(modalManager.show).not.toHaveBeenCalled();
-      expect(sdkMock.getStack).not.toHaveBeenCalled();
+    });
+
+    it('always acts on every asset of a manual stack, without asking', async () => {
+      sdkMock.getStack.mockResolvedValue(
+        buildStack('stack-1', 'primary', ['member-1', 'member-2'], StackSource.Manual),
+      );
+
+      for (const mode of [StackActionMode.Ask, StackActionMode.Primary]) {
+        setMode(mode);
+        await expect(resolveStackSelection([stacked, plain])).resolves.toEqual([
+          'primary',
+          'plain',
+          'member-1',
+          'member-2',
+        ]);
+      }
+      expect(modalManager.show).not.toHaveBeenCalled();
+    });
+
+    it('only asks about the automatic stacks of a mixed selection', async () => {
+      const manual = timelineAssetFactory.build({
+        id: 'manual-primary',
+        stack: { id: 'stack-manual', primaryAssetId: 'manual-primary', assetCount: 2 },
+      });
+      sdkMock.getStack.mockImplementation(({ id }) =>
+        Promise.resolve(
+          id === 'stack-manual'
+            ? buildStack('stack-manual', 'manual-primary', ['manual-member'], StackSource.Manual)
+            : stack,
+        ),
+      );
+      vi.mocked(modalManager.show).mockResolvedValue({ includeStacked: false, remember: false } as never);
+
+      await expect(resolveStackSelection([stacked, manual])).resolves.toEqual([
+        'primary',
+        'manual-primary',
+        'manual-member',
+      ]);
+      expect(modalManager.show).toHaveBeenCalledExactlyOnceWith(StackSelectionModal, { stackCount: 1 });
     });
 
     it('uses a remembered include choice without asking', async () => {
@@ -174,6 +218,29 @@ describe('stack selection service', () => {
       expect(ids).toHaveLength(50);
       expect(ids).toContain('member-24');
       expect(ids).not.toContain('other-member');
+    });
+  });
+
+  describe('resolveAssetStackIds', () => {
+    it('acts on the asset alone outside a stack', async () => {
+      await expect(resolveAssetStackIds({ id: 'plain', stack: null })).resolves.toEqual(['plain']);
+      expect(sdkMock.getStack).not.toHaveBeenCalled();
+    });
+
+    it('adds the other assets of a manual stack', async () => {
+      sdkMock.getStack.mockResolvedValue(buildStack('stack-1', 'primary', ['member-1'], StackSource.Manual));
+
+      await expect(resolveAssetStackIds({ id: 'member-1', stack: { id: 'stack-1' } })).resolves.toEqual([
+        'member-1',
+        'primary',
+      ]);
+    });
+
+    it('acts on the asset alone in an automatic stack or one that cannot be loaded', async () => {
+      await expect(resolveAssetStackIds({ id: 'primary', stack: { id: 'stack-1' } })).resolves.toEqual(['primary']);
+
+      sdkMock.getStack.mockRejectedValue(new Error('Not found or no stack.read access'));
+      await expect(resolveAssetStackIds({ id: 'partner', stack: { id: 'stack-2' } })).resolves.toEqual(['partner']);
     });
   });
 });

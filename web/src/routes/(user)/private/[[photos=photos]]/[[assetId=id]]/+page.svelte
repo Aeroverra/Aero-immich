@@ -30,7 +30,7 @@
   let { data }: Props = $props();
 
   let timelineManager = $state<TimelineManager>() as TimelineManager;
-  const options = { isPrivate: true };
+  const options = { isPrivate: true, withStacked: true };
 
   const handleEscape = () => {
     if (!assetMultiSelectManager.selectionActive) {
@@ -57,6 +57,7 @@
 
 <UserPageLayout title={data.meta.title} hideNavbar={assetMultiSelectManager.selectionActive} scrollbar={false}>
   <Timeline
+    withStacked={true}
     enableRouting={true}
     bind:timelineManager
     {options}

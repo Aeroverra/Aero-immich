@@ -38,7 +38,7 @@ describe('actions on a selection with stacks', () => {
   const stack: StackResponseDto = {
     id: 'stack-1',
     primaryAssetId: 'primary',
-    source: StackSource.Manual,
+    source: StackSource.Auto,
     assets: ['primary', 'member-1', 'member-2'].map((id) => assetFactory.build({ id, ownerId: user.id })),
   };
   const buildSelection = () => [

@@ -46,7 +46,8 @@ class TimelineFactory {
   final SettingsRepository _settingsRepository;
   final PrivateModeFilter privateFilter;
 
-  /// Whether automatic stacks are collapsed in the main timeline, from the server-side stacks.groupAuto preference
+  /// Whether automatic stacks are collapsed, from the server-side stacks.groupAuto preference. Every view that shows one
+  /// tile per stack follows it like the main timeline does; the trash and the locked folder list stack members singly.
   final bool groupAutoStacks;
 
   const TimelineFactory({
@@ -69,41 +70,57 @@ class TimelineFactory {
   TimelineService localAlbum({required String albumId}) =>
       TimelineService(_timelineRepository.localAlbum(albumId, groupBy));
 
-  TimelineService remoteAlbum({required String albumId}) =>
-      TimelineService(_timelineRepository.remoteAlbum(albumId, groupBy, privateFilter: privateFilter));
+  TimelineService remoteAlbum({required String albumId}) => TimelineService(
+    _timelineRepository.remoteAlbum(albumId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService remoteAssets(String userId) =>
-      TimelineService(_timelineRepository.remote(userId, groupBy, privateFilter: privateFilter));
+  TimelineService remoteAssets(String userId) => TimelineService(
+    _timelineRepository.remote(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService recentlyAdded(String userId) =>
-      TimelineService(_timelineRepository.recentlyAdded(userId, groupBy, privateFilter: privateFilter));
+  TimelineService recentlyAdded(String userId) => TimelineService(
+    _timelineRepository.recentlyAdded(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService tagged(String userId, Set<String> tagIds) =>
-      TimelineService(_timelineRepository.tagged(userId, tagIds, groupBy, privateFilter: privateFilter));
+  TimelineService tagged(String userId, Set<String> tagIds) => TimelineService(
+    _timelineRepository.tagged(userId, tagIds, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService favorite(String userId) =>
-      TimelineService(_timelineRepository.favorite(userId, groupBy, privateFilter: privateFilter));
+  TimelineService favorite(String userId) => TimelineService(
+    _timelineRepository.favorite(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
   TimelineService trash(String userId) =>
       TimelineService(_timelineRepository.trash(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService archive(String userId) =>
-      TimelineService(_timelineRepository.archived(userId, groupBy, privateFilter: privateFilter));
+  TimelineService archive(String userId) => TimelineService(
+    _timelineRepository.archived(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
   TimelineService lockedFolder(String userId) =>
       TimelineService(_timelineRepository.locked(userId, groupBy, privateFilter: privateFilter));
 
-  TimelineService privateFolder(String userId) =>
-      TimelineService(_timelineRepository.privateFolder(userId, groupBy, privateFilter: privateFilter));
+  TimelineService privateFolder(String userId) => TimelineService(
+    _timelineRepository.privateFolder(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService video(String userId) =>
-      TimelineService(_timelineRepository.video(userId, groupBy, privateFilter: privateFilter));
+  TimelineService video(String userId) => TimelineService(
+    _timelineRepository.video(userId, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService place(String place) =>
-      TimelineService(_timelineRepository.place(place, groupBy, privateFilter: privateFilter));
+  TimelineService place(String place) => TimelineService(
+    _timelineRepository.place(place, groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+  );
 
-  TimelineService person(String userId, String personId) =>
-      TimelineService(_timelineRepository.person(userId, personId, groupBy, privateFilter: privateFilter));
+  TimelineService person(String userId, String personId) => TimelineService(
+    _timelineRepository.person(
+      userId,
+      personId,
+      groupBy,
+      privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    ),
+  );
 
   TimelineService fromAssets(List<BaseAsset> assets, TimelineOrigin type) =>
       TimelineService(_timelineRepository.fromAssets(assets, type));

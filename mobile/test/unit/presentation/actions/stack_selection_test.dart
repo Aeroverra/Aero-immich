@@ -37,6 +37,7 @@ void main() {
 
   setUpAll(() {
     registerFallbackValue(StackActionMode.ask);
+    registerFallbackValue(<String>{});
   });
 
   setUp(() async {
@@ -58,6 +59,8 @@ void main() {
     when(
       () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: any(named: 'includeAutoStacks')),
     ).thenAnswer((_) async => [primary, member]);
+    // the prompt is about automatic stacks, manual ones are always acted on as a whole
+    when(() => remoteAssetRepository.getAutoStackIds(any())).thenAnswer((_) async => {'stack-1'});
   });
 
   tearDown(() async {
@@ -156,27 +159,47 @@ void main() {
     });
 
     testWidgets('does not ask for automatic stacks shown as separate photos', (tester) async {
-      // the repository leaves out automatic stacks, so only manual stacks can hide assets
-      when(
-        () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: false),
-      ).thenAnswer((_) async => const []);
-
       await tapAction(tester, const FavoriteAction(source: .timeline), {primary}, groupAutoStacks: false);
       await tester.pumpAndSettle();
 
       expect(find.byType(StackSelectionDialog), findsNothing);
-      verify(() => remoteAssetRepository.getStackAssets({'stack-1'}, includeAutoStacks: false)).called(1);
+      verifyNever(
+        () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: any(named: 'includeAutoStacks')),
+      );
       verify(() => assetService.update([primary.id], isFavorite: const Option.some(true))).called(1);
     });
 
-    testWidgets('still asks for manual stacks while automatic stacks are shown as separate photos', (tester) async {
+    testWidgets('always acts on every asset of a manual stack, without asking', (tester) async {
+      when(() => remoteAssetRepository.getAutoStackIds(any())).thenAnswer((_) async => const {});
+
+      await tapAction(tester, const FavoriteAction(source: .timeline), {primary, plain}, groupAutoStacks: false);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(StackSelectionDialog), findsNothing);
+      verify(
+        () => assetService.update([primary.id, plain.id, member.id], isFavorite: const Option.some(true)),
+      ).called(1);
+    });
+
+    testWidgets('keeps a manual stack whole even when told to keep the top items of automatic stacks', (tester) async {
+      final autoPrimary = RemoteAssetFactory.create(ownerId: context.currentUser.id, stackId: 'stack-auto');
+      final autoMember = RemoteAssetFactory.create(ownerId: context.currentUser.id, stackId: 'stack-auto');
+      when(() => remoteAssetRepository.getAutoStackIds(any())).thenAnswer((_) async => {'stack-auto'});
       when(
-        () => remoteAssetRepository.getStackAssets(any(), includeAutoStacks: false),
+        () => remoteAssetRepository.getStackAssets({'stack-auto'}, includeAutoStacks: true),
+      ).thenAnswer((_) async => [autoPrimary, autoMember]);
+      when(
+        () => remoteAssetRepository.getStackAssets({'stack-1'}, includeAutoStacks: true),
       ).thenAnswer((_) async => [primary, member]);
 
-      await tapAction(tester, const FavoriteAction(source: .timeline), {primary}, groupAutoStacks: false);
-
+      await tapAction(tester, const FavoriteAction(source: .timeline), {primary, autoPrimary});
       expect(find.byType(StackSelectionDialog), findsOneWidget);
+      await tester.tap(find.text('Top items only'));
+      await tester.pumpAndSettle();
+
+      verify(
+        () => assetService.update([primary.id, autoPrimary.id, member.id], isFavorite: const Option.some(true)),
+      ).called(1);
     });
 
     testWidgets('trashes and restores the stacked assets with the selection', (tester) async {

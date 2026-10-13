@@ -9,6 +9,7 @@ import { LoggingRepository } from 'src/repositories/logging.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { SearchRepository } from 'src/repositories/search.repository';
+import { StackRepository } from 'src/repositories/stack.repository';
 import { DB } from 'src/schema';
 import { SearchService } from 'src/services/search.service';
 import { newMediumService } from 'test/medium.factory';
@@ -29,6 +30,7 @@ const setup = (db?: Kysely<DB>) => {
       SearchRepository,
       PartnerRepository,
       PersonRepository,
+      StackRepository,
     ],
     mock: [LoggingRepository],
   });
@@ -157,6 +159,25 @@ describe(SearchService.name, () => {
 
       expect(response.assets.items.length).toBe(1);
       expect(response.assets.items[0].id).toBe(unstackedAsset.id);
+    });
+
+    it('should tell which stack each result belongs to', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+
+      const { asset: primaryAsset } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: stackedAsset } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: unstackedAsset } = await ctx.newAsset({ ownerId: user.id });
+      const { stack } = await ctx.newStack({ ownerId: user.id }, [primaryAsset.id, stackedAsset.id]);
+
+      const auth = factory.auth({ user: { id: user.id } });
+      const response = await sut.searchMetadata(auth, { size: 250 });
+
+      const stacks = Object.fromEntries(response.assets.items.map((asset) => [asset.id, asset.stack]));
+      const expected = { id: stack.id, primaryAssetId: primaryAsset.id, assetCount: 2, source: 'manual' };
+      expect(stacks[primaryAsset.id]).toEqual(expected);
+      expect(stacks[stackedAsset.id]).toEqual(expected);
+      expect(stacks[unstackedAsset.id]).toBeNull();
     });
 
     describe('visibility', () => {

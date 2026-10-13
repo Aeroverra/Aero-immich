@@ -47,7 +47,7 @@
   const tag = $derived(tree.traverse(data.path));
 
   let timelineManager = $state<TimelineManager>() as TimelineManager;
-  const options = $derived({ deferInit: !tag, tagId: tag?.id });
+  const options = $derived({ deferInit: !tag, tagId: tag?.id, withStacked: true });
 
   const handleNavigation = (tag: string) => navigateToView(joinPaths(data.path, tag));
 
@@ -103,6 +103,7 @@
   <section class="mt-2 h-[calc(100%-(--spacing(20)))] immich-scrollbar overflow-auto">
     {#if tag.hasAssets}
       <Timeline
+        withStacked={true}
         enableRouting={true}
         bind:timelineManager
         {options}

@@ -67,7 +67,12 @@
   let thumbnailData = $derived(getPeopleThumbnailUrl(person));
 
   let timelineManager = $state<TimelineManager>() as TimelineManager;
-  const options = $derived({ visibility: AssetVisibility.Timeline, personId: data.person.id, withPartners: true });
+  const options = $derived({
+    visibility: AssetVisibility.Timeline,
+    personId: data.person.id,
+    withPartners: true,
+    withStacked: true,
+  });
 
   let viewMode: PersonPageViewMode = $state(PersonPageViewMode.VIEW_ASSETS);
   let isEditingName = $state(false);
@@ -343,6 +348,7 @@
 >
   {#key person.id}
     <Timeline
+      withStacked={true}
       enableRouting={true}
       {person}
       bind:timelineManager

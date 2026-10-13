@@ -1,4 +1,11 @@
-import { getStack, searchStacks, StackActionMode, updateMyPreferences, type StackResponseDto } from '@immich/sdk';
+import {
+  getStack,
+  searchStacks,
+  StackActionMode,
+  StackSource,
+  updateMyPreferences,
+  type StackResponseDto,
+} from '@immich/sdk';
 import { modalManager } from '@immich/ui';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
@@ -53,8 +60,10 @@ const rememberChoice = async (includeStacked: boolean) => {
 };
 
 /**
- * A collapsed stack only shows its primary asset, so an action on a selection with stacks either applies to those
- * primary assets or to every asset of the stacks. The stackActions preference decides, or the user is asked.
+ * A collapsed stack only shows its primary asset, so an action on a selection with stacks has to decide whether it
+ * applies to the stacked assets too. A manual stack (edited copies, Video Boost pairs, RAW and JPEG) is one item to the
+ * user, so every action applies to all of it. An automatic stack groups different but similar photos, so the
+ * stackActions preference decides for those, or the user is asked.
  *
  * Resolves to the ids the action applies to (the selected assets first, followed by the stacked assets that were not
  * selected), or to undefined when the user cancels.
@@ -66,36 +75,62 @@ export const resolveStackSelection = async (assets: SelectionAsset[]): Promise<s
     return ids;
   }
 
-  let includeStacked = getMode() === StackActionMode.Stack;
-  if (getMode() === StackActionMode.Ask) {
-    const choice = (await modalManager.show(StackSelectionModal, { stackCount: stackIds.length })) as
-      StackSelectionChoice | undefined;
-    if (!choice) {
-      return;
-    }
-
-    includeStacked = choice.includeStacked;
-    if (choice.remember) {
-      await rememberChoice(includeStacked);
-    }
-  }
-
-  if (!includeStacked) {
-    return ids;
-  }
-
+  let stacks: StackResponseDto[];
   try {
-    const stacks = await getStacks(stackIds);
-    const result = new Set(ids);
-    for (const stack of stacks) {
-      for (const asset of stack.assets) {
-        result.add(asset.id);
-      }
-    }
-    return [...result];
+    stacks = await getStacks(stackIds);
   } catch (error) {
     const $t = await getFormatter();
     handleError(error, $t('errors.unable_to_load_stacked_assets'));
+    return;
+  }
+
+  const manualStacks = stacks.filter(({ source }) => source !== StackSource.Auto);
+  const autoStacks = stacks.filter(({ source }) => source === StackSource.Auto);
+
+  let includeAutoStacks = false;
+  if (autoStacks.length > 0) {
+    includeAutoStacks = getMode() === StackActionMode.Stack;
+    if (getMode() === StackActionMode.Ask) {
+      const choice = (await modalManager.show(StackSelectionModal, { stackCount: autoStacks.length })) as
+        StackSelectionChoice | undefined;
+      if (!choice) {
+        return;
+      }
+
+      includeAutoStacks = choice.includeStacked;
+      if (choice.remember) {
+        await rememberChoice(includeAutoStacks);
+      }
+    }
+  }
+
+  const result = new Set(ids);
+  for (const stack of includeAutoStacks ? [...manualStacks, ...autoStacks] : manualStacks) {
+    for (const asset of stack.assets) {
+      result.add(asset.id);
+    }
+  }
+  return [...result];
+};
+
+/**
+ * The ids a single-asset action (the viewer's add to album or tag) applies to: the asset, and for a manual stack every
+ * other asset of it too, since a manual stack is one item to the user. Automatic stacks and assets outside a stack are
+ * acted on alone, and so is a stack that cannot be loaded, like a partner's.
+ */
+export const resolveAssetStackIds = async (asset: { id: string; stack?: { id: string } | null }): Promise<string[]> => {
+  if (!asset.stack) {
+    return [asset.id];
+  }
+
+  try {
+    const stack = await getStack({ id: asset.stack.id });
+    if (stack.source === StackSource.Auto) {
+      return [asset.id];
+    }
+    return [asset.id, ...stack.assets.map(({ id }) => id).filter((id) => id !== asset.id)];
+  } catch {
+    return [asset.id];
   }
 };
 

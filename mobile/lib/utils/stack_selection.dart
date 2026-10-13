@@ -22,20 +22,23 @@ class StackSelectionChoice {
   const StackSelectionChoice({required this.includeStacked, required this.remember});
 }
 
-/// A collapsed stack only shows its primary asset, so an action on a selection with stacks either applies to
-/// those primary assets or to every asset of the stacks. The server-side stackActions preference decides, or the
-/// user is asked.
+/// A collapsed stack only shows its primary asset, so an action on a selection with stacks has to decide whether it
+/// applies to the stacked assets too. A manual stack (edited copies, Video Boost pairs, RAW and JPEG) is one item to
+/// the user, so every action applies to all of it. An automatic stack groups different but similar photos, so the
+/// server-side stackActions preference decides for those, or the user is asked.
 ///
 /// Returns the stacked assets to act on in addition to [assets] (empty when there are none or the user keeps the
-/// top items only), or null when the user cancels. Only the timeline selection is resolved: the viewer shows the
-/// stack members one by one.
+/// top items only), or null when the user cancels. The viewer shows stack members one by one, so its actions act on
+/// the shown asset alone, except [wholeManualStackInViewer] ones (adding to an album, tagging) that keep a manual
+/// stack together.
 Future<List<RemoteAsset>?> resolveStackedAssets(
   BuildContext context,
   WidgetRef ref,
   ActionSource source,
-  Iterable<BaseAsset> assets,
-) async {
-  if (source != ActionSource.timeline) {
+  Iterable<BaseAsset> assets, {
+  bool wholeManualStackInViewer = false,
+}) async {
+  if (source != ActionSource.timeline && !wholeManualStackInViewer) {
     return const [];
   }
 
@@ -47,13 +50,24 @@ Future<List<RemoteAsset>?> resolveStackedAssets(
 
   final drift = ref.read(driftProvider);
   final selectedIds = selected.map((asset) => asset.id).toSet();
+  final autoStackIds = await drift.remoteAssetRepository.getAutoStackIds(stackIds);
+
+  Future<List<RemoteAsset>> membersOf(Set<String> ids) async => ids.isEmpty
+      ? const []
+      : (await drift.remoteAssetRepository.getStackAssets(
+          ids,
+          includeAutoStacks: true,
+        )).where((asset) => !selectedIds.contains(asset.id)).toList(growable: false);
+
+  final manual = await membersOf(stackIds.difference(autoStackIds));
+  if (source != ActionSource.timeline) {
+    return manual;
+  }
+
   // automatic stacks shown ungrouped are separate photos, nothing is hidden behind them
-  final stacked = (await drift.remoteAssetRepository.getStackAssets(
-    stackIds,
-    includeAutoStacks: ref.read(groupAutoStacksProvider),
-  )).where((asset) => !selectedIds.contains(asset.id)).toList(growable: false);
+  final stacked = await membersOf(ref.read(groupAutoStacksProvider) ? autoStackIds : const {});
   if (stacked.isEmpty) {
-    return const [];
+    return manual;
   }
 
   final userId = ref.read(authUserProvider).id;
@@ -87,7 +101,7 @@ Future<List<RemoteAsset>?> resolveStackedAssets(
     }
   }
 
-  return mode == StackActionMode.stack ? stacked : const [];
+  return mode == StackActionMode.stack ? [...manual, ...stacked] : manual;
 }
 
 /// Asks whether an action applies to the top items of the selected stacks only or to their stacked items too
