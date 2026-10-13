@@ -9,6 +9,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/server_info/server_info.model.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/providers/backup/backup.provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/readonly_mode.provider.dart';
@@ -78,6 +79,7 @@ class ImmichSliverAppBar extends ConsumerWidget {
                 onPressed: () => showDialog(context: context, builder: (context) => const CastDialog()),
                 icon: Icon(isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded),
               ),
+            const CustomViewSwitcherButton(),
             ...?actions,
             if (showUploadButton && !isReadonlyModeEnabled) const _BackupIndicator(),
             const _ProfileIndicator(),

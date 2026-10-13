@@ -28,6 +28,7 @@
   import AddPeopleAction from '$lib/components/timeline/actions/AddPeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import Timeline from '$lib/components/timeline/Timeline.svelte';
+  import ViewSwitcherButton from '$lib/components/timeline/ViewSwitcherButton.svelte';
   import { AlbumPageViewMode } from '$lib/constants';
   import { activityManager } from '$lib/managers/activity-manager.svelte';
   import { assetMultiSelectManager, AssetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
@@ -522,6 +523,8 @@
       {#if viewMode === AlbumPageViewMode.VIEW}
         <ControlAppBar backIcon={mdiArrowLeft} onClose={() => goto(Route.albums())}>
           {#snippet trailing()}
+            <ViewSwitcherButton />
+
             <ActionButton action={Cast} />
 
             {#if isEditor}

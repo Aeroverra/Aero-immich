@@ -7,6 +7,7 @@
   import { clickOutside } from '$lib/actions/click-outside';
   import NotificationPanel from '$lib/components/shared-components/navigation-bar/NotificationPanel.svelte';
   import SearchBar from '$lib/components/shared-components/search-bar/SearchBar.svelte';
+  import ViewSwitcherButton from '$lib/components/timeline/ViewSwitcherButton.svelte';
   import SkipLink from '$lib/elements/SkipLink.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
@@ -36,7 +37,7 @@
 
   type Props = {
     onUploadClick?: () => void;
-    /** page specific buttons shown before the private mode toggle */
+    /** page specific buttons shown between the view switcher and the private mode toggle */
     buttons?: Snippet;
     // TODO: remove once this is only used in <AppShellHeader>
     noBorder?: boolean;
@@ -149,6 +150,10 @@
             icon={mdiTrayArrowUp}
             class="lg:hidden"
           />
+        {/if}
+
+        {#if !authManager.isSharedLink}
+          <ViewSwitcherButton />
         {/if}
 
         {@render buttons?.()}

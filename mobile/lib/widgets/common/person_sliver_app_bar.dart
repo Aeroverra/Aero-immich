@@ -14,6 +14,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/widgets/images/image_provider.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
@@ -92,6 +93,7 @@ class _MesmerizingSliverAppBarState extends ConsumerState<PersonSliverAppBar> {
               },
             ),
             actions: [
+              CustomViewSwitcherButton(color: actionIconColor, shadows: actionIconShadows),
               IconButton(
                 icon: Icon(Icons.more_vert, color: actionIconColor, shadows: actionIconShadows),
                 onPressed: widget.onShowOptions,
