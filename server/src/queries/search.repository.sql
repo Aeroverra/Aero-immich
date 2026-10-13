@@ -212,6 +212,7 @@ set
   local vchordrq.probes = 1
 select
   "asset"."id",
+  "smart_search_frame"."frameTimestamp",
   smart_search_frame.embedding <=> $1 as "distance"
 from
   "asset"
@@ -1903,6 +1904,7 @@ set
   local vchordrq.probes = 1
 select
   "asset"."id",
+  "smart_search_frame"."frameTimestamp",
   smart_search_frame.embedding <=> $1 as "distance"
 from
   "asset"
@@ -1981,6 +1983,7 @@ set
   local vchordrq.probes = 1
 select
   "asset"."id",
+  "smart_search_frame"."frameTimestamp",
   smart_search_frame.embedding <=> $1 as "distance"
 from
   "asset"
@@ -2059,6 +2062,7 @@ set
   local vchordrq.probes = 1
 select
   "asset"."id",
+  "smart_search_frame"."frameTimestamp",
   smart_search_frame.embedding <=> $1 as "distance"
 from
   "asset"

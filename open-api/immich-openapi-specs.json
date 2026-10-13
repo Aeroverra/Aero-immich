@@ -30672,6 +30672,24 @@
             },
             "type": "array"
           },
+          "matchedFrames": {
+            "description": "Smart search only: the videos of this page that matched on a sampled frame, with its position",
+            "items": {
+              "$ref": "#/components/schemas/SearchMatchedFrameResponseDto"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Beta"
+              }
+            ],
+            "x-immich-state": "Beta"
+          },
           "nextCursor": {
             "description": "Cursor for the next page of results",
             "nullable": true,
@@ -31016,6 +31034,28 @@
             "$ref": "#/components/schemas/EnumFilterAssetVisibility"
           }
         },
+        "type": "object"
+      },
+      "SearchMatchedFrameResponseDto": {
+        "description": "A video that matched a smart search on one of its sampled frames rather than its thumbnail",
+        "properties": {
+          "assetId": {
+            "description": "Video asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "frameTimestamp": {
+            "description": "Position in milliseconds of the sampled video frame that matched best",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "assetId",
+          "frameTimestamp"
+        ],
         "type": "object"
       },
       "SearchOrder": {

@@ -8,6 +8,7 @@ import 'package:immich_mobile/presentation/actions/edit_asset.action.dart';
 import 'package:immich_mobile/presentation/actions/restore.action.dart';
 import 'package:immich_mobile/presentation/actions/share.action.dart';
 import 'package:immich_mobile/presentation/actions/upload.action.dart';
+import 'package:immich_mobile/presentation/pages/search/paginated_search.provider.dart';
 import 'package:immich_mobile/presentation/widgets/action_buttons/add_action_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/asset_viewer/ocr_toggle_button.widget.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
@@ -40,7 +41,13 @@ class ViewerBottomBar extends ConsumerWidget {
     final isReadonlyModeEnabled = ref.watch(readonlyModeProvider);
     final showingDetails = ref.watch(assetViewerProvider.select((s) => s.showingDetails));
     final isInLockedView = ref.watch(inLockedViewProvider);
-    final isInTrash = ref.watch(timelineServiceProvider).origin == TimelineOrigin.trash;
+    final origin = ref.watch(timelineServiceProvider).origin;
+    final isInTrash = origin == TimelineOrigin.trash;
+    final remoteId = asset.remoteId;
+    // where smart search matched, for a video opened from the search results
+    final searchMatch = asset.isVideo && remoteId != null && origin == TimelineOrigin.search
+        ? ref.watch(searchVideoMatchProvider(remoteId))
+        : null;
 
     final originalTheme = context.themeData;
 
@@ -94,7 +101,12 @@ class ViewerBottomBar extends ConsumerWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           if (asset.isImage) OcrToggleButton(asset: asset),
-                          if (asset.isVideo) VideoControls(videoPlayerName: asset.id, bookmarkAssetId: asset.remoteId),
+                          if (asset.isVideo)
+                            VideoControls(
+                              videoPlayerName: asset.id,
+                              bookmarkAssetId: asset.remoteId,
+                              searchMatch: searchMatch,
+                            ),
                           if (!isReadonlyModeEnabled)
                             ImmichColorOverride(
                               color: Colors.white,
