@@ -4,6 +4,7 @@ import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
+import { AssetVisibility, StackAutoExclusionReason } from 'src/enum';
 import { DB } from 'src/schema';
 import { StackTable } from 'src/schema/tables/stack.table';
 import {
@@ -217,6 +218,46 @@ export class StackRepository {
       .select(['stackId as id', 'stack.primaryAssetId', 'stack.source'])
       .where('asset.id', '=', assetId)
       .executeTakeFirst();
+  }
+
+  /**
+   * The owner's assets whose original file name matches [pattern] (a `LIKE` pattern), for finding the other files of a
+   * camera shot wherever they are in the library. Trashed and hidden assets are left out; `isExcluded` is set for
+   * assets the user took out of a stack or unstacked.
+   */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.STRING] })
+  getCameraGroupCandidates(ownerId: string, pattern: string) {
+    return this.db
+      .selectFrom('asset')
+      .leftJoin('stack', 'stack.id', 'asset.stackId')
+      .select([
+        'asset.id',
+        'asset.originalFileName',
+        'asset.type',
+        'asset.visibility',
+        'asset.isPrivate',
+        'asset.stackId',
+        'stack.primaryAssetId as stackPrimaryAssetId',
+        'stack.source as stackSource',
+      ])
+      .select((eb) =>
+        eb
+          .exists(
+            eb
+              .selectFrom('stack_auto_exclusion')
+              .whereRef('stack_auto_exclusion.assetId', '=', 'asset.id')
+              .where('stack_auto_exclusion.reason', 'in', [
+                StackAutoExclusionReason.Removed,
+                StackAutoExclusionReason.Unstacked,
+              ]),
+          )
+          .as('isExcluded'),
+      )
+      .where('asset.ownerId', '=', asUuid(ownerId))
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.visibility', '!=', AssetVisibility.Hidden)
+      .where(sql`f_unaccent(asset."originalFileName")`, 'like', sql<string>`f_unaccent(${pattern})`)
+      .execute();
   }
 
   @GenerateSql({ params: [{ sourceId: DummyValue.UUID, targetId: DummyValue.UUID }] })

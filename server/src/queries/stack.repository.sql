@@ -210,6 +210,33 @@ from
 where
   "asset"."id" = $1
 
+-- StackRepository.getCameraGroupCandidates
+select
+  "asset"."id",
+  "asset"."originalFileName",
+  "asset"."type",
+  "asset"."visibility",
+  "asset"."isPrivate",
+  "asset"."stackId",
+  "stack"."primaryAssetId" as "stackPrimaryAssetId",
+  "stack"."source" as "stackSource",
+  exists (
+    select
+    from
+      "stack_auto_exclusion"
+    where
+      "stack_auto_exclusion"."assetId" = "asset"."id"
+      and "stack_auto_exclusion"."reason" in ($1, $2)
+  ) as "isExcluded"
+from
+  "asset"
+  left join "stack" on "stack"."id" = "asset"."stackId"
+where
+  "asset"."ownerId" = $3::uuid
+  and "asset"."deletedAt" is null
+  and "asset"."visibility" != $4
+  and f_unaccent (asset."originalFileName") like f_unaccent ($5)
+
 -- StackRepository.merge
 update "asset"
 set

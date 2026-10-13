@@ -120,4 +120,50 @@ describe('FeatureSettings component', () => {
     );
     expect(authManager.preferences.autoStack.enabled).toBe(true);
   });
+
+  it('saves the camera shot preferences with the tag lists split at commas', async () => {
+    const preferences = preferencesFactory.build();
+    authManager.setPreferences(preferences);
+    sdkMock.updateMyPreferences.mockResolvedValue(preferences);
+    const user = userEvent.setup();
+
+    render(FeatureSettings);
+
+    expect(screen.getByRole('switch', { name: 'Stack files from one camera shot' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    const reviewTags = screen.getByRole('textbox', { name: 'Tags every file must have' });
+    expect(reviewTags).toHaveValue('Unreviewed');
+    await user.clear(reviewTags);
+    await user.type(reviewTags, 'Unreviewed,  To check ,');
+    await user.click(screen.getByRole('switch', { name: 'Same tags for one shot' }));
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(sdkMock.updateMyPreferences).toHaveBeenCalledWith({
+        userPreferencesUpdateDto: expect.objectContaining({
+          cameraGroups: {
+            enabled: true,
+            copyTags: false,
+            keepTags: ['{immich-go}/*', 'Source/*', 'Takeout', 'takeout-*'],
+            reviewTags: ['Unreviewed', 'To check'],
+          },
+        }),
+      }),
+    );
+  });
+
+  it('hides the tag settings while camera shots are not stacked', () => {
+    authManager.setPreferences(
+      preferencesFactory.build({
+        cameraGroups: { enabled: false, copyTags: true, keepTags: [], reviewTags: [] },
+      }),
+    );
+
+    render(FeatureSettings);
+
+    expect(screen.queryByRole('switch', { name: 'Same tags for one shot' })).not.toBeInTheDocument();
+  });
 });

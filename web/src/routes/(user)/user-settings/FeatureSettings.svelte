@@ -4,7 +4,7 @@
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { handleError } from '$lib/utils/handle-error';
   import { AssetOrder, updateMyPreferences } from '@immich/sdk';
-  import { Button, Field, NumberInput, Select, Switch, toastManager } from '@immich/ui';
+  import { Button, Field, Input, NumberInput, Select, Switch, toastManager } from '@immich/ui';
   import { t } from 'svelte-i18n';
   import { fade } from 'svelte/transition';
 
@@ -45,6 +45,16 @@
   // Stacks
   let stacksGroupAuto = $state(authManager.preferences.stacks?.groupAuto ?? true);
   let autoStackEnabled = $state(authManager.preferences.autoStack?.enabled ?? false);
+  let cameraGroupsEnabled = $state(authManager.preferences.cameraGroups?.enabled ?? true);
+  let cameraGroupsCopyTags = $state(authManager.preferences.cameraGroups?.copyTags ?? true);
+  let cameraGroupsKeepTags = $state((authManager.preferences.cameraGroups?.keepTags ?? []).join(', '));
+  let cameraGroupsReviewTags = $state((authManager.preferences.cameraGroups?.reviewTags ?? []).join(', '));
+
+  const toTagPatterns = (value: string) =>
+    value
+      .split(',')
+      .map((pattern) => pattern.trim())
+      .filter(Boolean);
 
   // Private page
   let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
@@ -66,6 +76,12 @@
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
           stacks: { groupAuto: stacksGroupAuto },
           autoStack: { enabled: autoStackEnabled },
+          cameraGroups: {
+            enabled: cameraGroupsEnabled,
+            copyTags: cameraGroupsCopyTags,
+            keepTags: toTagPatterns(cameraGroupsKeepTags),
+            reviewTags: toTagPatterns(cameraGroupsReviewTags),
+          },
           privateMode: {
             sidebarWeb: privateSidebar,
             timeoutMinutes: privateTimeout,
@@ -216,6 +232,24 @@
             >
               <Switch bind:checked={autoStackEnabled} />
             </Field>
+            <Field label={$t('stack_camera_shots')} description={$t('stack_camera_shots_description')}>
+              <Switch bind:checked={cameraGroupsEnabled} />
+            </Field>
+
+            {#if cameraGroupsEnabled}
+              <Field label={$t('camera_shot_same_tags')} description={$t('camera_shot_same_tags_description')}>
+                <Switch bind:checked={cameraGroupsCopyTags} />
+              </Field>
+
+              {#if cameraGroupsCopyTags}
+                <Field label={$t('camera_shot_keep_tags')} description={$t('camera_shot_keep_tags_description')}>
+                  <Input bind:value={cameraGroupsKeepTags} />
+                </Field>
+                <Field label={$t('camera_shot_review_tags')} description={$t('camera_shot_review_tags_description')}>
+                  <Input bind:value={cameraGroupsReviewTags} />
+                </Field>
+              {/if}
+            {/if}
           </div>
         </SettingAccordion>
 
