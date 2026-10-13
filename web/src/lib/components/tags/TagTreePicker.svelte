@@ -1,10 +1,19 @@
 <script lang="ts">
-  import { tagPicker, tagPickerFocus, tagPickerSearch } from '$lib/components/tags/tag-picker.svelte';
+  import { tagPicker, tagPickerFocus, tagPickerSearch, togglePinned } from '$lib/components/tags/tag-picker.svelte';
   import { parseTagPath } from '$lib/services/tag.service';
   import { buildTagRows, pickTagRow, tagName } from '$lib/utils/tag-tree';
   import type { TagResponseDto } from '@immich/sdk';
   import { Checkbox, Icon, IconButton } from '@immich/ui';
-  import { mdiChevronDown, mdiChevronRight, mdiClose, mdiMagnify, mdiPlus, mdiUnfoldLessHorizontal } from '@mdi/js';
+  import {
+    mdiChevronDown,
+    mdiChevronRight,
+    mdiClose,
+    mdiMagnify,
+    mdiPin,
+    mdiPinOutline,
+    mdiPlus,
+    mdiUnfoldLessHorizontal,
+  } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
 
@@ -45,6 +54,7 @@
   let input = $state<HTMLInputElement>();
 
   const expanded = $derived(new Set(tagPicker.expanded.current));
+  const pinnedIds = $derived(new Set(tagPicker.pinned.current));
   const rows = $derived(buildTagRows(tags, { expanded, checked: checkedIds, query }));
   const recentTags = $derived.by(() => {
     const byId = new Map(tags.map((tag) => [tag.id, tag]));
@@ -168,13 +178,15 @@
       {#each rows as row (row.tag.id)}
         {@const checked = checkedIds.has(row.tag.id)}
         {@const checkboxId = `${uid}-${row.tag.id}`}
+        {@const pinned = pinnedIds.has(row.tag.id)}
+        {@const pinLabel = $t(pinned ? 'tag_unpin' : 'tag_pin', { values: { tag: row.tag.value } })}
         <li
           role="treeitem"
           aria-level={row.depth + 1}
           aria-expanded={row.hasChildren ? row.isOpen : undefined}
           aria-selected={checked}
           data-partial={partialIds.has(row.tag.id) ? '' : undefined}
-          class="flex min-h-8 items-center gap-1 rounded-lg pe-2 hover:bg-gray-100 dark:hover:bg-gray-800"
+          class="group flex min-h-8 items-center gap-1 rounded-lg pe-1 hover:bg-gray-100 dark:hover:bg-gray-800"
           style:padding-inline-start="{row.depth * 16}px"
           data-testid="tag-picker-row"
           data-tag-value={row.tag.value}
@@ -218,6 +230,19 @@
               {row.checkedBelow}
             </span>
           {/if}
+          <!-- shown on hover or focus where there is a mouse, always on touch screens, and always once pinned -->
+          <button
+            type="button"
+            class="flex size-6 shrink-0 items-center justify-center rounded-sm group-hover:opacity-100 hover:text-primary focus-visible:opacity-100 pointer-coarse:opacity-100 {pinned
+              ? 'text-primary'
+              : 'text-gray-500 opacity-0 dark:text-gray-400'}"
+            aria-label={pinLabel}
+            title={pinLabel}
+            data-testid="tag-picker-pin"
+            onclick={() => togglePinned(row.tag.id)}
+          >
+            <Icon icon={pinned ? mdiPin : mdiPinOutline} size="16" />
+          </button>
         </li>
       {/each}
     </ul>

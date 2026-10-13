@@ -1,6 +1,6 @@
 import { Kysely } from 'kysely';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
-import { JobStatus } from 'src/enum';
+import { JobStatus, ViewAccess, ViewPrivateAssets } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { CustomViewRepository } from 'src/repositories/custom-view.repository';
@@ -12,7 +12,7 @@ import { DB } from 'src/schema';
 import { TagService } from 'src/services/tag.service';
 import { upsertTags } from 'src/utils/tag';
 import { newMediumService } from 'test/medium.factory';
-import { factory } from 'test/small.factory';
+import { factory, newUuid } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
 
 let defaultDatabase: Kysely<DB>;
@@ -120,13 +120,50 @@ describe(TagService.name, () => {
       expect(await sut.getAssetCounts(auth, { assetIds: [asset.id] })).toEqual([]);
     });
 
-    it('should refuse assets the user cannot read', async () => {
+    it('should leave out assets the user cannot read', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();
       const { user: other } = await ctx.newUser();
-      const { asset } = await ctx.newAsset({ ownerId: other.id });
+      const { asset: mine } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: theirs } = await ctx.newAsset({ ownerId: other.id });
+      const { tag: own } = await ctx.newTag({ userId: user.id, value: 'Own' });
+      const { tag: foreign } = await ctx.newTag({ userId: other.id, value: 'Foreign' });
+      await ctx.newTagAsset({ tagIds: [own.id], assetIds: [mine.id] });
+      await ctx.newTagAsset({ tagIds: [foreign.id], assetIds: [theirs.id] });
 
-      await expect(sut.getAssetCounts(factory.auth({ user }), { assetIds: [asset.id] })).rejects.toThrow();
+      await expect(sut.getAssetCounts(factory.auth({ user }), { assetIds: [theirs.id] })).resolves.toEqual([]);
+      await expect(sut.getAssetCounts(factory.auth({ user }), { assetIds: [mine.id, theirs.id] })).resolves.toEqual([
+        { tagId: own.id, count: 1 },
+      ]);
+    });
+
+    it('should not fail for assets a tag took out of the session view', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user, session: { privateMode: false } });
+      const { asset: shown } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: excluded } = await ctx.newAsset({ ownerId: user.id });
+      // the view excludes Hide, so Hide/Child takes an asset out of it too
+      const [food, hide, hideChild] = await upsertTags(ctx.get(TagRepository), {
+        userId: user.id,
+        tags: ['Food', 'Hide', 'Hide/Child'],
+      });
+      await ctx.newTagAsset({ tagIds: [food.id], assetIds: [shown.id, excluded.id] });
+      await ctx.newTagAsset({ tagIds: [hideChild.id], assetIds: [excluded.id] });
+      auth.session!.view = {
+        id: newUuid(),
+        ownerId: user.id,
+        access: ViewAccess.Open,
+        includeAll: true,
+        includeUntagged: false,
+        includeTagIds: [],
+        excludeTagIds: [hide.id],
+        privateAssets: ViewPrivateAssets.Hide,
+      };
+
+      await expect(sut.getAssetCounts(auth, { assetIds: [shown.id, excluded.id] })).resolves.toEqual([
+        { tagId: food.id, count: 1 },
+      ]);
     });
   });
 

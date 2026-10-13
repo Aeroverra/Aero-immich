@@ -1,14 +1,28 @@
-import { deleteTag, getCustomViews, updateTag, upsertTags, type TagUpdateDto } from '@immich/sdk';
+import {
+  deleteTag,
+  getAssetInfo,
+  getCustomViews,
+  updateTag,
+  upsertTags,
+  type TagResponseDto,
+  type TagUpdateDto,
+} from '@immich/sdk';
 import { modalManager, toastManager, type ActionItem } from '@immich/ui';
 import { mdiPencil, mdiPlus, mdiTrashCanOutline } from '@mdi/js';
 import { type MessageFormatter } from 'svelte-i18n';
+import { rememberRecentTags } from '$lib/components/tags/tag-picker.svelte';
+import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import { viewManager } from '$lib/managers/view-manager.svelte';
 import TagCreateModal from '$lib/modals/TagCreateModal.svelte';
 import TagEditModal from '$lib/modals/TagEditModal.svelte';
+import { removeTag, tagAssets } from '$lib/utils/asset-utils';
 import { handleError } from '$lib/utils/handle-error';
 import { getFormatter } from '$lib/utils/i18n';
 import type { TreeNode } from '$lib/utils/tree-utils';
+import { getViewDeparture } from '$lib/utils/view-departures';
 
 export const getTagActions = ($t: MessageFormatter, tag: TreeNode) => {
   const Create: ActionItem = {
@@ -32,6 +46,97 @@ export const getTagActions = ($t: MessageFormatter, tag: TreeNode) => {
   };
 
   return { Create, Update, Delete };
+};
+
+/** how many assets are looked up at once to find the ones a tag change took out of the view */
+const VIEW_CHECK_CONCURRENCY = 6;
+
+/** The assets of [assetIds] the session cannot read anymore, looked up one by one */
+const findUnreadableAssets = async (assetIds: string[]) => {
+  const unreadable: string[] = [];
+  const queue = [...assetIds];
+  const worker = async () => {
+    for (let id = queue.shift(); id; id = queue.shift()) {
+      try {
+        await getAssetInfo({ id });
+      } catch {
+        unreadable.push(id);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(VIEW_CHECK_CONCURRENCY, queue.length) }, worker));
+  return unreadable;
+};
+
+/**
+ * A tag change can take assets out of the view the session sees, like adding a tag the view excludes. Those assets
+ * leave the selection, and what is on screen reloads the way it does when the view changes, so they disappear from the
+ * page instead of staying behind as assets the server refuses to read.
+ */
+const removeAssetsLeavingView = async (
+  assetIds: string[],
+  tags: TagResponseDto[],
+  changes: { addIds: string[]; removeIds: string[] },
+) => {
+  const departure = getViewDeparture(viewManager.active.view, tags, changes);
+  if (departure === 'none') {
+    return;
+  }
+
+  const changed = new Set(assetIds);
+  const selected = assetMultiSelectManager.assets.filter(({ id }) => changed.has(id)).map(({ id }) => id);
+  let leaving = departure === 'all' ? assetIds : [];
+  if (departure === 'unknown') {
+    try {
+      leaving = await findUnreadableAssets(selected);
+    } catch (error) {
+      console.warn('Could not check which assets left the view', error);
+    }
+  }
+  if (leaving.length === 0) {
+    return;
+  }
+
+  for (const id of leaving) {
+    assetMultiSelectManager.removeAssetFromMultiselectGroup(id);
+  }
+  privateModeManager.invalidate();
+};
+
+/**
+ * Adds the tags [addIds] to every asset of [assetIds] and takes the tags [removeIds] off every one of them: the save of
+ * the tag dialog and of the pinned tags in the selection bar. [tags] are the tags of the user, to tell whether the
+ * change takes assets out of the view the session sees. Resolves to whether the tags were saved.
+ */
+export const handleTagAssetsChanges = async ({
+  assetIds,
+  addIds,
+  removeIds,
+  tags,
+}: {
+  assetIds: string[];
+  addIds: string[];
+  removeIds: string[];
+  tags: TagResponseDto[];
+}) => {
+  try {
+    if (addIds.length > 0) {
+      await tagAssets({ tagIds: addIds, assetIds });
+      rememberRecentTags(addIds);
+    }
+    if (removeIds.length > 0) {
+      await removeTag({ tagIds: removeIds, assetIds });
+    }
+  } catch (error) {
+    const $t = await getFormatter();
+    handleError(error, $t('errors.failed_to_tag_assets'));
+    return false;
+  }
+
+  // before the event, so whatever refreshes on it only asks about the assets still on screen
+  await removeAssetsLeavingView(assetIds, tags, { addIds, removeIds });
+  eventManager.emit('AssetsTag', assetIds);
+  return true;
 };
 
 export const handleCreateTag = async (tagValue: string, { isHidden = false }: { isHidden?: boolean } = {}) => {
