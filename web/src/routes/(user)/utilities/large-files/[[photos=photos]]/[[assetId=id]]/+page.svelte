@@ -5,6 +5,7 @@
   import LargeAssetData from './LargeAssetData.svelte';
   import Portal from '$lib/elements/Portal.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
+  import type { TimelineAsset } from '$lib/managers/timeline-manager/types';
   import { handlePromiseError } from '$lib/utils';
   import { getNextAsset, getPreviousAsset, navigateToAsset } from '$lib/utils/asset-utils';
   import { navigate } from '$lib/utils/navigation';
@@ -51,6 +52,11 @@
     assets = assets.filter(({ id }) => !assetIds.includes(id));
   };
 
+  // an undone trash reloads the list and reopens the restored asset
+  const onAssetsRestore = async (restored: TimelineAsset[]) => {
+    await navigate({ targetRoute: 'current', assetId: restored[0]?.id ?? null });
+  };
+
   const onViewAsset = async (asset: AssetResponseDto) => {
     await navigate({ targetRoute: 'current', assetId: asset.id });
   };
@@ -62,7 +68,7 @@
   });
 </script>
 
-<OnEvents {onAssetsDelete} />
+<OnEvents {onAssetsDelete} {onAssetsRestore} />
 
 <UserPageLayout title={data.meta.title} scrollbar={true}>
   <div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
