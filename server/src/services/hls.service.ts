@@ -10,6 +10,7 @@ import { CacheControl, ImmichWorker, Permission } from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
 import { VideoPacketInfo, VideoStreamInfo } from 'src/types';
+import { getEditRotation, getVideoDisplayRotation } from 'src/utils/editor';
 import { PendingEvents } from 'src/utils/event';
 import { ImmichFileResponse } from 'src/utils/file';
 import { getCodecString, getOutputSize } from 'src/utils/media';
@@ -54,6 +55,15 @@ export class HlsService extends BaseService {
     const asset = await this.videoStreamRepository.getForMainPlaylist(assetId);
     if (!asset) {
       throw new NotFoundException('Asset metadata is not yet ready for streaming');
+    }
+
+    // variants of a rotated video have the turned size
+    const rotation = getEditRotation(await this.assetEditRepository.getAll(assetId));
+    if (rotation !== 0) {
+      asset.videoStream = {
+        ...asset.videoStream,
+        rotation: getVideoDisplayRotation(asset.videoStream.rotation, rotation),
+      };
     }
 
     // Sharing the sessionId allows only one microservices worker to successfully insert to the session table.

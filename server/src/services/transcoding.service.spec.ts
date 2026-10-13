@@ -5,6 +5,7 @@ import {
   HLS_INACTIVITY_TIMEOUT_MS,
   HLS_LEASE_DURATION_MS,
 } from 'src/constants';
+import { AssetEditAction } from 'src/dtos/editing.dto';
 import { TranscodingService } from 'src/services/transcoding.service';
 import { VIDEO_STREAM_SESSION_PK_CONSTRAINT } from 'src/utils/database';
 import { eiffelTower, train, waterfall } from 'test/fixtures/media.stub';
@@ -35,6 +36,7 @@ describe(TranscodingService.name, () => {
     ({ sut, mocks } = newTestService(TranscodingService));
     mocks.systemMetadata.get.mockResolvedValue({ ffmpeg: { realtime: { enabled: true } } });
     mocks.videoStream.getForTranscoding.mockResolvedValue(eiffelTower);
+    mocks.assetEdit.getAll.mockResolvedValue([]);
   });
 
   describe('onSessionRequest', () => {
@@ -134,6 +136,30 @@ describe(TranscodingService.name, () => {
 
       expect(mocks.process.spawn).toHaveBeenCalledTimes(1);
       expect(mocks.process.spawn).toHaveBeenCalledWith('ffmpeg', expect.any(Array), expect.any(Object));
+    });
+
+    it('streams a rotated video turned', async () => {
+      mocks.process.spawn.mockReturnValue(mockSpawn(0, '', ''));
+      mocks.assetEdit.getAll.mockResolvedValue([
+        { id: 'edit-1', action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+      ]);
+
+      await sut.onSegmentRequest({ sessionId, assetId, variantIndex: 0, segmentIndex: 0 });
+
+      const args = mocks.process.spawn.mock.calls[0][1] as string[];
+      const rotationIndex = args.indexOf('-display_rotation');
+      expect(rotationIndex).toBeGreaterThan(-1);
+      // the file is upright, turning it a quarter clockwise is -90 counter-clockwise
+      expect(args[rotationIndex + 1]).toBe('-90');
+      expect(rotationIndex).toBeLessThan(args.indexOf('-i'));
+    });
+
+    it('does not override the rotation of a video without edits', async () => {
+      mocks.process.spawn.mockReturnValue(mockSpawn(0, '', ''));
+
+      await sut.onSegmentRequest({ sessionId, assetId, variantIndex: 0, segmentIndex: 0 });
+
+      expect(mocks.process.spawn.mock.calls[0][1]).not.toContain('-display_rotation');
     });
 
     it('kills and respawns when the variant changes', async () => {

@@ -169,6 +169,8 @@ export interface HlsCommandOptions {
   target: TranscodeTarget;
   timeBase: number;
   totalDuration: number;
+  /** overrides the rotation of the input (ffmpeg -display_rotation), for rotated videos */
+  displayRotation?: number;
 }
 
 export interface BitrateDistribution {

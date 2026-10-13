@@ -1,4 +1,10 @@
-import { editAsset, removeAssetEdits, type AssetEditsCreateDto, type AssetResponseDto } from '@immich/sdk';
+import {
+  AssetTypeEnum,
+  editAsset,
+  removeAssetEdits,
+  type AssetEditsCreateDto,
+  type AssetResponseDto,
+} from '@immich/sdk';
 import { ConfirmModal, modalManager, toastManager } from '@immich/ui';
 import { mdiCropRotate } from '@mdi/js';
 import type { Component } from 'svelte';
@@ -123,11 +129,20 @@ export class EditManager {
     }
 
     const assetId = this.currentAsset.id;
+    const motionAssetId = this.currentAsset.livePhotoVideoId;
+    // a rotated video is copied before it is ready, which takes a while for a big one
+    const timeout = this.currentAsset.type === AssetTypeEnum.Video ? 300_000 : 10_000;
     const t = await getFormatter();
 
     try {
       // Setup the websocket listener before sending the edit request
-      const editCompleted = waitForWebsocketEvent('AssetEditReadyV2', (event) => event.asset.id === assetId, 10_000);
+      const editCompleted = Promise.all([
+        waitForWebsocketEvent('AssetEditReadyV2', (event) => event.asset.id === assetId, timeout),
+        // the video of a live photo turns with it
+        motionAssetId
+          ? waitForWebsocketEvent('AssetEditReadyV2', (event) => event.asset.id === motionAssetId, 300_000)
+          : undefined,
+      ]);
 
       await (edits.length === 0
         ? removeAssetEdits({ id: assetId })

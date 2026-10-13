@@ -1,7 +1,14 @@
 import { AssetFace } from 'src/database';
+import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { SourceType } from 'src/enum';
-import { boundingBoxOverlap, checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
+import {
+  boundingBoxOverlap,
+  checkFaceVisibility,
+  checkOcrVisibility,
+  getEditRotation,
+  getVideoDisplayRotation,
+} from 'src/utils/editor';
 import { describe, expect, it } from 'vitest';
 
 describe('boundingBoxOverlap', () => {
@@ -503,5 +510,40 @@ describe('checkOcrVisibility', () => {
     // 40% overlap should be hidden
     expect(result2.visible).toHaveLength(0);
     expect(result2.hidden).toHaveLength(1);
+  });
+});
+
+describe('getEditRotation', () => {
+  it('should be 0 without rotate edits', () => {
+    expect(getEditRotation([])).toBe(0);
+    expect(getEditRotation([{ action: AssetEditAction.Mirror, parameters: { axis: MirrorAxis.Horizontal } }])).toBe(0);
+  });
+
+  it('should add up rotate edits clockwise', () => {
+    expect(getEditRotation([{ action: AssetEditAction.Rotate, parameters: { angle: 90 } }])).toBe(90);
+    expect(
+      getEditRotation([
+        { action: AssetEditAction.Rotate, parameters: { angle: 270 } },
+        { action: AssetEditAction.Rotate, parameters: { angle: 180 } },
+      ]),
+    ).toBe(90);
+  });
+});
+
+describe('getVideoDisplayRotation', () => {
+  it('should turn an upright video clockwise', () => {
+    expect(getVideoDisplayRotation(0, 0)).toBe(0);
+    expect(getVideoDisplayRotation(0, 90)).toBe(-90);
+    expect(getVideoDisplayRotation(0, 180)).toBe(180);
+    expect(getVideoDisplayRotation(0, 270)).toBe(90);
+  });
+
+  it('should add to the rotation the video already has', () => {
+    // a portrait phone video is stored sideways with a rotation of -90
+    expect(getVideoDisplayRotation(-90, 90)).toBe(180);
+    expect(getVideoDisplayRotation(-90, 270)).toBe(0);
+    expect(getVideoDisplayRotation(90, 90)).toBe(0);
+    expect(getVideoDisplayRotation(180, 90)).toBe(90);
+    expect(getVideoDisplayRotation(-180, 0)).toBe(180);
   });
 });

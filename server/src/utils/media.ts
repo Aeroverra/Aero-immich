@@ -24,8 +24,9 @@ import {
 
 export const isVideoRotated = (videoStream: VideoStreamInfo): boolean => Math.abs(videoStream.rotation) === 90;
 
+// a quarter turn shows portrait frames as landscape and the other way around
 export const isVideoVertical = (videoStream: VideoStreamInfo): boolean =>
-  videoStream.height > videoStream.width || isVideoRotated(videoStream);
+  videoStream.height > videoStream.width !== isVideoRotated(videoStream);
 
 export const getOutputSize = (videoStream: VideoStreamInfo, targetRes: number) => {
   const factor = Math.max(videoStream.height, videoStream.width) / Math.min(videoStream.height, videoStream.width);
@@ -166,6 +167,9 @@ export class BaseConfig implements VideoCodecSWConfig {
     const args: string[] = this.getBaseInputOptions(video);
     if (options.seekSeconds) {
       args.push('-ss', String(options.seekSeconds));
+    }
+    if (options.displayRotation !== undefined) {
+      args.push('-display_rotation', String(options.displayRotation));
     }
     args.push(
       '-nostdin',

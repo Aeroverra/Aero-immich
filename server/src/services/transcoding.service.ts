@@ -19,6 +19,7 @@ import { ArgOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
 import { VideoInterfaces } from 'src/types';
 import { isVideoStreamSessionPkConstraint } from 'src/utils/database';
+import { getEditRotation, getVideoDisplayRotation } from 'src/utils/editor';
 import { BaseConfig } from 'src/utils/media';
 
 type Session = {
@@ -211,6 +212,13 @@ export class TranscodingService extends BaseService {
     // that quantizes to slot K×gop and discards the one quantizing to K×gop−1.
     const fps = (asset.packets.packetCount * asset.videoStream.timeBase) / asset.packets.totalDuration;
     const gop = Math.ceil(HLS_SEGMENT_DURATION * fps);
+
+    // a rotated video is streamed turned: the rotation of its edits is added to the one of the file
+    const rotation = getEditRotation(await this.assetEditRepository.getAll(session.assetId));
+    const videoStream =
+      rotation === 0
+        ? asset.videoStream
+        : { ...asset.videoStream, rotation: getVideoDisplayRotation(asset.videoStream.rotation, rotation) };
     const seekSeconds = startSegment > 0 ? (startSegment * gop - 0.5) / fps : 0;
 
     let config;
@@ -247,8 +255,9 @@ export class TranscodingService extends BaseService {
         target: TranscodeTarget.All,
         timeBase: asset.videoStream.timeBase,
         totalDuration: asset.packets.totalDuration,
+        displayRotation: rotation === 0 ? undefined : videoStream.rotation,
       },
-      asset.videoStream,
+      videoStream,
       asset.audioStream ?? undefined,
     );
     this.logger.log(

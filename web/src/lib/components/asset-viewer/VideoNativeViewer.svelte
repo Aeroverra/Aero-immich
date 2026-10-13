@@ -99,6 +99,7 @@
       realtimeTranscoding: featureFlagsManager.value.realtimeTranscoding,
       playOriginalVideo,
       hasEncodedVideo: asset.hasEncodedVideo,
+      isEdited: asset.isEdited,
     }),
   );
   const playbackSourceText = $derived.by(() => {

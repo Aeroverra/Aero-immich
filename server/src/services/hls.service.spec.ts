@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { AssetEditAction } from 'src/dtos/editing.dto';
 import { HlsVideoResolution, VideoCodec } from 'src/enum';
 import { HlsService } from 'src/services/hls.service';
 import { eiffelTower, train, waterfall } from 'test/fixtures/media.stub';
@@ -171,12 +172,19 @@ ${sessionId}/13/playlist.m3u8
 ${sessionId}/14/playlist.m3u8
 `;
 
+const getVariantSizes = (playlist: string) =>
+  playlist
+    .matchAll(/RESOLUTION=(\d+)x(\d+)/g)
+    .map(([, width, height]) => [width, height])
+    .toArray();
+
 describe(HlsService.name, () => {
   let sut: HlsService;
   let mocks: ServiceMocks;
 
   beforeEach(() => {
     ({ sut, mocks } = newTestService(HlsService));
+    mocks.assetEdit.getAll.mockResolvedValue([]);
   });
 
   describe('getMainPlaylist', () => {
@@ -226,6 +234,17 @@ describe(HlsService.name, () => {
     it('offers every resolution up to the source and derives 4K codec levels (waterfall, 4K, 29.83fps)', async () => {
       setup(waterfall, allCodecs, allResolutions);
       await expect(sut.getMainPlaylist(auth, assetId)).resolves.toBe(waterfallExpectedMasterAv1);
+    });
+
+    it('offers the turned size of a rotated video', async () => {
+      setup(eiffelTower);
+      const playlist = await sut.getMainPlaylist(auth, assetId);
+      mocks.assetEdit.getAll.mockResolvedValue([
+        { id: 'edit-1', action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+      ]);
+      const rotated = await sut.getMainPlaylist(auth, assetId);
+
+      expect(getVariantSizes(rotated)).toEqual(getVariantSizes(playlist).map(([width, height]) => [height, width]));
     });
 
     it('throws BadRequestException when realtime transcoding is disabled', async () => {

@@ -82,38 +82,43 @@
       ]}
       bind:this={transformManager.overlayEl}
     ></div>
-    <div class="crop-frame absolute border-2 border-white" bind:this={transformManager.cropFrame}>
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class={[
-          'grid size-full cursor-move transition-opacity motion-reduce:transition-none',
-          transformManager.isInteracting ? 'opacity-100' : 'opacity-0',
-        ]}
-        onmousedown={(e) => transformManager.handleMouseDownOn(e, ResizeBoundary.None)}
-      ></div>
+    <div
+      class={['crop-frame absolute', !transformManager.rotateOnly && 'border-2 border-white']}
+      bind:this={transformManager.cropFrame}
+    >
+      {#if !transformManager.rotateOnly}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class={[
+            'grid size-full cursor-move transition-opacity motion-reduce:transition-none',
+            transformManager.isInteracting ? 'opacity-100' : 'opacity-0',
+          ]}
+          onmousedown={(e) => transformManager.handleMouseDownOn(e, ResizeBoundary.None)}
+        ></div>
 
-      {#each edges as edge (edge)}
-        {@const rotatedEdge = rotateBoundary(edges, edge, transformManager.normalizedRotation / 90)}
-        <button
-          class={['absolute', edge]}
-          style={`${edge}: -10px`}
-          onmousedown={(e) => transformManager.handleMouseDownOn(e, edge)}
-          type="button"
-          aria-label={$t('editor_handle_edge', { values: { edge: rotatedEdge } })}
-        ></button>
-      {/each}
+        {#each edges as edge (edge)}
+          {@const rotatedEdge = rotateBoundary(edges, edge, transformManager.normalizedRotation / 90)}
+          <button
+            class={['absolute', edge]}
+            style={`${edge}: -10px`}
+            onmousedown={(e) => transformManager.handleMouseDownOn(e, edge)}
+            type="button"
+            aria-label={$t('editor_handle_edge', { values: { edge: rotatedEdge } })}
+          ></button>
+        {/each}
 
-      {#each corners as corner (corner)}
-        {@const rotatedCorner = rotateBoundary(corners, corner, transformManager.normalizedRotation / 90)}
-        <button
-          class={['corner', corner]}
-          onmousedown={(e) => transformManager.handleMouseDownOn(e, corner)}
-          type="button"
-          aria-label={$t('editor_handle_corner', { values: { corner: rotatedCorner.replace('-', '_') } })}
-        >
-          <Icon icon={cornerIcon} size="30" strokeWidth={4} strokeColor="white" color="transparent" />
-        </button>
-      {/each}
+        {#each corners as corner (corner)}
+          {@const rotatedCorner = rotateBoundary(corners, corner, transformManager.normalizedRotation / 90)}
+          <button
+            class={['corner', corner]}
+            onmousedown={(e) => transformManager.handleMouseDownOn(e, corner)}
+            type="button"
+            aria-label={$t('editor_handle_corner', { values: { corner: rotatedCorner.replace('-', '_') } })}
+          >
+            <Icon icon={cornerIcon} size="30" strokeWidth={4} strokeColor="white" color="transparent" />
+          </button>
+        {/each}
+      {/if}
     </div>
   </div>
 </div>

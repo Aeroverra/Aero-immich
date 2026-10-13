@@ -633,12 +633,19 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found');
     }
 
-    if (asset.type !== AssetType.Image) {
-      throw new BadRequestException('Only images can be edited');
+    if (asset.type !== AssetType.Image && asset.type !== AssetType.Video) {
+      throw new BadRequestException('Only images and videos can be edited');
     }
 
-    if (asset.livePhotoVideoId) {
-      throw new BadRequestException('Editing live photos is not supported');
+    const edits = dto.edits as AssetEditActionItem[];
+
+    // players turn a video by its rotation metadata, so a video (or the video of a live photo) can only be rotated
+    if (asset.type === AssetType.Video && edits.some((edit) => edit.action !== AssetEditAction.Rotate)) {
+      throw new BadRequestException('Videos can only be rotated');
+    }
+
+    if (asset.livePhotoVideoId && edits.some((edit) => edit.action !== AssetEditAction.Rotate)) {
+      throw new BadRequestException('Live photos can only be rotated');
     }
 
     if (isPanorama(asset)) {
@@ -660,7 +667,6 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset dimensions are not available for editing');
     }
 
-    const edits = dto.edits as AssetEditActionItem[];
     const crop = edits.find((e) => e.action === AssetEditAction.Crop);
     if (crop) {
       if (edits[0].action !== AssetEditAction.Crop) {
@@ -683,6 +689,15 @@ export class AssetService extends BaseService {
     const newEdits = await this.assetEditRepository.replaceAll(id, edits);
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
 
+    // the video of a live photo turns with the photo
+    if (asset.livePhotoVideoId) {
+      await this.assetEditRepository.replaceAll(asset.livePhotoVideoId, edits);
+      await this.jobRepository.queue({
+        name: JobName.AssetEditThumbnailGeneration,
+        data: { id: asset.livePhotoVideoId },
+      });
+    }
+
     // Return the asset and its applied edits
     return {
       assetId: id,
@@ -700,5 +715,13 @@ export class AssetService extends BaseService {
 
     await this.assetEditRepository.replaceAll(id, []);
     await this.jobRepository.queue({ name: JobName.AssetEditThumbnailGeneration, data: { id } });
+
+    if (asset.livePhotoVideoId) {
+      await this.assetEditRepository.replaceAll(asset.livePhotoVideoId, []);
+      await this.jobRepository.queue({
+        name: JobName.AssetEditThumbnailGeneration,
+        data: { id: asset.livePhotoVideoId },
+      });
+    }
   }
 }
