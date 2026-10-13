@@ -58,7 +58,7 @@ class SearchPage extends HookConsumerWidget {
         location: const SearchLocationFilter(),
         camera: const SearchCameraFilter(),
         date: const SearchDateFilter(),
-        display: const SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false),
+        display: const SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false, hasNoTags: false),
         rating: const SearchRatingFilter(),
         mediaType: AssetType.other,
         language: "${context.locale.languageCode}-${context.locale.countryCode}",
@@ -469,6 +469,7 @@ class SearchPage extends HookConsumerWidget {
           isNotInAlbum: value[DisplayOption.notInAlbum] ?? display.isNotInAlbum,
           isArchive: value[DisplayOption.archive] ?? display.isArchive,
           isFavorite: value[DisplayOption.favorite] ?? display.isFavorite,
+          hasNoTags: value[DisplayOption.noTags] ?? display.hasNoTags,
         );
       }
 
@@ -476,7 +477,12 @@ class SearchPage extends HookConsumerWidget {
         displayOptionCurrentFilterWidget.value = null;
         search(
           filter.value.copyWith(
-            display: const SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false),
+            display: const SearchDisplayFilters(
+              isNotInAlbum: false,
+              isArchive: false,
+              isFavorite: false,
+              hasNoTags: false,
+            ),
           ),
         );
       }
@@ -486,6 +492,7 @@ class SearchPage extends HookConsumerWidget {
           if (display.isNotInAlbum) context.t.search_filter_display_option_not_in_album,
           if (display.isArchive) context.t.archive,
           if (display.isFavorite) context.t.favorite,
+          if (display.hasNoTags) context.t.search_filter_display_option_no_tags,
         ];
         displayOptionCurrentFilterWidget.value = filterText.isNotEmpty
             ? Text(filterText.join(', '), style: context.textTheme.labelLarge)
@@ -500,7 +507,11 @@ class SearchPage extends HookConsumerWidget {
             title: context.t.display_options,
             onSearch: handleApply,
             onClear: handleClear,
-            child: DisplayOptionPicker(onSelect: handleOnSelect, filter: filter.value.display),
+            child: DisplayOptionPicker(
+              onSelect: handleOnSelect,
+              filter: filter.value.display,
+              tagsEnabled: userPreferences.valueOrNull?.tagsEnabled ?? false,
+            ),
           ),
         ),
       );
