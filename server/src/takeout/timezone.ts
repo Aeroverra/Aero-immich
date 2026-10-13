@@ -129,15 +129,16 @@ function pxlInstant(name: string): Date | null {
 
 // Section 13 / 13.1 capture-time rule: "Google unless 100% sure". Pure and synchronous.
 //
-// Default: Google's photoTakenTime moment, with no invented zone (flag zoneAssumed). Changed only when:
+// Default: Google's photoTakenTime moment, shown in the zone at the capture position (the file's GPS, else Google's
+// location) and with no invented zone when there is no position either (flag zoneAssumed). Changed only when:
 //   1. the file records time AND zone, the device is not a dedicated camera, and the file moment equals Google's
-//      within 2 s: moment stays Google's, zone from the file. If the moments disagree, keep Google (zone-less,
-//      flagged) unless an independent clock (PXL_ name or GPSDateTime, within 2 s) proves the file: then the
-//      file's moment and zone. GPS never overrides a recorded zone.
+//      within 2 s: moment stays Google's, zone from the file. If the moments disagree, keep Google (the default
+//      above) unless an independent clock (PXL_ name or GPSDateTime, within 2 s) proves the file: then the
+//      file's moment and zone. A position never overrides a recorded zone that agrees with Google.
 //   2. PHONE with a zone-less wall clock whose clock minus Google is a whole 15-min offset within 2 s: that offset.
 //      A zero offset from a video's UTC QuickTime date is no zone evidence.
 //   3. exact Screenshot_YYYYMMDD-HHMMSS name: as rule 2 with the name as the clock.
-//   4. CAMERA: Google's moment, no zone change.
+//   4. CAMERA: the default above, whatever zone label or clock the camera wrote.
 export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
   const { googleInstant, exif, names } = input;
   const device = classifyDevice(exif.make, exif.model);
@@ -176,8 +177,18 @@ export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
     return result({ instant: null, zone: null, zoneSource: null, putDate: false });
   }
 
-  // Google's moment with no zone evidence: PUT the moment with no zone (flagged).
+  // Google's moment with no zone of its own: the zone at the capture position when there is one, as a plain upload of
+  // the file gets it; else PUT the moment with no zone (flagged).
   const googleNoZone = (): CaptureTimeResult => {
+    const atPosition = exif.gpsZone ? DateTime.fromJSDate(googleInstant, { zone: exif.gpsZone }) : null;
+    if (atPosition?.isValid) {
+      return result({
+        instant: googleInstant,
+        zone: fixedOffsetName(atPosition.offset),
+        zoneSource: 'gps',
+        putDate: true,
+      });
+    }
     flags.push('zoneAssumed');
     return result({ instant: googleInstant, zone: null, zoneSource: 'google', putDate: true });
   };
@@ -198,7 +209,7 @@ export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
       flags.push(pxlProof ? 'fileMomentProvenByPxl' : 'fileMomentProvenByGpsDateTime');
       return result({ instant: fileMoment, zone: fileZone, zoneSource: 'fileOffset', putDate: false });
     }
-    // Google's date may be a manual edit in Google Photos: keep Google's moment, zone-less.
+    // Google's date may be a manual edit in Google Photos: keep Google's moment, without the file's zone.
     return googleNoZone();
   }
 
@@ -235,7 +246,7 @@ export function resolveCaptureTime(input: CaptureTimeInput): CaptureTimeResult {
     }
   }
 
-  // Everything else: Google's moment, no zone. Note a phone clock that disagrees with Google.
+  // Everything else: Google's moment. Note a phone clock that disagrees with Google.
   if (device === 'phone' && exif.fileClock) {
     const diff = exif.fileClock.getTime() - googleInstant.getTime();
     if (Math.abs(diff) > TOLERANCE_MS) {
