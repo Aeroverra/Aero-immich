@@ -17,9 +17,11 @@
     initialDate?: DateTime;
     initialTimeZone?: string;
     assets: TimelineAsset[];
+    /** the ids to update when they differ from the owned assets, e.g. with the assets stacked below them */
+    assetIds?: string[];
     onClose: (success: boolean) => void;
   }
-  let { initialDate = DateTime.now(), initialTimeZone, assets, onClose }: Props = $props();
+  let { initialDate = DateTime.now(), initialTimeZone, assets, assetIds, onClose }: Props = $props();
 
   let showRelative = $state(false);
   let selectedDuration = $state(0);
@@ -31,7 +33,7 @@
   let selectedOption = $derived(getPreferredTimeZone(initialDate, initialTimeZone, timezones, lastSelectedTimezone));
 
   const onSubmit = async () => {
-    const ids = getOwnedAssetsWithWarning(assets, authManager.user);
+    const ids = assetIds ?? getOwnedAssetsWithWarning(assets, authManager.user);
     try {
       if (showRelative && (selectedDuration || selectedOption)) {
         await updateAssets({

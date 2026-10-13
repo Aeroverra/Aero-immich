@@ -29304,6 +29304,34 @@
         ],
         "type": "string"
       },
+      "StackActionMode": {
+        "description": "Whether actions on a selection include the stacked assets of the selected stacks",
+        "enum": [
+          "ask",
+          "primary",
+          "stack"
+        ],
+        "type": "string"
+      },
+      "StackActionsResponse": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/StackActionMode"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "StackActionsUpdate": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/StackActionMode"
+          }
+        },
+        "type": "object"
+      },
       "StackCreateDto": {
         "properties": {
           "assetIds": {
@@ -33511,6 +33539,9 @@
           "sharedLinks": {
             "$ref": "#/components/schemas/SharedLinksResponse"
           },
+          "stackActions": {
+            "$ref": "#/components/schemas/StackActionsResponse"
+          },
           "stacks": {
             "$ref": "#/components/schemas/StacksResponse"
           },
@@ -33533,6 +33564,7 @@
           "ratings",
           "recentlyAdded",
           "sharedLinks",
+          "stackActions",
           "stacks",
           "tags"
         ],
@@ -33584,6 +33616,9 @@
           },
           "sharedLinks": {
             "$ref": "#/components/schemas/SharedLinksUpdate"
+          },
+          "stackActions": {
+            "$ref": "#/components/schemas/StackActionsUpdate"
           },
           "stacks": {
             "$ref": "#/components/schemas/StacksUpdate"

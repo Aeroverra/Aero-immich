@@ -102,6 +102,20 @@ export enum StackAutoExclusionReason {
   Edited = 'edited',
 }
 
+export enum StackActionMode {
+  /** ask on every action whether stacked assets are included */
+  Ask = 'ask',
+  /** act on the visible primary asset of each stack only */
+  Primary = 'primary',
+  /** act on every asset of each stack */
+  Stack = 'stack',
+}
+
+export const StackActionModeSchema = z
+  .enum(StackActionMode)
+  .describe('Whether actions on a selection include the stacked assets of the selected stacks')
+  .meta({ id: 'StackActionMode' });
+
 export enum AssetOrderBy {
   TakenAt = 'takenAt',
   CreatedAt = 'createdAt',

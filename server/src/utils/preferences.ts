@@ -1,6 +1,6 @@
 import _ from 'lodash';
 import { UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
-import { AssetOrder, DeletedReimportMode, UserMetadataKey } from 'src/enum';
+import { AssetOrder, DeletedReimportMode, StackActionMode, UserMetadataKey } from 'src/enum';
 import { DeepPartial, UserMetadataItem, UserPreferences } from 'src/types';
 import { HumanReadableSize } from 'src/utils/bytes';
 import { getKeysDeep } from 'src/utils/misc';
@@ -68,6 +68,9 @@ const getDefaultPreferences = (): UserPreferences => {
     deletedReimport: {
       mode: DeletedReimportMode.Trash,
       albumId: null,
+    },
+    stackActions: {
+      mode: StackActionMode.Ask,
     },
   };
 };

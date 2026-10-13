@@ -100,6 +100,19 @@ class UserApiRepository extends ApiRepository {
     );
   }
 
+  Future<void> setStackActionMode(domain.StackActionMode mode) async {
+    final apiMode = switch (mode) {
+      domain.StackActionMode.ask => StackActionMode.ask,
+      domain.StackActionMode.primary => StackActionMode.primary,
+      domain.StackActionMode.stack => StackActionMode.stack,
+    };
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(stackActions: Optional.present(StackActionsUpdate(mode: Optional.present(apiMode)))),
+      ),
+    );
+  }
+
   Future<int> getDeletedChecksumCount() async {
     final dto = await checkNull(_api.getMyDeletedChecksumStatistics());
     return dto.count;

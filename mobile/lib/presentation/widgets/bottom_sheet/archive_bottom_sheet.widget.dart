@@ -18,6 +18,8 @@ import 'package:immich_mobile/presentation/actions/stack.action.dart';
 import 'package:immich_mobile/presentation/widgets/album/album_selector.widget.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_sheet.widget.dart';
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
+import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class ArchiveBottomSheet extends ConsumerStatefulWidget {
@@ -45,7 +47,19 @@ class _ArchiveBottomSheetState extends ConsumerState<ArchiveBottomSheet> {
   @override
   Widget build(BuildContext context) {
     Future<void> addToAlbum(RemoteAlbum album) async {
-      final result = await ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album);
+      final selectedAssets = ref.read(multiSelectProvider).selectedAssets;
+      final stacked = await resolveStackedAssets(context, ref, ActionSource.timeline, selectedAssets);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
+      final result = await ref
+          .read(actionProvider.notifier)
+          .addToAlbum(
+            ActionSource.timeline,
+            album,
+            stackedAssetIds: stacked.map((asset) => asset.id).toList(growable: false),
+          );
 
       if (!context.mounted) {
         return;

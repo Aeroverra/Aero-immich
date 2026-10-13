@@ -49,6 +49,7 @@ import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
 import ProfileImageCropperModal from '$lib/modals/ProfileImageCropperModal.svelte';
 import SharedLinkCreateModal from '$lib/modals/SharedLinkCreateModal.svelte';
 import { Route } from '$lib/route';
+import { resolveStackSelection } from '$lib/services/stack-selection.service';
 import { SlideshowState, slideshowStore } from '$lib/stores/slideshow.store';
 import { getAssetMediaUrl, getSharedLink, sleep } from '$lib/utils';
 import { downloadUrl } from '$lib/utils';
@@ -67,11 +68,18 @@ export const getAssetBulkActions = ($t: MessageFormatter) => {
     title: $t('add_to_album'),
     icon: mdiPlus,
     shortcuts: [{ key: 'l' }],
-    onAction: () =>
-      modalManager.show(AssetAddToAlbumModal, {
-        assetIds: assetMultiSelectManager.assets.map((asset) => asset.id),
-        hasPrivate: assetMultiSelectManager.assets.some((asset) => asset.isPrivate),
-      }),
+    onAction: async () => {
+      const assets = assetMultiSelectManager.assets;
+      const assetIds = await resolveStackSelection(assets);
+      if (!assetIds) {
+        return;
+      }
+
+      await modalManager.show(AssetAddToAlbumModal, {
+        assetIds,
+        hasPrivate: assets.some((asset) => asset.isPrivate),
+      });
+    },
   };
 
   const RefreshFacesJob: ActionItem = {

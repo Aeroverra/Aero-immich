@@ -757,6 +757,9 @@ export type SharedLinksResponse = {
     /** Whether shared links appear in web sidebar */
     sidebarWeb: boolean;
 };
+export type StackActionsResponse = {
+    mode: StackActionMode;
+};
 export type StacksResponse = {
     /** Whether stacks created automatically are shown grouped in the timeline, like manual stacks */
     groupAuto: boolean;
@@ -782,6 +785,7 @@ export type UserPreferencesResponseDto = {
     ratings: RatingsResponse;
     recentlyAdded: RecentlyAddedResponse;
     sharedLinks: SharedLinksResponse;
+    stackActions: StackActionsResponse;
     stacks: StacksResponse;
     tags: TagsResponse;
 };
@@ -866,6 +870,9 @@ export type SharedLinksUpdate = {
     /** Whether shared links appear in web sidebar */
     sidebarWeb?: boolean;
 };
+export type StackActionsUpdate = {
+    mode?: StackActionMode;
+};
 export type StacksUpdate = {
     /** Whether stacks created automatically are shown grouped in the timeline, like manual stacks */
     groupAuto?: boolean;
@@ -892,6 +899,7 @@ export type UserPreferencesUpdateDto = {
     ratings?: RatingsUpdate;
     recentlyAdded?: RecentlyAddedUpdate;
     sharedLinks?: SharedLinksUpdate;
+    stackActions?: StackActionsUpdate;
     stacks?: StacksUpdate;
     tags?: TagsUpdate;
 };
@@ -8118,6 +8126,11 @@ export enum DeletedReimportMode {
     Trash = "trash",
     Skip = "skip",
     Album = "album"
+}
+export enum StackActionMode {
+    Ask = "ask",
+    Primary = "primary",
+    Stack = "stack"
 }
 export enum AssetVisibility {
     Archive = "archive",

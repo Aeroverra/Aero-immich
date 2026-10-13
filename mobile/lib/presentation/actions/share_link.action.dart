@@ -7,6 +7,7 @@ import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.dart';
 import 'package:immich_mobile/routing/router.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 
 final _stateProvider = Provider.family.autoDispose<List<String>?, ActionSource>((ref, source) {
   final assets = ref.watch(assetsActionProvider(source));
@@ -24,10 +25,16 @@ class ShareLinkAction extends AssetActionBuilder {
       return null;
     }
 
-    return .new(
-      icon: Icons.link_rounded,
-      label: context.t.share_link,
-      onAction: () async => unawaited(context.pushRoute(SharedLinkEditRoute(assetsList: remoteIds))),
-    );
+    return .new(icon: Icons.link_rounded, label: context.t.share_link, onAction: () => _share(context, ref, remoteIds));
+  }
+
+  Future<void> _share(BuildContext context, WidgetRef ref, List<String> remoteIds) async {
+    final selected = ref.read(assetsActionProvider(source)).remote().where((asset) => remoteIds.contains(asset.id));
+    final stacked = await resolveStackedAssets(context, ref, source, selected);
+    if (stacked == null || !context.mounted) {
+      return;
+    }
+
+    unawaited(context.pushRoute(SharedLinkEditRoute(assetsList: [...remoteIds, ...stacked.map((asset) => asset.id)])));
   }
 }

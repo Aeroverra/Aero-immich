@@ -9,6 +9,7 @@ import 'package:immich_mobile/presentation/actions/action.dart';
 import 'package:immich_mobile/providers/background_sync.provider.dart';
 import 'package:immich_mobile/repositories/download.repository.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 
 final _stateProvider = Provider.family.autoDispose<List<RemoteAsset>?, ActionSource>((ref, source) {
   final assets = ref.watch(assetsActionProvider(source));
@@ -26,15 +27,20 @@ class DownloadAction extends AssetActionBuilder {
       return null;
     }
 
-    return .new(icon: Icons.download, label: context.t.download, onAction: () => _download(ref, assets));
+    return .new(icon: Icons.download, label: context.t.download, onAction: () => _download(context, ref, assets));
   }
 
-  Future<void> _download(WidgetRef ref, List<RemoteAsset> assets) async {
+  Future<void> _download(BuildContext context, WidgetRef ref, List<RemoteAsset> assets) async {
     final backgroundSync = ref.read(backgroundSyncProvider);
     final downloads = ref.read(downloadRepositoryProvider);
 
     try {
-      await downloads.downloadAllAssets(assets);
+      final stacked = await resolveStackedAssets(context, ref, source, assets);
+      if (stacked == null) {
+        return;
+      }
+
+      await downloads.downloadAllAssets([...assets, ...stacked]);
 
       unawaited(
         Future.delayed(const .new(seconds: 1), () async {

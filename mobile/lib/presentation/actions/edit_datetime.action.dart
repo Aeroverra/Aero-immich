@@ -10,6 +10,7 @@ import 'package:immich_mobile/providers/infrastructure/asset_viewer/asset.provid
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/utils/timezone.dart';
 import 'package:immich_mobile/widgets/common/date_time_picker.dart';
 
@@ -46,11 +47,18 @@ class EditDateTimeAction extends AssetActionBuilder {
       return;
     }
 
-    final (:assetIds, :origin) = state;
+    final (assetIds: selectedIds, :origin) = state;
     final remoteAssetRepository = ref.read(driftProvider).remoteAssetRepository;
     final clearSelection = ref.read(clearSelectionProvider(source));
 
     try {
+      final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+      final stacked = await resolveStackedAssets(context, ref, source, selected);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
+      final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
       DateTime? initialDate;
       String? timeZone;
       Duration? offset;

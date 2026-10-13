@@ -49,6 +49,8 @@ void main() {
       );
       expect(preferences, isNotNull);
       expect(preferences!.stacks.groupAuto, isTrue);
+      expect(preferences.autoStack.enabled, isFalse);
+      expect(preferences.stackActions.mode, StackActionMode.ask);
 
       final stack = StackResponseDto.fromJson(
         jsonDecode('{"id": "stack-1", "primaryAssetId": "asset-1", "assets": []}'),
@@ -61,6 +63,42 @@ void main() {
       );
       expect(assetStack, isNotNull);
       expect(assetStack!.source_, StackSource.manual);
+    });
+
+    test('reads queues from servers without face attributes and automatic stacks', () {
+      final queue = {
+        'jobCounts': {'active': 1, 'completed': 0, 'delayed': 0, 'failed': 0, 'paused': 0, 'waiting': 2},
+        'queueStatus': {'isActive': true, 'isPaused': false},
+      };
+      const names = [
+        'backgroundTask',
+        'backupDatabase',
+        'duplicateDetection',
+        'editor',
+        'faceDetection',
+        'facialRecognition',
+        'integrityCheck',
+        'library',
+        'metadataExtraction',
+        'migration',
+        'notifications',
+        'ocr',
+        'search',
+        'sidecar',
+        'smartSearch',
+        'storageTemplateMigration',
+        'thumbnailGeneration',
+        'videoConversion',
+        'workflow',
+      ];
+
+      // decoded like a response body, so the maps can take the patched queues
+      final queues = QueuesResponseLegacyDto.fromJson(jsonDecode(jsonEncode({for (final name in names) name: queue})));
+
+      expect(queues, isNotNull);
+      expect(queues!.faceAttributes.jobCounts.waiting, 0);
+      expect(queues.autoStack.queueStatus.isActive, isFalse);
+      expect(queues.smartSearch.jobCounts.waiting, 2);
     });
 
     test('addDefault', () {

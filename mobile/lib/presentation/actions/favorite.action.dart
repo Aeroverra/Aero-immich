@@ -6,6 +6,7 @@ import 'package:immich_mobile/presentation/actions/action.dart';
 import 'package:immich_mobile/providers/infrastructure/asset.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 
 typedef _State = ({bool shouldFavorite, List<String> assetIds});
 
@@ -43,7 +44,14 @@ class FavoriteAction extends AssetActionBuilder {
       return;
     }
 
-    final (:shouldFavorite, :assetIds) = state;
+    final (:shouldFavorite, assetIds: selectedIds) = state;
+    final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+    final stacked = await resolveStackedAssets(context, ref, source, selected);
+    if (stacked == null || !context.mounted) {
+      return;
+    }
+
+    final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
     final message = shouldFavorite
         ? context.t.favorite_action_prompt(count: assetIds.length)
         : context.t.unfavorite_action_prompt(count: assetIds.length);

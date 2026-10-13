@@ -24,10 +24,12 @@ export const deleteAssets = async (
   onAssetDelete: OnDelete,
   assets: TimelineAsset[],
   onUndoDelete: OnUndoDelete | undefined = undefined,
+  /** assets stacked below the selected ones that are not in the timeline, deleted and restored along with them */
+  stackedAssetIds: string[] = [],
 ) => {
   const $t = get(t);
   try {
-    const ids = assets.map((a) => a.id);
+    const ids = [...assets.map((a) => a.id), ...stackedAssetIds];
     await deleteBulk({ assetBulkDeleteDto: { ids, force } });
     onAssetDelete(ids);
 
@@ -38,7 +40,11 @@ export const deleteAssets = async (
           : $t('assets_trashed_count', { values: { count: ids.length } }),
         button:
           onUndoDelete && !force
-            ? { label: $t('undo'), color: 'secondary', onclick: () => undoDeleteAssets(onUndoDelete, assets) }
+            ? {
+                label: $t('undo'),
+                color: 'secondary',
+                onclick: () => undoDeleteAssets(onUndoDelete, assets, stackedAssetIds),
+              }
             : undefined,
       },
       { timeout: 5000 },
@@ -48,10 +54,10 @@ export const deleteAssets = async (
   }
 };
 
-const undoDeleteAssets = async (onUndoDelete: OnUndoDelete, assets: TimelineAsset[]) => {
+const undoDeleteAssets = async (onUndoDelete: OnUndoDelete, assets: TimelineAsset[], stackedAssetIds: string[]) => {
   const $t = get(t);
   try {
-    const ids = assets.map((a) => a.id);
+    const ids = [...assets.map((a) => a.id), ...stackedAssetIds];
     await restoreAssets({ bulkIdsDto: { ids } });
     onUndoDelete?.(assets);
   } catch (error) {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import type { OnArchive } from '$lib/utils/actions';
   import { archiveAssets } from '$lib/utils/asset-utils';
   import { AssetVisibility } from '@immich/sdk';
@@ -24,8 +25,13 @@
   const handleArchive = async () => {
     const visibility = unarchive ? AssetVisibility.Timeline : AssetVisibility.Archive;
     const assets = assetMultiSelectManager.getOwnedAssets().filter((asset) => asset.visibility !== visibility);
+    const assetIds = await resolveStackSelection(assets);
+    if (!assetIds) {
+      return;
+    }
+
     loading = true;
-    const ids = await archiveAssets(assets, visibility as AssetVisibility);
+    const ids = await archiveAssets(assets, visibility as AssetVisibility, assetIds.slice(assets.length));
     if (ids) {
       onArchive?.(ids, visibility);
       assetMultiSelectManager.clear();

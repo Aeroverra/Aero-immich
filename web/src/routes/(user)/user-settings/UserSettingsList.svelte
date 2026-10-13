@@ -22,6 +22,7 @@
     mdiDownload,
     mdiFeatureSearchOutline,
     mdiFormTextboxPassword,
+    mdiImageMultipleOutline,
     mdiKeyOutline,
     mdiLockSmart,
     mdiServerOutline,
@@ -34,6 +35,7 @@
   import DeviceList from './DeviceList.svelte';
   import OauthSettings from './OauthSettings.svelte';
   import SharingSettings from './SharingSettings.svelte';
+  import StackActionsSettings from './StackActionsSettings.svelte';
   import UserApiKeyList from './UserApiKeyList.svelte';
   import UserProfileSettings from './UserProfileSettings.svelte';
 
@@ -108,6 +110,15 @@
   subtitle={$t('previously_deleted_files_description')}
 >
   <PreviouslyDeletedSettings />
+</SettingAccordion>
+
+<SettingAccordion
+  icon={mdiImageMultipleOutline}
+  key="stack-actions"
+  title={$t('stack_actions')}
+  subtitle={$t('stack_actions_description')}
+>
+  <StackActionsSettings />
 </SettingAccordion>
 
 <SettingAccordion

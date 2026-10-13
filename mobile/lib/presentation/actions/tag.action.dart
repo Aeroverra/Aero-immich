@@ -8,6 +8,7 @@ import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/tag_picker.dart';
 
 final _stateProvider = Provider.family.autoDispose<List<String>?, ActionSource>((ref, source) {
@@ -40,10 +41,19 @@ class TagAction extends AssetActionBuilder {
     );
   }
 
-  Future<void> _tag(BuildContext context, WidgetRef ref, List<String> assetIds) async {
+  Future<void> _tag(BuildContext context, WidgetRef ref, List<String> selectedIds) async {
     final clearSelection = ref.read(clearSelectionProvider(source));
 
     try {
+      final selectedAssets = ref
+          .read(ownedAssetsActionProvider(source))
+          .where((asset) => selectedIds.contains(asset.id));
+      final stacked = await resolveStackedAssets(context, ref, source, selectedAssets);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
+      final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
       final results = await showTagPickerModal(context: context);
       if (results == null || !context.mounted) {
         return;

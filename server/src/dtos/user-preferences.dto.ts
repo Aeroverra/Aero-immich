@@ -1,5 +1,5 @@
 import { createZodDto } from 'nestjs-zod';
-import { AssetOrderSchema, DeletedReimportModeSchema, UserAvatarColorSchema } from 'src/enum';
+import { AssetOrderSchema, DeletedReimportModeSchema, StackActionModeSchema, UserAvatarColorSchema } from 'src/enum';
 import { UserPreferences } from 'src/types';
 import z from 'zod';
 
@@ -139,6 +139,13 @@ const DeletedReimportUpdateSchema = z
   .optional()
   .meta({ id: 'DeletedReimportUpdate' });
 
+const StackActionsUpdateSchema = z
+  .object({
+    mode: StackActionModeSchema.optional(),
+  })
+  .optional()
+  .meta({ id: 'StackActionsUpdate' });
+
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
@@ -154,6 +161,7 @@ const UserPreferencesUpdateSchema = z
     purchase: PurchaseUpdateSchema,
     ratings: RatingsUpdateSchema,
     sharedLinks: SharedLinksUpdateSchema,
+    stackActions: StackActionsUpdateSchema,
     tags: TagsUpdateSchema,
     recentlyAdded: RecentlyAddedUpdateSchema,
     stacks: StacksUpdateSchema,
@@ -276,6 +284,12 @@ const DeletedReimportResponseSchema = z
   })
   .meta({ id: 'DeletedReimportResponse' });
 
+const StackActionsResponseSchema = z
+  .object({
+    mode: StackActionModeSchema,
+  })
+  .meta({ id: 'StackActionsResponse' });
+
 const UserPreferencesResponseSchema = z
   .object({
     albums: AlbumsResponseSchema,
@@ -294,6 +308,7 @@ const UserPreferencesResponseSchema = z
     privateMode: PrivateModeResponseSchema,
     autoStack: AutoStackResponseSchema,
     deletedReimport: DeletedReimportResponseSchema,
+    stackActions: StackActionsResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });
 
