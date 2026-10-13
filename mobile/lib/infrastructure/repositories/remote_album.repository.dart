@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:collection/collection.dart';
 import 'package:drift/drift.dart';
+import 'package:immich_mobile/constants/constants.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/data/db/main/database.dart';
 import 'package:immich_mobile/data/db/main/table/remote/album.drift.dart';
@@ -580,11 +582,15 @@ class RemoteAlbumRepository extends DatabaseAccessor<Drift> with $RemoteAlbumRep
     }
 
     // Note: this needs to be 2 queries as the where clause filtering causes the assetCount to always be 1
-    final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly(distinct: true)
-      ..addColumns([_db.remoteAlbumAssetEntity.albumId])
-      ..where(_db.remoteAlbumAssetEntity.assetId.isIn(assetIds));
+    // A large selection is looked up in slices to stay under SQLite's bound variable limit
+    final albumIds = <String>{};
+    for (final slice in assetIds.slices(kDriftMaxChunk)) {
+      final albumIdsQuery = _db.remoteAlbumAssetEntity.selectOnly(distinct: true)
+        ..addColumns([_db.remoteAlbumAssetEntity.albumId])
+        ..where(_db.remoteAlbumAssetEntity.assetId.isIn(slice));
 
-    final albumIds = await albumIdsQuery.map((row) => row.read(_db.remoteAlbumAssetEntity.albumId)!).get();
+      albumIds.addAll(await albumIdsQuery.map((row) => row.read(_db.remoteAlbumAssetEntity.albumId)!).get());
+    }
 
     if (albumIds.isEmpty) {
       return [];

@@ -37,7 +37,7 @@ describe('SetPrivateAction component', () => {
     assetMultiSelectManager.clear();
     privateModeManager.enabled = false;
     sdkMock.updateAssets.mockResolvedValue(undefined as never);
-    sdkMock.getAllAlbums.mockResolvedValue([]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([]);
     sdkMock.removeAssetFromAlbum.mockResolvedValue([]);
   });
 
@@ -107,7 +107,7 @@ describe('SetPrivateAction component', () => {
     );
     expect(privateAsset.isPrivate).toBe(false);
     expect(onSetPrivate).toHaveBeenCalledWith([privateAsset.id], false);
-    expect(sdkMock.getAllAlbums).not.toHaveBeenCalled();
+    expect(sdkMock.getAlbumsForAssets).not.toHaveBeenCalled();
   });
 
   it('shows both the lock and the unlock button for a mixed selection while the mode is on', () => {
@@ -164,7 +164,7 @@ describe('SetPrivateAction component', () => {
     it('asks first and marks nothing when declined', async () => {
       const plainAsset = timelineAssetFactory.build({ isPrivate: false });
       assetMultiSelectManager.selectAssets([plainAsset]);
-      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      sdkMock.getAlbumsForAssets.mockResolvedValue([{ album, assetIds: [plainAsset.id] }]);
       vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
       const onRemove = vi.fn();
 
@@ -181,7 +181,7 @@ describe('SetPrivateAction component', () => {
     it('removes the assets from the listed albums before marking when asked to', async () => {
       const plainAsset = timelineAssetFactory.build({ isPrivate: false });
       assetMultiSelectManager.selectAssets([plainAsset]);
-      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      sdkMock.getAlbumsForAssets.mockResolvedValue([{ album, assetIds: [plainAsset.id] }]);
       vi.mocked(modalManager.show).mockResolvedValue('remove' as never);
 
       const sut = renderWithTooltips(SetPrivateAction, {});
@@ -201,7 +201,7 @@ describe('SetPrivateAction component', () => {
     it('marks without touching the albums when they are kept', async () => {
       const plainAsset = timelineAssetFactory.build({ isPrivate: false });
       assetMultiSelectManager.selectAssets([plainAsset]);
-      sdkMock.getAllAlbums.mockResolvedValue([album]);
+      sdkMock.getAlbumsForAssets.mockResolvedValue([{ album, assetIds: [plainAsset.id] }]);
       vi.mocked(modalManager.show).mockResolvedValue('keep' as never);
 
       const sut = renderWithTooltips(SetPrivateAction, {});

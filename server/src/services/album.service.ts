@@ -2,9 +2,11 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   AddUsersDto,
   AlbumAddAssetsDto,
+  AlbumForAssetsResponseDto,
   AlbumResponseDto,
   AlbumsAddAssetsDto,
   AlbumsAddAssetsResponseDto,
+  AlbumsForAssetsDto,
   AlbumStatisticsResponseDto,
   CreateAlbumDto,
   GetAlbumsDto,
@@ -76,11 +78,34 @@ export class AlbumService extends BaseService {
       ? await this.albumRepository.getByAssetId(ownerId, assetId, scope)
       : await this.albumRepository.getAll(ownerId, { ...rest, privateMode: scope.privateMode });
 
+    return this.mapAlbumList(auth, albums, scope);
+  }
+
+  async getAllForAssets(auth: AuthDto, { assetIds }: AlbumsForAssetsDto): Promise<AlbumForAssetsResponseDto[]> {
+    if (assetIds.length === 0) {
+      return [];
+    }
+
+    await this.albumRepository.updateThumbnails();
+
+    const scope = toAlbumScope(auth);
+    const albums = await this.albumRepository.getForAssetIds(auth.user.id, assetIds, scope);
+    const assetIdsByAlbum = new Map(albums.map((album) => [album.id, album.assetIds]));
+    const mapped = await this.mapAlbumList(auth, albums, scope);
+
+    return mapped.map((album) => ({ album, assetIds: assetIdsByAlbum.get(album.id)! }));
+  }
+
+  /** Albums for a listing: asset count, dates and cover follow the active view, albums it hides entirely are dropped */
+  private async mapAlbumList(
+    auth: AuthDto,
+    albums: Parameters<typeof mapAlbum>[0][],
+    scope: PrivateScope,
+  ): Promise<AlbumResponseDto[]> {
     if (albums.length === 0) {
       return [];
     }
 
-    // asset count, dates and cover of each album, following the active view
     const albumMetadata = await this.getViewMetadata(auth, albums, scope);
 
     return albums

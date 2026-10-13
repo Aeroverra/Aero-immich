@@ -35,4 +35,27 @@ describe(AlbumController.name, () => {
       expect(body).toEqual(factory.responses.validationError([{ path: ['assetId'], message: 'Invalid UUID' }]));
     });
   });
+
+  describe('POST /albums/for-assets', () => {
+    it('should be an authenticated route', async () => {
+      await request(ctx.getHttpServer()).post('/albums/for-assets').send({ assetIds: [] });
+      expect(ctx.authenticate).toHaveBeenCalled();
+    });
+
+    it('should reject an invalid asset id', async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .post('/albums/for-assets')
+        .send({ assetIds: ['invalid'] });
+      expect(status).toEqual(400);
+      expect(body).toEqual(factory.responses.validationError([{ path: ['assetIds', 0], message: 'Invalid UUID' }]));
+    });
+
+    it('should accept a list of asset ids in the body', async () => {
+      const assetIds = Array.from({ length: 1000 }, () => factory.uuid());
+      service.getAllForAssets.mockResolvedValue([]);
+      const { status } = await request(ctx.getHttpServer()).post('/albums/for-assets').send({ assetIds });
+      expect(status).toEqual(200);
+      expect(service.getAllForAssets).toHaveBeenCalledWith(undefined, { assetIds });
+    });
+  });
 });

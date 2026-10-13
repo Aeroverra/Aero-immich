@@ -4,9 +4,11 @@ import { Endpoint, HistoryBuilder } from 'src/decorators';
 import {
   AddUsersDto,
   AlbumAddAssetsDto,
+  AlbumForAssetsResponseDto,
   AlbumResponseDto,
   AlbumsAddAssetsDto,
   AlbumsAddAssetsResponseDto,
+  AlbumsForAssetsDto,
   AlbumStatisticsResponseDto,
   AlbumUserParamDto,
   CreateAlbumDto,
@@ -47,6 +49,19 @@ export class AlbumController {
   })
   createAlbum(@Auth() auth: AuthDto, @Body() dto: CreateAlbumDto): Promise<AlbumResponseDto> {
     return this.service.create(auth, dto);
+  }
+
+  @Post('for-assets')
+  @Authenticated({ permission: Permission.AlbumRead })
+  @HttpCode(HttpStatus.OK)
+  @Endpoint({
+    summary: 'List albums containing assets',
+    description:
+      'Retrieve the albums available to the authenticated user that contain any of the given assets, each with the given asset IDs it contains.',
+    history: new HistoryBuilder().added('v3'),
+  })
+  getAlbumsForAssets(@Auth() auth: AuthDto, @Body() dto: AlbumsForAssetsDto): Promise<AlbumForAssetsResponseDto[]> {
+    return this.service.getAllForAssets(auth, dto);
   }
 
   @Get('statistics')

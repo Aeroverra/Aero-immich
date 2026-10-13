@@ -131,6 +131,12 @@ const GetAlbumsSchema = z
   })
   .meta({ id: 'GetAlbumsDto' });
 
+const AlbumsForAssetsSchema = z
+  .object({
+    assetIds: z.array(z.uuidv4()).describe('Asset IDs to look up'),
+  })
+  .meta({ id: 'AlbumsForAssetsDto' });
+
 const AlbumStatisticsResponseSchema = z
   .object({
     owned: z.int().min(0).describe('Number of owned albums'),
@@ -221,6 +227,13 @@ export const AlbumResponseSchema = z
   })
   .meta({ id: 'AlbumResponseDto' });
 
+const AlbumForAssetsResponseSchema = z
+  .object({
+    album: AlbumResponseSchema,
+    assetIds: z.array(z.uuidv4()).describe('The requested asset IDs this album contains'),
+  })
+  .meta({ id: 'AlbumForAssetsResponseDto' });
+
 const AlbumUserParamSchema = z.object({
   id: z.uuidv4().describe('Album ID'),
   // TODO: disallow 'me' as a shortcut in v4 and type userId as uuidv4
@@ -242,9 +255,11 @@ export class AlbumsAddAssetsDto extends createZodDto(AlbumsAddAssetsSchema) {}
 export class AlbumsAddAssetsResponseDto extends createZodDto(AlbumsAddAssetsResponseSchema) {}
 export class UpdateAlbumDto extends createZodDto(UpdateAlbumSchema) {}
 export class GetAlbumsDto extends createZodDto(GetAlbumsSchema) {}
+export class AlbumsForAssetsDto extends createZodDto(AlbumsForAssetsSchema) {}
 export class AlbumStatisticsResponseDto extends createZodDto(AlbumStatisticsResponseSchema) {}
 export class UpdateAlbumUserDto extends createZodDto(UpdateAlbumUserSchema) {}
 export class AlbumResponseDto extends createZodDto(AlbumResponseSchema) {}
+export class AlbumForAssetsResponseDto extends createZodDto(AlbumForAssetsResponseSchema) {}
 class AlbumUserResponseDto extends createZodDto(AlbumUserResponseSchema) {}
 
 export type MapAlbumDto = {
