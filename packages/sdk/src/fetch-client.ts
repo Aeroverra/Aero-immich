@@ -8055,13 +8055,15 @@ export function getUniqueOriginalPaths(opts?: Oazapfts.RequestOpts) {
 /**
  * Retrieve views
  */
-export function getCustomViews({ tagId }: {
+export function getCustomViews({ assetId, tagId }: {
+    assetId?: string;
     tagId?: string;
 }, opts?: Oazapfts.RequestOpts) {
     return oazapfts.ok(oazapfts.fetchJson<{
         status: 200;
         data: CustomViewResponseDto[];
     }>(`/views${QS.query(QS.explode({
+        assetId,
         tagId
     }))}`, {
         ...opts

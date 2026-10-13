@@ -91,6 +91,10 @@ void main() {
   late List<TimelineService> createdTimelineServices;
   late DeepLinkService sut;
 
+  setUpAll(() {
+    registerFallbackValue(PrivateModeFilter.off);
+  });
+
   setUp(() {
     timelineFactory = MockTimelineFactory();
     assetService = MockAssetService();
@@ -111,15 +115,9 @@ void main() {
     });
 
     when(() => ref.read(assetViewerProvider.notifier)).thenReturn(MockAssetViewerStateNotifier());
+    when(() => assetService.isRemoteAssetVisible(any(), any())).thenAnswer((_) async => true);
 
-    sut = DeepLinkService(
-      timelineFactory,
-      assetService,
-      remoteAlbumService,
-      memoryService,
-      MockPeopleService(),
-      _user,
-    );
+    sut = DeepLinkService(timelineFactory, assetService, remoteAlbumService, memoryService, MockPeopleService(), _user);
 
     addTearDown(() async {
       for (final timelineService in createdTimelineServices) {
@@ -162,6 +160,66 @@ void main() {
     expect(route, isA<AssetViewerRoute>());
     expect((route!.args! as AssetViewerRouteArgs).currentAlbum, isNull);
     verifyNever(() => remoteAlbumService.get(any()));
+  });
+
+  test('a hidden asset opens the hidden asset page with the album context', () async {
+    when(() => assetService.getRemoteAsset(_assetId)).thenAnswer((_) async => _asset);
+    when(() => assetService.isRemoteAssetVisible(_assetId, any())).thenAnswer((_) async => false);
+
+    final route = await sut.handleMyImmichApp(link('/albums/$_albumId/photos/$_assetId'), ref);
+
+    expect(route, isA<HiddenAssetRoute>());
+    final args = route!.args! as HiddenAssetRouteArgs;
+    expect(args.assetId, _assetId);
+    expect(args.albumId, _albumId);
+    verifyNever(() => timelineFactory.fromAssets(any(), TimelineOrigin.deepLink));
+  });
+
+  test('a scheme link to a hidden asset never opens the viewer', () async {
+    when(() => assetService.getRemoteAsset(_assetId)).thenAnswer((_) async => _asset);
+    when(() => assetService.isRemoteAssetVisible(_assetId, any())).thenAnswer((_) async => false);
+    final deepLink = MockPlatformDeepLink();
+    when(() => deepLink.uri).thenReturn(Uri.parse('immich://asset?id=$_assetId'));
+
+    final route = await sut.handleScheme(deepLink, ref);
+
+    expect(route, isA<HiddenAssetRoute>());
+  });
+
+  test('a missing asset asks for the PIN while private mode is off, and does nothing once it is on', () async {
+    when(() => assetService.getRemoteAsset(_assetId)).thenAnswer((_) async => null);
+
+    expect(await sut.handleMyImmichApp(link('/photos/$_assetId'), ref), isA<HiddenAssetRoute>());
+
+    sut = DeepLinkService(
+      timelineFactory,
+      assetService,
+      remoteAlbumService,
+      memoryService,
+      MockPeopleService(),
+      _user,
+      const PrivateModeFilter(enabled: true, userId: _userId),
+    );
+    expect(await sut.handleMyImmichApp(link('/photos/$_assetId'), ref), isNull);
+  });
+
+  test('the visibility check uses the session private mode filter', () async {
+    const filter = PrivateModeFilter(enabled: true, userId: _userId);
+    sut = DeepLinkService(
+      timelineFactory,
+      assetService,
+      remoteAlbumService,
+      memoryService,
+      MockPeopleService(),
+      _user,
+      filter,
+    );
+    when(() => assetService.getRemoteAsset(_assetId)).thenAnswer((_) async => _asset);
+
+    final route = await sut.handleMyImmichApp(link('/photos/$_assetId'), ref);
+
+    expect(route, isA<AssetViewerRoute>());
+    verify(() => assetService.isRemoteAssetVisible(_assetId, filter)).called(1);
   });
 
   test('album link resolves the album with the session private mode filter', () async {

@@ -9,6 +9,7 @@ import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
 import 'package:immich_mobile/data/db/util/private_mode_filter.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
+import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/stack.model.dart';
@@ -61,6 +62,22 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
 
   Future<RemoteAsset?> get(String id) {
     return _assetSelectable(id).getSingleOrNull();
+  }
+
+  /// Whether the asset is synced and passes [privateFilter]: private mode and the applied view
+  Future<bool> isVisible(String id, PrivateModeFilter privateFilter) async {
+    final query = _db.remoteAssetEntity.selectOnly()
+      ..addColumns([_db.remoteAssetEntity.id])
+      ..where(_db.remoteAssetEntity.id.equals(id) & _db.remoteAssetEntity.privateFilter(privateFilter));
+    return await query.getSingleOrNull() != null;
+  }
+
+  /// Whether the asset passes the rules of [view], private mode aside
+  Future<bool> isInView(String id, ViewFilter view) async {
+    final query = _db.remoteAssetEntity.selectOnly()
+      ..addColumns([_db.remoteAssetEntity.id])
+      ..where(_db.remoteAssetEntity.id.equals(id) & _db.remoteAssetEntity.viewFilter(view));
+    return await query.getSingleOrNull() != null;
   }
 
   Future<List<RemoteAsset>> getAllDebugForChecksum(String checksum) {

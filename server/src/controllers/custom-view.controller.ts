@@ -25,7 +25,7 @@ export class CustomViewController {
   @Endpoint({
     summary: 'Retrieve views',
     description:
-      'Retrieve the views of the current user. Views with private access are only listed while private mode is unlocked.',
+      'Retrieve the views of the current user. Views with private access are only listed while private mode is unlocked. With an asset ID, only the views that show that asset are returned, so a client can offer to switch when the active view hides it.',
     history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
   })
   getCustomViews(@Auth() auth: AuthDto, @Query() dto: CustomViewSearchDto): Promise<CustomViewResponseDto[]> {

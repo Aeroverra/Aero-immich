@@ -23,7 +23,10 @@ import 'package:immich_mobile/widgets/forms/pin_verification_form.dart';
 class PrivatePinAuthPage extends HookConsumerWidget {
   final bool openPrivateFolder;
 
-  const PrivatePinAuthPage({super.key, this.openPrivateFolder = false});
+  /// Replaces the default explanation, for example when a link to a hidden photo asked for the PIN
+  final String? description;
+
+  const PrivatePinAuthPage({super.key, this.openPrivateFolder = false, this.description});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -137,7 +140,7 @@ class PrivatePinAuthPage extends HookConsumerWidget {
                       Center(
                         child: PinVerificationForm(
                           autoFocus: true,
-                          description: context.t.private_mode_enable_description,
+                          description: description ?? context.t.private_mode_enable_description,
                           icon: Icons.lock_person_outlined,
                           verify: enablePrivateMode,
                           onSuccess: (_) => unawaited(onEnabled()),

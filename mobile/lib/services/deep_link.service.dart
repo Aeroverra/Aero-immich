@@ -1,5 +1,6 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
@@ -117,10 +118,20 @@ class DeepLinkService {
 
   Future<PageRouteInfo?> _buildAssetDeepLink(String assetId, WidgetRef ref, {String? albumId}) async {
     final asset = await _betaAssetService.getRemoteAsset(assetId);
-    if (asset == null) {
-      return null;
+    if (asset != null && await _betaAssetService.isRemoteAssetVisible(assetId, _privateFilter)) {
+      return buildAssetViewerRoute(asset, ref, albumId: albumId);
     }
 
+    // private while private mode is off, or hidden by the applied view: ask for the PIN or a view that shows it. While
+    // private mode is off a missing asset asks too, so the prompt never tells a private asset from a missing one
+    if (asset != null || !_privateFilter.enabled) {
+      return HiddenAssetRoute(assetId: assetId, albumId: albumId);
+    }
+    return null;
+  }
+
+  /// The viewer for an asset the session shows, with the album context when [albumId] resolves
+  Future<PageRouteInfo> buildAssetViewerRoute(RemoteAsset asset, WidgetRef ref, {String? albumId}) async {
     final album = albumId != null ? await _betaRemoteAlbumService.get(albumId, privateFilter: _privateFilter) : null;
 
     AssetViewer.setAsset(ref, asset);
