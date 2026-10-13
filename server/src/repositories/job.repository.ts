@@ -262,6 +262,12 @@ export class JobRepository {
           delay: item.data?.delay,
         };
       }
+      case JobName.NotifyDeletedReimport: {
+        return {
+          jobId: item.data.userId,
+          delay: item.data?.delay,
+        };
+      }
       case JobName.StorageTemplateMigrationSingle: {
         return { jobId: item.data.id };
       }

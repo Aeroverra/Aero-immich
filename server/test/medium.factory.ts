@@ -23,6 +23,7 @@ import { ActivityRepository } from 'src/repositories/activity.repository';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
 import { ApiKeyRepository } from 'src/repositories/api-key.repository';
+import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetFileRepository } from 'src/repositories/asset-file.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
@@ -61,8 +62,10 @@ import { SyncRepository } from 'src/repositories/sync.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { TagRepository } from 'src/repositories/tag.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
+import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
+import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { DB } from 'src/schema';
 import { AlbumTable } from 'src/schema/tables/album.table';
@@ -474,6 +477,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case ActivityRepository:
     case ApiKeyRepository:
     case AssetRepository:
+    case AssetDeletedChecksumRepository:
     case AssetEditRepository:
     case AssetFileRepository:
     case AssetJobRepository:
@@ -494,6 +498,7 @@ const newRealRepository = <T extends BaseServiceDeps[number]>(key: T, db: Kysely
     case SyncRepository:
     case SyncCheckpointRepository:
     case SystemMetadataRepository:
+    case TrashRepository:
     case UserRepository:
     case VersionHistoryRepository:
     case WorkflowRepository: {
@@ -558,6 +563,7 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
     case ActivityRepository:
     case AlbumRepository:
     case AssetRepository:
+    case AssetDeletedChecksumRepository:
     case AssetJobRepository:
     case ConfigRepository:
     case CryptoRepository:
@@ -581,6 +587,10 @@ const newMockRepository = <T>(key: ClassConstructor<T>) => {
 
     case MapRepository: {
       return automock(MapRepository, { args: [undefined, undefined, { setContext: () => {} }] });
+    }
+
+    case WebsocketRepository: {
+      return automock(WebsocketRepository, { args: [undefined, { setContext: () => {} }] });
     }
 
     case TelemetryRepository: {

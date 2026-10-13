@@ -336,6 +336,14 @@ export class AlbumService extends BaseService {
         userIds: album.albumUsers.map(({ user }) => user.id),
         recipientIds: [],
       });
+
+      const owner = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner);
+      if (owner) {
+        const { deletedReimport } = getPreferences(await this.userRepository.getMetadata(owner.user.id));
+        if (deletedReimport.albumId === id) {
+          await this.assetDeletedChecksumRepository.forgetAssets(removedIds);
+        }
+      }
     }
 
     return results;

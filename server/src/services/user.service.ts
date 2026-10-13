@@ -8,7 +8,12 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
 import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
 import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
-import { UserPreferencesResponseDto, UserPreferencesUpdateDto, mapPreferences } from 'src/dtos/user-preferences.dto';
+import {
+  DeletedChecksumStatisticsResponseDto,
+  UserPreferencesResponseDto,
+  UserPreferencesUpdateDto,
+  mapPreferences,
+} from 'src/dtos/user-preferences.dto';
 import { CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
 import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto, mapUser, mapUserAdmin } from 'src/dtos/user.dto';
 import { CacheControl, JobName, JobStatus, QueueName, StorageFolder, UserMetadataKey } from 'src/enum';
@@ -95,6 +100,15 @@ export class UserService extends BaseService {
     });
 
     return mapPreferences(updated);
+  }
+
+  async getMyDeletedChecksumStatistics(auth: AuthDto): Promise<DeletedChecksumStatisticsResponseDto> {
+    const count = await this.assetDeletedChecksumRepository.getCount(auth.user.id);
+    return { count };
+  }
+
+  async deleteMyDeletedChecksums(auth: AuthDto): Promise<void> {
+    await this.assetDeletedChecksumRepository.deleteAll(auth.user.id);
   }
 
   async get(id: string): Promise<UserResponseDto> {

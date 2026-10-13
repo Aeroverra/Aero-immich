@@ -5,6 +5,7 @@ import { AssetMediaSize } from 'src/dtos/asset-media.dto';
 import { AssetFileType, SharedLinkType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AlbumRepository } from 'src/repositories/album.repository';
+import { AssetDeletedChecksumRepository } from 'src/repositories/asset-deleted-checksum.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { EventRepository } from 'src/repositories/event.repository';
 import { JobRepository } from 'src/repositories/job.repository';
@@ -25,7 +26,14 @@ let defaultDatabase: Kysely<DB>;
 const setup = (db?: Kysely<DB>) => {
   return newMediumService(AssetMediaService, {
     database: db || defaultDatabase,
-    real: [AccessRepository, AlbumRepository, AssetRepository, SharedLinkRepository, UserRepository],
+    real: [
+      AccessRepository,
+      AlbumRepository,
+      AssetRepository,
+      AssetDeletedChecksumRepository,
+      SharedLinkRepository,
+      UserRepository,
+    ],
     mock: [EventRepository, LoggingRepository, JobRepository, StorageRepository],
   });
 };

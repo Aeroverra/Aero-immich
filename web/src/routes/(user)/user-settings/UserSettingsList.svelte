@@ -4,6 +4,7 @@
   import DownloadSettings from './DownloadSettings.svelte';
   import FeatureSettings from './FeatureSettings.svelte';
   import NotificationsSettings from './NotificationsSettings.svelte';
+  import PreviouslyDeletedSettings from './PreviouslyDeletedSettings.svelte';
   import UserPurchaseSettings from './UserPurchaseSettings.svelte';
   import UserUsageStatistic from './UserUsageStatistic.svelte';
   import { OpenQueryParam, QueryParameter } from '$lib/constants';
@@ -16,6 +17,7 @@
     mdiApi,
     mdiBellOutline,
     mdiCogOutline,
+    mdiDeleteRestore,
     mdiDevices,
     mdiDownload,
     mdiFeatureSearchOutline,
@@ -97,6 +99,15 @@
   subtitle={$t('features_setting_description')}
 >
   <FeatureSettings />
+</SettingAccordion>
+
+<SettingAccordion
+  icon={mdiDeleteRestore}
+  key="previously-deleted"
+  title={$t('previously_deleted_files')}
+  subtitle={$t('previously_deleted_files_description')}
+>
+  <PreviouslyDeletedSettings />
 </SettingAccordion>
 
 <SettingAccordion

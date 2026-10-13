@@ -209,6 +209,8 @@ export const getForAssetDeletion = (asset: ReturnType<AssetFactory['build']>) =>
   ownerId: asset.ownerId,
   livePhotoVideoId: asset.livePhotoVideoId,
   originalPath: asset.originalPath,
+  originalFileName: asset.originalFileName,
+  checksum: asset.checksum,
   isOffline: asset.isOffline,
   exifInfo: asset.exifInfo ? getDehydrated(asset.exifInfo) : null,
   files: asset.files.map((file) => getDehydrated(file)),

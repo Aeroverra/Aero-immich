@@ -22,7 +22,11 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { CalendarHeatmapDto, CalendarHeatmapResponseDto } from 'src/dtos/calendar-heatmap.dto';
 import { LicenseKeyDto, LicenseResponseDto } from 'src/dtos/license.dto';
 import { OnboardingDto, OnboardingResponseDto } from 'src/dtos/onboarding.dto';
-import { UserPreferencesResponseDto, UserPreferencesUpdateDto } from 'src/dtos/user-preferences.dto';
+import {
+  DeletedChecksumStatisticsResponseDto,
+  UserPreferencesResponseDto,
+  UserPreferencesUpdateDto,
+} from 'src/dtos/user-preferences.dto';
 import { CreateProfileImageDto, CreateProfileImageResponseDto } from 'src/dtos/user-profile.dto';
 import { UserAdminResponseDto, UserResponseDto, UserUpdateMeDto } from 'src/dtos/user.dto';
 import { ApiTag, Permission, RouteKey } from 'src/enum';
@@ -133,6 +137,30 @@ export class UserController {
     @Body() dto: UserPreferencesUpdateDto,
   ): Promise<UserPreferencesResponseDto> {
     return this.service.updateMyPreferences(auth, dto);
+  }
+
+  @Get('me/deleted-checksums/statistics')
+  @Authenticated({ permission: Permission.DeletedChecksumRead })
+  @Endpoint({
+    summary: 'Get my deleted checksum statistics',
+    description: 'Retrieve how many permanently deleted files are remembered for the current user.',
+    history: new HistoryBuilder().added('v3'),
+  })
+  getMyDeletedChecksumStatistics(@Auth() auth: AuthDto): Promise<DeletedChecksumStatisticsResponseDto> {
+    return this.service.getMyDeletedChecksumStatistics(auth);
+  }
+
+  @Delete('me/deleted-checksums')
+  @Authenticated({ permission: Permission.DeletedChecksumDelete })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Endpoint({
+    summary: 'Forget my deleted checksums',
+    description:
+      'Forget every remembered permanently deleted file of the current user, so uploads of those files are stored like any other file again.',
+    history: new HistoryBuilder().added('v3'),
+  })
+  async deleteMyDeletedChecksums(@Auth() auth: AuthDto): Promise<void> {
+    await this.service.deleteMyDeletedChecksums(auth);
   }
 
   @Get('me/license')

@@ -1,4 +1,4 @@
-import { AssetOrder, type UserPreferencesResponseDto } from '@immich/sdk';
+import { AssetOrder, DeletedReimportMode, type UserPreferencesResponseDto } from '@immich/sdk';
 import { Sync } from 'factory.ts';
 
 export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
@@ -52,5 +52,9 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
   },
   recentlyAdded: {
     sidebarWeb: false,
+  },
+  deletedReimport: {
+    mode: DeletedReimportMode.Trash,
+    albumId: null,
   },
 });

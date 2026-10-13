@@ -14,6 +14,7 @@ import {
   ColorMatrix,
   ColorPrimaries,
   ColorTransfer,
+  DeletedReimportMode,
   DvProfile,
   DvSignalCompatibility,
   ExifOrientation,
@@ -285,6 +286,10 @@ export interface INotifyAlbumUpdateJob extends IEntityJob, IDelayedJob {
   recipientId: string;
 }
 
+export interface INotifyDeletedReimportJob extends IDelayedJob {
+  userId: string;
+}
+
 export interface IIntegrityJob {
   refreshOnly?: boolean;
 }
@@ -424,6 +429,7 @@ export type JobItem =
   | { name: JobName.SendMail; data: IEmailJob }
   | { name: JobName.NotifyAlbumInvite; data: INotifyAlbumInviteJob }
   | { name: JobName.NotifyAlbumUpdate; data: INotifyAlbumUpdateJob }
+  | { name: JobName.NotifyDeletedReimport; data: INotifyDeletedReimportJob }
   | { name: JobName.NotifyUserSignup; data: INotifySignupJob }
 
   // Version check
@@ -602,6 +608,11 @@ export type UserPreferences = {
     timeoutMinutes: number;
     sidebarWeb: boolean;
     includeInMemories: boolean;
+  };
+  deletedReimport: {
+    mode: DeletedReimportMode;
+    /** the "Previously deleted" album, created on the first re-upload in album mode */
+    albumId: string | null;
   };
 };
 
