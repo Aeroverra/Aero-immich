@@ -146,6 +146,9 @@ abstract class SearchFilter with _$SearchFilter {
     List<String>? tagIds,
     // photos with any of these tags (or their child tags) are left out
     List<String>? excludeTagIds,
+    // video length bounds in milliseconds; either one keeps the search to videos
+    int? minDuration,
+    int? maxDuration,
     required Set<Person> people,
     required SearchLocationFilter location,
     required SearchCameraFilter camera,
@@ -164,6 +167,8 @@ abstract class SearchFilter with _$SearchFilter {
         (ocr == null || (ocr!.isEmpty)) &&
         (tagIds ?? []).isEmpty &&
         (excludeTagIds ?? []).isEmpty &&
+        minDuration == null &&
+        maxDuration == null &&
         people.isEmpty &&
         location.country == null &&
         location.state == null &&

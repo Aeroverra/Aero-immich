@@ -75,6 +75,9 @@ export type SearchFilter = {
   date: SearchDateFilter;
   display: SearchDisplayFilters;
   mediaType: MediaType;
+  /** video length bounds in milliseconds; either one keeps the search to videos */
+  minDuration?: number;
+  maxDuration?: number;
   rating?: number | null;
   /** true = only private assets, false = exclude private assets, undefined = all (only meaningful while private mode is on) */
   isPrivate?: boolean;

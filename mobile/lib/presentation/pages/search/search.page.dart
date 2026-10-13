@@ -38,6 +38,7 @@ import 'package:immich_mobile/widgets/search/search_filter/search_filter_chip.da
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_utils.dart';
 import 'package:immich_mobile/widgets/search/search_filter/star_rating_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/tag_filter_picker.dart';
+import 'package:immich_mobile/widgets/search/search_filter/video_length_fields.dart';
 
 @RoutePage()
 class SearchPage extends HookConsumerWidget {
@@ -402,24 +403,33 @@ class SearchPage extends HookConsumerWidget {
     // MEDIA PICKER
     void showMediaTypePicker() {
       var mediaType = filter.value.mediaType;
+      var minDuration = filter.value.minDuration;
+      var maxDuration = filter.value.maxDuration;
 
       void handleOnSelected(AssetType assetType) {
         mediaType = assetType;
       }
 
+      void handleLengthChanged(int? min, int? max) {
+        minDuration = min;
+        maxDuration = max;
+      }
+
       void handleClear() {
         mediaTypeCurrentFilterWidget.value = null;
-        search(filter.value.copyWith(mediaType: AssetType.other));
+        search(filter.value.copyWith(mediaType: AssetType.other, minDuration: null, maxDuration: null));
       }
 
       void handleApply() {
-        mediaTypeCurrentFilterWidget.value = mediaType != AssetType.other
-            ? Text(
-                mediaType == AssetType.image ? context.t.image : context.t.video,
-                style: context.textTheme.labelLarge,
-              )
+        // a video length keeps the search to videos, so the label says so
+        final length = videoLengthLabel(context, minDuration, maxDuration);
+        final label = length != null
+            ? '${context.t.video} $length'
+            : mediaType != AssetType.other
+            ? (mediaType == AssetType.image ? context.t.image : context.t.video)
             : null;
-        search(filter.value.copyWith(mediaType: mediaType));
+        mediaTypeCurrentFilterWidget.value = label != null ? Text(label, style: context.textTheme.labelLarge) : null;
+        search(filter.value.copyWith(mediaType: mediaType, minDuration: minDuration, maxDuration: maxDuration));
       }
 
       unawaited(
@@ -429,7 +439,17 @@ class SearchPage extends HookConsumerWidget {
             title: context.t.search_filter_media_type_title,
             onSearch: handleApply,
             onClear: handleClear,
-            child: MediaTypePicker(onSelect: handleOnSelected, filter: filter.value.mediaType),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                MediaTypePicker(onSelect: handleOnSelected, filter: filter.value.mediaType),
+                VideoLengthFields(
+                  initialMin: filter.value.minDuration,
+                  initialMax: filter.value.maxDuration,
+                  onChanged: handleLengthChanged,
+                ),
+              ],
+            ),
           ),
         ),
       );
