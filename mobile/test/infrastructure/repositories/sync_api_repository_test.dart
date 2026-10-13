@@ -83,6 +83,18 @@ void main() {
     );
   }
 
+  test('streamChanges opts in to private assets on every request', () async {
+    final streamChangesFuture = streamChanges((_, _, _) async {}, const SemVer(major: 2, minor: 5, patch: 0));
+    await Future.delayed(const Duration(milliseconds: 50));
+    await responseStreamController.close();
+    await expectLater(streamChangesFuture, completes);
+
+    final request = verify(() => mockHttpClient.send(captureAny())).captured.single as http.Request;
+    final body = jsonDecode(request.body) as Map<String, dynamic>;
+    expect(body['includePrivate'], isTrue);
+    expect(body['types'], isNotEmpty);
+  });
+
   test('streamChanges stops processing stream when abort is called', () async {
     int onDataCallCount = 0;
     bool abortWasCalledInCallback = false;

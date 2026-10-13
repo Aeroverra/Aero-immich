@@ -3047,6 +3047,8 @@ export type SyncAckSetDto = {
     acks: string[];
 };
 export type SyncStreamDto = {
+    /** Include assets marked private. Without it, private assets are left out of the stream and a delete is emitted when an asset becomes private. */
+    includePrivate?: boolean;
     /** Reset sync state */
     reset?: boolean;
     /** Sync request types */

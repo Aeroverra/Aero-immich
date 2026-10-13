@@ -1,6 +1,7 @@
 import { Kysely } from 'kysely';
 import { AlbumUserRole, SyncEntityType, SyncRequestType } from 'src/enum';
 import { AlbumUserRepository } from 'src/repositories/album-user.repository';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
 import { getKyselyDB, wait } from 'test/utils';
@@ -346,6 +347,57 @@ describe(SyncRequestType.AlbumUsersV1, () => {
 
       await ctx.syncAckAll(auth, newResponse);
       await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumUsersV1]);
+    });
+  });
+  describe('private albums and the includePrivate flag', () => {
+    it('should withhold the users of a private album and send them again once the album is public', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { user: owner } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      const { album } = await ctx.newAlbum({ ownerId: owner.id }, [hidden.id]);
+      await ctx.newAlbumUser({ albumId: album.id, userId: auth.user.id, role: AlbumUserRole.Editor });
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AlbumUsersV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AlbumUserV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumUsersV1]);
+
+      // unmarking the last private asset flips the album, and the trigger touches its users
+      await assetRepo.updateAll([hidden.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([hidden.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AlbumUsersV1]);
+      expect(restored).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumUserV1,
+            data: expect.objectContaining({ albumId: album.id, userId: owner.id }),
+          }),
+          expect.objectContaining({
+            type: SyncEntityType.AlbumUserV1,
+            data: expect.objectContaining({ albumId: album.id, userId: auth.user.id }),
+          }),
+        ]),
+      );
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AlbumUsersV1]);
+    });
+
+    it('should carry the users of a private album for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { user: owner } = await ctx.newUser();
+      const { asset: hidden } = await ctx.newAsset({ ownerId: owner.id, isPrivate: true });
+      const { album } = await ctx.newAlbum({ ownerId: owner.id }, [hidden.id]);
+      await ctx.newAlbumUser({ albumId: album.id, userId: auth.user.id, role: AlbumUserRole.Editor });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AlbumUsersV1], false, true)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: SyncEntityType.AlbumUserV1,
+            data: expect.objectContaining({ albumId: album.id, userId: auth.user.id }),
+          }),
+        ]),
+      );
     });
   });
 });
