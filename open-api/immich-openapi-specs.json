@@ -34564,6 +34564,13 @@
             "description": "Tag name",
             "pattern": "^[^/]*$",
             "type": "string"
+          },
+          "parentId": {
+            "description": "Move the tag, with its children, under this parent tag, or to the top level with null",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
           }
         },
         "type": "object"

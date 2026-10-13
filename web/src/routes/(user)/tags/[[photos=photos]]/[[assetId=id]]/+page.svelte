@@ -28,7 +28,7 @@
   import { TimelineManager } from '$lib/managers/timeline-manager/timeline-manager.svelte';
   import { Route } from '$lib/route';
   import { getAssetBulkActions } from '$lib/services/asset.service';
-  import { getTagActions } from '$lib/services/tag.service';
+  import { getTagActions, handleMoveTag } from '$lib/services/tag.service';
   import { joinPaths, TreeNode } from '$lib/utils/tree-utils';
   import { getAllTags, type TagResponseDto } from '@immich/sdk';
   import { ActionButton, CommandPaletteDefaultProvider, Text } from '@immich/ui';
@@ -64,12 +64,14 @@
     tags = await getAllTags();
   };
 
-  const onTagUpdate = async (response: TagResponseDto) => {
-    if (response.value !== tag.path) {
-      await navigateToView(response.value || '');
-    }
-
+  // a rename or move can change the path of the tag on screen (it, or one of its parents, was changed), so follow it
+  const onTagUpdate = async () => {
+    const currentId = tag.id;
     await onRefresh();
+    const current = currentId ? tags.find(({ id }) => id === currentId) : undefined;
+    if (current && current.value !== data.path) {
+      await navigateToView(current.value);
+    }
   };
 
   const onTagDelete = async (response: TreeNode) => {
@@ -92,7 +94,13 @@
       <section>
         <Text class="mb-4 ps-4" size="small">{$t('explorer')}</Text>
         <div class="h-full">
-          <TreeItems icons={{ default: mdiTag, active: mdiTag }} {tree} active={tag.path} {getLink} />
+          <TreeItems
+            icons={{ default: mdiTag, active: mdiTag }}
+            {tree}
+            active={tag.path}
+            {getLink}
+            onMove={(node, target) => void handleMoveTag(node, target)}
+          />
         </div>
       </section>
     </Sidebar>
