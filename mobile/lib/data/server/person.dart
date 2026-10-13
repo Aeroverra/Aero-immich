@@ -21,6 +21,22 @@ class PersonApiRepository extends ApiRepository {
     return _toPerson(response);
   }
 
+  /// Adds the person to the videos among [assetIds] with a whole-frame face. Returns the assets that got the person
+  /// and the photos the server left out (their faces are drawn on the photo instead).
+  Future<({List<String> added, List<String> photos})> addToAssets(String id, List<String> assetIds) async {
+    final results = await _api.addPersonToAssets(id, BulkIdsDto(ids: assetIds)) ?? const <BulkIdResponseDto>[];
+    return (
+      added: [
+        for (final result in results)
+          if (result.success) result.id,
+      ],
+      photos: [
+        for (final result in results)
+          if (result.error.orElse(null) == BulkIdErrorReason.validation) result.id,
+      ],
+    );
+  }
+
   static Person _toPerson(PersonResponseDto dto) =>
       .new(birthDate: dto.birthDate, id: dto.id, name: dto.name, updatedAt: dto.updatedAt.orElse(null));
 }
