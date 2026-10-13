@@ -12,6 +12,7 @@ typedef AssetMetadataEntry = ({String key, Map<String, Object?> value});
 
 /// Texts the custom fields rows need, resolved by the caller so the formatting stays free of widgets.
 enum AssetMetadataText {
+  account,
   taken,
   uploaded,
   views,
@@ -122,20 +123,30 @@ List<AssetMetadataGroup> getAssetMetadataGroups(
     .where((group) => group.rows.isNotEmpty)
     .toList();
 
+/// The Google Photos link, opened in the account that exported it: the photo id only exists in that account, and
+/// Google otherwise uses the browser's default one. authuser takes the email; `/u/<n>/` depends on the sign-in order.
 String? getGooglePhotosUrl(Iterable<AssetMetadataEntry> entries) {
   for (final entry in entries) {
     if (entry.key == kGooglePhotosMetadataKey) {
       final url = entry.value['url'];
-      return url is String && url.startsWith(_kGooglePhotosUrlPrefix) ? url : null;
+      if (url is! String || !url.startsWith(_kGooglePhotosUrlPrefix)) {
+        return null;
+      }
+      final account = entry.value['account'];
+      if (account is! String || !account.contains('@')) {
+        return url;
+      }
+      final link = Uri.parse(url);
+      return link.replace(queryParameters: {...link.queryParameters, 'authuser': account}).toString();
     }
   }
   return null;
 }
 
 /// Pretty printed JSON of the visible metadata, keyed by metadata key.
-String getAssetMetadataJson(Iterable<AssetMetadataEntry> entries) => const JsonEncoder.withIndent(
-  '  ',
-).convert({for (final entry in getVisibleAssetMetadata(entries)) entry.key: entry.value});
+String getAssetMetadataJson(Iterable<AssetMetadataEntry> entries) =>
+    const JsonEncoder.withIndent('  ')
+        .convert({for (final entry in getVisibleAssetMetadata(entries)) entry.key: entry.value});
 
 List<AssetMetadataRow> _getGooglePhotosRows(
   Map<String, Object?> value,
@@ -160,6 +171,7 @@ List<AssetMetadataRow> _getGooglePhotosRows(
     return text == null ? formatAssetMetadataValue(mappedValue) : t(text);
   }
 
+  add('account', AssetMetadataText.account, formatAssetMetadataValue);
   add('takenAt', AssetMetadataText.taken, formatDate);
   add('uploadedAt', AssetMetadataText.uploaded, formatDate);
   add('views', AssetMetadataText.views, formatAssetMetadataValue);

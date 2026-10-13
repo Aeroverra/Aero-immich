@@ -45,6 +45,7 @@ class CustomFieldsDetails extends ConsumerWidget {
   static String _translate(BuildContext context, AssetMetadataText text, Map<String, Object>? args) {
     final t = context.t;
     return switch (text) {
+      .account => t.asset_metadata_account,
       .taken => t.asset_metadata_taken,
       .uploaded => t.asset_metadata_uploaded,
       .views => t.asset_metadata_views,
