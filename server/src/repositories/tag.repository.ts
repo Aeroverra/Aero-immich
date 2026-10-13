@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { Insertable, InsertQueryBuilder, Kysely, QueryCreator, Selectable, Updateable } from 'kysely';
+import { Insertable, InsertQueryBuilder, Kysely, QueryCreator, Selectable, sql, Updateable } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
-import { columns } from 'src/database';
+import { isDeepStrictEqual } from 'node:util';
+import { columns, LockableProperty } from 'src/database';
 import { Chunked, ChunkedSet, DummyValue, GenerateSql } from 'src/decorators';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { DB } from 'src/schema';
@@ -156,10 +157,14 @@ export class TagRepository {
       return;
     }
 
-    await this.db
-      .insertInto('tag_asset')
-      .values(assetIds.map((assetId) => ({ tagId, assetId })))
-      .execute();
+    await this.db.transaction().execute(async (tx) => {
+      await this.lockExif(tx, assetIds);
+      await tx
+        .insertInto('tag_asset')
+        .values(assetIds.map((assetId) => ({ tagId, assetId })))
+        .execute();
+      await this.syncExifTags(tx, assetIds);
+    });
   }
 
   @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
@@ -169,7 +174,11 @@ export class TagRepository {
       return;
     }
 
-    await this.db.deleteFrom('tag_asset').where('tagId', '=', tagId).where('assetId', 'in', assetIds).execute();
+    await this.db.transaction().execute(async (tx) => {
+      await this.lockExif(tx, assetIds);
+      await tx.deleteFrom('tag_asset').where('tagId', '=', tagId).where('assetId', 'in', assetIds).execute();
+      await this.syncExifTags(tx, assetIds);
+    });
   }
 
   @GenerateSql({ params: [[{ assetId: DummyValue.UUID, tagIds: DummyValue.UUID }]] })
@@ -179,18 +188,39 @@ export class TagRepository {
       return Promise.resolve([]);
     }
 
-    return this.db
-      .insertInto('tag_asset')
-      .values(items)
-      .onConflict((oc) => oc.doNothing())
-      .returningAll()
-      .execute();
+    return this.db.transaction().execute(async (tx) => {
+      await this.lockExif(tx, [...new Set(items.map(({ assetId }) => assetId))]);
+      const results = await tx
+        .insertInto('tag_asset')
+        .values(items)
+        .onConflict((oc) => oc.doNothing())
+        .returningAll()
+        .execute();
+      await this.syncExifTags(tx, [...new Set(results.map(({ assetId }) => assetId))]);
+      return results;
+    });
   }
 
+  /**
+   * @param expectedTags only replace the tags while `asset_exif.tags` still has this value, so tags read from a file
+   * cannot overwrite a tag change that happened in the meantime
+   */
   @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
   @Chunked({ paramIndex: 1 })
-  replaceAssetTags(assetId: string, tagIds: string[]) {
+  replaceAssetTags(assetId: string, tagIds: string[], expectedTags?: string[] | null) {
     return this.db.transaction().execute(async (tx) => {
+      if (expectedTags !== undefined) {
+        const exif = await tx
+          .selectFrom('asset_exif')
+          .select('tags')
+          .where('assetId', '=', assetId)
+          .forUpdate()
+          .executeTakeFirst();
+        if (!exif || !isDeepStrictEqual(exif.tags, expectedTags)) {
+          return;
+        }
+      }
+
       await tx.deleteFrom('tag_asset').where('assetId', '=', assetId).execute();
 
       if (tagIds.length === 0) {
@@ -204,6 +234,54 @@ export class TagRepository {
         .returningAll()
         .execute();
     });
+  }
+
+  /**
+   * `asset_exif.tags` is what the sidecar write job puts in the file. The exif rows are locked before `tag_asset`
+   * changes and updated in the same transaction, so metadata extraction never sees a tag change that is half done.
+   */
+  private lockExif(tx: Kysely<DB>, assetIds: string[]) {
+    return tx
+      .selectFrom('asset_exif')
+      .select('assetId')
+      .where('assetId', 'in', assetIds)
+      .orderBy('assetId')
+      .forUpdate()
+      .execute();
+  }
+
+  private async syncExifTags(tx: Kysely<DB>, assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    await tx
+      .insertInto('asset_exif')
+      .columns(['assetId', 'tags', 'lockedProperties'])
+      .expression((eb) =>
+        eb
+          .selectFrom('asset')
+          .select((eb) => [
+            'asset.id',
+            sql<string[]>`array(${eb
+              .selectFrom('tag_asset')
+              .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+              .select('tag.value')
+              .whereRef('tag_asset.assetId', '=', 'asset.id')
+              .orderBy('tag.value')})`.as('tags'),
+            sql<LockableProperty[]>`array['tags']::character varying[]`.as('lockedProperties'),
+          ])
+          .where('asset.id', 'in', assetIds),
+      )
+      .onConflict((oc) =>
+        oc.column('assetId').doUpdateSet((eb) => ({
+          tags: eb.ref('excluded.tags'),
+          lockedProperties: sql<
+            LockableProperty[]
+          >`array(select distinct unnest(${eb.ref('asset_exif.lockedProperties')} || array['tags']::character varying[]))`,
+        })),
+      )
+      .execute();
   }
 
   async deleteEmptyTags() {

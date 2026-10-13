@@ -17,7 +17,6 @@ import { TagAssetTable } from 'src/schema/tables/tag-asset.table';
 import { BaseService } from 'src/services/base.service';
 import { isPrivateMode } from 'src/utils/access';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
-import { updateLockedColumns } from 'src/utils/database';
 import { findOrFail } from 'src/utils/misc';
 import { upsertTags } from 'src/utils/tag';
 
@@ -104,7 +103,6 @@ export class TagService extends BaseService {
 
     const results = await this.tagRepository.upsertAssetIds(items);
     for (const assetId of new Set(results.map((item) => item.assetId))) {
-      await this.updateTags(assetId);
       await this.eventRepository.emit('AssetTag', { assetId, userId: auth.user.id });
     }
 
@@ -125,7 +123,6 @@ export class TagService extends BaseService {
         continue;
       }
 
-      await this.updateTags(assetId);
       await this.eventRepository.emit('AssetTag', { assetId, userId: auth.user.id });
     }
 
@@ -146,7 +143,6 @@ export class TagService extends BaseService {
         continue;
       }
 
-      await this.updateTags(assetId);
       await this.eventRepository.emit('AssetUntag', { assetId });
     }
 
@@ -161,13 +157,5 @@ export class TagService extends BaseService {
 
   private findOrFail(id: string) {
     return findOrFail(() => this.tagRepository.get(id), 'Tag');
-  }
-
-  private async updateTags(assetId: string) {
-    const { tags } = await this.assetRepository.getForUpdateTags(assetId);
-    await this.assetRepository.upsertExif({
-      exif: updateLockedColumns({ assetId, tags: tags.map(({ value }) => value) }),
-      lockedPropertiesBehavior: 'append',
-    });
   }
 }
