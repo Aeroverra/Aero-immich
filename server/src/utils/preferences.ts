@@ -62,6 +62,9 @@ const getDefaultPreferences = (): UserPreferences => {
       sidebarWeb: true,
       includeInMemories: false,
     },
+    autoStack: {
+      enabled: false,
+    },
     deletedReimport: {
       mode: DeletedReimportMode.Trash,
       albumId: null,

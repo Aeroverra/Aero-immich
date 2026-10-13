@@ -6,6 +6,7 @@ import { AssetType, AssetVisibility, IntegrityReport, JobName, JobStatus, Manual
 import { ArgsOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobItem } from 'src/types';
+import { AUTO_STACK_UPLOAD_DELAY } from 'src/utils/auto-stack';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
 
 const asJobItem = (dto: JobCreateDto): JobItem => {
@@ -252,14 +253,33 @@ export class JobService extends BaseService {
 
       case JobName.SmartSearch: {
         if (item.data.source === 'upload') {
-          await this.jobRepository.queue({ name: JobName.AssetDetectDuplicates, data: item.data });
+          await this.jobRepository.queueAll([
+            { name: JobName.AssetDetectDuplicates, data: item.data },
+            { name: JobName.AutoStack, data: { id: item.data.id, delay: AUTO_STACK_UPLOAD_DELAY } },
+          ]);
         }
         break;
       }
 
       case JobName.AssetDetectFaces: {
         // attributes are computed for the faces that detection just stored
-        await this.jobRepository.queue({ name: JobName.AssetDetectFaceAttributes, data: { id: item.data.id } });
+        await this.jobRepository.queue({
+          name: JobName.AssetDetectFaceAttributes,
+          data: { id: item.data.id, source: item.data.source },
+        });
+        break;
+      }
+
+      case JobName.AssetDetectFaceAttributes: {
+        // face attributes are the last input of automatic stacks: a new upload joins its neighbours, an asset that is
+        // already in an automatic stack may get a better cover
+        await this.jobRepository.queue({
+          name: JobName.AutoStack,
+          data:
+            item.data.source === 'upload'
+              ? { id: item.data.id, delay: AUTO_STACK_UPLOAD_DELAY }
+              : { id: item.data.id, refresh: true },
+        });
         break;
       }
 

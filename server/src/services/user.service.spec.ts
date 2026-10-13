@@ -349,6 +349,38 @@ describe(UserService.name, () => {
     });
   });
 
+  describe('updateMyPreferences', () => {
+    it('should queue automatic stacks for the library when the user turns them on', async () => {
+      mocks.user.getMetadata.mockResolvedValue([]);
+
+      await sut.updateMyPreferences(authStub.user1, { autoStack: { enabled: true } });
+
+      expect(mocks.user.upsertMetadata).toHaveBeenCalledWith(authStub.user1.user.id, {
+        key: UserMetadataKey.Preferences,
+        value: { autoStack: { enabled: true } },
+      });
+      expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.AutoStackQueueAll, data: { force: false } });
+    });
+
+    it('should not queue automatic stacks when they were on already', async () => {
+      mocks.user.getMetadata.mockResolvedValue([
+        { key: UserMetadataKey.Preferences, value: { autoStack: { enabled: true } } },
+      ]);
+
+      await sut.updateMyPreferences(authStub.user1, { autoStack: { enabled: true } });
+
+      expect(mocks.job.queue).not.toHaveBeenCalled();
+    });
+
+    it('should not queue automatic stacks when they are turned off', async () => {
+      mocks.user.getMetadata.mockResolvedValue([]);
+
+      await sut.updateMyPreferences(authStub.user1, { folders: { enabled: true } });
+
+      expect(mocks.job.queue).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getMyDeletedChecksumStatistics', () => {
     it('should count the remembered checksums of the user', async () => {
       mocks.assetDeletedChecksum.getCount.mockResolvedValue(3);

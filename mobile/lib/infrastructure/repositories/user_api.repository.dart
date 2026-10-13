@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:http/http.dart';
@@ -39,6 +41,27 @@ class UserApiRepository extends ApiRepository {
     await checkNull(
       _api.updateMyPreferences(
         UserPreferencesUpdateDto(stacks: Optional.present(StacksUpdate(groupAuto: Optional.present(groupAuto)))),
+      ),
+    );
+  }
+
+  /// Whether similar photos are stacked automatically for the user, or null when the server has no automatic stacks
+  Future<bool?> getAutoStackEnabled() async {
+    // the raw response: the generated model fills in a default for servers without the preference
+    final response = await _api.getMyPreferencesWithHttpInfo();
+    final body = utf8.decode(response.bodyBytes);
+    if (response.statusCode >= HttpStatus.badRequest) {
+      throw ApiException(response.statusCode, body);
+    }
+
+    final autoStack = (jsonDecode(body) as Map<String, dynamic>)['autoStack'];
+    return autoStack is Map<String, dynamic> ? autoStack['enabled'] as bool? : null;
+  }
+
+  Future<void> updateAutoStackEnabled(bool enabled) async {
+    await checkNull(
+      _api.updateMyPreferences(
+        UserPreferencesUpdateDto(autoStack: Optional.present(AutoStackUpdate(enabled: Optional.present(enabled)))),
       ),
     );
   }

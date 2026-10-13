@@ -56,6 +56,9 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
   stacks: {
     groupAuto: true,
   },
+  autoStack: {
+    enabled: false,
+  },
   deletedReimport: {
     mode: DeletedReimportMode.Trash,
     albumId: null,

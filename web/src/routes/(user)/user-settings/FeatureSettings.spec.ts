@@ -97,4 +97,26 @@ describe('FeatureSettings component', () => {
     );
     expect(authManager.preferences.stacks.groupAuto).toBe(false);
   });
+
+  it('saves the automatic stacks preference', async () => {
+    const preferences = preferencesFactory.build({ autoStack: { enabled: false } });
+    authManager.setPreferences(preferences);
+    sdkMock.updateMyPreferences.mockResolvedValue({ ...preferences, autoStack: { enabled: true } });
+    const user = userEvent.setup();
+
+    render(FeatureSettings);
+
+    const toggle = screen.getByRole('switch', { name: 'Stack similar photos automatically' });
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await user.click(toggle);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(sdkMock.updateMyPreferences).toHaveBeenCalledWith({
+        userPreferencesUpdateDto: expect.objectContaining({ autoStack: { enabled: true } }),
+      }),
+    );
+    expect(authManager.preferences.autoStack.enabled).toBe(true);
+  });
 });

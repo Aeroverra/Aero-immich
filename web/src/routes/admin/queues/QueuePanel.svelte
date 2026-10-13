@@ -75,6 +75,11 @@
       missingText: $t('missing'),
       disabled: !featureFlags.faceAttributes,
     },
+    [QueueName.AutoStack]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+      disabled: !featureFlags.smartSearch,
+    },
     [QueueName.Ocr]: {
       allText: $t('all'),
       missingText: $t('missing'),

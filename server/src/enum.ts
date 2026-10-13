@@ -93,6 +93,15 @@ export const DeletedReimportModeSchema = z
   .describe('How an upload of a previously deleted file is handled')
   .meta({ id: 'DeletedReimportMode' });
 
+export enum StackAutoExclusionReason {
+  /** the user took the asset out of an automatic stack */
+  Removed = 'removed',
+  /** the user deleted the automatic stack the asset was in */
+  Unstacked = 'unstacked',
+  /** the user changed the automatic stack the asset is in, so the job leaves that stack alone */
+  Edited = 'edited',
+}
+
 export enum AssetOrderBy {
   TakenAt = 'takenAt',
   CreatedAt = 'createdAt',
@@ -839,6 +848,7 @@ export enum QueueName {
   FacialRecognition = 'facialRecognition',
   SmartSearch = 'smartSearch',
   DuplicateDetection = 'duplicateDetection',
+  AutoStack = 'autoStack',
   BackgroundTask = 'backgroundTask',
   StorageTemplateMigration = 'storageTemplateMigration',
   Migration = 'migration',
@@ -885,6 +895,9 @@ export enum JobName {
   AssetFileMigration = 'AssetFileMigration',
   AssetGenerateThumbnailsQueueAll = 'AssetGenerateThumbnailsQueueAll',
   AssetGenerateThumbnails = 'AssetGenerateThumbnails',
+
+  AutoStackQueueAll = 'AutoStackQueueAll',
+  AutoStack = 'AutoStack',
 
   AuditTableCleanup = 'AuditTableCleanup',
 

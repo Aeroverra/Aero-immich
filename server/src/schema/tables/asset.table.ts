@@ -59,6 +59,7 @@ import { ASSET_CHECKSUM_CONSTRAINT } from 'src/utils/database';
 @Index({ name: 'asset_owner_private_idx', columns: ['ownerId'], where: '"isPrivate" = true' })
 @Index({ columns: ['originalPath', 'libraryId'] })
 @Index({ columns: ['id', 'stackId'] })
+@Index({ columns: ['ownerId', 'fileCreatedAt'] })
 @Index({
   name: 'asset_originalFilename_trigram_idx',
   using: 'gin',

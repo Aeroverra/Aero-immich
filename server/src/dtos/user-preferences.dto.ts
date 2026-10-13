@@ -125,6 +125,13 @@ const PrivateModeUpdateSchema = z
   .optional()
   .meta({ id: 'PrivateModeUpdate' });
 
+const AutoStackUpdateSchema = z
+  .object({
+    enabled: z.boolean().optional().describe('Whether similar photos taken close together are stacked automatically'),
+  })
+  .optional()
+  .meta({ id: 'AutoStackUpdate' });
+
 const DeletedReimportUpdateSchema = z
   .object({
     mode: DeletedReimportModeSchema.optional(),
@@ -135,6 +142,7 @@ const DeletedReimportUpdateSchema = z
 const UserPreferencesUpdateSchema = z
   .object({
     albums: AlbumsUpdateSchema,
+    autoStack: AutoStackUpdateSchema,
     avatar: AvatarUpdateSchema,
     cast: CastUpdateSchema,
     deletedReimport: DeletedReimportUpdateSchema,
@@ -252,6 +260,12 @@ const PrivateModeResponseSchema = z
   })
   .meta({ id: 'PrivateModeResponse' });
 
+const AutoStackResponseSchema = z
+  .object({
+    enabled: z.boolean().describe('Whether similar photos taken close together are stacked automatically'),
+  })
+  .meta({ id: 'AutoStackResponse' });
+
 const DeletedReimportResponseSchema = z
   .object({
     mode: DeletedReimportModeSchema,
@@ -278,6 +292,7 @@ const UserPreferencesResponseSchema = z
     recentlyAdded: RecentlyAddedResponseSchema,
     stacks: StacksResponseSchema,
     privateMode: PrivateModeResponseSchema,
+    autoStack: AutoStackResponseSchema,
     deletedReimport: DeletedReimportResponseSchema,
   })
   .meta({ id: 'UserPreferencesResponseDto' });

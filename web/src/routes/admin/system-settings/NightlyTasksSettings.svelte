@@ -45,6 +45,12 @@
           {disabled}
         />
         <SettingSwitch
+          title={$t('admin.nightly_tasks_auto_stack_setting')}
+          subtitle={$t('admin.nightly_tasks_auto_stack_setting_description')}
+          bind:checked={configToEdit.nightlyTasks.autoStack}
+          {disabled}
+        />
+        <SettingSwitch
           title={$t('admin.nightly_tasks_generate_memories_setting')}
           subtitle={$t('admin.nightly_tasks_generate_memories_setting_description')}
           bind:checked={configToEdit.nightlyTasks.generateMemories}
