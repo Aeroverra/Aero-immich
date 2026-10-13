@@ -62,7 +62,7 @@
       <div class="mt-4 grow text-start">
         <Text fontWeight="medium">{$t('configuration')}</Text>
         <Stack gap={4}>
-          <SchemaConfiguration schema={method.schema as JSONSchemaProperty} bind:config root />
+          <SchemaConfiguration schema={method.schema as JSONSchemaProperty} methodKey={method.key} bind:config root />
         </Stack>
       </div>
     {/if}

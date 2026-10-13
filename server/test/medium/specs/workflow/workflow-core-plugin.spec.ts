@@ -209,6 +209,30 @@ const runTemplate = async (name: string, assetId: string, ownerId: string) => {
   return isFavorite(assetId);
 };
 
+const fileFilter = (pattern: string, extra: Record<string, unknown> = {}) => ({
+  method: 'immich-plugin-core#assetFileFilter',
+  config: { pattern, matchType: 'regex', ...extra },
+});
+const typeFilter = (allowedTypes: string[]) => ({
+  method: 'immich-plugin-core#assetTypeFilter',
+  config: { allowedTypes },
+});
+const filterGroup = (mode: string, filters: WorkflowTemplateStep[]): WorkflowTemplateStep => ({
+  method: 'immich-plugin-core#assetFilterGroup',
+  config: { mode, filters } as WorkflowStepConfig,
+});
+
+const setupFilterGroup = async () => {
+  const { user } = await ctx.newUser();
+  const [{ asset: beach }, { asset: party }, { asset: partyClip }, { asset: other }] = await Promise.all([
+    ctx.newAsset({ ownerId: user.id, originalFileName: 'beach_day.jpg' }),
+    ctx.newAsset({ ownerId: user.id, originalFileName: 'party_night.jpg' }),
+    ctx.newAsset({ ownerId: user.id, originalFileName: 'party_clip.mp4', type: AssetType.Video }),
+    ctx.newAsset({ ownerId: user.id, originalFileName: 'receipt.jpg' }),
+  ]);
+  return { user, beach, party, partyClip, other };
+};
+
 describe('core plugin', () => {
   describe('validation', () => {
     it('should have a valid manifest.json', () => {
@@ -847,6 +871,148 @@ describe('core plugin', () => {
     });
   });
 
+  describe('assetFilterGroup', () => {
+    it('should let an asset through when any filter matches', async () => {
+      const { user, beach, party, other } = await setupFilterGroup();
+      const config = { mode: 'any', filters: [fileFilter('^beach_'), fileFilter('^party_')] };
+
+      await expect(passesFilter(beach.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(party.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it('should use any when the mode is missing', async () => {
+      const { user, beach, other } = await setupFilterGroup();
+      const config = { filters: [fileFilter('^receipt'), fileFilter('^beach_')] };
+
+      await expect(passesFilter(beach.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+    });
+
+    it('should require every filter to match with all', async () => {
+      const { user, party, partyClip } = await setupFilterGroup();
+      const config = { mode: 'all', filters: [fileFilter('^party_'), typeFilter(['VIDEO'])] };
+
+      await expect(passesFilter(partyClip.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(party.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it('should let an asset through when no filter matches with none', async () => {
+      const { user, beach, party, other } = await setupFilterGroup();
+      const config = { mode: 'none', filters: [fileFilter('^beach_'), fileFilter('^party_')] };
+
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(beach.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+      await expect(passesFilter(party.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it('should evaluate nested groups', async () => {
+      const { user, beach, party, partyClip, other } = await setupFilterGroup();
+      // beach photos, or party videos
+      const config = {
+        mode: 'any',
+        filters: [fileFilter('^beach_'), filterGroup('all', [fileFilter('^party_'), typeFilter(['VIDEO'])])],
+      };
+
+      await expect(passesFilter(beach.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(partyClip.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(party.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it.each(['any', 'all', 'none'])('should let every asset through when the group is empty (%s)', async (mode) => {
+      const { user, other } = await setupFilterGroup();
+
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', { mode, filters: [] })).resolves.toBe(true);
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', { mode })).resolves.toBe(true);
+    });
+
+    it('should honor inverse on a filter inside a group', async () => {
+      const { user, party, partyClip, other } = await setupFilterGroup();
+      // party assets that are not videos
+      const config = {
+        mode: 'all',
+        filters: [fileFilter('^party_'), fileFilter(String.raw`\.mp4$`, { inverse: true })],
+      };
+
+      await expect(passesFilter(party.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(partyClip.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+      await expect(passesFilter(other.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it('should check exif values inside a group like in a step', async () => {
+      const { user } = await ctx.newUser();
+      const [{ asset: camera }, { asset: download }] = await Promise.all([
+        ctx.newAsset({ ownerId: user.id }),
+        ctx.newAsset({ ownerId: user.id }),
+      ]);
+      await ctx.newExif({ assetId: camera.id, make: 'Canon' });
+      const config = {
+        mode: 'all',
+        filters: [{ method: 'immich-plugin-core#assetExifFilter', config: { property: 'make', matchType: 'empty' } }],
+      };
+
+      await expect(passesFilter(download.id, user.id, 'assetFilterGroup', config)).resolves.toBe(true);
+      await expect(passesFilter(camera.id, user.id, 'assetFilterGroup', config)).resolves.toBe(false);
+    });
+
+    it('should fail the run when the group holds something that is not a filter', async () => {
+      const { user, beach } = await setupFilterGroup();
+      const workflow = await createWorkflow({
+        ownerId: user.id,
+        trigger: WorkflowTrigger.AssetCreate,
+        logging: true,
+        steps: [
+          filterGroup('any', [{ method: 'immich-plugin-core#assetFavorite', config: {} }]),
+          { method: 'immich-plugin-core#assetFavorite' },
+        ],
+      });
+
+      await expect(ctx.sut.handleAssetTrigger({ workflowId: workflow.id, assetId: beach.id })).resolves.toBe('failed');
+      await expect(isFavorite(beach.id)).resolves.toBe(false);
+      const logs = await ctx.get(WorkflowRepository).getLogs(workflow.id, { limit: 10 });
+      expect(logs.map(({ result }) => result)).toEqual(['error']);
+    });
+
+    it('should preview and run a workflow that starts with a group', async () => {
+      const { user, beach, partyClip, party, other } = await setupFilterGroup();
+      const workflow = await createWorkflow({
+        ownerId: user.id,
+        trigger: WorkflowTrigger.AssetMetadataExtraction,
+        enabled: false,
+        steps: [
+          filterGroup('any', [
+            fileFilter('^beach_'),
+            filterGroup('all', [fileFilter('^party_'), typeFilter(['VIDEO'])]),
+          ]),
+          { method: 'immich-plugin-core#assetFavorite' },
+        ],
+      });
+
+      const preview = await ctx.sut.preview(workflow.id, { limit: 12 });
+      expect(preview).toMatchObject({ total: 4, scanned: 4, matched: 2, complete: true, filters: 1 });
+      expect(preview.assetIds.toSorted()).toEqual([beach.id, partyClip.id].toSorted());
+      await expect(isFavorite(beach.id)).resolves.toBe(false);
+
+      const queueAll = ctx.getMock(JobRepository).queueAll;
+      queueAll.mockClear();
+      const runId = '6c1d2f4a-8b3e-4d5f-9a7b-1c2d3e4f5a6b';
+      await expect(ctx.sut.handleWorkflowRun({ workflowId: workflow.id, runId })).resolves.toBe('success');
+      const jobs = queueAll.mock.calls.flatMap(([items]) => items);
+      expect(jobs.map((job) => (job.data as { assetId: string }).assetId).toSorted()).toEqual(
+        [beach.id, partyClip.id].toSorted(),
+      );
+      for (const job of jobs) {
+        await ctx.sut.handleAssetTrigger(job.data as any);
+      }
+
+      await expect(isFavorite(beach.id)).resolves.toBe(true);
+      await expect(isFavorite(partyClip.id)).resolves.toBe(true);
+      await expect(isFavorite(party.id)).resolves.toBe(false);
+      await expect(isFavorite(other.id)).resolves.toBe(false);
+    });
+  });
+
   describe('assetAddTags', () => {
     it('should create a tag by name and keep using it', async () => {
       const { user } = await ctx.newUser();
@@ -988,6 +1154,48 @@ describe('core plugin', () => {
       }
     });
 
+    it('should only put filters of the core plugin in groups', () => {
+      const filters = new Set(
+        manifest.methods
+          .filter(({ uiHints }) => uiHints?.includes('Filter'))
+          .map(({ name }) => `immich-plugin-core#${name}`),
+      );
+      const check = (name: string, steps: Array<{ method: string; config?: Record<string, unknown> | null }>) => {
+        for (const step of steps) {
+          if (step.method !== 'immich-plugin-core#assetFilterGroup') {
+            continue;
+          }
+
+          const children = (step.config?.filters ?? []) as typeof steps;
+          expect(children.length, `${name}: empty group`).toBeGreaterThan(0);
+          for (const child of children) {
+            expect(filters.has(child.method), `${name}: ${child.method}`).toBe(true);
+          }
+          check(name, children);
+        }
+      };
+
+      for (const template of manifest.templates) {
+        check(template.name, template.steps);
+      }
+    });
+
+    it('should have one template per pack and keep the status bar on its own', () => {
+      const names = manifest.templates.map(({ name }) => name);
+      expect(names).toEqual(
+        expect.arrayContaining(['screenshots-smart-album', 'screenshots-status-bar', 'tiktok-downloads']),
+      );
+      expect(names.filter((name) => name.startsWith('tiktok-'))).toEqual(['tiktok-downloads']);
+      for (const name of ['screenshots-smart-album', 'screenshots-status-bar', 'tiktok-downloads']) {
+        const template = manifest.templates.find((template) => template.name === name)!;
+        // rule hits go to a tag to review, not straight into a curated one
+        expect(template.steps.at(-1)).toMatchObject({
+          method: 'immich-plugin-core#assetAddTags',
+          config: { tags: [], tagName: expect.stringMatching(/^review\//) },
+        });
+      }
+    });
+
     it.each([
       ['someuser_2025-01-01-00-00-00_1735689600000.mp4', true],
       ['some.user_2025-01-01-00-00-00_1735689600000_mute (1).mp4', true],
@@ -1001,7 +1209,7 @@ describe('core plugin', () => {
     ])('should recognize TikTok file names: %s', async (originalFileName, expected) => {
       const { user } = await ctx.newUser();
       const { asset } = await ctx.newAsset({ ownerId: user.id, originalFileName, type: AssetType.Video });
-      await expect(runTemplate('tiktok-downloads-file-names', asset.id, user.id)).resolves.toBe(expected);
+      await expect(runTemplate('tiktok-downloads', asset.id, user.id)).resolves.toBe(expected);
     });
 
     it('should recognize older TikTok saves by name, width and missing make', async () => {
@@ -1016,9 +1224,9 @@ describe('core plugin', () => {
       await ctx.newExif({ assetId: camera.id, make: 'Apple', exifImageWidth: 576 });
       await ctx.newExif({ assetId: wide.id, make: null, exifImageWidth: 1080 });
 
-      await expect(runTemplate('tiktok-downloads-hash-videos', save.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-hash-videos', camera.id, user.id)).resolves.toBe(false);
-      await expect(runTemplate('tiktok-downloads-hash-videos', wide.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', save.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', camera.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', wide.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize photo mode images by name, ratio and missing make', async () => {
@@ -1044,9 +1252,9 @@ describe('core plugin', () => {
         }),
       ]);
 
-      await expect(runTemplate('tiktok-downloads-photo-mode', png.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-photo-mode', jpg.id, user.id)).resolves.toBe(false);
-      await expect(runTemplate('tiktok-downloads-photo-mode', square.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', png.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', jpg.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', square.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize the TikTok watermark but not screen recordings of the app', async () => {
@@ -1058,8 +1266,8 @@ describe('core plugin', () => {
       await addOcr(download.id, [{ text: 'TikTok' }, { text: '@someuser' }]);
       await addOcr(recording.id, [{ text: 'TikTok' }]);
 
-      await expect(runTemplate('tiktok-downloads-watermark', download.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('tiktok-downloads-watermark', recording.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('tiktok-downloads', download.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('tiktok-downloads', recording.id, user.id)).resolves.toBe(false);
     });
 
     it.each([
@@ -1070,6 +1278,7 @@ describe('core plugin', () => {
       ['Bildschirmfoto 2025-01-01 um 00.00.00.png', true],
       ['Capture d’écran 2025-01-01.png', true],
       ['IMG_1234.JPG', false],
+      ['IMG_1234.PNG', true],
       ['screenplay.pdf', false],
     ])('should recognize screenshot file names: %s', async (originalFileName, expected) => {
       const { user } = await ctx.newUser();
@@ -1085,8 +1294,8 @@ describe('core plugin', () => {
       ]);
       await ctx.newExif({ assetId: photo.id, make: 'Apple' });
 
-      await expect(runTemplate('screenshots-iphone', screenshot.id, user.id)).resolves.toBe(true);
-      await expect(runTemplate('screenshots-iphone', photo.id, user.id)).resolves.toBe(false);
+      await expect(runTemplate('screenshots-smart-album', screenshot.id, user.id)).resolves.toBe(true);
+      await expect(runTemplate('screenshots-smart-album', photo.id, user.id)).resolves.toBe(false);
     });
 
     it('should recognize a status bar clock', async () => {

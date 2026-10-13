@@ -1,6 +1,6 @@
 <script lang="ts">
   import { pluginManager } from '$lib/managers/plugin-manager.svelte';
-  import { getTriggerName } from '$lib/utils/workflow';
+  import { getFilterGroupSummaryLines, getTriggerName, isFilterGroupSchema } from '$lib/utils/workflow';
   import type { WorkflowStepDto, WorkflowTrigger } from '@immich/sdk';
   import { Icon, IconButton, shortcut, Text } from '@immich/ui';
   import { mdiCheck, mdiClose, mdiContentCopy, mdiViewDashboardOutline } from '@mdi/js';
@@ -70,9 +70,22 @@
       const isFilter = method?.uiHints?.includes('Filter') ?? false;
       const type = isFilter ? $t('filter') : $t('action');
       const label = pluginManager.getMethodLabel(step.method);
-      lines.push(`    [${i + 1}] ${type.toUpperCase()} · ${label}`);
-      for (const [key, value] of getConfigEntries(step.config)) {
-        lines.push(`          ${key} = ${formatConfigValue(value)}`);
+      const isGroup = (key: string) => isFilterGroupSchema(pluginManager.getMethod(key)?.schema);
+      if (isGroup(step.method)) {
+        lines.push(
+          `    [${i + 1}] ${type.toUpperCase()} · ${label} (${step.config?.mode ?? 'any'})`,
+          ...getFilterGroupSummaryLines(step.config, {
+            getLabel: (key) => pluginManager.getMethodLabel(key),
+            isGroup,
+            formatValue: formatConfigValue,
+            indent: ' '.repeat(10),
+          }),
+        );
+      } else {
+        lines.push(`    [${i + 1}] ${type.toUpperCase()} · ${label}`);
+        for (const [key, value] of getConfigEntries(step.config)) {
+          lines.push(`          ${key} = ${formatConfigValue(value)}`);
+        }
       }
       if (i < workflow.steps.length - 1) {
         lines.push('');
