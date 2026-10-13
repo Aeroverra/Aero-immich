@@ -15,6 +15,7 @@ const NO_EXIF: CaptureExifInput = {
   fileClock: null,
   fileClockIsUtc: false,
   gpsDateTime: null,
+  gpsZone: null,
 };
 
 const PHONE = { make: 'Google', model: 'Pixel 7' };
@@ -496,6 +497,100 @@ const cases: Case[] = [
     google: G,
     exif: IPHONE,
     expected: { ...GOOGLE_NO_ZONE, flags: ['zoneAssumed'], device: 'phone' },
+  },
+
+  // ---------- the zone at the capture position ----------
+  {
+    name: 'position: no rule has a zone: the zone at the position, at its summer offset',
+    google: G,
+    exif: { gpsZone: 'Europe/London' },
+    expected: { instant: G_ISO, zone: 'UTC+1', zoneSource: 'gps', putDate: true, putOffsetZone: 'UTC+1', flags: [] },
+  },
+  {
+    name: 'position: the offset is the one in force at the moment (winter)',
+    google: '2023-01-05T01:30:00Z',
+    exif: { gpsZone: 'Europe/London' },
+    expected: {
+      instant: '2023-01-05T01:30:00.000Z',
+      zone: 'UTC+0',
+      zoneSource: 'gps',
+      putDate: true,
+      putOffsetZone: 'UTC+0',
+      flags: [],
+    },
+  },
+  {
+    name: 'position: a video with no make whose only clock is the QuickTime date (Pixel Video Boost MAIN)',
+    google: G,
+    exif: { fileHasGps: true, fileClock: wall('2023-07-05T02:30:00'), gpsZone: 'Europe/London' },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC+1',
+      zoneSource: 'gps',
+      putDate: true,
+      putOffsetZone: 'UTC+1',
+      flags: [],
+      device: 'unknown',
+    },
+  },
+  {
+    name: 'position: a camera gets the zone at its position, never its own zone label',
+    google: G,
+    exif: { ...CAMERA, fileOffsetZone: 'UTC-4', fileClock: wall('2023-07-04T21:30:00'), gpsZone: 'Asia/Tokyo' },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC+9',
+      zoneSource: 'gps',
+      putDate: true,
+      putOffsetZone: 'UTC+9',
+      flags: [],
+      device: 'camera',
+    },
+  },
+  {
+    name: 'position: the offset of a phone clock (rule 2) wins over the position',
+    google: G,
+    exif: { ...PHONE, fileClock: wall('2023-07-04T21:30:00'), gpsZone: 'Europe/London' },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC-4',
+      zoneSource: 'derivedOffset',
+      putDate: true,
+      putOffsetZone: 'UTC-4',
+      flags: [],
+    },
+  },
+  {
+    name: 'position: a recorded zone that agrees with Google (rule 1) wins over the position',
+    google: G,
+    exif: { ...IPHONE, fileOffsetZone: 'UTC-4', fileClock: wall('2023-07-04T21:30:00'), gpsZone: 'Europe/London' },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC-4',
+      zoneSource: 'fileOffset',
+      putDate: false,
+      putOffsetZone: null,
+      flags: [],
+    },
+  },
+  {
+    name: 'position: a file moment that disagrees with Google leaves the zone to the position',
+    google: G,
+    exif: { ...IPHONE, fileOffsetZone: 'UTC-4', fileClock: wall('2023-07-04T23:30:00'), gpsZone: 'Europe/London' },
+    expected: {
+      instant: G_ISO,
+      zone: 'UTC+1',
+      zoneSource: 'gps',
+      putDate: true,
+      putOffsetZone: 'UTC+1',
+      flags: ['fileMomentDisagrees'],
+    },
+  },
+  {
+    name: 'position: a zone name luxon does not know is no zone',
+    google: G,
+    exif: { gpsZone: 'Nowhere/Land' },
+    expected: { ...GOOGLE_NO_ZONE, flags: ['zoneAssumed'] },
   },
   {
     name: 'no Google time, no zoned file moment: noDate',

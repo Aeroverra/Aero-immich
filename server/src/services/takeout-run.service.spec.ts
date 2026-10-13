@@ -1,3 +1,4 @@
+import { Settings } from 'luxon';
 import sharp from 'sharp';
 import { AssetEditAction } from 'src/dtos/editing.dto';
 import {
@@ -15,7 +16,7 @@ import { TakeoutRunService } from 'src/services/takeout-run.service';
 import { computeImageSample, detectRotationFromSamples } from 'src/takeout/image-sample';
 import { authStub } from 'test/fixtures/auth.stub';
 import { newTestService, ServiceMocks } from 'test/utils';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 const userId = authStub.admin.user.id;
 
@@ -112,6 +113,41 @@ const coverRow = () =>
     captureDate: new Date('2026-09-30T05:45:17Z'),
   });
 
+// readTags of PXL_20261007_040137078.VB-02.MAIN.mp4 (the boosted clip of a Pixel 9 Pro XL Video Boost pair, run
+// 841707f1, taken in Gloucester): GPS, and the QuickTime date (raw 04:11:28) shifted into the zone there like its
+// COVER, but no AndroidMake or AndroidModel, so it is no phone to the capture-time rule.
+const pixelVideoBoostMain = () => {
+  const gloucester = {
+    year: 2026,
+    month: 10,
+    day: 7,
+    hour: 5,
+    minute: 11,
+    second: 28,
+    tzoffsetMinutes: 60,
+    zoneName: 'Europe/London',
+  };
+  return {
+    MIMEType: 'video/mp4',
+    FileType: 'MP4',
+    GPSLatitude: 51.8588,
+    GPSLongitude: -2.2513,
+    zone: 'Europe/London',
+    tz: 'Europe/London',
+    tzSource: 'GeolocationTimeZone',
+    CreateDate: gloucester,
+    MediaCreateDate: gloucester,
+  };
+};
+const mainRow = () =>
+  uploadRow({
+    takeoutPath: 'Takeout/Google Photos/Deletemeasap/PXL_20261007_040137078.VB-02.MAIN.mp4',
+    originalFileName: 'PXL_20261007_040137078.VB-02.MAIN.mp4',
+    targetPath: '/tmp/does-not-exist/asset-uuid.mp4',
+    captureDate: new Date('2026-10-07T04:11:28Z'),
+    plan: { latitude: 51.8588, longitude: -2.2513, tags: [] },
+  });
+
 // readTags of a downloaded mp4 with no date of its own: zeroed QuickTime dates, no make or model
 const datelessMp4 = () => ({
   MIMEType: 'video/mp4',
@@ -151,6 +187,10 @@ describe(TakeoutRunService.name, () => {
       originalPath: '/tmp/does-not-exist/asset-uuid.jpg',
     } as any);
     mocks.metadata.writeTags.mockResolvedValue(true as any);
+  });
+
+  afterEach(() => {
+    Settings.defaultZone = 'system';
   });
 
   // Every upsertExif call whose payload actually carries a capture date (the PUT path), ignoring the fileSize upsert.
@@ -271,8 +311,82 @@ describe(TakeoutRunService.name, () => {
       expect((mocks.asset.create.mock.calls[0][0] as any).localDateTime).toEqual(new Date('2026-09-30T05:45:17Z'));
       const exif = (dateUpserts()[0][0] as any).exif;
       expect(exif.dateTimeOriginal).toBe('2026-09-30T05:45:17.000Z');
-      expect(exif.timeZone).toBeNull();
-      expect((mocks.metadata.writeTags.mock.calls[0][1] as any).DateTimeOriginal).toBe('2026-09-30T05:45:17.000+00:00');
+      expect(exif.timeZone).toBe('UTC');
+      expect((mocks.metadata.writeTags.mock.calls[0][1] as any).DateTimeOriginal).toBe('2026-09-30T05:45:17.000Z');
+    });
+
+    it('a date with no zone evidence is written as UTC whatever the zone of the server', async () => {
+      // family runs with TZ=America/New_York: the sidecar of run 841707f1 said 00:11:28-04:00 for a 04:11:28Z moment,
+      // and extraction took that offset as the zone of the capture
+      Settings.defaultZone = 'America/New_York';
+      mocks.metadata.readTags.mockResolvedValue(pixelVideoBoostCover() as any);
+
+      await (sut as any).processUpload(run(), settings(), coverRow());
+
+      expect((dateUpserts()[0][0] as any).exif.timeZone).toBe('UTC');
+      expect((mocks.metadata.writeTags.mock.calls[0][1] as any).DateTimeOriginal).toBe('2026-09-30T05:45:17.000Z');
+      expect((mocks.asset.create.mock.calls[0][0] as any).localDateTime).toEqual(new Date('2026-09-30T05:45:17Z'));
+    });
+
+    it('a video with GPS but no make (Video Boost MAIN) gets the zone at its position', async () => {
+      Settings.defaultZone = 'America/New_York';
+      mocks.metadata.readTags.mockResolvedValue(pixelVideoBoostMain() as any);
+
+      await (sut as any).processUpload(run(), settings(), mainRow());
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('UTC+1');
+      expect(created.zoneSource).toBe('gps');
+      expect(created.fallbacks).not.toContain('zoneAssumed');
+      expect((mocks.asset.create.mock.calls[0][0] as any).localDateTime).toEqual(new Date('2026-10-07T05:11:28Z'));
+      const exif = (dateUpserts()[0][0] as any).exif;
+      expect(exif.dateTimeOriginal).toBe('2026-10-07T05:11:28.000+01:00');
+      expect(exif.timeZone).toBe('UTC+1');
+      const tags = mocks.metadata.writeTags.mock.calls[0][1] as any;
+      expect(tags.DateTimeOriginal).toBe('2026-10-07T05:11:28.000+01:00');
+      expect(tags.GPSLatitude).toBeUndefined();
+    });
+
+    it('both halves of a Video Boost pair get the same zone', async () => {
+      mocks.metadata.readTags.mockResolvedValue(pixelVideoBoostMain() as any);
+      await (sut as any).processUpload(run(), settings(), mainRow());
+      const main = createdUpdate()![1] as any;
+
+      mocks.takeout.updateRunFile.mockClear();
+      mocks.metadata.readTags.mockResolvedValue({
+        ...pixelVideoBoostMain(),
+        AndroidMake: 'Google',
+        AndroidModel: 'Pixel 9 Pro XL',
+      } as any);
+      await (sut as any).processUpload(
+        run(),
+        settings(),
+        uploadRow({ ...mainRow(), originalFileName: 'PXL_20261007_040137078.VB-01.COVER.mp4' }),
+      );
+      const cover = createdUpdate()![1] as any;
+
+      expect(cover.zoneSource).toBe('derivedOffset');
+      expect(main.zone).toBe('UTC+1');
+      expect(cover.zone).toBe(main.zone);
+    });
+
+    it("a file with no GPS and no zone evidence gets the zone at Google's location", async () => {
+      mocks.metadata.readTags.mockResolvedValue(pixelVideoBoostCover() as any);
+
+      await (sut as any).processUpload(
+        run(),
+        settings(),
+        uploadRow({ ...coverRow(), plan: { latitude: 51.8588, longitude: -2.2513, tags: [] } }),
+      );
+
+      const created = createdUpdate()![1] as any;
+      expect(created.zone).toBe('UTC+1');
+      expect(created.zoneSource).toBe('gps');
+      expect(created.fallbacks).not.toContain('zoneAssumed');
+      const tags = mocks.metadata.writeTags.mock.calls[0][1] as any;
+      expect(tags.DateTimeOriginal).toBe('2026-09-30T06:45:17.000+01:00');
+      expect(tags.GPSLatitude).toBe(51.8588);
+      expect(tags.GPSLongitude).toBe(-2.2513);
     });
 
     it('a video CreationDate written in UTC (+00:00) is not a recorded zone', async () => {
@@ -554,7 +668,8 @@ describe(TakeoutRunService.name, () => {
       expect(exif.assetId).toBe('server-asset');
       // no zone evidence: the moment is stored in UTC, as for a new upload
       expect(exif.dateTimeOriginal).toBe('2019-05-26T00:04:52.000Z');
-      expect(exif.timeZone).toBeNull();
+      // said out loud: SidecarWrite writes a date without a zone in the zone of the server
+      expect(exif.timeZone).toBe('UTC');
       expect(exif.lockedProperties).toEqual(expect.arrayContaining(['dateTimeOriginal', 'timeZone']));
       expect((puts[0][0] as any).lockedPropertiesBehavior).toBe('append');
       expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.SidecarWrite, data: { id: 'server-asset' } });
