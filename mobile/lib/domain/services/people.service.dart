@@ -34,19 +34,18 @@ class PeopleService {
     return _repository.updateBirthday(personId, birthday);
   }
 
-  /// Adds each of [personIds] to the videos among [assetIds]. Returns the assets that got at least one of them and the
-  /// photos that were skipped; the new faces reach the local database with the next sync.
-  Future<({Set<String> added, Set<String> photos})> addToVideos(
-    Iterable<String> personIds,
-    List<String> assetIds,
-  ) async {
-    final added = <String>{};
-    final photos = <String>{};
-    for (final personId in personIds) {
-      final result = await _personApiRepository.addToAssets(personId, assetIds);
-      added.addAll(result.added);
-      photos.addAll(result.photos);
-    }
-    return (added: added, photos: photos);
+  /// Adds the person to [assetIds] without a face box; the new faces reach the local database with the next sync
+  Future<List<String>> addToAssets(String personId, List<String> assetIds) {
+    return _personApiRepository.addToAssets(personId, assetIds);
+  }
+
+  /// Takes the person off [assetIds]; a face of theirs found in the picture stays (reported as kept)
+  Future<({List<String> removed, List<String> kept})> removeFromAssets(String personId, List<String> assetIds) {
+    return _personApiRepository.removeFromAssets(personId, assetIds);
+  }
+
+  /// For every person on any of [assetIds]: how many of them they are on, and on how many a removal takes them off
+  Future<Map<String, ({int count, int removable})>> countOnAssets(List<String> assetIds) {
+    return _personApiRepository.getAssetCounts(assetIds);
   }
 }

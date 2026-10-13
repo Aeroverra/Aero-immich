@@ -160,7 +160,8 @@
     // eslint-disable-next-line svelte/prefer-svelte-reactivity
     const map = new Map<Faces, string>();
     for (const face of faceManager.data) {
-      if (!face.person) {
+      // a whole-asset mark covers the whole photo and marks no face, so it gets no box
+      if (!face.person || face.isWholeAsset) {
         continue;
       }
       if (face.person.isHidden && !assetViewerManager.isShowingHiddenPeople) {

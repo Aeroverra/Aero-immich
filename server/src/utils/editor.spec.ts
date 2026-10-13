@@ -71,6 +71,7 @@ const createFace = (params: Partial<AssetFace> = {}): AssetFace => ({
   updateId: 'update-id',
   isVisible: true,
   frameTimestamp: null,
+  isWholeAsset: false,
   ...params,
 });
 

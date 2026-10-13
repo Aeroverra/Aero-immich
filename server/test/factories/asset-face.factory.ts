@@ -28,6 +28,7 @@ export class AssetFaceFactory {
       imageHeight: 500,
       imageWidth: 400,
       isVisible: true,
+      isWholeAsset: false,
       personGroupId: null,
       sourceType: SourceType.MachineLearning,
       updatedAt: newDate(),

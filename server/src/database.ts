@@ -299,6 +299,7 @@ export type AssetFace = {
   updateId: string;
   isVisible: boolean;
   frameTimestamp: number | null;
+  isWholeAsset: boolean;
 };
 
 export type Plugin = Selectable<PluginTable>;

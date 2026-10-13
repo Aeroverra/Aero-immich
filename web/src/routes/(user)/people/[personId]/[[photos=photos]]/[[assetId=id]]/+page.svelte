@@ -21,7 +21,7 @@
   import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import SetVisibilityAction from '$lib/components/timeline/actions/SetVisibilityAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
-  import AddPeopleAction from '$lib/components/timeline/actions/AddPeopleAction.svelte';
+  import PeopleAction from '$lib/components/timeline/actions/PeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import Timeline from '$lib/components/timeline/Timeline.svelte';
   import ViewSwitcherButton from '$lib/components/timeline/ViewSwitcherButton.svelte';
@@ -499,7 +499,7 @@
         {#if authManager.preferences.tags.enabled && assetMultiSelectManager.isAllUserOwned}
           <TagAction menuItem />
         {/if}
-        <AddPeopleAction />
+        <PeopleAction />
         <SetVisibilityAction menuItem onVisibilitySet={handleSetVisibility} />
         <DeleteAssets
           menuItem

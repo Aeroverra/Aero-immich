@@ -89,4 +89,8 @@ export class AssetFaceTable {
 
   @Column({ type: 'integer', nullable: true })
   frameTimestamp!: number | null;
+
+  /** the person is somewhere in the asset; the box covers the whole asset and marks no location */
+  @Column({ type: 'boolean', default: false })
+  isWholeAsset!: Generated<boolean>;
 }

@@ -33,6 +33,7 @@ select
           "asset_face"."assetId" = "asset"."id"
           and "asset_face"."deletedAt" is null
           and "asset_face"."frameTimestamp" is null
+          and "asset_face"."isWholeAsset" = $1
         order by
           "asset_face"."id"
       ) as agg
@@ -40,7 +41,7 @@ select
 from
   "asset"
 where
-  "asset"."id" = $1
+  "asset"."id" = $2
 
 -- FaceAttributeRepository.streamForFaceAttributesJob
 select
@@ -77,6 +78,7 @@ where
         "asset_face"."assetId" = "asset"."id"
         and "asset_face"."deletedAt" is null
         and "asset_face"."frameTimestamp" is null
+        and "asset_face"."isWholeAsset" = $3
         and "asset_face_attribute"."faceId" is null
     )
   )

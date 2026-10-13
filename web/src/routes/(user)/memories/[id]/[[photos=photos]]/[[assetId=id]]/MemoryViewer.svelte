@@ -14,7 +14,7 @@
   import FavoriteAction from '$lib/components/timeline/actions/FavoriteAction.svelte';
   import SetPrivateAction from '$lib/components/timeline/actions/SetPrivateAction.svelte';
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
-  import AddPeopleAction from '$lib/components/timeline/actions/AddPeopleAction.svelte';
+  import PeopleAction from '$lib/components/timeline/actions/PeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
@@ -303,7 +303,7 @@
         {#if authManager.preferences.tags.enabled && assetMultiSelectManager.isAllUserOwned}
           <TagAction menuItem />
         {/if}
-        <AddPeopleAction />
+        <PeopleAction />
         <DeleteAssets menuItem onAssetDelete={handleHideAssets} />
       </ButtonContextMenu>
     </AssetSelectControlBar>

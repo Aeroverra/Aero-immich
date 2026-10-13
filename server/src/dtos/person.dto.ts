@@ -108,12 +108,41 @@ export const AssetFaceResponseSchema = z
       .min(0)
       .nullish()
       .describe('Position in milliseconds of the video frame the face was detected in, if it was not the thumbnail'),
+    isWholeAsset: z
+      .boolean()
+      .optional()
+      .describe(
+        'The person is somewhere in the asset without a location: the box covers the whole asset and should not be drawn',
+      )
+      .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
     person: PersonResponseSchema.nullable(),
   })
   .describe('Asset face with person')
   .meta({ id: 'AssetFaceResponseDto' });
 
 export class AssetFaceResponseDto extends createZodDto(AssetFaceResponseSchema) {}
+
+const PersonAssetCountsSchema = z
+  .object({
+    assetIds: z.array(z.uuidv4()).min(1).describe('Asset IDs'),
+  })
+  .meta({ id: 'PersonAssetCountsDto' });
+
+const PersonAssetCountResponseSchema = z
+  .object({
+    personId: z.uuidv4().describe('Person ID'),
+    count: z.int().min(0).describe('How many of the assets the person is on'),
+    removableCount: z
+      .int()
+      .min(0)
+      .describe(
+        'How many of those the person is on only through a whole-asset mark, so removing the person takes them off; on the others a face of the person is located in the picture and stays',
+      ),
+  })
+  .meta({ id: 'PersonAssetCountResponseDto' });
+
+export class PersonAssetCountsDto extends createZodDto(PersonAssetCountsSchema) {}
+export class PersonAssetCountResponseDto extends createZodDto(PersonAssetCountResponseSchema) {}
 
 const AssetFaceUpdateItemSchema = z
   .object({
@@ -210,6 +239,7 @@ function mapFacesWithoutPerson(
     ),
     sourceType: face.sourceType,
     frameTimestamp: face.frameTimestamp,
+    isWholeAsset: face.isWholeAsset,
   };
 }
 

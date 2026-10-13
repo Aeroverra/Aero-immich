@@ -11,6 +11,7 @@ import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonGroupTable } from 'src/schema/tables/person-group.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import {
+  anyUuid,
   asUuid,
   dummy,
   dummyViewFilter,
@@ -20,8 +21,8 @@ import {
   removeUndefinedKeys,
   viewAssetPredicate,
   withFilePath,
-  withVideoStream,
   withPrivateScope,
+  withVideoStream,
 } from 'src/utils/database';
 import { paginationHelper, PaginationOptions } from 'src/utils/pagination';
 
@@ -164,6 +165,30 @@ export class PersonRepository {
 
   @GenerateSql()
   async deleteEmptyGroups(): Promise<number> {
+    // a whole-asset mark has no location to fall back to, so it would be left as an unknown face without its person
+    await this.db
+      .deleteFrom('asset_face')
+      .where('asset_face.isWholeAsset', '=', true)
+      .where((eb) =>
+        eb(
+          'asset_face.personGroupId',
+          'in',
+          eb
+            .selectFrom('person_group')
+            .select('person_group.id')
+            .where(({ not, exists, selectFrom }) =>
+              not(
+                exists(
+                  selectFrom('person')
+                    .whereRef('person.personGroupId', '=', 'person_group.id')
+                    .select('person.personGroupId'),
+                ),
+              ),
+            ),
+        ),
+      )
+      .execute();
+
     const result = await this.db
       .deleteFrom('person_group')
       .where(({ not, exists, selectFrom }) =>
@@ -734,6 +759,8 @@ export class PersonRepository {
         .where('asset_face.isVisible', 'is', true)
         // prefer a non-private feature photo so the person stays presentable outside private mode
         .orderBy('asset.isPrivate', 'asc')
+        // and a located face over a whole-asset mark, which would crop the whole picture
+        .orderBy('asset_face.isWholeAsset', 'asc')
         .executeTakeFirst()
     );
   }
@@ -790,6 +817,99 @@ export class PersonRepository {
     await this.db.insertInto('asset_face').values(faces).execute();
   }
 
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @Chunked()
+  async deleteAssetFaces(ids: string[]): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+
+    await this.db.deleteFrom('asset_face').where('asset_face.id', 'in', ids).execute();
+  }
+
+  /** A merge can leave a person with two whole-asset marks on one asset; keeps the oldest */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async deleteDuplicateWholeAssetFaces(personGroupId: string): Promise<void> {
+    await this.db
+      .deleteFrom('asset_face')
+      .where('asset_face.personGroupId', '=', personGroupId)
+      .where('asset_face.isWholeAsset', '=', true)
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('asset_face as other')
+            .whereRef('other.assetId', '=', 'asset_face.assetId')
+            .whereRef('other.personGroupId', '=', 'asset_face.personGroupId')
+            .where('other.isWholeAsset', '=', true)
+            .where('other.deletedAt', 'is', null)
+            .whereRef('other.id', '<', 'asset_face.id'),
+        ),
+      )
+      .execute();
+  }
+
+  /** What a whole-asset face needs to know about each asset: its type and the dimensions faces are stored in */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @ChunkedArray()
+  getAssetsForWholeAssetFaces(assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db
+      .selectFrom('asset')
+      .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select([
+        'asset.id',
+        'asset.type',
+        'asset.width',
+        'asset.height',
+        'asset_exif.exifImageWidth',
+        'asset_exif.exifImageHeight',
+        'asset_exif.orientation',
+      ])
+      .where('asset.id', 'in', assetIds)
+      .execute();
+  }
+
+  /**
+   * For every person of the user on any of the assets: how many of the assets they are on, and on how many only
+   * through whole-asset marks (those are the ones a removal takes them off)
+   */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID]] })
+  async getAssetCounts(ownerId: string, assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db
+      .with('presence', (qb) =>
+        qb
+          .selectFrom('asset_face')
+          .innerJoin('person', (join) =>
+            join.onRef('person.personGroupId', '=', 'asset_face.personGroupId').on('person.ownerId', '=', ownerId),
+          )
+          .select(['asset_face.personGroupId', 'asset_face.assetId'])
+          .select((eb) => eb.fn.agg<boolean>('bool_or', [eb.not(eb.ref('asset_face.isWholeAsset'))]).as('located'))
+          .where('asset_face.assetId', '=', anyUuid(assetIds))
+          .where('asset_face.deletedAt', 'is', null)
+          .where('asset_face.isVisible', 'is', true)
+          .groupBy(['asset_face.personGroupId', 'asset_face.assetId']),
+      )
+      .selectFrom('presence')
+      .select('presence.personGroupId')
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .select((eb) => eb.fn.countAll<number>().filterWhere('presence.located', '=', false).as('removableCount'))
+      .groupBy('presence.personGroupId')
+      .execute();
+
+    return rows.map(({ personGroupId, count, removableCount }) => ({
+      personGroupId: personGroupId!,
+      count: Number(count),
+      removableCount: Number(removableCount),
+    }));
+  }
+
   @GenerateSql({ params: [DummyValue.UUID] })
   async deleteAssetFace(id: string): Promise<void> {
     await this.db.deleteFrom('asset_face').where('asset_face.id', '=', id).execute();
@@ -842,6 +962,7 @@ export class PersonRepository {
       .where('asset_face.personGroupId', '=', personGroupId)
       .where('asset_face.deletedAt', 'is', null)
       .innerJoin('asset', (join) => join.onRef('asset.id', '=', 'asset_face.assetId').on('asset.isOffline', '=', false))
+      .orderBy('asset_face.isWholeAsset', 'asc')
       .executeTakeFirst();
   }
 

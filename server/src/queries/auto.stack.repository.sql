@@ -117,6 +117,7 @@ select
           "asset_face"."assetId" = "asset"."id"
           and "asset_face"."deletedAt" is null
           and "asset_face"."isVisible" is true
+          and "asset_face"."isWholeAsset" = $1
       ) as agg
   ) as "faces"
 from
@@ -126,8 +127,8 @@ from
   left join "asset_job_status" on "asset_job_status"."assetId" = "asset"."id"
   left join "asset_quality" on "asset_quality"."assetId" = "asset"."id"
 where
-  "asset"."ownerId" = $1::uuid
-  and "asset"."id" = any ($2::uuid[])
+  "asset"."ownerId" = $2::uuid
+  and "asset"."id" = any ($3::uuid[])
   and "asset"."deletedAt" is null
   and "asset"."visibility" in ('timeline', 'archive')
 order by

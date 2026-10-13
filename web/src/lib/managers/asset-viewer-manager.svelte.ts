@@ -16,6 +16,8 @@ export interface Faces {
   boundingBoxX2: number;
   boundingBoxY1: number;
   boundingBoxY2: number;
+  /** a whole-asset mark: the person is somewhere in the asset, the box marks no location */
+  isWholeAsset?: boolean;
 }
 
 const createDefaultZoomState = (): ZoomImageWheelState => ({
@@ -233,7 +235,8 @@ class AssetViewerManager extends BaseEventManager<Events> {
   }
 
   setHighlightedFaces(faces: Faces[]) {
-    this.#highlightedFaces = faces;
+    // a whole-asset mark has no location to point at
+    this.#highlightedFaces = faces.filter(({ isWholeAsset }) => !isWholeAsset);
   }
 
   clearHighlightedFaces() {

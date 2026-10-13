@@ -170,7 +170,9 @@ export class AutoStackRepository {
             ])
             .whereRef('asset_face.assetId', '=', 'asset.id')
             .where('asset_face.deletedAt', 'is', null)
-            .where('asset_face.isVisible', 'is', true),
+            .where('asset_face.isVisible', 'is', true)
+            // a whole-asset mark has no face to score
+            .where('asset_face.isWholeAsset', '=', false),
         ).as('faces'),
       )
       .where('asset.ownerId', '=', asUuid(ownerId))

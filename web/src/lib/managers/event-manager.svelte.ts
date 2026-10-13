@@ -53,7 +53,7 @@ export type Events = {
   PersonUpdate: [PersonResponseDto];
   PersonThumbnailReady: [{ id: string }];
   PersonAssetDelete: [{ id: string; assetId: string }];
-  PersonAssetsAdd: [string[]];
+  AssetsPeopleUpdate: [string[]];
 
   BackupDeleteStatus: [{ filename: string; isDeleting: boolean }];
   BackupDeleted: [{ filename: string }];

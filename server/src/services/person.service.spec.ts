@@ -24,6 +24,33 @@ import {
 import { newDate, newUuid } from 'test/small.factory';
 import { makeStream, newTestService, ServiceMocks } from 'test/utils';
 
+/** The asset columns a whole-asset face is sized from */
+const forFaces = (
+  asset: { id: string; type: AssetType; width?: number | null; height?: number | null },
+  exif: { exifImageWidth?: number | null; exifImageHeight?: number | null; orientation?: string | null } = {},
+) => ({
+  id: asset.id,
+  type: asset.type,
+  width: asset.width ?? null,
+  height: asset.height ?? null,
+  exifImageWidth: exif.exifImageWidth ?? null,
+  exifImageHeight: exif.exifImageHeight ?? null,
+  orientation: exif.orientation ?? null,
+});
+
+const wholeFace = (assetId: string, personGroupId: string, width: number, height: number) => ({
+  assetId,
+  personGroupId,
+  imageWidth: width,
+  imageHeight: height,
+  boundingBoxX1: 0,
+  boundingBoxY1: 0,
+  boundingBoxX2: width,
+  boundingBoxY2: height,
+  sourceType: SourceType.Manual,
+  isWholeAsset: true,
+});
+
 describe(PersonService.name, () => {
   let sut: PersonService;
   let mocks: ServiceMocks;
@@ -543,78 +570,62 @@ describe(PersonService.name, () => {
       expect(mocks.person.createAssetFaces).not.toHaveBeenCalled();
     });
 
-    it('should add a whole frame manual face to each video', async () => {
+    it('should add a whole-asset mark to videos and photos', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ faceAssetId: newUuid() });
-      const video = AssetFactory.create({ type: AssetType.Video, width: 1920, height: 1080 });
-      const portrait = AssetFactory.create({ type: AssetType.Video, width: 1080, height: 1920 });
+      const video = forFaces({ id: newUuid(), type: AssetType.Video, width: 1920, height: 1080 });
+      const photo = forFaces(
+        { id: newUuid(), type: AssetType.Image, width: 400, height: 300 },
+        { exifImageWidth: 4000, exifImageHeight: 3000, orientation: '6' },
+      );
 
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
-      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id, portrait.id]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id, photo.id]));
       mocks.person.getByGroupId.mockResolvedValue(person);
-      mocks.asset.getByIds.mockResolvedValue([video, portrait]);
+      mocks.person.getAssetsForWholeAssetFaces.mockResolvedValue([video, photo]);
       mocks.person.getFacesByIds.mockResolvedValue([]);
 
-      await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id, portrait.id] })).resolves.toEqual([
+      await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id, photo.id] })).resolves.toEqual([
         { id: video.id, success: true },
-        { id: portrait.id, success: true },
+        { id: photo.id, success: true },
       ]);
 
       expect(mocks.person.getFacesByIds).toHaveBeenCalledWith(
         [
           { assetId: video.id, personGroupId: person.personGroupId },
-          { assetId: portrait.id, personGroupId: person.personGroupId },
+          { assetId: photo.id, personGroupId: person.personGroupId },
         ],
         { viewingUserId: auth.user.id },
       );
+      // a photo's mark uses the oriented original, the space faces on edited photos are stored in
       expect(mocks.person.createAssetFaces).toHaveBeenCalledWith([
-        {
-          assetId: video.id,
-          personGroupId: person.personGroupId,
-          imageWidth: 1920,
-          imageHeight: 1080,
-          boundingBoxX1: 0,
-          boundingBoxY1: 0,
-          boundingBoxX2: 1920,
-          boundingBoxY2: 1080,
-          sourceType: SourceType.Manual,
-        },
-        {
-          assetId: portrait.id,
-          personGroupId: person.personGroupId,
-          imageWidth: 1080,
-          imageHeight: 1920,
-          boundingBoxX1: 0,
-          boundingBoxY1: 0,
-          boundingBoxX2: 1080,
-          boundingBoxY2: 1920,
-          sourceType: SourceType.Manual,
-        },
+        wholeFace(video.id, person.personGroupId, 1920, 1080),
+        wholeFace(photo.id, person.personGroupId, 3000, 4000),
       ]);
       expect(mocks.person.getRandomFace).not.toHaveBeenCalled();
     });
 
-    it('should report assets it cannot or does not need to tag', async () => {
+    it('should report assets it cannot or does not need to mark', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ faceAssetId: newUuid() });
-      const photo = AssetFactory.create({ type: AssetType.Image });
-      const tagged = AssetFactory.create({ type: AssetType.Video, width: 640, height: 480 });
+      const other = forFaces({ id: newUuid(), type: AssetType.Other });
+      const detected = forFaces({ id: newUuid(), type: AssetType.Image, width: 640, height: 480 });
       const missing = newUuid();
       const forbidden = newUuid();
 
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
-      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([photo.id, tagged.id, missing]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([other.id, detected.id, missing]));
       mocks.person.getByGroupId.mockResolvedValue(person);
-      mocks.asset.getByIds.mockResolvedValue([photo, tagged]);
+      mocks.person.getAssetsForWholeAssetFaces.mockResolvedValue([other, detected]);
       mocks.person.getFacesByIds.mockResolvedValue([
-        getForAssetFace(AssetFaceFactory.create({ assetId: tagged.id, personGroupId: person.personGroupId })),
+        getForAssetFace(AssetFaceFactory.create({ assetId: detected.id, personGroupId: person.personGroupId })),
       ]);
 
       await expect(
-        sut.addToAssets(auth, person.personGroupId, { ids: [photo.id, tagged.id, missing, forbidden] }),
+        sut.addToAssets(auth, person.personGroupId, { ids: [other.id, detected.id, missing, forbidden] }),
       ).resolves.toEqual([
-        { id: photo.id, success: false, error: BulkIdErrorReason.VALIDATION },
-        { id: tagged.id, success: false, error: BulkIdErrorReason.DUPLICATE },
+        { id: other.id, success: false, error: BulkIdErrorReason.VALIDATION },
+        { id: detected.id, success: false, error: BulkIdErrorReason.DUPLICATE },
         { id: missing, success: false, error: BulkIdErrorReason.NOT_FOUND },
         { id: forbidden, success: false, error: BulkIdErrorReason.NO_PERMISSION },
       ]);
@@ -622,15 +633,15 @@ describe(PersonService.name, () => {
       expect(mocks.person.createAssetFaces).toHaveBeenCalledWith([]);
     });
 
-    it('should tag a video only once when it is listed twice', async () => {
+    it('should mark an asset only once when it is listed twice', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ faceAssetId: newUuid() });
-      const video = AssetFactory.create({ type: AssetType.Video, width: 1920, height: 1080 });
+      const video = forFaces({ id: newUuid(), type: AssetType.Video, width: 1920, height: 1080 });
 
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id]));
       mocks.person.getByGroupId.mockResolvedValue(person);
-      mocks.asset.getByIds.mockResolvedValue([video]);
+      mocks.person.getAssetsForWholeAssetFaces.mockResolvedValue([video]);
       mocks.person.getFacesByIds.mockResolvedValue([]);
 
       await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id, video.id] })).resolves.toEqual([
@@ -641,41 +652,36 @@ describe(PersonService.name, () => {
       expect(mocks.person.createAssetFaces).toHaveBeenCalledWith([expect.objectContaining({ assetId: video.id })]);
     });
 
-    it('should cover a unit frame when the video has no dimensions', async () => {
+    it('should fall back to the asset size and then to a unit frame', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ faceAssetId: newUuid() });
-      const video = AssetFactory.create({ type: AssetType.Video });
+      const photo = forFaces({ id: newUuid(), type: AssetType.Image, width: 800, height: 600 });
+      const video = forFaces({ id: newUuid(), type: AssetType.Video });
 
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
-      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([photo.id, video.id]));
       mocks.person.getByGroupId.mockResolvedValue(person);
-      mocks.asset.getByIds.mockResolvedValue([video]);
+      mocks.person.getAssetsForWholeAssetFaces.mockResolvedValue([photo, video]);
       mocks.person.getFacesByIds.mockResolvedValue([]);
 
-      await sut.addToAssets(auth, person.personGroupId, { ids: [video.id] });
+      await sut.addToAssets(auth, person.personGroupId, { ids: [photo.id, video.id] });
 
       expect(mocks.person.createAssetFaces).toHaveBeenCalledWith([
-        expect.objectContaining({
-          imageWidth: 1,
-          imageHeight: 1,
-          boundingBoxX1: 0,
-          boundingBoxY1: 0,
-          boundingBoxX2: 1,
-          boundingBoxY2: 1,
-        }),
+        wholeFace(photo.id, person.personGroupId, 800, 600),
+        wholeFace(video.id, person.personGroupId, 1, 1),
       ]);
     });
 
     it('should give a person without a feature photo one', async () => {
       const auth = AuthFactory.create();
       const person = PersonFactory.create({ faceAssetId: null });
-      const video = AssetFactory.create({ type: AssetType.Video, width: 1920, height: 1080 });
+      const video = forFaces({ id: newUuid(), type: AssetType.Video, width: 1920, height: 1080 });
       const face = AssetFaceFactory.create({ assetId: video.id, personGroupId: person.personGroupId });
 
       mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id]));
       mocks.person.getByGroupId.mockResolvedValue(person);
-      mocks.asset.getByIds.mockResolvedValue([video]);
+      mocks.person.getAssetsForWholeAssetFaces.mockResolvedValue([video]);
       mocks.person.getFacesByIds.mockResolvedValue([]);
       mocks.person.getRandomFace.mockResolvedValue(face);
       mocks.person.update.mockResolvedValue({ ...person, faceAssetId: face.id });
@@ -693,6 +699,104 @@ describe(PersonService.name, () => {
           data: { ownerId: person.ownerId, personGroupId: person.personGroupId },
         },
       ]);
+    });
+  });
+
+  describe('removeFromAssets', () => {
+    it('should require access to the person', async () => {
+      const auth = AuthFactory.create();
+
+      await expect(sut.removeFromAssets(auth, newUuid(), { ids: [newUuid()] })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.person.deleteAssetFaces).not.toHaveBeenCalled();
+    });
+
+    it('should remove marks and keep located faces', async () => {
+      const auth = AuthFactory.create();
+      const person = PersonFactory.create({ faceAssetId: newUuid() });
+      const [marked, detected, both, without, forbidden] = [newUuid(), newUuid(), newUuid(), newUuid(), newUuid()];
+      const mark = (assetId: string) =>
+        getForAssetFace(
+          AssetFaceFactory.create({
+            assetId,
+            personGroupId: person.personGroupId,
+            sourceType: SourceType.Manual,
+            isWholeAsset: true,
+          }),
+        );
+      const located = (assetId: string) =>
+        getForAssetFace(AssetFaceFactory.create({ assetId, personGroupId: person.personGroupId }));
+      const markedFace = mark(marked);
+      const bothMark = mark(both);
+
+      mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([marked, detected, both, without]));
+      mocks.person.getByGroupId.mockResolvedValue(person);
+      mocks.person.getFacesByIds.mockResolvedValue([markedFace, located(detected), bothMark, located(both)]);
+
+      await expect(
+        sut.removeFromAssets(auth, person.personGroupId, { ids: [marked, detected, both, without, forbidden] }),
+      ).resolves.toEqual([
+        { id: marked, success: true },
+        { id: detected, success: false, error: BulkIdErrorReason.VALIDATION },
+        { id: both, success: false, error: BulkIdErrorReason.VALIDATION },
+        { id: without, success: false, error: BulkIdErrorReason.NOT_FOUND },
+        { id: forbidden, success: false, error: BulkIdErrorReason.NO_PERMISSION },
+      ]);
+
+      expect(mocks.person.deleteAssetFaces).toHaveBeenCalledWith([markedFace.id, bothMark.id]);
+      expect(mocks.person.getRandomFace).not.toHaveBeenCalled();
+    });
+
+    it('should pick a new feature photo when the removed mark was it', async () => {
+      const auth = AuthFactory.create();
+      const assetId = newUuid();
+      const person = PersonFactory.create();
+      const markFace = getForAssetFace(
+        AssetFaceFactory.create({
+          assetId,
+          personGroupId: person.personGroupId,
+          sourceType: SourceType.Manual,
+          isWholeAsset: true,
+        }),
+      );
+      const featured = { ...person, faceAssetId: markFace.id };
+
+      mocks.access.person.checkOwnerAccess.mockResolvedValue(new Set([person.personGroupId]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([assetId]));
+      mocks.person.getByGroupId.mockResolvedValue(featured);
+      mocks.person.getFacesByIds.mockResolvedValue([markFace]);
+      mocks.person.getRandomFace.mockResolvedValue(undefined);
+
+      await expect(sut.removeFromAssets(auth, person.personGroupId, { ids: [assetId] })).resolves.toEqual([
+        { id: assetId, success: true },
+      ]);
+
+      expect(mocks.person.getRandomFace).toHaveBeenCalledWith(person.personGroupId);
+    });
+  });
+
+  describe('getAssetCounts', () => {
+    it('should require access to the assets', async () => {
+      await expect(sut.getAssetCounts(AuthFactory.create(), { assetIds: [newUuid()] })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('should return the counts per person', async () => {
+      const auth = AuthFactory.create();
+      const assetId = newUuid();
+      const personGroupId = newUuid();
+
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([assetId]));
+      mocks.person.getAssetCounts.mockResolvedValue([{ personGroupId, count: 1, removableCount: 1 }]);
+
+      await expect(sut.getAssetCounts(auth, { assetIds: [assetId] })).resolves.toEqual([
+        { personId: personGroupId, count: 1, removableCount: 1 },
+      ]);
+      expect(mocks.person.getAssetCounts).toHaveBeenCalledWith(auth.user.id, [assetId]);
     });
   });
 
@@ -1594,6 +1698,7 @@ describe(PersonService.name, () => {
         imageWidth: 400,
         sourceType: SourceType.MachineLearning,
         frameTimestamp: null,
+        isWholeAsset: false,
         person: mapPerson(person),
       });
     });

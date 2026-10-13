@@ -175,6 +175,42 @@ describe(PersonController.name, () => {
     });
   });
 
+  describe('DELETE /people/:id/assets', () => {
+    it('should require uuids in the body', async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .delete(`/people/${factory.uuid()}/assets`)
+        .send({ ids: ['invalid'] });
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.validationError([{ path: ['ids', 0], message: 'Invalid UUID' }]));
+    });
+
+    it('should call the service', async () => {
+      const personId = factory.uuid();
+      const assetId = factory.uuid();
+      const { status } = await request(ctx.getHttpServer())
+        .delete(`/people/${personId}/assets`)
+        .send({ ids: [assetId] });
+      expect(status).toBe(200);
+      expect(service.removeFromAssets).toHaveBeenCalledWith(undefined, personId, { ids: [assetId] });
+    });
+  });
+
+  describe('POST /people/assets/counts', () => {
+    it('should require at least one asset', async () => {
+      const { status } = await request(ctx.getHttpServer()).post('/people/assets/counts').send({ assetIds: [] });
+      expect(status).toBe(400);
+    });
+
+    it('should call the service', async () => {
+      const assetId = factory.uuid();
+      const { status } = await request(ctx.getHttpServer())
+        .post('/people/assets/counts')
+        .send({ assetIds: [assetId] });
+      expect(status).toBe(200);
+      expect(service.getAssetCounts).toHaveBeenCalledWith(undefined, { assetIds: [assetId] });
+    });
+  });
+
   describe('DELETE /people/:id', () => {
     it('should require a valid uuid', async () => {
       const { status, body } = await request(ctx.getHttpServer()).delete(`/people/invalid`);
