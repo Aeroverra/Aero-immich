@@ -7,7 +7,7 @@
   import { languageManager } from '$lib/managers/language-manager.svelte';
   import { getPeopleThumbnailUrl, handlePromiseError } from '$lib/utils';
   import { handleError } from '$lib/utils/handle-error';
-  import { zoomImageToBase64 } from '$lib/utils/people-utils';
+  import { formatVideoPosition, zoomImageToBase64 } from '$lib/utils/people-utils';
   import { getPersonNameWithHiddenValue } from '$lib/utils/person';
   import {
     AssetTypeEnum,
@@ -312,6 +312,21 @@
                       heightStyle="90px"
                     />
                   {/await}
+                {/if}
+                {#if typeof face.frameTimestamp === 'number'}
+                  {@const time = formatVideoPosition(face.frameTimestamp)}
+                  <button
+                    type="button"
+                    class="absolute inset-s-1 bottom-1 rounded-full bg-black/70 px-1.5 py-0.5 text-xs font-medium text-white hover:bg-black/90"
+                    title={$t('jump_to_time', { values: { time } })}
+                    aria-label={$t('jump_to_time', { values: { time } })}
+                    onclick={(event) => {
+                      event.stopPropagation();
+                      assetViewerManager.emit('VideoSeek', face.frameTimestamp!);
+                    }}
+                  >
+                    {time}
+                  </button>
                 {/if}
               </div>
 

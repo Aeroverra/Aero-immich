@@ -876,6 +876,7 @@ export enum QueueName {
   Workflow = 'workflow',
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
+  VideoFrameAnalysis = 'videoFrameAnalysis',
 }
 
 export const QueueNameSchema = z.enum(QueueName).describe('Queue name').meta({ id: 'QueueName' });
@@ -970,6 +971,10 @@ export enum JobName {
 
   VersionCheck = 'VersionCheck',
 
+  // Video frame analysis
+  AssetAnalyzeVideoFramesQueueAll = 'AssetAnalyzeVideoFramesQueueAll',
+  AssetAnalyzeVideoFrames = 'AssetAnalyzeVideoFrames',
+
   // OCR
   OcrQueueAll = 'OcrQueueAll',
   Ocr = 'Ocr',
@@ -1022,6 +1027,7 @@ export enum QueueCleanType {
 export enum VectorIndex {
   Clip = 'clip_index',
   Face = 'face_index',
+  ClipFrame = 'clip_frame_index',
 }
 
 export enum DatabaseLock {

@@ -96,6 +96,8 @@ class _AssetPageState extends ConsumerState<AssetPage> {
     switch (event) {
       case ViewerShowDetailsEvent():
         _showDetails();
+      case ViewerHideDetailsEvent():
+        _hideDetails();
       case TimelineReloadEvent():
         final asset = ref.read(timelineServiceProvider).getAssetSafe(widget.index);
         if (asset != _asset) {
@@ -113,6 +115,14 @@ class _AssetPageState extends ConsumerState<AssetPage> {
     }
     _viewer.setShowingDetails(true);
     unawaited(_scrollController.animateTo(_snapOffset, duration: Durations.medium2, curve: Curves.easeOutCubic));
+  }
+
+  void _hideDetails() {
+    if (!_scrollController.hasClients || _scrollController.offset <= 0) {
+      return;
+    }
+    _viewer.setShowingDetails(false);
+    unawaited(_scrollController.animateTo(0, duration: Durations.medium2, curve: Curves.easeOutCubic));
   }
 
   bool _willClose(double scrollVelocity) =>

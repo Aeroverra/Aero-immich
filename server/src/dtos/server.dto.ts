@@ -154,6 +154,7 @@ const ServerFeaturesSchema = z
       .describe(
         'Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it.',
       ),
+    videoFrameAnalysis: z.boolean().describe('Whether enhanced video analysis of sampled frames is enabled'),
   })
   .meta({ id: 'ServerFeaturesDto' });
 

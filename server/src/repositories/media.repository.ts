@@ -5,6 +5,7 @@ import _ from 'lodash';
 import { Duration } from 'luxon';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { setPriority } from 'node:os';
 import { Writable } from 'node:stream';
 import sharp from 'sharp';
 import { ORIENTATION_TO_SHARP_ROTATION } from 'src/constants';
@@ -283,6 +284,52 @@ export class MediaRepository {
           bitrate: this.parseInt(stream.bit_rate),
         })),
     };
+  }
+
+  extractVideoFrame(
+    input: string,
+    { inputOptions, outputOptions }: { inputOptions: string[]; outputOptions: string[] },
+    timeoutMs = 120_000,
+  ): Promise<Buffer> {
+    const args = ['-nostdin', '-v', 'error', ...inputOptions, '-i', input, ...outputOptions, 'pipe:1'];
+    this.logger.debug(`ffmpeg ${args.join(' ')}`);
+    const ffmpegProcess = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      if (ffmpegProcess.pid) {
+        setPriority(ffmpegProcess.pid, 10);
+      }
+    } catch {
+      // lowering the priority is best effort
+    }
+
+    const chunks: Buffer[] = [];
+    let stderr = '';
+    ffmpegProcess.stdout.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    ffmpegProcess.stderr.setEncoding('utf8');
+    ffmpegProcess.stderr.on('data', (chunk: string) => (stderr += chunk));
+
+    return new Promise<Buffer>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        ffmpegProcess.kill('SIGKILL');
+        reject(new Error(`ffmpeg timed out after ${timeoutMs}ms while extracting a frame from ${input}`));
+      }, timeoutMs);
+
+      ffmpegProcess.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+
+      ffmpegProcess.on('close', (code) => {
+        clearTimeout(timeout);
+        const buffer = Buffer.concat(chunks);
+        if (code !== 0 || buffer.length === 0) {
+          return reject(new Error(`ffmpeg exited with code ${code} without a frame: ${stderr.trim()}`));
+        }
+        resolve(buffer);
+      });
+    });
   }
 
   /**

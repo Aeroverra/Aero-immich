@@ -1,7 +1,7 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { SearchSuggestionType } from 'src/dtos/search.dto';
-import { AlbumUserRole, AssetOrder, AssetVisibility, SearchOrderField } from 'src/enum';
+import { AlbumUserRole, AssetOrder, AssetType, AssetVisibility, SearchOrderField } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
@@ -458,6 +458,113 @@ describe(SearchService.name, () => {
       const secondPage = await searchRepository.searchSmartV3({ take: 2, skip: 2 }, options, scope);
       expect(secondPage.items.length).toBe(1);
       expect(secondPage.hasNextPage).toBe(false);
+    });
+  });
+
+  describe('video frames', () => {
+    const vector = (values: Record<number, number>) =>
+      JSON.stringify(Array.from({ length: 512 }, (_, i) => values[i] ?? 0));
+
+    const newRankedAssets = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string, options = {}) => {
+      const searchRepository = ctx.get(SearchRepository);
+      // a video whose thumbnail does not match, but one of its frames does
+      const { asset: video } = await ctx.newAsset({ ownerId, type: AssetType.Video, ...options });
+      await searchRepository.upsert(video.id, unitVector(5));
+      await searchRepository.replaceFrames(video.id, [
+        { frameTimestamp: 1000, embedding: unitVector(0) },
+        { frameTimestamp: 2000, embedding: vector({ 0: 0.9, 1: 0.1 }) },
+      ]);
+      // a photo that matches reasonably well
+      const { asset: photo } = await ctx.newAsset({ ownerId });
+      await searchRepository.upsert(photo.id, vector({ 0: 0.8, 1: 0.6 }));
+      // a photo that does not match
+      const { asset: other } = await ctx.newAsset({ ownerId });
+      await searchRepository.upsert(other.id, unitVector(1));
+      return { video, photo, other };
+    };
+
+    it('should rank a video by its best frame and list it once', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      const { video, photo, other } = await newRankedAssets(ctx, user.id);
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
+      const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
+      expect(result.items.map(({ id }) => id)).toEqual([video.id, photo.id, other.id]);
+
+      const legacy = await searchRepository.searchSmart(
+        { page: 1, size: 10 },
+        { embedding: unitVector(0), userIds: [user.id], privateScope: { privateMode: false, userId: user.id } },
+      );
+      expect(legacy.items.map(({ id }) => id)).toEqual([video.id, photo.id, other.id]);
+    });
+
+    it('should page through merged results without repeating assets', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      const { video, photo, other } = await newRankedAssets(ctx, user.id);
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
+      const pages = [];
+      for (let skip = 0; skip < 3; skip++) {
+        pages.push(await searchRepository.searchSmartV3({ take: 1, skip }, options, scope));
+      }
+
+      expect(pages.map(({ items }) => items.map(({ id }) => id))).toEqual([[video.id], [photo.id], [other.id]]);
+      expect(pages.map(({ hasNextPage }) => hasNextPage)).toEqual([true, true, false]);
+
+      const legacyPage = await searchRepository.searchSmart(
+        { page: 2, size: 1 },
+        { embedding: unitVector(0), userIds: [user.id], privateScope: { privateMode: false, userId: user.id } },
+      );
+      expect(legacyPage.items.map(({ id }) => id)).toEqual([photo.id]);
+      expect(legacyPage.hasNextPage).toBe(true);
+    });
+
+    it('should apply the search filters to frame matches', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      const { photo, other } = await newRankedAssets(ctx, user.id, { isPrivate: true });
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
+      const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
+      expect(result.items.map(({ id }) => id)).toEqual([photo.id, other.id]);
+    });
+
+    it('should not return frames of another user', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: stranger } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      await newRankedAssets(ctx, stranger.id);
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
+      const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
+      expect(result.items).toEqual([]);
+    });
+
+    it('should replace the frames of a video', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      const { video } = await newRankedAssets(ctx, user.id);
+
+      await searchRepository.replaceFrames(video.id, [{ frameTimestamp: 500, embedding: unitVector(3) }]);
+
+      await expect(
+        ctx.database
+          .selectFrom('smart_search_frame')
+          .select('frameTimestamp')
+          .where('assetId', '=', video.id)
+          .execute(),
+      ).resolves.toEqual([{ frameTimestamp: 500 }]);
     });
   });
 

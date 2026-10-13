@@ -103,6 +103,11 @@ export const AssetFaceResponseSchema = z
     boundingBoxY1: z.int().describe('Bounding box Y1 coordinate'),
     boundingBoxY2: z.int().describe('Bounding box Y2 coordinate'),
     sourceType: SourceTypeSchema.optional(),
+    frameTimestamp: z
+      .int()
+      .min(0)
+      .nullish()
+      .describe('Position in milliseconds of the video frame the face was detected in, if it was not the thumbnail'),
     person: PersonResponseSchema.nullable(),
   })
   .describe('Asset face with person')
@@ -204,6 +209,7 @@ function mapFacesWithoutPerson(
       assetDimensions ?? { width: face.imageWidth, height: face.imageHeight },
     ),
     sourceType: face.sourceType,
+    frameTimestamp: face.frameTimestamp,
   };
 }
 

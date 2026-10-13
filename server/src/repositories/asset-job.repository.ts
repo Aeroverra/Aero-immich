@@ -458,6 +458,47 @@ export class AssetJobRepository {
   }
 
   @GenerateSql({ params: [], stream: true })
+  streamForVideoFrameAnalysis(force?: boolean) {
+    return this.assetsWithPreviews()
+      .where('asset.type', '=', sql.lit(AssetType.Video))
+      .$if(!force, (qb) => qb.where('job_status.videoFramesAnalyzedAt', 'is', null))
+      .select(['asset.id'])
+      .orderBy('asset.fileCreatedAt', 'desc')
+      .stream();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getForVideoFrameAnalysis(id: string) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset.id', 'asset_exif.assetId')
+      .leftJoin('asset_video', 'asset_video.assetId', 'asset.id')
+      .leftJoin('smart_search', 'smart_search.assetId', 'asset.id')
+      .select([
+        'asset.id',
+        'asset.type',
+        'asset.visibility',
+        'asset.deletedAt',
+        'asset.originalPath',
+        'asset.duration',
+        'smart_search.embedding as thumbnailEmbedding',
+      ])
+      .select((eb) => withVideoStream(eb).as('videoStream'))
+      .select((eb) =>
+        jsonArrayFrom(
+          eb
+            .selectFrom('asset_face')
+            .leftJoin('face_search', 'face_search.faceId', 'asset_face.id')
+            .select(['asset_face.id', 'asset_face.personGroupId', 'face_search.embedding'])
+            .whereRef('asset_face.assetId', '=', 'asset.id')
+            .where('asset_face.deletedAt', 'is', null),
+        ).as('faces'),
+      )
+      .where('asset.id', '=', id)
+      .executeTakeFirst();
+  }
+
+  @GenerateSql({ params: [], stream: true })
   streamForOcrJob(force?: boolean) {
     return this.db
       .selectFrom('asset')

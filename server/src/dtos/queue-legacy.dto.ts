@@ -40,6 +40,7 @@ const QueuesResponseLegacySchema = z
     [QueueName.Workflow]: QueueResponseLegacySchema,
     [QueueName.Editor]: QueueResponseLegacySchema,
     [QueueName.IntegrityCheck]: QueueResponseLegacySchema,
+    [QueueName.VideoFrameAnalysis]: QueueResponseLegacySchema,
   })
   .meta({ id: 'QueuesResponseLegacyDto' });
 

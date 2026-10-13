@@ -20,4 +20,7 @@ export class AssetJobStatusTable {
 
   @Column({ type: 'timestamp with time zone', nullable: true })
   autoStackedAt!: Timestamp | null;
+
+  @Column({ type: 'timestamp with time zone', nullable: true })
+  videoFramesAnalyzedAt!: Timestamp | null;
 }

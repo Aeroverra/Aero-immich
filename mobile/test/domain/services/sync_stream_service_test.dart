@@ -643,6 +643,7 @@ void main() {
       smartSearch: false,
       stackSource: stackSource,
       trash: true,
+      videoFrameAnalysis: false,
     );
 
     Future<bool?> syncedWithStackSource() async {

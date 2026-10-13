@@ -25,7 +25,7 @@ import { AudioStreamInfo, JobCounts, RawImageInfo, VideoFormat, VideoStreamInfo 
 import { AssetFaceFactory } from 'test/factories/asset-face.factory';
 import { AssetFactory } from 'test/factories/asset.factory';
 import { PersonFactory } from 'test/factories/person.factory';
-import { probeStub } from 'test/fixtures/media.stub';
+import { probeStub, videoInfoStub } from 'test/fixtures/media.stub';
 import { personThumbnailStub } from 'test/fixtures/person.stub';
 import { systemConfigStub } from 'test/fixtures/system-config.stub';
 import { getForGenerateThumbnail } from 'test/mappers';
@@ -1598,6 +1598,33 @@ describe(MediaService.name, () => {
         personGroupId: person.personGroupId,
         thumbnailPath: expect.any(String),
       });
+    });
+
+    it('should crop a face found in another frame of a video from that frame', async () => {
+      const person = PersonFactory.create();
+      const videoStream = { ...videoInfoStub.videoStreamH264.videoStreams[0], timeBase: 600 };
+
+      mocks.person.getDataForThumbnailGenerationJob.mockResolvedValue({
+        ...personThumbnailStub.videoThumbnail,
+        frameTimestamp: 7500,
+        videoStream,
+      });
+      mocks.media.generateThumbnail.mockResolvedValue();
+      mocks.media.extractVideoFrame.mockResolvedValue(Buffer.from('frame'));
+      mocks.media.decodeImage.mockResolvedValue({
+        data: Buffer.from(''),
+        info: { width: 1000, height: 1000 } as OutputInfo,
+      });
+
+      await expect(
+        sut.handleGeneratePersonThumbnail({ ownerId: person.ownerId, personGroupId: person.personGroupId }),
+      ).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.media.extractVideoFrame).toHaveBeenCalledWith(
+        personThumbnailStub.videoThumbnail.originalPath,
+        expect.objectContaining({ inputOptions: expect.arrayContaining(['-ss', '7.500']) }),
+      );
+      expect(mocks.media.decodeImage).toHaveBeenCalledWith(Buffer.from('frame'), expect.any(Object));
     });
 
     it('should use preview path if video', async () => {

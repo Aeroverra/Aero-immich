@@ -450,6 +450,10 @@ export type JobItem =
   // Version check
   | { name: JobName.VersionCheck; data: IBaseJob }
 
+  // Video frame analysis
+  | { name: JobName.AssetAnalyzeVideoFramesQueueAll; data: IBaseJob }
+  | { name: JobName.AssetAnalyzeVideoFrames; data: IEntityJob }
+
   // OCR
   | { name: JobName.OcrQueueAll; data: IBaseJob }
   | { name: JobName.Ocr; data: IEntityJob }

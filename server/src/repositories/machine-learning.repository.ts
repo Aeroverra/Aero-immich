@@ -30,7 +30,7 @@ export enum ModelType {
   OCR = 'ocr',
 }
 
-export type ModelPayload = { imagePath: string } | { text: string };
+export type ModelPayload = { imagePath: string } | { image: Buffer } | { text: string };
 
 type ModelOptions = { modelName: string };
 
@@ -108,8 +108,19 @@ export type FaceAttributesResponse = {
   [ModelTask.IMAGE_QUALITY]: ImageQuality;
 } & VisualResponse;
 
+export type ImageAnalysisRequest = Partial<ClipVisualRequest & FacialRecognitionRequest>;
+export type ImageAnalysisResponse = Partial<
+  { [ModelTask.SEARCH]: string } & { [ModelTask.FACIAL_RECOGNITION]: Face[] }
+> &
+  VisualResponse;
+
 export type MachineLearningRequest =
-  ClipVisualRequest | ClipTextualRequest | FacialRecognitionRequest | FaceAttributesRequest | OcrRequest;
+  | ClipVisualRequest
+  | ClipTextualRequest
+  | FacialRecognitionRequest
+  | FaceAttributesRequest
+  | OcrRequest
+  | ImageAnalysisRequest;
 export type TextEncodingOptions = ModelOptions & { language?: string };
 
 @Injectable()
@@ -261,6 +272,33 @@ export class MachineLearningRepository {
     return response[ModelTask.SEARCH];
   }
 
+  /** runs smart search encoding and face detection on one in-memory image in a single request */
+  async analyzeImage(
+    image: Buffer,
+    { clip, facialRecognition }: { clip?: ModelOptions; facialRecognition?: FaceDetectionOptions },
+  ): Promise<{ imageHeight: number; imageWidth: number; clip?: string; faces?: Face[] }> {
+    const request: ImageAnalysisRequest = {};
+    if (clip) {
+      request[ModelTask.SEARCH] = { [ModelType.VISUAL]: { modelName: clip.modelName } };
+    }
+
+    if (facialRecognition) {
+      const { modelName, minScore } = facialRecognition;
+      request[ModelTask.FACIAL_RECOGNITION] = {
+        [ModelType.DETECTION]: { modelName, options: { minScore } },
+        [ModelType.RECOGNITION]: { modelName },
+      };
+    }
+
+    const response = await this.predict<ImageAnalysisResponse>({ image }, request);
+    return {
+      imageHeight: response.imageHeight,
+      imageWidth: response.imageWidth,
+      clip: response[ModelTask.SEARCH],
+      faces: response[ModelTask.FACIAL_RECOGNITION],
+    };
+  }
+
   async encodeText(text: string, { language, modelName }: TextEncodingOptions) {
     const request = { [ModelTask.SEARCH]: { [ModelType.TEXTUAL]: { modelName, options: { language } } } };
     const response = await this.predict<ClipTextualResponse>({ text }, request);
@@ -285,6 +323,8 @@ export class MachineLearningRepository {
     if ('imagePath' in payload) {
       const fileBuffer = await readFile(payload.imagePath);
       formData.append('image', new Blob([new Uint8Array(fileBuffer)]));
+    } else if ('image' in payload) {
+      formData.append('image', new Blob([new Uint8Array(payload.image)]));
     } else if ('text' in payload) {
       formData.append('text', payload.text);
     } else {

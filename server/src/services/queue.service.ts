@@ -253,6 +253,10 @@ export class QueueService extends BaseService {
         return this.jobRepository.queue({ name: JobName.AssetDetectFaceAttributesQueueAll, data: { force } });
       }
 
+      case QueueName.VideoFrameAnalysis: {
+        return this.jobRepository.queue({ name: JobName.AssetAnalyzeVideoFramesQueueAll, data: { force } });
+      }
+
       default: {
         throw new BadRequestException(`Invalid job name: ${name}`);
       }
