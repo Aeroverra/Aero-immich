@@ -38,6 +38,7 @@ import { SyncController } from 'src/controllers/sync.controller';
 import { SystemConfigController } from 'src/controllers/system-config.controller';
 import { SystemMetadataController } from 'src/controllers/system-metadata.controller';
 import { TagController } from 'src/controllers/tag.controller';
+import { TakeoutController } from 'src/controllers/takeout.controller';
 import { TimelineController } from 'src/controllers/timeline.controller';
 import { TrashController } from 'src/controllers/trash.controller';
 import { UserAdminController } from 'src/controllers/user-admin.controller';
@@ -87,6 +88,7 @@ export const controllers = [
   SystemConfigController,
   SystemMetadataController,
   TagController,
+  TakeoutController,
   TimelineController,
   TrashController,
   UserAdminController,

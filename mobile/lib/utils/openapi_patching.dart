@@ -59,6 +59,9 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'customViews': false,
   },
   'TagResponseDto': {'isHidden': false},
+  // takeout exports of a server without the expected part count (the app does not show them)
+  'TakeoutExportDto': {'expectedPartCount': 0},
+  'TakeoutExportDetailDto': {'expectedPartCount': 0},
   'SearchAssetResponseDto': {'nextCursor': null},
   'StackResponseDto': {'source': 'manual'},
   'AssetStackResponseDto': {'source': 'manual'},
@@ -90,6 +93,8 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     ).toJson(),
   },
   'AdminConfigNightlyTasksDto': {'autoStack': false},
+  // the takeout read settings of a server without them are its built-in defaults
+  'AdminConfigDto': {'takeout': AdminConfigTakeoutDto(readaheadDepth: 4, readers: 3, throttleMBps: null).toJson()},
   'UserConfigMachineLearningDto': {
     'faceAttributes': UserConfigFaceAttributesDto(enabled: false).toJson(),
     'autoStack': UserConfigAutoStackDto(enabled: false).toJson(),
@@ -99,6 +104,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'faceAttributes': _emptyQueue,
     'autoStack': _emptyQueue,
     'videoFrameAnalysis': _emptyQueue,
+    'takeout': _emptyQueue,
   },
   'WorkflowResponseDto': {'logging': false},
 };

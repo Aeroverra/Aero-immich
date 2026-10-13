@@ -57,6 +57,12 @@ export const updateConfig = async (repos: RepoDeps, newConfig: SystemConfig): Pr
     _.set(partialConfig, property, newValue);
   }
 
+  // a cleared takeout read limit means no limit: stored as 0, since an empty value would bring back the default, which
+  // is the limit of IMMICH_TAKEOUT_READ_THROTTLE_MBPS when that is set
+  if (newConfig.takeout?.throttleMBps === null && defaults.takeout.throttleMBps !== null) {
+    _.set(partialConfig, 'takeout.throttleMBps', 0);
+  }
+
   await metadataRepo.set(SystemMetadataKey.SystemConfig, partialConfig);
 
   return getConfig(repos, { withCache: false });

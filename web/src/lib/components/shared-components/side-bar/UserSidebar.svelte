@@ -15,6 +15,8 @@
     mdiAccountOutline,
     mdiArchiveArrowDown,
     mdiArchiveArrowDownOutline,
+    mdiArchiveArrowUp,
+    mdiArchiveArrowUpOutline,
     mdiCards,
     mdiCardsOutline,
     mdiFolderOutline,
@@ -106,6 +108,13 @@
   {/if}
 
   <NavbarItem title={$t('utilities')} href={Route.utilities()} icon={mdiToolboxOutline} activeIcon={mdiToolbox} />
+
+  <NavbarItem
+    title={$t('takeouts')}
+    href={Route.takeouts()}
+    icon={mdiArchiveArrowUpOutline}
+    activeIcon={mdiArchiveArrowUp}
+  />
 
   <NavbarItem
     title={$t('archive')}

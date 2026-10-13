@@ -143,6 +143,13 @@ export const Route = {
   largeFileUtility: () => '/utilities/large-files',
   geolocationUtility: () => '/utilities/geolocation',
 
+  // takeouts
+  takeouts: () => '/takeouts',
+  viewTakeoutExport: ({ id }: { id: string }) => '/takeouts/exports/' + id,
+  viewTakeoutRun: ({ id }: { id: string }) => '/takeouts/runs/' + id,
+  takeoutSettings: () => '/takeouts/settings',
+  takeoutLargerVersions: (params?: { index?: number }) => '/takeouts/larger-versions' + asQueryString(params),
+
   // workflows
   workflows: () => '/workflows',
   viewWorkflow: ({ id }: { id: string }) => `/workflows/${id}`,

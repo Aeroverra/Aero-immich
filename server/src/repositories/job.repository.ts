@@ -287,6 +287,15 @@ export class JobRepository {
       case JobName.DatabaseBackup: {
         return { deduplication: { id: JobName.DatabaseBackup } };
       }
+      case JobName.TakeoutScanPart: {
+        return { jobId: `${item.data.partId}/${item.data.attempt}`, delay: item.data.delay };
+      }
+      case JobName.TakeoutAnalyzeExport: {
+        return { jobId: item.data.exportId, delay: item.data.delay };
+      }
+      case JobName.TakeoutRun: {
+        return { jobId: `${item.data.runId}/${item.data.attempt}`, delay: item.data.delay };
+      }
       default: {
         return null;
       }

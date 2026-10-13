@@ -51,6 +51,45 @@ const newStackedAssets = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: s
   return { manual, auto, manualPrimary, manualChild, autoPrimary, autoChild, single };
 };
 
+/** a Pixel Video Boost style stack: the original video as primary and the enhanced copy as the second member */
+const newVideoStack = async (
+  ctx: ReturnType<typeof setup>['ctx'],
+  ownerId: string,
+  options: { primaryFavorite?: boolean; visibility?: AssetVisibility } = {},
+) => {
+  const { primaryFavorite = true, visibility = AssetVisibility.Timeline } = options;
+  const { asset: primary } = await ctx.newAsset({
+    ownerId,
+    type: AssetType.Video,
+    isFavorite: primaryFavorite,
+    visibility,
+    localDateTime: new Date('1970-02-01'),
+    fileCreatedAt: new Date('1970-02-01'),
+  });
+  const { asset: enhanced } = await ctx.newAsset({
+    ownerId,
+    type: AssetType.Video,
+    isFavorite: true,
+    visibility,
+    localDateTime: new Date('1970-02-02'),
+    fileCreatedAt: new Date('1970-02-02'),
+  });
+  for (const asset of [primary, enhanced]) {
+    await ctx.newExif({ assetId: asset.id, make: 'Canon' });
+  }
+  const { stack } = await ctx.newStack({ ownerId }, [primary.id, enhanced.id]);
+  return { stack, primary, enhanced };
+};
+
+/** the ids of the 1970-02-01 bucket, checked against the count getTimeBuckets reports for the same filter */
+const bucketIds = async (sut: TimelineService, auth: AuthDto, dto: Omit<TimeBucketAssetDto, 'timeBucket'>) => {
+  const buckets = await sut.getTimeBuckets(auth, dto);
+  const count = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
+  const response = JSON.parse(await sut.getTimeBucket(auth, { ...dto, timeBucket: '1970-02-01' }));
+  expect(response.id).toHaveLength(count);
+  return { ids: response.id as string[], stack: response.stack as Array<[string, string] | null> };
+};
+
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
@@ -487,44 +526,6 @@ describe(TimelineService.name, () => {
     });
 
     describe('in filtered views', () => {
-      /** a Pixel Video Boost style stack: the original video as primary and the enhanced copy as the second member */
-      const newVideoStack = async (
-        ctx: ReturnType<typeof setup>['ctx'],
-        ownerId: string,
-        options: { primaryFavorite?: boolean; visibility?: AssetVisibility } = {},
-      ) => {
-        const { primaryFavorite = true, visibility = AssetVisibility.Timeline } = options;
-        const { asset: primary } = await ctx.newAsset({
-          ownerId,
-          type: AssetType.Video,
-          isFavorite: primaryFavorite,
-          visibility,
-          localDateTime: new Date('1970-02-01'),
-          fileCreatedAt: new Date('1970-02-01'),
-        });
-        const { asset: enhanced } = await ctx.newAsset({
-          ownerId,
-          type: AssetType.Video,
-          isFavorite: true,
-          visibility,
-          localDateTime: new Date('1970-02-02'),
-          fileCreatedAt: new Date('1970-02-02'),
-        });
-        for (const asset of [primary, enhanced]) {
-          await ctx.newExif({ assetId: asset.id, make: 'Canon' });
-        }
-        const { stack } = await ctx.newStack({ ownerId }, [primary.id, enhanced.id]);
-        return { stack, primary, enhanced };
-      };
-
-      const bucketIds = async (sut: TimelineService, auth: AuthDto, dto: Omit<TimeBucketAssetDto, 'timeBucket'>) => {
-        const buckets = await sut.getTimeBuckets(auth, dto);
-        const count = buckets.reduce((sum, bucket) => sum + bucket.count, 0);
-        const response = JSON.parse(await sut.getTimeBucket(auth, { ...dto, timeBucket: '1970-02-01' }));
-        expect(response.id).toHaveLength(count);
-        return { ids: response.id as string[], stack: response.stack as Array<[string, string] | null> };
-      };
-
       it('should show a stack once in favorites and videos', async () => {
         const { sut, ctx } = setup();
         const { user } = await ctx.newUser();

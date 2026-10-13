@@ -1,0 +1,17 @@
+import { getTakeoutOverview } from '@immich/sdk';
+import { authenticate } from '$lib/utils/auth';
+import { getFormatter } from '$lib/utils/i18n';
+import type { PageLoad } from './$types';
+
+export const load = (async ({ url }) => {
+  await authenticate(url);
+  const overview = await getTakeoutOverview();
+  const $t = await getFormatter();
+
+  return {
+    overview,
+    meta: {
+      title: $t('takeouts'),
+    },
+  };
+}) satisfies PageLoad;
