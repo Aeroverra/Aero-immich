@@ -6,14 +6,15 @@ import {
   WorkflowResponse,
   WorkflowTrigger,
 } from '@immich/plugin-sdk';
-import { HttpException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, HttpException, UnauthorizedException } from '@nestjs/common';
 import { join } from 'node:path';
 import { DummyValue, OnEvent, OnJob } from 'src/decorators';
 import { AlbumsAddAssetsDto, CreateAlbumDto, GetAlbumsDto } from 'src/dtos/album.dto';
 import { BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { PluginManifestDto } from 'src/dtos/plugin-manifest.dto';
-import { TagBulkAssetsDto } from 'src/dtos/tag.dto';
+import { TagBulkAssetsDto, TagUpsertDto } from 'src/dtos/tag.dto';
+import { WorkflowPreviewDto, WorkflowPreviewResponseDto } from 'src/dtos/workflow.dto';
 import {
   BootstrapEventPriority,
   DatabaseLock,
@@ -26,11 +27,13 @@ import {
   WorkflowType,
 } from 'src/enum';
 import { ArgOf } from 'src/repositories/event.repository';
+import { WorkflowRepository } from 'src/repositories/workflow.repository';
 import { AlbumService } from 'src/services/album.service';
 import { AssetService } from 'src/services/asset.service';
 import { BaseService } from 'src/services/base.service';
 import { TagService } from 'src/services/tag.service';
 import { JobOf } from 'src/types';
+import { batched } from 'src/utils/misc';
 
 const dummy = () => {
   throw new Error(
@@ -44,6 +47,14 @@ type ExecuteOptions<T extends WorkflowType> = {
 };
 
 type AssetTrigger = { userId: string; assetId: string; trigger: WorkflowTrigger };
+
+type WorkflowForRun = NonNullable<Awaited<ReturnType<WorkflowRepository['getForWorkflowRun']>>>;
+type WorkflowStepForRun = WorkflowForRun['steps'][number];
+
+/** how many assets a manual run or a preview reads and filters at once */
+const RUN_BATCH_SIZE = 500;
+/** a preview stops after this long and reports what it found so far */
+const PREVIEW_TIME_LIMIT_MS = 15_000;
 
 type HostContext = {
   allowedHosts: string[];
@@ -113,6 +124,7 @@ export class WorkflowExecutionService extends BaseService {
     const bulkTagAssets = this.wrap<[dto: TagBulkAssetsDto]>((authDto, ctx, args) =>
       tagService.bulkTagAssets(authDto, ...args),
     );
+    const upsertTags = this.wrap<[dto: TagUpsertDto]>((authDto, ctx, args) => tagService.upsert(authDto, ...args));
 
     const functions = {
       searchAlbums,
@@ -121,29 +133,14 @@ export class WorkflowExecutionService extends BaseService {
       addAssetsToAlbums,
       httpRequest,
       bulkTagAssets,
-    };
-
-    const stubs: typeof functions = {
-      searchAlbums: dummy,
-      createAlbum: dummy,
-      addAssetsToAlbum: dummy,
-      addAssetsToAlbums: dummy,
-      httpRequest: dummy,
-      bulkTagAssets: dummy,
+      upsertTags,
     };
 
     const plugins = await this.pluginRepository.getForLoad();
-    for (const { id, name, version, wasmBytes, methods } of plugins) {
+    for (const { id, name, version, wasmBytes, sha256hash, methods } of plugins) {
       const isMethod = methods.some(({ hostFunctions }) => !hostFunctions);
       if (isMethod) {
-        const label = `${name}@${version}`;
-        const key = this.getPluginKey({ id, hostFunctions: false });
-        try {
-          await this.pluginRepository.load({ key, label, wasmBytes }, { runInWorker: false, functions: stubs });
-          this.logger.log(`Loaded plugin: ${label}`);
-        } catch (error) {
-          this.logger.error(`Unable to load plugin ${label} (${id})`, error);
-        }
+        await this.loadWithoutHostFunctions({ id, name, version, wasmBytes, sha256hash });
       }
 
       const isMethodWithFunction = methods.some(({ hostFunctions }) => hostFunctions);
@@ -156,6 +153,53 @@ export class WorkflowExecutionService extends BaseService {
         } catch (error) {
           this.logger.error(`Unable to load plugin with host functions ${label} (${id})`, error);
         }
+      }
+    }
+  }
+
+  private async loadWithoutHostFunctions(plugin: {
+    id: string;
+    name: string;
+    version: string;
+    wasmBytes: Buffer;
+    sha256hash: Buffer;
+  }) {
+    const stubs = {
+      searchAlbums: dummy,
+      createAlbum: dummy,
+      addAssetsToAlbum: dummy,
+      addAssetsToAlbums: dummy,
+      httpRequest: dummy,
+      bulkTagAssets: dummy,
+      upsertTags: dummy,
+    };
+
+    const { id, wasmBytes, sha256hash } = plugin;
+    const label = `${plugin.name}@${plugin.version}`;
+    const key = this.getPluginKey({ id, hostFunctions: false });
+    try {
+      await this.pluginRepository.load({ key, label, wasmBytes, sha256hash }, { runInWorker: false, functions: stubs });
+      this.logger.log(`Loaded plugin: ${label}`);
+    } catch (error) {
+      this.logger.error(`Unable to load plugin ${label} (${id})`, error);
+    }
+  }
+
+  /**
+   * previews run in the api worker, which does not load plugins at startup: load the plugins of the filters on first
+   * use, and again when their manifest changed since
+   */
+  private async ensureFiltersLoaded(steps: WorkflowStepForRun[]) {
+    for (const pluginId of new Set(steps.map((step) => step.pluginId))) {
+      const key = this.getPluginKey({ id: pluginId, hostFunctions: false });
+      const current = await this.pluginRepository.getHash(pluginId);
+      if (!current || this.pluginRepository.isLoaded(key, current.sha256hash)) {
+        continue;
+      }
+
+      const [plugin] = await this.pluginRepository.getForLoad({ id: pluginId });
+      if (plugin) {
+        await this.loadWithoutHostFunctions(plugin);
       }
     }
   }
@@ -323,6 +367,11 @@ export class WorkflowExecutionService extends BaseService {
     return this.onAssetTrigger({ userId, assetId, trigger: WorkflowTrigger.AssetTagged });
   }
 
+  @OnEvent({ name: 'AssetOcr' })
+  onAssetOcr({ assetId, userId }: ArgOf<'AssetOcr'>) {
+    return this.onAssetTrigger({ userId, assetId, trigger: WorkflowTrigger.AssetOcr });
+  }
+
   private async onAssetTrigger({ userId, assetId, trigger }: AssetTrigger) {
     const items = await this.workflowRepository.search({ userId, trigger });
     await this.jobRepository.queueAll(
@@ -333,9 +382,150 @@ export class WorkflowExecutionService extends BaseService {
     );
   }
 
+  @OnJob({ name: JobName.WorkflowRunQueueAll, queue: QueueName.Workflow })
+  async handleWorkflowRun({ workflowId, runId }: JobOf<JobName.WorkflowRunQueueAll>): Promise<JobStatus> {
+    const workflow = await this.workflowRepository.getForWorkflowRun(workflowId, { includeDisabled: true });
+    if (!workflow) {
+      return JobStatus.Skipped;
+    }
+
+    let total = 0;
+    for await (const assets of batched(this.workflowRepository.streamForRun(workflow.ownerId), RUN_BATCH_SIZE)) {
+      const assetIds = await this.filterAssets(
+        workflow,
+        assets.map(({ id }) => id),
+      );
+      await this.jobRepository.queueAll(
+        assetIds.map((assetId) => ({
+          name: JobName.WorkflowAssetTrigger,
+          data: { workflowId, assetId, manualRunId: runId },
+        })),
+      );
+      total += assetIds.length;
+    }
+
+    this.logger.log(`Workflow ${workflowId} run ${runId}: queued ${total} asset(s)`);
+    return JobStatus.Success;
+  }
+
+  /** checks the leading filters of a workflow against the assets a manual run goes through, without changing them */
+  async preview(workflowId: string, { limit }: WorkflowPreviewDto): Promise<WorkflowPreviewResponseDto> {
+    const workflow = await this.workflowRepository.getForWorkflowRun(workflowId, { includeDisabled: true });
+    if (!workflow) {
+      throw new BadRequestException('Workflow not found');
+    }
+
+    const filters = this.getLeadingFilters(workflow.steps);
+    await this.ensureFiltersLoaded(filters);
+
+    const total = await this.workflowRepository.getRunAssetCount(workflow.ownerId);
+    const deadline = Date.now() + PREVIEW_TIME_LIMIT_MS;
+    const assetIds: string[] = [];
+    let scanned = 0;
+    let matched = 0;
+    let complete = true;
+
+    for await (const assets of batched(this.workflowRepository.streamForRun(workflow.ownerId), RUN_BATCH_SIZE)) {
+      const matches = await this.filterAssets(
+        workflow,
+        assets.map(({ id }) => id),
+      );
+      scanned += assets.length;
+      matched += matches.length;
+      assetIds.push(...matches.slice(0, Math.max(0, limit - assetIds.length)));
+
+      if (filters.length === 0) {
+        // without filters every asset matches, so there is nothing left to check
+        scanned = total;
+        matched = total;
+        break;
+      }
+
+      if (Date.now() > deadline) {
+        complete = false;
+        break;
+      }
+    }
+
+    return { total, scanned, matched, complete, filters: filters.length, assetIds };
+  }
+
+  /** the filter steps at the start of a workflow, which can be checked without side effects */
+  private getLeadingFilters(steps: WorkflowStepForRun[]) {
+    const filters: WorkflowStepForRun[] = [];
+    for (const step of steps) {
+      if (step.methodName.startsWith('noop')) {
+        continue;
+      }
+
+      if (step.hostFunctions || !step.uiHints?.includes('Filter')) {
+        break;
+      }
+
+      filters.push(step);
+    }
+
+    return filters;
+  }
+
+  /** returns the assets that pass the leading filters of the workflow, in the given order */
+  private async filterAssets(workflow: WorkflowForRun, assetIds: string[]) {
+    const filters = this.getLeadingFilters(workflow.steps);
+    if (filters.length === 0 || assetIds.length === 0) {
+      return assetIds;
+    }
+
+    const type = this.getWorkflowType(workflow);
+    if (!type) {
+      throw new Error('Unable to infer workflow event type from steps');
+    }
+
+    const assets = await this.workflowRepository.getForAssetsV1(assetIds);
+    const matches = new Set<string>();
+
+    for (const asset of assets) {
+      let isMatch = true;
+      for (const step of filters) {
+        const payload: WorkflowEventPayload<WorkflowType> = {
+          trigger: workflow.trigger,
+          type,
+          config: step.config ?? {},
+          workflow: { id: workflow.id, authToken: '', stepId: step.id },
+          data: { asset } as any,
+        };
+        const result = await this.pluginRepository.callMethod<WorkflowResponse<WorkflowType>>(
+          { pluginKey: this.getPluginKey({ id: step.pluginId, hostFunctions: false }), methodName: step.methodName },
+          payload,
+          { allowedHosts: [] } satisfies HostContext,
+        );
+
+        if (result?.workflow?.continue === false) {
+          isMatch = false;
+          break;
+        }
+      }
+
+      if (isMatch) {
+        matches.add(asset.id);
+      }
+    }
+
+    return assetIds.filter((id) => matches.has(id));
+  }
+
+  private getWorkflowType(workflow: WorkflowForRun) {
+    // TODO infer from steps
+    for (const targetType of Object.values(WorkflowType)) {
+      const isMissing = workflow.steps.some((step) => !step.types.includes(targetType));
+      if (!isMissing) {
+        return targetType;
+      }
+    }
+  }
+
   @OnJob({ name: JobName.WorkflowAssetTrigger, queue: QueueName.Workflow })
-  handleAssetTrigger({ workflowId, assetId }: JobOf<JobName.WorkflowAssetTrigger>) {
-    return this.execute(workflowId, (type) => {
+  handleAssetTrigger({ workflowId, assetId, manualRunId }: JobOf<JobName.WorkflowAssetTrigger>) {
+    return this.execute(workflowId, { manualRunId }, (type) => {
       const assetService = BaseService.create(AssetService, this);
 
       switch (type) {
@@ -387,23 +577,16 @@ export class WorkflowExecutionService extends BaseService {
 
   private async execute<T extends WorkflowType>(
     workflowId: string,
+    { manualRunId }: { manualRunId?: string },
     getHandler: (type: T) => ExecuteOptions<T> | undefined,
   ) {
-    const workflow = await this.workflowRepository.getForWorkflowRun(workflowId);
+    // a manual run is started on purpose, so it also runs a workflow that is disabled
+    const workflow = await this.workflowRepository.getForWorkflowRun(workflowId, { includeDisabled: !!manualRunId });
     if (!workflow) {
       return;
     }
 
-    // TODO infer from steps
-    let type: T | undefined;
-    for (const targetType of Object.values(WorkflowType)) {
-      const isMissing = workflow.steps.some((step) => !step.types.includes(targetType));
-      if (!isMissing) {
-        type = targetType as unknown as T;
-        break;
-      }
-    }
-
+    const type = this.getWorkflowType(workflow) as T | undefined;
     if (!type) {
       throw new Error('Unable to infer workflow event type from steps');
     }
@@ -417,7 +600,8 @@ export class WorkflowExecutionService extends BaseService {
     const { read, write } = handler;
     const readResult = await read(type);
     let data = readResult.data;
-    const runId = crypto.randomUUID();
+    const runId = manualRunId ?? crypto.randomUUID();
+    const isManual = !!manualRunId;
 
     for (const step of workflow.steps) {
       try {
@@ -479,6 +663,7 @@ export class WorkflowExecutionService extends BaseService {
               workflowStepId: step.id,
               triggerDataId: readResult.entityId,
               runId,
+              isManual,
             });
           }
 
@@ -508,6 +693,7 @@ export class WorkflowExecutionService extends BaseService {
         result: WorkflowResult.Completed,
         triggerDataId: readResult.entityId,
         runId,
+        isManual,
       });
     }
 

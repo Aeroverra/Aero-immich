@@ -3,43 +3,84 @@ import { AssetVisibility } from '@immich/sdk';
 import type { Manifest } from '../dist/index.d.ts';
 
 type MatchValueConfig = {
-  pattern: string;
-  matchType?: 'contains' | 'exact' | 'regex' | 'startsWith';
+  pattern?: string;
+  matchType?: 'contains' | 'exact' | 'regex' | 'startsWith' | 'empty';
   caseSensitive?: boolean;
+  inverse?: boolean;
 };
 
-const matchValueResult = (value: string, config: MatchValueConfig) => {
-  const { pattern, matchType = 'contains', caseSensitive = false } = config;
+const isEmptyValue = (value: unknown) =>
+  value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+
+const matchValue = (value: string | null | undefined, config: MatchValueConfig): boolean => {
+  const { pattern = '', matchType = 'contains', caseSensitive = false } = config;
+
+  if (matchType === 'empty') {
+    return isEmptyValue(value);
+  }
+
+  if (value === null || value === undefined) {
+    return false;
+  }
+
+  if (matchType === 'regex') {
+    // the pattern is not lowercased: that would turn escapes like \D, \S or \W into \d, \s and \w
+    return new RegExp(pattern, caseSensitive ? '' : 'i').test(value);
+  }
+
   const searchName = caseSensitive ? value : value.toLowerCase();
   const searchPattern = caseSensitive ? pattern : pattern.toLowerCase();
 
   switch (matchType) {
     case 'contains': {
-      return { workflow: { continue: searchName.includes(searchPattern) } };
+      return searchName.includes(searchPattern);
     }
 
     case 'exact': {
-      return { workflow: { continue: searchName === searchPattern } };
+      return searchName === searchPattern;
     }
 
     case 'startsWith': {
-      return { workflow: { continue: searchName.startsWith(searchPattern) } };
-    }
-
-    case 'regex': {
-      const flags = caseSensitive ? '' : 'i';
-      const regex = new RegExp(searchPattern, flags);
-      return { workflow: { continue: regex.test(value) } };
+      return searchName.startsWith(searchPattern);
     }
 
     default: {
-      return {};
+      return false;
     }
   }
 };
 
+const matchValueResult = (value: string | null | undefined, config: MatchValueConfig) => ({
+  workflow: { continue: matchValue(value, config) !== !!config.inverse },
+});
+
+const parseAspectRatio = (value: string | undefined) => {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*[:/x]\s*(\d+(?:\.\d+)?)\s*$/i.exec(value ?? '');
+  if (!match) {
+    return;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? width / height : undefined;
+};
+
 const methods = wrapper<Manifest>({
   assetAddTags: ({ config, data, functions }) => {
+    if (config.tags.length === 0) {
+      if (!config.tagName) {
+        return {};
+      }
+
+      // creates the tag (and its parents) the first time, then the step keeps using its id
+      const [tag] = functions.upsertTags({ tags: [config.tagName] });
+      if (!tag) {
+        return {};
+      }
+
+      config.tags.push(tag.id);
+    }
+
     functions.bulkTagAssets({ assetIds: [data.asset.id], tagIds: config.tags });
     return {};
   },
@@ -135,11 +176,65 @@ const methods = wrapper<Manifest>({
   },
 
   assetExifFilter: ({ config, data }) => {
-    if (!data.asset.exifInfo || data.asset.exifInfo[config.property] === null) {
-      return { workflow: { continue: false } };
+    const value = data.asset.exifInfo?.[config.property];
+    return matchValueResult(value === null || value === undefined ? value : String(value), config);
+  },
+
+  assetOcrFilter: ({ config, data }) => {
+    const minY = config.minY ?? 0;
+    const maxY = config.maxY ?? 1;
+    const lines = (data.asset.ocr ?? [])
+      .filter((line) => {
+        // where the top edge of the text is, from 0 (top of the image) to 1 (bottom)
+        const top = Math.min(line.y1, line.y2, line.y3, line.y4);
+        return top >= minY && top <= maxY;
+      })
+      .map(({ text }) => text);
+
+    let matched: boolean;
+    switch (config.matchType ?? 'contains') {
+      case 'exact':
+      case 'startsWith': {
+        matched = lines.some((line) => matchValue(line.trim(), config));
+        break;
+      }
+
+      case 'empty': {
+        matched = lines.every((line) => isEmptyValue(line));
+        break;
+      }
+
+      default: {
+        matched = lines.length > 0 && matchValue(lines.join('\n'), config);
+      }
     }
 
-    return matchValueResult(String(data.asset.exifInfo[config.property]), config);
+    return { workflow: { continue: matched !== !!config.inverse } };
+  },
+
+  assetDimensionFilter: ({ config, data }) => {
+    const width = data.asset.width ?? data.asset.exifInfo?.exifImageWidth;
+    const height = data.asset.height ?? data.asset.exifInfo?.exifImageHeight;
+
+    let matched = !!width && !!height;
+    if (matched && width && height) {
+      const orientation = config.orientation ?? 'any';
+      if (orientation === 'portrait') {
+        matched = height > width;
+      } else if (orientation === 'landscape') {
+        matched = width > height;
+      } else if (orientation === 'square') {
+        matched = width === height;
+      }
+
+      const ratio = parseAspectRatio(config.aspectRatio);
+      if (matched && ratio) {
+        const tolerance = (config.tolerance ?? 1) / 100;
+        matched = Math.abs(width / height / ratio - 1) <= tolerance;
+      }
+    }
+
+    return { workflow: { continue: matched !== !!config.inverse } };
   },
 
   assetDateFilter: ({ config, data }) => {
@@ -238,6 +333,8 @@ const {
   assetFileFilter,
   assetLocationFilter,
   assetExifFilter,
+  assetOcrFilter,
+  assetDimensionFilter,
   assetDateFilter,
   assetLock,
   assetMissingTimeZoneFilter,
@@ -258,6 +355,8 @@ export {
   assetFileFilter,
   assetLocationFilter,
   assetExifFilter,
+  assetOcrFilter,
+  assetDimensionFilter,
   assetDateFilter,
   assetLock,
   assetMissingTimeZoneFilter,

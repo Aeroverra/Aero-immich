@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { Insertable, Kysely, Updateable } from 'kysely';
+import { ExpressionBuilder, Insertable, Kysely, Updateable } from 'kysely';
 import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { WorkflowGetLogsDto, WorkflowSearchDto } from 'src/dtos/workflow.dto';
+import { AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { WorkflowLogTable } from 'src/schema/tables/workflow-log.table';
 import { WorkflowStepTable } from 'src/schema/tables/workflow-step.table';
@@ -65,10 +66,10 @@ export class WorkflowRepository {
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })
-  getForWorkflowRun(id: string) {
+  getForWorkflowRun(id: string, options?: { includeDisabled?: boolean }) {
     return this.db
       .selectFrom('workflow')
-      .select(['workflow.id', 'workflow.name', 'workflow.trigger', 'workflow.logging'])
+      .select(['workflow.id', 'workflow.ownerId', 'workflow.name', 'workflow.trigger', 'workflow.logging'])
       .select((eb) => [
         jsonArrayFrom(
           eb
@@ -84,11 +85,13 @@ export class WorkflowRepository {
               'plugin_method.types as types',
               'plugin_method.hostFunctions',
               'plugin_method.allowedHosts',
-            ]),
+              'plugin_method.uiHints',
+            ])
+            .orderBy('workflow_step.order', 'asc'),
         ).as('steps'),
       ])
       .where('id', '=', id)
-      .where('enabled', '=', true)
+      .$if(!options?.includeDisabled, (qb) => qb.where('enabled', '=', true))
       .executeTakeFirst();
   }
 
@@ -122,6 +125,8 @@ export class WorkflowRepository {
         'workflow_log.workflowId',
         'workflow_log.workflowStepId',
         'workflow_log.triggerDataId',
+        'workflow_log.runId',
+        'workflow_log.isManual',
       ])
       .where('workflow_log.workflowId', '=', id)
       .select((eb) => [
@@ -176,13 +181,53 @@ export class WorkflowRepository {
     await this.db.deleteFrom('workflow').where('id', '=', id).execute();
   }
 
+  @GenerateSql({ params: [DummyValue.UUID] })
   getForAssetV1(assetId: string) {
+    return this.assetV1QueryBuilder().where('asset.id', '=', assetId).executeTakeFirstOrThrow();
+  }
+
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  getForAssetsV1(assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.assetV1QueryBuilder().where('asset.id', 'in', assetIds).execute();
+  }
+
+  /** the assets of a user that a manual run goes through, newest first */
+  @GenerateSql({ params: [DummyValue.UUID], stream: true })
+  streamForRun(ownerId: string) {
+    return this.runAssetsQueryBuilder(ownerId)
+      .select(['asset.id'])
+      .orderBy('asset.fileCreatedAt', 'desc')
+      .orderBy('asset.id', 'desc')
+      .stream();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getRunAssetCount(ownerId: string) {
+    const { count } = await this.runAssetsQueryBuilder(ownerId)
+      .select((eb) => eb.fn.countAll<number>().as('count'))
+      .executeTakeFirstOrThrow();
+    return Number(count);
+  }
+
+  private runAssetsQueryBuilder(ownerId: string) {
     return this.db
       .selectFrom('asset')
-      .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .where('asset.ownerId', '=', ownerId)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.visibility', '!=', AssetVisibility.Hidden);
+  }
+
+  private assetV1QueryBuilder() {
+    return this.db
+      .selectFrom('asset')
       .select((eb) => [
         ...columns.workflowAssetV1,
         withTags,
+        this.withOcrLines(eb),
         jsonObjectFrom(
           eb
             .selectFrom('asset_exif')
@@ -220,8 +265,29 @@ export class WorkflowRepository {
             ])
             .whereRef('asset_exif.assetId', '=', 'asset.id'),
         ).as('exifInfo'),
-      ])
-      .where('id', '=', assetId)
-      .executeTakeFirstOrThrow();
+      ]);
+  }
+
+  private withOcrLines(eb: ExpressionBuilder<DB, 'asset'>) {
+    return jsonArrayFrom(
+      eb
+        .selectFrom('asset_ocr')
+        .select([
+          'asset_ocr.text',
+          'asset_ocr.textScore',
+          'asset_ocr.x1',
+          'asset_ocr.y1',
+          'asset_ocr.x2',
+          'asset_ocr.y2',
+          'asset_ocr.x3',
+          'asset_ocr.y3',
+          'asset_ocr.x4',
+          'asset_ocr.y4',
+        ])
+        .whereRef('asset_ocr.assetId', '=', 'asset.id')
+        .where('asset_ocr.isVisible', '=', true)
+        .orderBy('asset_ocr.y1', 'asc')
+        .orderBy('asset_ocr.x1', 'asc'),
+    ).as('ocr');
   }
 }

@@ -6,6 +6,8 @@ import {
   type CreateAlbumDto,
   type TagBulkAssetsDto,
   type TagBulkAssetsResponseDto,
+  type TagResponseDto,
+  type TagUpsertDto,
 } from '@immich/sdk';
 
 declare module 'extism:host' {
@@ -50,6 +52,7 @@ export const availableFunctions = [
   'addAssetsToAlbums',
   'httpRequest',
   'bulkTagAssets',
+  'upsertTags',
 ] as const;
 
 export const hostFunctions = (authToken: string) => {
@@ -105,5 +108,7 @@ export const hostFunctions = (authToken: string) => {
         authToken,
         [dto],
       ),
+    upsertTags: (dto: TagUpsertDto) =>
+      call<[TagUpsertDto], TagResponseDto[]>('upsertTags', authToken, [dto]),
   } satisfies Record<(typeof availableFunctions)[number], unknown>;
 };

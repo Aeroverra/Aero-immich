@@ -19,6 +19,7 @@ import {
   mdiPause,
   mdiPencil,
   mdiPlay,
+  mdiPlayCircleOutline,
   mdiPlus,
 } from '@mdi/js';
 import type { MessageFormatter } from 'svelte-i18n';
@@ -26,6 +27,7 @@ import { goto } from '$app/navigation';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import WorkflowDuplicateModal from '$lib/modals/WorkflowDuplicateModal.svelte';
 import WorkflowLogsModal from '$lib/modals/WorkflowLogsModal.svelte';
+import WorkflowRunModal from '$lib/modals/WorkflowRunModal.svelte';
 import WorkflowTemplatePickerModal from '$lib/modals/WorkflowTemplatePickerModal.svelte';
 import { Route } from '$lib/route';
 import { copyToClipboard, downloadJson } from '$lib/utils';
@@ -53,7 +55,11 @@ export const getWorkflowsActions = ($t: MessageFormatter) => {
   return { Create, UseTemplate };
 };
 
-export const getWorkflowActions = ($t: MessageFormatter, workflow: WorkflowResponseDto) => {
+export const getWorkflowActions = (
+  $t: MessageFormatter,
+  workflow: WorkflowResponseDto,
+  options: { hasChanges?: boolean } = {},
+) => {
   const ToggleEnabled: ActionItem = {
     title: workflow.enabled ? $t('disable') : $t('enable'),
     icon: workflow.enabled ? mdiPause : mdiPlay,
@@ -120,7 +126,13 @@ export const getWorkflowActions = ($t: MessageFormatter, workflow: WorkflowRespo
     onAction: () => modalManager.show(WorkflowLogsModal, { workflow }),
   };
 
-  return { CopyJson, Download, Duplicate, ToggleEnabled, Edit, Delete, Logs };
+  const Run: ActionItem = {
+    title: $t('workflow_run_existing'),
+    icon: mdiPlayCircleOutline,
+    onAction: () => modalManager.show(WorkflowRunModal, { workflow, hasChanges: options.hasChanges }),
+  };
+
+  return { CopyJson, Download, Duplicate, ToggleEnabled, Edit, Delete, Logs, Run };
 };
 
 export const getWorkflowShowSchemaAction = (

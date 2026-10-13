@@ -390,6 +390,8 @@ export const columns = {
     'asset.isPrivate',
     'asset.isExternal',
     'asset.isEdited',
+    'asset.width',
+    'asset.height',
   ],
   assetFiles: ['asset_file.id', 'asset_file.path', 'asset_file.type', 'asset_file.isEdited'],
   assetFilesForThumbnail: [

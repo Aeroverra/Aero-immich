@@ -14,7 +14,7 @@ import { PluginMethodTable } from 'src/schema/tables/plugin-method.table';
 import { PluginTable } from 'src/schema/tables/plugin.table';
 
 type PluginMethod = { pluginKey: string; methodName: string };
-type PluginLoad = { key: string; label: string; wasmBytes: Buffer };
+type PluginLoad = { key: string; label: string; wasmBytes: Buffer; sha256hash?: Buffer };
 
 export type PluginHostFunction = (callContext: CallContext, input: bigint) => Promise<bigint> | bigint;
 export type PluginLoadOptions = {
@@ -42,7 +42,7 @@ const asExtismLogLevel = (logLevel: LogLevel) => levels[logLevel] || 'info';
 
 @Injectable()
 export class PluginRepository {
-  private pluginMap: Map<string, { label: string; pool: Pool<ExtismPlugin> }> = new Map();
+  private pluginMap: Map<string, { label: string; pool: Pool<ExtismPlugin>; hash?: string }> = new Map();
 
   constructor(
     @InjectKysely() private db: Kysely<DB>,
@@ -52,7 +52,7 @@ export class PluginRepository {
   }
 
   @GenerateSql()
-  getForLoad() {
+  getForLoad(dto: { id?: string } = {}) {
     return this.db
       .selectFrom('plugin')
       .select((eb) => [
@@ -60,6 +60,7 @@ export class PluginRepository {
         'plugin.name',
         'plugin.version',
         'plugin.wasmBytes',
+        'plugin.sha256hash',
         jsonArrayFrom(
           eb
             .selectFrom('plugin_method')
@@ -68,7 +69,24 @@ export class PluginRepository {
         ).as('methods'),
       ])
       .where('enabled', '=', true)
+      .$if(!!dto.id, (qb) => qb.where('plugin.id', '=', dto.id!))
       .execute();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getHash(id: string) {
+    return this.db
+      .selectFrom('plugin')
+      .select(['plugin.sha256hash'])
+      .where('plugin.id', '=', id)
+      .where('enabled', '=', true)
+      .executeTakeFirst();
+  }
+
+  /** whether the plugin is loaded, and when a hash is given, loaded from that version of the manifest */
+  isLoaded(key: string, sha256hash?: Buffer) {
+    const item = this.pluginMap.get(key);
+    return !!item && (!sha256hash || item.hash === sha256hash.toString('hex'));
   }
 
   private queryBuilder() {
@@ -203,7 +221,7 @@ export class PluginRepository {
     });
   }
 
-  async load({ key, label, wasmBytes }: PluginLoad, { runInWorker, functions }: PluginLoadOptions) {
+  async load({ key, label, wasmBytes, sha256hash }: PluginLoad, { runInWorker, functions }: PluginLoadOptions) {
     const data = new Uint8Array(wasmBytes.buffer, wasmBytes.byteOffset, wasmBytes.byteLength);
     const logger = LoggingRepository.create(`Plugin:${label}`);
     const pool = createPool<ExtismPlugin>(
@@ -235,7 +253,12 @@ export class PluginRepository {
 
     try {
       await pool.ready();
-      this.pluginMap.set(key, { pool, label });
+      const previous = this.pluginMap.get(key);
+      this.pluginMap.set(key, { pool, label, hash: sha256hash?.toString('hex') });
+      if (previous) {
+        await previous.pool.drain();
+        await previous.pool.clear();
+      }
     } catch (error: Error | any) {
       throw new Error(`Unable to instantiate plugin: ${key}`, { cause: error });
     }

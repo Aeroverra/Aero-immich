@@ -7,15 +7,18 @@ import {
   WorkflowCreateDto,
   WorkflowGetLogsDto,
   WorkflowLogEntryDto,
+  WorkflowPreviewDto,
+  WorkflowPreviewResponseDto,
   WorkflowResponseDto,
   WorkflowSearchDto,
   WorkflowShareResponseDto,
   WorkflowTriggerResponseDto,
   WorkflowUpdateDto,
 } from 'src/dtos/workflow.dto';
-import { Permission } from 'src/enum';
+import { JobName, Permission } from 'src/enum';
 import { PluginMethodSearchResponse } from 'src/repositories/plugin.repository';
 import { BaseService } from 'src/services/base.service';
+import { WorkflowExecutionService } from 'src/services/workflow-execution.service';
 import { findOrFail } from 'src/utils/misc';
 import { getWorkflowTriggers, isMethodCompatible, resolveMethod } from 'src/utils/workflow';
 
@@ -93,6 +96,8 @@ export class WorkflowService extends BaseService {
       at: entry.createdAt,
       result: entry.result,
       triggerDataId: entry.triggerDataId ?? undefined,
+      runId: entry.runId,
+      isManual: entry.isManual,
       lastStep: entry.step
         ? {
             index: entry.step.order,
@@ -100,6 +105,21 @@ export class WorkflowService extends BaseService {
           }
         : undefined,
     }));
+  }
+
+  async preview(auth: AuthDto, id: string, dto: WorkflowPreviewDto): Promise<WorkflowPreviewResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.WorkflowRead, ids: [id] });
+    await this.findOrFail(id);
+    return BaseService.create(WorkflowExecutionService, this).preview(id, dto);
+  }
+
+  async run(auth: AuthDto, id: string): Promise<void> {
+    await this.requireAccess({ auth, permission: Permission.WorkflowRun, ids: [id] });
+    await this.findOrFail(id);
+    await this.jobRepository.queue({
+      name: JobName.WorkflowRunQueueAll,
+      data: { workflowId: id, runId: this.cryptoRepository.randomUUID() },
+    });
   }
 
   private async resolveAndValidateSteps<T extends { method: string }>(steps: T[], trigger: WorkflowTrigger) {

@@ -4306,6 +4306,8 @@ export type WorkflowLogEntryDto = {
     at: string;
     /** Workflow log entry ID */
     id: string;
+    /** Whether the run was started by hand on existing assets */
+    isManual: boolean;
     /** Last step ran, if the workflow ended early */
     lastStep?: {
         /** Index of the step in the workflow */
@@ -4314,8 +4316,24 @@ export type WorkflowLogEntryDto = {
         method: string;
     };
     result: WorkflowResult;
+    /** Workflow run ID, shared by every asset of a manual run */
+    runId: string;
     /** Workflow trigger data ID */
     triggerDataId?: string;
+};
+export type WorkflowPreviewResponseDto = {
+    /** IDs of the first matching assets */
+    assetIds: string[];
+    /** Whether every asset was checked (false when the preview ran out of time) */
+    complete: boolean;
+    /** Number of leading filter steps that were checked */
+    filters: number;
+    /** Number of checked assets that pass the filters */
+    matched: number;
+    /** Number of assets checked, newest first */
+    scanned: number;
+    /** Number of assets a manual run goes through */
+    total: number;
 };
 export type WorkflowShareStepDto = {
     /** Step configuration */
@@ -9668,6 +9686,33 @@ export function getWorkflowLogs({ before, id, limit, result }: {
     }));
 }
 /**
+ * Preview a workflow run
+ */
+export function previewWorkflow({ id, limit }: {
+    id: string;
+    limit?: number;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: WorkflowPreviewResponseDto;
+    }>(`/workflows/${encodeURIComponent(id)}/preview${QS.query(QS.explode({
+        limit
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Run a workflow on existing assets
+ */
+export function runWorkflow({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/workflows/${encodeURIComponent(id)}/run`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
  * Retrieve a workflow
  */
 export function getWorkflowForShare({ id }: {
@@ -10032,6 +10077,7 @@ export enum Permission {
     WorkflowUpdate = "workflow.update",
     WorkflowDelete = "workflow.delete",
     WorkflowLogs = "workflow.logs",
+    WorkflowRun = "workflow.run",
     AdminUserCreate = "adminUser.create",
     AdminUserRead = "adminUser.read",
     AdminUserUpdate = "adminUser.update",
@@ -10180,7 +10226,8 @@ export enum WorkflowType {
 export enum WorkflowTrigger {
     AssetCreate = "AssetCreate",
     AssetMetadataExtraction = "AssetMetadataExtraction",
-    AssetTagged = "AssetTagged"
+    AssetTagged = "AssetTagged",
+    AssetOcr = "AssetOcr"
 }
 export enum QueueJobStatus {
     Active = "active",
@@ -10257,6 +10304,7 @@ export enum JobName {
     OcrQueueAll = "OcrQueueAll",
     Ocr = "Ocr",
     WorkflowAssetTrigger = "WorkflowAssetTrigger",
+    WorkflowRunQueueAll = "WorkflowRunQueueAll",
     IntegrityUntrackedFilesQueueAll = "IntegrityUntrackedFilesQueueAll",
     IntegrityUntrackedFiles = "IntegrityUntrackedFiles",
     IntegrityUntrackedRefresh = "IntegrityUntrackedRefresh",

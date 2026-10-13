@@ -13,6 +13,7 @@ describe(OcrService.name, () => {
 
     mocks.config.getWorker.mockReturnValue(ImmichWorker.Microservices);
     mocks.assetJob.getForOcr.mockResolvedValue({
+      ownerId: 'user-id',
       visibility: AssetVisibility.Timeline,
       previewFile: '/uploads/user-id/thumbs/path.jpg',
     });
@@ -73,12 +74,17 @@ describe(OcrService.name, () => {
 
     it('should skip assets without a resize path', async () => {
       const asset = AssetFactory.create();
-      mocks.assetJob.getForOcr.mockResolvedValue({ visibility: AssetVisibility.Timeline, previewFile: null });
+      mocks.assetJob.getForOcr.mockResolvedValue({
+        ownerId: 'user-id',
+        visibility: AssetVisibility.Timeline,
+        previewFile: null,
+      });
 
       expect(await sut.handleOcr({ id: asset.id })).toEqual(JobStatus.Failed);
 
       expect(mocks.ocr.upsert).not.toHaveBeenCalled();
       expect(mocks.machineLearning.ocr).not.toHaveBeenCalled();
+      expect(mocks.event.emit).not.toHaveBeenCalledWith('AssetOcr', expect.anything());
     });
 
     it('should save the returned objects', async () => {
@@ -135,6 +141,7 @@ describe(OcrService.name, () => {
         ],
         'One Two Three Four Five',
       );
+      expect(mocks.event.emit).toHaveBeenCalledWith('AssetOcr', { assetId: asset.id, userId: 'user-id' });
     });
 
     it('should apply config settings', async () => {
@@ -170,6 +177,7 @@ describe(OcrService.name, () => {
     it('should skip invisible assets', async () => {
       const asset = AssetFactory.from().file({ type: AssetFileType.Preview }).build();
       mocks.assetJob.getForOcr.mockResolvedValue({
+        ownerId: 'user-id',
         visibility: AssetVisibility.Hidden,
         previewFile: asset.files[0].path,
       });
