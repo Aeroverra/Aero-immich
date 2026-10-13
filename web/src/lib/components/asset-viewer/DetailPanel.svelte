@@ -4,6 +4,7 @@
   import DetailPanelDescription from '$lib/components/asset-viewer/DetailPanelDescription.svelte';
   import DetailPanelLocation from '$lib/components/asset-viewer/DetailPanelLocation.svelte';
   import DetailPanelMetadata from '$lib/components/asset-viewer/DetailPanelMetadata.svelte';
+  import DetailPanelSectionEditor from '$lib/components/asset-viewer/DetailPanelSectionEditor.svelte';
   import DetailPanelRating from '$lib/components/asset-viewer/DetailPanelStarRating.svelte';
   import DetailPanelTags from '$lib/components/asset-viewer/DetailPanelTags.svelte';
   import DetailPanelUploadDate from '$lib/components/asset-viewer/DetailPanelUploadDate.svelte';
@@ -12,10 +13,17 @@
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { Route } from '$lib/route';
-  import { locale } from '$lib/stores/preferences.store';
+  import { detailPanelSettings, locale } from '$lib/stores/preferences.store';
   import { getAssetMediaUrl } from '$lib/utils';
   import { delay, getDimensions } from '$lib/utils/asset-utils';
   import { getByteUnitString } from '$lib/utils/byte-units';
+  import {
+    defaultDetailPanelSettings,
+    DetailPanelSection,
+    getDetailPanelSectionOrder,
+    getHiddenDetailPanelSections,
+    toDetailPanelSettings,
+  } from '$lib/utils/detail-panel-sections';
   import { handleError } from '$lib/utils/handle-error';
   import { getParentPath } from '$lib/utils/tree-utils';
   import {
@@ -26,8 +34,8 @@
     type AssetResponseDto,
   } from '@immich/sdk';
   import { Icon, IconButton, Link, LoadingSpinner, Text } from '@immich/ui';
-  import { mdiCamera, mdiCameraIris, mdiClose, mdiImageOutline, mdiInformationOutline } from '@mdi/js';
-  import { onDestroy } from 'svelte';
+  import { mdiCamera, mdiCameraIris, mdiClose, mdiImageOutline, mdiInformationOutline, mdiTuneVariant } from '@mdi/js';
+  import { onDestroy, type Snippet } from 'svelte';
   import { t } from 'svelte-i18n';
   import { slide } from 'svelte/transition';
   import PersonSidePanel from '../faces-page/PersonSidePanel.svelte';
@@ -113,12 +121,30 @@
   onDestroy(() => {
     assetViewerManager.closeEditFacesPanel();
   });
+
+  let isEditingSections = $state(false);
+  const sectionOrder = $derived(getDetailPanelSectionOrder($detailPanelSettings.order));
+  const hiddenSections = $derived(getHiddenDetailPanelSections($detailPanelSettings.hidden));
+  const visibleSections = $derived(sectionOrder.filter((section) => !hiddenSections.has(section)));
+
+  const sectionSnippets: Record<DetailPanelSection, Snippet> = {
+    [DetailPanelSection.Description]: descriptionSection,
+    [DetailPanelSection.Rating]: ratingSection,
+    [DetailPanelSection.Bookmarks]: bookmarksSection,
+    [DetailPanelSection.People]: peopleSection,
+    [DetailPanelSection.Details]: detailsSection,
+    [DetailPanelSection.Map]: mapSection,
+    [DetailPanelSection.SharedBy]: sharedBySection,
+    [DetailPanelSection.Albums]: albumsSection,
+    [DetailPanelSection.Metadata]: metadataSection,
+    [DetailPanelSection.Tags]: tagsSection,
+  };
 </script>
 
 <OnEvents onAlbumAddAssets={() => (albums = refreshAlbums())} />
 
 {#if !assetViewerManager.isEditFacesPanelOpen}
-  <section class="relative p-2">
+  <section class="relative px-2 pt-2">
     <div class="flex place-items-center gap-2">
       <IconButton
         icon={mdiClose}
@@ -129,6 +155,20 @@
         variant="ghost"
       />
       <p class="text-lg text-immich-fg dark:text-immich-dark-fg">{$t('info')}</p>
+      {#if !authManager.isSharedLink}
+        <IconButton
+          icon={mdiTuneVariant}
+          aria-label={$t('customize_info_panel')}
+          title={$t('customize_info_panel')}
+          aria-pressed={isEditingSections}
+          onclick={() => (isEditingSections = !isEditingSections)}
+          shape="round"
+          color="secondary"
+          variant="ghost"
+          class="ms-auto"
+          data-testid="detail-panel-customize"
+        />
+      {/if}
     </div>
 
     {#if asset.isOffline}
@@ -152,12 +192,60 @@
         </div>
       </section>
     {/if}
+  </section>
 
+  {#if isEditingSections}
+    <DetailPanelSectionEditor
+      order={sectionOrder}
+      hidden={hiddenSections}
+      onChange={(order, hidden) => ($detailPanelSettings = toDetailPanelSettings(order, hidden))}
+      onReset={() => ($detailPanelSettings = { ...defaultDetailPanelSettings })}
+      onDone={() => (isEditingSections = false)}
+    />
+  {:else}
+    <div class="pb-12">
+      {#each visibleSections as section (section)}
+        {@render sectionSnippets[section]()}
+      {/each}
+    </div>
+  {/if}
+{/if}
+
+{#if assetViewerManager.isEditFacesPanelOpen}
+  <PersonSidePanel
+    assetId={asset.id}
+    assetType={asset.type}
+    onClose={() => assetViewerManager.closeEditFacesPanel()}
+    onRefresh={handleRefreshPeople}
+  />
+{/if}
+
+{#snippet descriptionSection()}
+  <div class="relative px-2">
     <DetailPanelDescription {asset} {isOwner} />
-    <DetailPanelRating {asset} {isOwner} />
-    <DetailPanelBookmarks {asset} />
-    <DetailPanelPeople {asset} {isOwner} {previousRoute} />
+  </div>
+{/snippet}
 
+{#snippet ratingSection()}
+  <div class="relative px-2">
+    <DetailPanelRating {asset} {isOwner} />
+  </div>
+{/snippet}
+
+{#snippet bookmarksSection()}
+  <div class="relative px-2">
+    <DetailPanelBookmarks {asset} />
+  </div>
+{/snippet}
+
+{#snippet peopleSection()}
+  <div class="relative px-2">
+    <DetailPanelPeople {asset} {isOwner} {previousRoute} />
+  </div>
+{/snippet}
+
+{#snippet detailsSection()}
+  <div class="relative px-2 pb-2">
     <div class="p-4">
       {#if asset.exifInfo}
         <div class="flex h-10 w-full items-center justify-between text-sm">
@@ -281,8 +369,10 @@
 
       <DetailPanelLocation {isOwner} {asset} />
     </div>
-  </section>
+  </div>
+{/snippet}
 
+{#snippet mapSection()}
   {#if latlng && featureFlagsManager.value.map}
     <div class="h-90">
       {#await import('$lib/components/shared-components/map/Map.svelte')}
@@ -328,7 +418,9 @@
       {/await}
     </div>
   {/if}
+{/snippet}
 
+{#snippet sharedBySection()}
   {#if currentAlbum && currentAlbum.albumUsers.length > 1 && asset.owner}
     <section class="mt-4 px-6 dark:text-immich-dark-fg">
       <Text size="small" color="muted">{$t('shared_by')}</Text>
@@ -345,7 +437,9 @@
       </div>
     </section>
   {/if}
+{/snippet}
 
+{#snippet albumsSection()}
   {#await albums then albums}
     {#if albums.length > 0}
       <section class="p-6 dark:text-immich-dark-fg">
@@ -379,23 +473,18 @@
       </section>
     {/if}
   {/await}
+{/snippet}
 
+{#snippet metadataSection()}
   {#if authManager.authenticated && !authManager.isSharedLink}
     <DetailPanelMetadata {asset} {isOwner} />
   {/if}
+{/snippet}
 
+{#snippet tagsSection()}
   {#if authManager.authenticated && authManager.preferences.tags.enabled}
-    <section class="relative px-2 pb-12 dark:bg-immich-dark-bg dark:text-immich-dark-fg">
+    <section class="relative px-2 dark:bg-immich-dark-bg dark:text-immich-dark-fg">
       <DetailPanelTags {asset} {isOwner} />
     </section>
   {/if}
-{/if}
-
-{#if assetViewerManager.isEditFacesPanelOpen}
-  <PersonSidePanel
-    assetId={asset.id}
-    assetType={asset.type}
-    onClose={() => assetViewerManager.closeEditFacesPanel()}
-    onRefresh={handleRefreshPeople}
-  />
-{/if}
+{/snippet}
