@@ -35,6 +35,7 @@
   import { withoutShownStacks } from '$lib/utils/asset-utils';
   import { formatVideoLength } from '$lib/components/shared-components/search-bar/search-bar-utils';
   import { parseUtcDate } from '$lib/utils/date-time';
+  import { DateTime } from 'luxon';
   import { handleError } from '$lib/utils/handle-error';
   import { isAlbumsRoute, isPeopleRoute } from '$lib/utils/navigation';
   import { toTimelineAsset } from '$lib/utils/timeline-util';
@@ -42,6 +43,7 @@
     type AlbumResponseDto,
     type AssetResponseDto,
     AssetVisibility,
+    getAlbumInfo,
     getPerson,
     getTagById,
     type MetadataSearchDto,
@@ -204,10 +206,19 @@
     );
   }
 
+  // upload bounds are real moments, sent as the edges of the picked local days
+  function getHumanReadableLocalDate(dateString: string) {
+    return DateTime.fromISO(dateString).toLocal().toLocaleString(DateTime.DATE_FULL, { locale: $locale });
+  }
+
   function getHumanReadableSearchKey(key: keyof SearchTerms): string {
     const keyMap: Partial<Record<keyof SearchTerms, string>> = {
       takenAfter: $t('start_date'),
       takenBefore: $t('end_date'),
+      uploadedAfter: $t('search_uploaded_after'),
+      uploadedBefore: $t('search_uploaded_before'),
+      albumIds: $t('albums'),
+      excludeAlbumIds: $t('search_exclude_albums'),
       visibility: $t('in_archive'),
       isFavorite: $t('favorite'),
       isNotInAlbum: $t('not_in_any_album'),
@@ -265,10 +276,15 @@
     return tagNames.join(', ');
   }
 
-  const onAlbumAddAssets = ({ assetIds }: { assetIds: string[] }) => {
+  async function getAlbumNames(albumIds: string[]) {
+    const albums = await Promise.all(albumIds.map((id) => getAlbumInfo({ id })));
+    return albums.map((album) => album.albumName).join(', ');
+  }
+
+  const onAlbumAddAssets = ({ assetIds, albumIds }: { assetIds: string[]; albumIds: string[] }) => {
     assetMultiSelectManager.clear();
 
-    if (terms.isNotInAlbum) {
+    if (terms.isNotInAlbum || albumIds.some((albumId) => terms.excludeAlbumIds?.includes(albumId))) {
       const assetIdSet = new Set(assetIds);
       searchResultAssets = searchResultAssets.filter((asset) => !assetIdSet.has(asset.id));
     }
@@ -312,6 +328,12 @@
                 {value ? $t('search_private_only') : $t('search_private_exclude')}
               {:else if (searchKey === 'takenAfter' || searchKey === 'takenBefore') && typeof value === 'string'}
                 {getHumanReadableDate(value)}
+              {:else if (searchKey === 'uploadedAfter' || searchKey === 'uploadedBefore') && typeof value === 'string'}
+                {getHumanReadableLocalDate(value)}
+              {:else if (searchKey === 'albumIds' || searchKey === 'excludeAlbumIds') && Array.isArray(value)}
+                {#await getAlbumNames(value) then albumNames}
+                  {albumNames}
+                {/await}
               {:else if searchKey === 'personIds' && Array.isArray(value)}
                 {#await getPersonName(value) then personName}
                   {personName}

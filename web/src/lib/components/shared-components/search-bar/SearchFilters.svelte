@@ -9,18 +9,26 @@
     mdiChevronDown,
     mdiChevronUp,
     mdiImage,
+    mdiImageAlbum,
     mdiMagnify,
     mdiMapMarker,
     mdiTagMultiple,
     mdiTune,
   } from '@mdi/js';
   import SearchLocationSection from './SearchLocationSection.svelte';
-  import { getAllTags, type PersonResponseDto, type TagResponseDto } from '@immich/sdk';
+  import {
+    getAllAlbums,
+    getAllTags,
+    type AlbumResponseDto,
+    type PersonResponseDto,
+    type TagResponseDto,
+  } from '@immich/sdk';
   import SearchMediaSection from './SearchMediaSection.svelte';
   import SearchCameraSection from './SearchCameraSection.svelte';
   import SearchDateSection from './SearchDateSection.svelte';
   import SearchPeopleSection from './SearchPeopleSection.svelte';
   import SearchTagsSection from './SearchTagsSection.svelte';
+  import SearchAlbumsSection from './SearchAlbumsSection.svelte';
   import SearchTextSection from './SearchTextSection.svelte';
   import SearchDisplaySection from './SearchDisplaySection.svelte';
   import SearchPrivateSection from './SearchPrivateSection.svelte';
@@ -29,8 +37,8 @@
   import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import {
     getPeople,
-    getSearchDatePreset,
-    getSearchDateTitle,
+    getSearchAlbumsTitle,
+    getSearchDateFilterTitle,
     getSearchMediaTitle,
     getSearchPeopleTitle,
     getSearchPlacesTitle,
@@ -69,16 +77,11 @@
   let people = $state<PersonResponseDto[]>();
   let tagsPromise = $state<Promise<TagResponseDto[]>>();
   let tags = $state<TagResponseDto[]>();
+  let albums = $state<AlbumResponseDto[]>();
 
   let typeTitle = $derived(getSearchTypeTitle(searchManager.filter.queryType));
   let peopleTitle = $state<string>();
-  let dateTitle = $derived(
-    getSearchDateTitle(
-      getSearchDatePreset(searchManager.filter.date.takenAfter, searchManager.filter.date.takenBefore),
-      searchManager.filter.date.takenAfter,
-      searchManager.filter.date.takenBefore,
-    ),
-  );
+  let dateTitle = $derived(getSearchDateFilterTitle(searchManager.filter.date));
   let placesTitle = $derived(
     getSearchPlacesTitle(
       searchManager.filter.location.city,
@@ -87,6 +90,11 @@
     ),
   );
   let tagsTitle = $state<string>();
+  let albumsTitle = $derived(
+    searchManager.filter.display.isNotInAlbum
+      ? $t('not_in_any_album')
+      : getSearchAlbumsTitle(albums ?? [], searchManager.filter.albumIds, searchManager.filter.excludeAlbumIds),
+  );
   let mediaTitle = $derived(
     getSearchMediaTitle(
       searchManager.filter.mediaType,
@@ -131,6 +139,12 @@
         ]
       : []),
     {
+      name: 'albums',
+      icon: mdiImageAlbum,
+      title: $t('albums'),
+      activeTitle: () => albumsTitle,
+    },
+    {
       name: 'media',
       icon: mdiImage,
       title: $t('media'),
@@ -160,6 +174,10 @@
     if (searchManager.filter.tagIds?.size && !tagsPromise) {
       tagsPromise = getAllTags();
       void tagsPromise.then((res) => (tags = res));
+    }
+
+    if (searchManager.filter.albumIds.size > 0 || searchManager.filter.excludeAlbumIds.size > 0) {
+      void getAllAlbums({}).then((res) => (albums = res));
     }
   });
 
@@ -236,6 +254,8 @@
             <SearchLocationSection />
           {:else if activeFilter === 'tags'}
             <SearchTagsSection bind:title={tagsTitle} parentPromise={tagsPromise} />
+          {:else if activeFilter === 'albums'}
+            <SearchAlbumsSection bind:albums />
           {:else if activeFilter === 'media'}
             <SearchMediaSection />
           {/if}

@@ -172,6 +172,38 @@ describe(AssetService.name, () => {
       );
     });
 
+    it('should give the Google Photos upload time as the upload date of an imported asset', async () => {
+      const asset = AssetFactory.create({ createdAt: new Date('2026-09-20T12:00:00.000Z') });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.getMetadataByKey.mockResolvedValue({
+        key: 'google-photos',
+        value: { uploadedAt: '2019-03-10T08:30:00Z' },
+        updatedAt: new Date(),
+      });
+
+      await expect(sut.get(authStub.admin, asset.id)).resolves.toEqual(
+        expect.objectContaining({ uploadedAt: '2019-03-10T08:30:00.000Z' }),
+      );
+      expect(mocks.asset.getMetadataByKey).toHaveBeenCalledWith(asset.id, 'google-photos');
+    });
+
+    it('should fall back to the creation date for the upload date', async () => {
+      const asset = AssetFactory.create({ createdAt: new Date('2026-09-20T12:00:00.000Z') });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getById.mockResolvedValue(getForAsset(asset));
+      mocks.asset.getMetadataByKey
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce({ key: 'google-photos', value: { uploadedAt: 'yesterday' }, updatedAt: new Date() });
+
+      await expect(sut.get(authStub.admin, asset.id)).resolves.toEqual(
+        expect.objectContaining({ uploadedAt: '2026-09-20T12:00:00.000Z' }),
+      );
+      await expect(sut.get(authStub.admin, asset.id)).resolves.toEqual(
+        expect.objectContaining({ uploadedAt: '2026-09-20T12:00:00.000Z' }),
+      );
+    });
+
     it('should not count an edited transcode as the playback copy', async () => {
       const asset = AssetFactory.from({ type: AssetType.Video })
         .files([{ type: AssetFileType.EncodedVideo, isEdited: true }])

@@ -1,3 +1,4 @@
+import { DateTime } from 'luxon';
 import { goto } from '$app/navigation';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
@@ -133,5 +134,52 @@ describe('SearchManager video length', () => {
     expect(searchManager.filter.minDuration).toBe(30_000);
     await searchManager.submit();
     expect(submittedQuery()).toMatchObject({ minDuration: 30_000, maxDuration: 300_000 });
+  });
+});
+
+describe('SearchManager albums and upload date', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    searchManager.reset();
+  });
+
+  afterEach(() => {
+    searchManager.reset();
+  });
+
+  it('reads albums from a query and submits them', async () => {
+    searchManager.setQuery({ albumIds: ['trip'], excludeAlbumIds: ['party'] });
+
+    expect([...searchManager.filter.albumIds]).toEqual(['trip']);
+    expect([...searchManager.filter.excludeAlbumIds]).toEqual(['party']);
+    await searchManager.submit();
+    expect(submittedQuery()).toMatchObject({ albumIds: ['trip'], excludeAlbumIds: ['party'] });
+  });
+
+  it('drops the albums while searching for assets outside every album', async () => {
+    searchManager.setQuery({ albumIds: ['trip'], excludeAlbumIds: ['party'], isNotInAlbum: true });
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).toMatchObject({ isNotInAlbum: true });
+    expect(submittedQuery()).not.toHaveProperty('albumIds');
+    expect(submittedQuery()).not.toHaveProperty('excludeAlbumIds');
+  });
+
+  it('sends the picked upload days as local midnight to local midnight and reads them back', async () => {
+    searchManager.filter.date.uploadedAfter = DateTime.utc(2019, 3, 1);
+    searchManager.filter.date.uploadedBefore = DateTime.utc(2019, 3, 31);
+
+    await searchManager.submit();
+
+    const query = submittedQuery() as { uploadedAfter: string; uploadedBefore: string };
+    expect(query.uploadedAfter).toBe(DateTime.local(2019, 3, 1).startOf('day').toUTC().toISO());
+    expect(query.uploadedBefore).toBe(DateTime.local(2019, 3, 31).endOf('day').toUTC().toISO());
+    expect(query).not.toHaveProperty('takenAfter');
+
+    searchManager.setQuery(query);
+
+    expect(searchManager.filter.date.uploadedAfter?.toISODate()).toBe('2019-03-01');
+    expect(searchManager.filter.date.uploadedBefore?.toISODate()).toBe('2019-03-31');
   });
 });

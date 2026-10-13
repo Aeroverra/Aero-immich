@@ -102,15 +102,11 @@ export class SearchService extends BaseService {
       checksum = Buffer.from(dto.checksum, encoding);
     }
 
-    let userIds: string[] | undefined;
-
-    if (dto.albumIds && dto.albumIds.length > 0) {
-      await this.requireAccess({ auth, ids: dto.albumIds, permission: Permission.AlbumRead });
-    } else if (auth.sharedLink) {
+    if (!dto.albumIds?.length && auth.sharedLink) {
       throw new BadRequestException('Shared link access is only allowed in combination with an albumIds filter');
-    } else {
-      userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     }
+
+    const userIds = await this.getUserIdsToSearchIn(auth, dto);
 
     const page = dto.page ?? 1;
     const size = dto.size;
@@ -136,6 +132,7 @@ export class SearchService extends BaseService {
     }
 
     const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
+    await this.requireExcludedAlbumAccess(auth, dto);
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
     }
@@ -167,6 +164,7 @@ export class SearchService extends BaseService {
     }
 
     const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
+    await this.requireExcludedAlbumAccess(auth, dto);
     const items = await this.searchRepository.searchRandom(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -187,6 +185,7 @@ export class SearchService extends BaseService {
     }
 
     const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
+    await this.requireExcludedAlbumAccess(auth, dto);
     const items = await this.searchRepository.searchLargeAssets(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -215,7 +214,7 @@ export class SearchService extends BaseService {
       throw new BadRequestException('Smart search is not enabled');
     }
 
-    const userIds = this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
+    const userIds = this.getUserIdsToSearchIn(auth, dto);
     const embedding = await this.resolveEmbedding(auth, dto, machineLearning);
     const page = dto.page ?? 1;
     const size = dto.size;
@@ -415,6 +414,31 @@ export class SearchService extends BaseService {
     const visible = await this.accessRepository.tag.checkOwnerAccess(auth.user.id, owned, false);
     if (visible.size < owned.size) {
       throw new BadRequestException(`Not found or no ${Permission.TagRead} access`);
+    }
+  }
+
+  /**
+   * Whose assets a flat search covers: a search in albums covers everything in them, whoever added it,
+   * like the album page does; otherwise the user and their timeline partners. Albums named to search in
+   * or to leave out must be readable.
+   */
+  private async getUserIdsToSearchIn(
+    auth: AuthDto,
+    dto: Pick<SmartSearchDto, 'albumIds' | 'excludeAlbumIds' | 'visibility' | 'tagIds' | 'excludeTagIds'>,
+  ): Promise<string[] | undefined> {
+    await this.requireExcludedAlbumAccess(auth, dto);
+    if (!dto.albumIds?.length) {
+      return this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
+    }
+
+    await this.requireAccess({ auth, ids: dto.albumIds, permission: Permission.AlbumRead });
+    await this.requireVisibleTags(auth, searchedTagIds(dto));
+    return undefined;
+  }
+
+  private async requireExcludedAlbumAccess(auth: AuthDto, dto: { excludeAlbumIds?: string[] }) {
+    if (dto.excludeAlbumIds?.length) {
+      await this.requireAccess({ auth, ids: dto.excludeAlbumIds, permission: Permission.AlbumRead });
     }
   }
 
