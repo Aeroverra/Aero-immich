@@ -231,7 +231,8 @@
         timelineAlbumId: albumId,
       };
     }
-    return { albumId, order: album.order };
+    // one tile per stack like every other view; the Timeline withStacked prop only draws the stack icon
+    return { albumId, order: album.order, withStacked: true };
   });
 
   const isShared = $derived(viewMode === AlbumPageViewMode.SELECT_ASSETS ? false : album.albumUsers.length > 1);
