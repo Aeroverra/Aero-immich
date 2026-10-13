@@ -167,7 +167,7 @@
     if (searchManager.filter.tagIds === null) {
       tagsTitle = $t('untagged');
     } else if (tags) {
-      tagsTitle = getSearchTagsTitle(tags, searchManager.filter.tagIds);
+      tagsTitle = getSearchTagsTitle(tags, searchManager.filter.tagIds, searchManager.filter.excludeTagIds);
     }
   });
 

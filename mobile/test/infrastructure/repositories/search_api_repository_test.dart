@@ -72,6 +72,27 @@ void main() {
     });
   });
 
+  group('excluded tags', () {
+    test('sends excluded tags next to the included ones, for both searches', () async {
+      final tagged = filter.copyWith(tagIds: ['work'], excludeTagIds: ['holiday']);
+
+      await repo.search(tagged, 1);
+      await repo.search(tagged.copyWith(context: 'sunset'), 1);
+
+      expect(sentMetadata().excludeTagIds.value, ['holiday']);
+      expect(sentSmart().excludeTagIds.value, ['holiday']);
+    });
+
+    test('omits excluded tags when there are none or the search is for untagged assets', () async {
+      await repo.search(filter.copyWith(excludeTagIds: []), 1);
+      expect(sentMetadata().excludeTagIds.isPresent, isFalse);
+
+      final untagged = filter.copyWith(excludeTagIds: ['holiday'], display: filter.display.copyWith(hasNoTags: true));
+      await repo.search(untagged, 1);
+      expect(sentMetadata().excludeTagIds.isPresent, isFalse);
+    });
+  });
+
   group('smart search', () {
     final smartFilter = filter.copyWith(context: 'sunset');
 

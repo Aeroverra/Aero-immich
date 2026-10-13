@@ -38,6 +38,10 @@ import { isSmartSearchEnabled } from 'src/utils/misc';
 import { decodeSearchCursor, encodeSearchCursor } from 'src/utils/search-cursor';
 import { applyLockedVisibilityPolicy, applyPrivatePolicy, collectFilterIds } from 'src/utils/search-filter';
 
+/** Every tag a flat search names, to find or to leave out; null (untagged) names none */
+const searchedTagIds = (dto: { tagIds?: string[] | null; excludeTagIds?: string[] }) =>
+  dto.tagIds === null && !dto.excludeTagIds ? null : [...(dto.tagIds ?? []), ...(dto.excludeTagIds ?? [])];
+
 @Injectable()
 export class SearchService extends BaseService {
   private embeddingCache = new LRUMap<string, string>(100);
@@ -105,7 +109,7 @@ export class SearchService extends BaseService {
     } else if (auth.sharedLink) {
       throw new BadRequestException('Shared link access is only allowed in combination with an albumIds filter');
     } else {
-      userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
+      userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     }
 
     const page = dto.page ?? 1;
@@ -131,7 +135,7 @@ export class SearchService extends BaseService {
       return this.searchStatisticsV3(auth, dto);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
     }
@@ -162,7 +166,7 @@ export class SearchService extends BaseService {
       requirePrivateMode(auth);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     const items = await this.searchRepository.searchRandom(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -182,7 +186,7 @@ export class SearchService extends BaseService {
       requirePrivateMode(auth);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     const items = await this.searchRepository.searchLargeAssets(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -211,7 +215,7 @@ export class SearchService extends BaseService {
       throw new BadRequestException('Smart search is not enabled');
     }
 
-    const userIds = this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
+    const userIds = this.getUserIdsToSearch(auth, dto.visibility, searchedTagIds(dto));
     const embedding = await this.resolveEmbedding(auth, dto, machineLearning);
     const page = dto.page ?? 1;
     const size = dto.size;

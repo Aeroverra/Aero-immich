@@ -59,6 +59,20 @@ describe('SearchTagsSection component', () => {
     expect(container.contains(document.activeElement)).toBe(true);
   });
 
+  it('lists excluded tags and removes one when its chip is clicked', async () => {
+    const user = userEvent.setup();
+    searchManager.setQuery({ tagIds: ['tag-1'], excludeTagIds: ['tag-2'] });
+    render(SearchTagsSection, {
+      props: { title: undefined, parentPromise: Promise.resolve([tag('tag-1', 'holiday'), tag('tag-2', 'family')]) },
+    });
+
+    // i18n is not loaded here: the label is the key
+    await user.click(await screen.findByRole('button', { name: 'search_without_tag' }));
+
+    expect(searchManager.filter.excludeTagIds.size).toBe(0);
+    expect([...(searchManager.filter.tagIds ?? [])]).toEqual(['tag-1']);
+  });
+
   it('sets tagIds to null when untagged is toggled on', async () => {
     const user = userEvent.setup();
     render(SearchTagsSection, {

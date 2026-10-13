@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
   import { SvelteSet } from 'svelte/reactivity';
-  import { mdiClose } from '@mdi/js';
+  import { mdiClose, mdiTagOffOutline } from '@mdi/js';
   import SearchButton from './SearchButton.svelte';
   import { getSearchTagsTitle } from './search-bar-utils';
   import { searchManager } from '$lib/managers/search-manager.svelte';
@@ -21,9 +21,14 @@
 
   let container = $state<HTMLDivElement>();
   let selectedTags = $derived(searchManager.filter.tagIds);
+  let excludedTags = $derived(searchManager.filter.excludeTagIds);
   let allTags: TagResponseDto[] = $state([]);
   let tagMap = $derived(Object.fromEntries(allTags.map((tag) => [tag.id, tag])));
   let selectedOption = $state(undefined);
+  let excludedOption = $state(undefined);
+  const updateTitle = () => {
+    title = getSearchTagsTitle(allTags, selectedTags ?? new SvelteSet(), excludedTags);
+  };
 
   onMount(() => {
     if (parentPromise) {
@@ -39,8 +44,26 @@
     }
 
     selectedTags.add(option.value);
+    excludedTags.delete(option.value);
     selectedOption = undefined;
-    title = getSearchTagsTitle(allTags, selectedTags);
+    updateTitle();
+  };
+
+  const handleExclude = (option?: ComboBoxOption) => {
+    if (!option || !option.id || selectedTags === null) {
+      return;
+    }
+
+    excludedTags.add(option.value);
+    selectedTags.delete(option.value);
+    excludedOption = undefined;
+    updateTitle();
+  };
+
+  const handleRemoveExcluded = (tag: string) => {
+    container?.focus();
+    excludedTags.delete(tag);
+    updateTitle();
   };
 
   const handleRemove = (tag: string) => {
@@ -51,7 +74,7 @@
     // Move focus back to the container so it doesn't fallback to the body and closes the search bar
     container?.focus();
     selectedTags.delete(tag);
-    title = getSearchTagsTitle(allTags, selectedTags);
+    updateTitle();
   };
 
   const handleToggleUntagged = () => {
@@ -89,6 +112,39 @@
               color="primary"
               variant="outline"
               onclick={() => handleRemove(tagId)}
+              trailingIcon={mdiClose}
+              >{tag.value}
+            </Button>
+          {/if}
+        {/each}
+      </section>
+    {/if}
+
+    <form autocomplete="off" class="pt-5" data-testid="search-exclude-tags">
+      <Combobox
+        disabled={selectedTags === null}
+        label={$t('search_exclude_tags')}
+        onSelect={handleExclude}
+        defaultFirstOption
+        options={allTags.map((tag) => ({ id: tag.id, label: tag.value, value: tag.id }))}
+        bind:selectedOption={excludedOption}
+        placeholder={$t('search_exclude_tags_placeholder')}
+      />
+    </form>
+
+    {#if excludedTags.size > 0 && selectedTags !== null}
+      <section class="flex flex-wrap gap-2 pt-3">
+        {#each excludedTags as tagId (tagId)}
+          {@const tag = tagMap[tagId]}
+          {#if tag}
+            <Button
+              size="small"
+              shape="round"
+              color="danger"
+              variant="outline"
+              aria-label={$t('search_without_tag', { values: { tag: tag.value } })}
+              onclick={() => handleRemoveExcluded(tagId)}
+              leadingIcon={mdiTagOffOutline}
               trailingIcon={mdiClose}
               >{tag.value}
             </Button>
