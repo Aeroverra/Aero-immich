@@ -190,6 +190,52 @@ export const transformFaceBoundingBox = (
   };
 };
 
+/**
+ * Maps a face found on an edited image (such as the edited preview) back to the unedited image.
+ * Faces are stored relative to the unedited image and the asset's edits are applied when they are returned,
+ * so a face detected on the edited preview has to be stored the same way.
+ */
+export const transformEditedFaceToOriginal = (
+  box: { x1: number; y1: number; x2: number; y2: number },
+  edits: AssetEditActionItem[],
+  dimensions: {
+    /** the edited image the face was found on */
+    source: ImageDimensions;
+    /** the full size edited image */
+    edited: ImageDimensions;
+    /** the unedited image, if known */
+    original?: ImageDimensions;
+  },
+): FaceBoundingBox => {
+  const { source, edited, original } = dimensions;
+  const scaleX = edited.width / source.width;
+  const scaleY = edited.height / source.height;
+
+  const points: Point[] = [
+    { x: box.x1 * scaleX, y: box.y1 * scaleY },
+    { x: box.x2 * scaleX, y: box.y2 * scaleY },
+  ];
+
+  const {
+    points: [p1, p2],
+    currentWidth,
+    currentHeight,
+  } = transformPoints(points, edits, edited, { inverse: true });
+
+  // without a crop the inverse transform ends on the unedited dimensions
+  const imageWidth = original?.width || currentWidth;
+  const imageHeight = original?.height || currentHeight;
+
+  return {
+    boundingBoxX1: Math.max(0, Math.round(Math.min(p1.x, p2.x))),
+    boundingBoxY1: Math.max(0, Math.round(Math.min(p1.y, p2.y))),
+    boundingBoxX2: Math.min(imageWidth, Math.round(Math.max(p1.x, p2.x))),
+    boundingBoxY2: Math.min(imageHeight, Math.round(Math.max(p1.y, p2.y))),
+    imageWidth,
+    imageHeight,
+  };
+};
+
 const reorderQuadPointsForRotation = (points: Point[], rotationDegrees: number): Point[] => {
   const [p1, p2, p3, p4] = points;
   switch (rotationDegrees) {

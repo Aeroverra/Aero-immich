@@ -187,8 +187,11 @@ export const getForAssetFace = (face: ReturnType<AssetFaceFactory['build']>) => 
 export const getForDetectedFaces = (asset: ReturnType<AssetFactory['build']>) => ({
   id: asset.id,
   visibility: asset.visibility,
+  width: asset.width,
+  height: asset.height,
   exifInfo: getDehydrated(asset.exifInfo),
   faces: asset.faces.map((face) => getDehydrated(face)),
+  edits: asset.edits.map(({ action, parameters }) => ({ action, parameters })) as AssetEditActionItem[],
   previewFile: asset.files
     .filter((file) => file.type === AssetFileType.Preview)
     .toSorted((a) => (a.isEdited ? -1 : 1))

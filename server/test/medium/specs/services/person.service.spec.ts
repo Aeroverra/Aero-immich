@@ -10,6 +10,7 @@ import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
 import { JobRepository } from 'src/repositories/job.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -20,7 +21,7 @@ import { SystemMetadataRepository } from 'src/repositories/system-metadata.repos
 import { DB } from 'src/schema';
 import { PersonService } from 'src/services/person.service';
 import { newMediumService } from 'test/medium.factory';
-import { factory } from 'test/small.factory';
+import { factory, newEmbedding } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
 
 let defaultDatabase: Kysely<DB>;
@@ -32,6 +33,7 @@ const setup = (db?: Kysely<DB>) => {
       AccessRepository,
       AssetJobRepository,
       ConfigRepository,
+      CryptoRepository,
       DatabaseRepository,
       PersonRepository,
       AssetRepository,
@@ -139,6 +141,49 @@ describe(PersonService.name, () => {
         'edited_file.jpg',
         config.machineLearning.facialRecognition,
       );
+    });
+
+    it('should return a face found on the edited preview where it was found', async () => {
+      const { sut, ctx } = setup(await getKyselyDB());
+      const { user } = await ctx.newUser();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, width: 3220, height: 2580 });
+      await ctx.newExif({ assetId: asset.id, exifImageWidth: 2580, exifImageHeight: 3220 });
+      await ctx.newEdits(asset.id, { edits: [{ action: AssetEditAction.Rotate, parameters: { angle: 270 } }] });
+      await ctx.newAssetFile({ assetId: asset.id, type: AssetFileType.Preview, path: 'unedited_file.jpg' });
+      await ctx.newAssetFile({
+        assetId: asset.id,
+        type: AssetFileType.Preview,
+        isEdited: true,
+        path: 'edited_file.jpg',
+      });
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      ctx.getMock(MachineLearningRepository).detectFaces.mockResolvedValue({
+        imageWidth: 1797,
+        imageHeight: 1440,
+        faces: [{ boundingBox: { x1: 1291, y1: 309, x2: 1416, y2: 485 }, embedding: newEmbedding(), score: 0.9 }],
+      });
+      const auth = factory.auth({ user });
+
+      await sut.handleDetectFaces({ id: asset.id });
+
+      // shown on the edited image at the same place, scaled to the full size
+      await expect(sut.getFacesById(auth, { id: asset.id })).resolves.toEqual([
+        expect.objectContaining({
+          imageWidth: 3220,
+          imageHeight: 2580,
+          boundingBoxX1: expect.closeTo(2313, -1),
+          boundingBoxY1: expect.closeTo(554, -1),
+          boundingBoxX2: expect.closeTo(2537, -1),
+          boundingBoxY2: expect.closeTo(869, -1),
+        }),
+      ]);
+
+      // detecting again on the edited preview keeps the same face
+      const [face] = await sut.getFacesById(auth, { id: asset.id });
+      await sut.handleDetectFaces({ id: asset.id });
+      await expect(sut.getFacesById(auth, { id: asset.id })).resolves.toEqual([
+        expect.objectContaining({ id: face.id }),
+      ]);
     });
   });
 
