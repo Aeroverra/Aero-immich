@@ -285,6 +285,13 @@ export class JobRepository {
       case JobName.FacialRecognitionQueueAll: {
         return { deduplication: { id: JobName.FacialRecognitionQueueAll } };
       }
+      case JobName.PersonSuggestionsQueueAll: {
+        return { deduplication: { id: JobName.PersonSuggestionsQueueAll } };
+      }
+      case JobName.PersonSuggestions: {
+        // asking again while a user's suggestions are waiting to be worked out changes nothing
+        return { deduplication: { id: `${JobName.PersonSuggestions}/${item.data.userId}` } };
+      }
       case JobName.VersionCheck: {
         return { deduplication: { id: JobName.VersionCheck } };
       }

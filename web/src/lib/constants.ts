@@ -53,6 +53,8 @@ export const dateFormats = {
 export enum QueryParameter {
   ACTION = 'action',
   ASSET_ID = 'assetId',
+  /** a face to point out in the photo (outlined) or video (shown at its frame) */
+  FACE = 'face',
   ID = 'id',
   IS_OPEN = 'isOpen',
   IS_SAVED = 'isSaved',
@@ -63,6 +65,7 @@ export enum QueryParameter {
   SMART_SEARCH = 'smartSearch',
   PAGE = 'page',
   PATH = 'path',
+  PERSON_ID = 'personId',
 }
 
 export enum SessionStorageKey {

@@ -142,6 +142,10 @@ const updatedConfig = Object.freeze<SystemConfig>({
       maxDistance: 0.5,
       minFaces: 3,
     },
+    personSuggestions: {
+      enabled: true,
+      minScore: 0.35,
+    },
     faceAttributes: {
       enabled: true,
       modelName: 'face_landmarker',

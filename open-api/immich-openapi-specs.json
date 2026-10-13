@@ -7390,6 +7390,64 @@
         "x-immich-state": "Stable"
       }
     },
+    "/faces/{id}/thumbnail": {
+      "get": {
+        "description": "Retrieve a face of the caller cut out of its photo or video frame, as a square JPEG.",
+        "operationId": "getFaceThumbnail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get face thumbnail",
+        "tags": [
+          "Faces"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "face.read",
+        "x-immich-state": "Beta"
+      }
+    },
     "/jobs": {
       "get": {
         "deprecated": true,
@@ -10264,6 +10322,425 @@
         ],
         "x-immich-permission": "person.merge",
         "x-immich-state": "Stable"
+      }
+    },
+    "/people/suggestions": {
+      "get": {
+        "description": "Questions to answer, most valuable first: whether an unnamed person or a face without a person is a named person, or whether two unnamed people are one.",
+        "operationId": "getPersonSuggestions",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Page number for pagination",
+            "schema": {
+              "minimum": 1,
+              "maximum": 9007199254740991,
+              "default": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "personId",
+            "required": false,
+            "in": "query",
+            "description": "Only questions about this person, whether they are the one asked about or the one they may be",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Number of questions per page",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSuggestionsResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get person suggestions",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.read",
+        "x-immich-state": "Beta"
+      },
+      "post": {
+        "description": "Ask whether a person (or a face) is the same person as another, for example to hand over matches a tool was not sure about. An existing question about the same pair is returned instead.",
+        "operationId": "createPersonSuggestion",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonSuggestionCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSuggestionResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Create a person suggestion",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.update",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/people/suggestions/answers": {
+      "get": {
+        "description": "The latest answers to person suggestions, newest first.",
+        "operationId": "getPersonSuggestionAnswers",
+        "parameters": [
+          {
+            "name": "size",
+            "required": false,
+            "in": "query",
+            "description": "Number of answers",
+            "schema": {
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PersonSuggestionResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Get answered person suggestions",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/people/suggestions/count": {
+      "get": {
+        "description": "How many person suggestions there are to answer, optionally only those about one person.",
+        "operationId": "getPersonSuggestionStatistics",
+        "parameters": [
+          {
+            "name": "personId",
+            "required": false,
+            "in": "query",
+            "description": "Only questions about this person, whether they are the one asked about or the one they may be",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSuggestionStatisticsResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Count person suggestions",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/people/suggestions/refresh": {
+      "post": {
+        "description": "Queue a search for new person suggestions for the current user.",
+        "operationId": "refreshPersonSuggestions",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Look for person suggestions",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.read",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/people/suggestions/{id}": {
+      "put": {
+        "description": "Same merges the candidate into the target person (or moves the face to it). Different is kept for good: the pair is never asked about again, merged or matched by facial recognition. Skipped asks again later.",
+        "operationId": "answerPersonSuggestion",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonSuggestionAnswerDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSuggestionResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Answer a person suggestion",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.merge",
+        "x-immich-state": "Beta"
+      }
+    },
+    "/people/suggestions/{id}/answer": {
+      "delete": {
+        "description": "Asks the question again. Taking back Same moves the faces the answer moved back, as long as they are still with the person.",
+        "operationId": "undoPersonSuggestionAnswer",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonSuggestionResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Take back the answer to a person suggestion",
+        "tags": [
+          "People"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "person.merge",
+        "x-immich-state": "Beta"
       }
     },
     "/people/{id}": {
@@ -21832,6 +22309,9 @@
           "ocr": {
             "$ref": "#/components/schemas/AdminConfigOcrDto"
           },
+          "personSuggestions": {
+            "$ref": "#/components/schemas/AdminConfigPersonSuggestionsDto"
+          },
           "urls": {
             "description": "ML service URLs",
             "items": {
@@ -21853,6 +22333,7 @@
           "faceAttributes",
           "facialRecognition",
           "ocr",
+          "personSuggestions",
           "urls",
           "videoFrameAnalysis"
         ],
@@ -22133,6 +22614,26 @@
         },
         "required": [
           "enabled"
+        ],
+        "type": "object"
+      },
+      "AdminConfigPersonSuggestionsDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "minScore": {
+            "description": "Minimum similarity (0-1) for asking whether an unnamed person or face is a named person, or whether two unnamed people are one",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "minScore"
         ],
         "type": "object"
       },
@@ -26048,6 +26549,8 @@
           "PersonCleanup",
           "PersonFileMigration",
           "PersonGenerateThumbnail",
+          "PersonSuggestionsQueueAll",
+          "PersonSuggestions",
           "SessionCleanup",
           "SendMail",
           "SidecarQueueAll",
@@ -28914,6 +29417,244 @@
         },
         "required": [
           "assets"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionAnswer": {
+        "description": "Same: merge the candidate into the target. Different: never ask again or match them. Skipped: not sure, ask later",
+        "enum": [
+          "same",
+          "different",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "PersonSuggestionAnswerDto": {
+        "properties": {
+          "answer": {
+            "$ref": "#/components/schemas/PersonSuggestionAnswer"
+          },
+          "name": {
+            "description": "A name for the person both turned out to be, when two unnamed people are answered to be the same",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "answer"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionCreateDto": {
+        "properties": {
+          "faceId": {
+            "description": "The candidate when it is a face without a person",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "personId": {
+            "description": "The candidate when it is a person",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "score": {
+            "description": "How alike the two look, 0 to 1",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "targetPersonId": {
+            "description": "The person the candidate may be",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "targetPersonId"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionFaceDto": {
+        "properties": {
+          "assetId": {
+            "description": "Asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "id": {
+            "description": "Face ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "takenAt": {
+            "description": "When the photo or video was taken",
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "When the face last changed",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "id",
+          "takenAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionKind": {
+        "description": "What a person suggestion asks: whether someone is a named person, or whether two unnamed people are one",
+        "enum": [
+          "named",
+          "unnamed"
+        ],
+        "type": "string"
+      },
+      "PersonSuggestionResponseDto": {
+        "properties": {
+          "answeredAt": {
+            "description": "When it was answered",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/PersonSuggestionSideDto",
+            "description": "The unnamed person or the face without a person"
+          },
+          "id": {
+            "description": "Suggestion ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PersonSuggestionKind"
+          },
+          "score": {
+            "description": "How alike the two look, 0 to 1",
+            "format": "double",
+            "type": "number"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PersonSuggestionSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PersonSuggestionStatus"
+          },
+          "target": {
+            "$ref": "#/components/schemas/PersonSuggestionSideDto",
+            "description": "The person the candidate may be"
+          }
+        },
+        "required": [
+          "answeredAt",
+          "candidate",
+          "id",
+          "kind",
+          "score",
+          "source",
+          "status",
+          "target"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionSideDto": {
+        "properties": {
+          "assetCount": {
+            "description": "On how many photos and videos the caller may see this person is",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "faces": {
+            "description": "Faces to compare, spread over time",
+            "items": {
+              "$ref": "#/components/schemas/PersonSuggestionFaceDto"
+            },
+            "type": "array"
+          },
+          "person": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PersonResponseDto"
+              }
+            ],
+            "description": "The person, or null for a face without a person",
+            "nullable": true
+          }
+        },
+        "required": [
+          "assetCount",
+          "faces",
+          "person"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionSource": {
+        "description": "Where a person suggestion came from",
+        "enum": [
+          "automatic",
+          "api"
+        ],
+        "type": "string"
+      },
+      "PersonSuggestionStatisticsResponseDto": {
+        "properties": {
+          "pending": {
+            "description": "Number of questions there are to answer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending"
+        ],
+        "type": "object"
+      },
+      "PersonSuggestionStatus": {
+        "description": "The answer to a person suggestion, or pending while it has none",
+        "enum": [
+          "pending",
+          "same",
+          "different",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "PersonSuggestionsResponseDto": {
+        "properties": {
+          "hasNextPage": {
+            "description": "Whether there are more pages",
+            "type": "boolean"
+          },
+          "suggestions": {
+            "items": {
+              "$ref": "#/components/schemas/PersonSuggestionResponseDto"
+            },
+            "type": "array"
+          },
+          "total": {
+            "description": "Number of questions there are to answer",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hasNextPage",
+          "suggestions",
+          "total"
         ],
         "type": "object"
       },
@@ -40107,6 +40848,9 @@
           "ocr": {
             "$ref": "#/components/schemas/UserConfigOcrDto"
           },
+          "personSuggestions": {
+            "$ref": "#/components/schemas/UserConfigPersonSuggestionsDto"
+          },
           "videoFrameAnalysis": {
             "$ref": "#/components/schemas/UserConfigVideoFrameAnalysisDto"
           }
@@ -40119,6 +40863,7 @@
           "faceAttributes",
           "facialRecognition",
           "ocr",
+          "personSuggestions",
           "videoFrameAnalysis"
         ],
         "type": "object"
@@ -40185,6 +40930,18 @@
         "properties": {
           "enabled": {
             "description": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "UserConfigPersonSuggestionsDto": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
             "type": "boolean"
           }
         },

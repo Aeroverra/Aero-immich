@@ -308,6 +308,16 @@ const AdminConfigSchemaWithVisibility = z
             .describe('Minimum number of faces required for recognition')
             .meta({ visibility: User }),
         }).meta({ id: 'AdminConfigFacialRecognitionDto' }),
+        personSuggestions: AdminConfigMachineLearningTaskSchema.extend({
+          minScore: z
+            .number()
+            .min(0)
+            .max(1)
+            .describe(
+              'Minimum similarity (0-1) for asking whether an unnamed person or face is a named person, or whether two unnamed people are one',
+            )
+            .meta({ format: 'double' }),
+        }).meta({ id: 'AdminConfigPersonSuggestionsDto' }),
         faceAttributes: AdminConfigMachineLearningModelSchema.meta({ id: 'AdminConfigFaceAttributesDto' }),
         ocr: AdminConfigMachineLearningModelSchema.extend({
           maxResolution: z.int().min(1).describe('Maximum resolution for OCR processing'),
@@ -747,6 +757,10 @@ export const defaults = Object.freeze<SystemConfig>({
       minScore: 0.7,
       maxDistance: 0.5,
       minFaces: 3,
+    },
+    personSuggestions: {
+      enabled: true,
+      minScore: 0.35,
     },
     faceAttributes: {
       enabled: true,

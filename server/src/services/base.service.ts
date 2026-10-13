@@ -42,6 +42,7 @@ import { NotificationRepository } from 'src/repositories/notification.repository
 import { OAuthRepository } from 'src/repositories/oauth.repository';
 import { OcrRepository } from 'src/repositories/ocr.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
+import { PersonSuggestionRepository } from 'src/repositories/person-suggestion.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { PluginRepository } from 'src/repositories/plugin.repository';
 import { ProcessRepository } from 'src/repositories/process.repository';
@@ -61,8 +62,8 @@ import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
-import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
+import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -133,6 +134,7 @@ export const BASE_SERVICE_DEPENDENCIES = [
   WebsocketRepository,
   WorkflowRepository,
   TakeoutRepository,
+  PersonSuggestionRepository,
 ] as const;
 
 @Injectable()
@@ -201,6 +203,7 @@ export class BaseService {
     protected websocketRepository: WebsocketRepository,
     protected workflowRepository: WorkflowRepository,
     protected takeoutRepository: TakeoutRepository,
+    protected personSuggestionRepository: PersonSuggestionRepository,
   ) {
     this.logger.setContext(this.constructor.name);
     this.storageCore = StorageCore.create(
@@ -278,6 +281,7 @@ export class BaseService {
       ctx.websocketRepository,
       ctx.workflowRepository,
       ctx.takeoutRepository,
+      ctx.personSuggestionRepository,
     );
 
     service.logger.setContext(BaseService.name);

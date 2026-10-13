@@ -74,7 +74,7 @@ export type FaceThumbnailData = {
   videoStream: VideoStreamInfo | null;
 };
 
-const getFaceCrop = (
+export const getFaceCrop = (
   dims: { old: ImageDimensions; new: ImageDimensions },
   { x1, y1, x2, y2 }: BoundingBox,
 ): CropParameters => {

@@ -1,5 +1,19 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Put, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Next,
+  Param,
+  Post,
+  Put,
+  Query,
+  Res,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { NextFunction, Response } from 'express';
 import { Endpoint, HistoryBuilder } from 'src/decorators';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
@@ -10,14 +24,18 @@ import {
   PersonResponseDto,
 } from 'src/dtos/person.dto';
 import { ApiTag, Permission } from 'src/enum';
-import { Auth, Authenticated } from 'src/middleware/auth.guard';
+import { Auth, Authenticated, FileResponse } from 'src/middleware/auth.guard';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import { UUIDParamDto } from 'src/validation';
 
 @ApiTags(ApiTag.Faces)
 @Controller('faces')
 export class FaceController {
-  constructor(private service: PersonService) {}
+  constructor(
+    private service: PersonService,
+    private suggestionService: PersonSuggestionService,
+  ) {}
 
   @Post()
   @Authenticated({ permission: Permission.FaceCreate })
@@ -40,6 +58,30 @@ export class FaceController {
   })
   getFaces(@Auth() auth: AuthDto, @Query() dto: FaceDto): Promise<AssetFaceResponseDto[]> {
     return this.service.getFacesById(auth, dto);
+  }
+
+  @Get(':id/thumbnail')
+  @FileResponse()
+  @Authenticated({ permission: Permission.FaceRead })
+  @Endpoint({
+    summary: 'Get face thumbnail',
+    description: 'Retrieve a face of the caller cut out of its photo or video frame, as a square JPEG.',
+    history: new HistoryBuilder().added('v3.2.2').beta('v3.2.2'),
+  })
+  async getFaceThumbnail(
+    @Res() res: Response,
+    @Next() next: NextFunction,
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+  ) {
+    try {
+      const { data, isPrivate } = await this.suggestionService.getFaceThumbnail(auth, id);
+      // a face on a private asset must not stay in a cache once private mode is locked again
+      res.set('Cache-Control', isPrivate ? 'private, no-cache, no-transform' : 'private, max-age=86400, no-transform');
+      res.type('image/jpeg').send(data);
+    } catch (error) {
+      next(error);
+    }
   }
 
   @Put(':id')

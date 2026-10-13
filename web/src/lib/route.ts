@@ -88,12 +88,13 @@ export const Route = {
 
   // people
   people: () => '/people',
+  peopleSuggestions: (params?: { personId?: string }) => '/people/review' + asQueryString(params),
   viewPerson: ({ id }: { id: string }, params?: { previousRoute?: string; action?: 'merge' }) =>
     `/people/${id}` + asQueryString(params),
 
   // photos
   photos: (params?: { at?: string }) => '/photos' + asQueryString(params),
-  viewAsset: ({ id }: { id: string }) => `/photos/${id}`,
+  viewAsset: ({ id }: { id: string }, params?: { face?: string }) => `/photos/${id}` + asQueryString(params),
   archive: () => '/archive',
   favorites: () => '/favorites',
   locked: () => '/locked',
