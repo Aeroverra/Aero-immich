@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:immich_mobile/constants/enums.dart';
@@ -240,10 +242,14 @@ enum ActionButtonType {
         menuItem: menuItem,
         onPressed: buildContext == null
             ? null
-            : () async {
-                await buildContext.router.navigate(const TabShellRoute(children: [MainTimelineRoute()]));
-                EventStream.shared.emit(ScrollToDateEvent(context.asset.createdAt));
-              },
+            // Swap the viewer for a timeline pushed above the current page instead of switching the tab shell to
+            // the Photos tab. Switching tabs disposes the page the viewer was opened from (the search tab does not
+            // maintain state), so the system back then had nothing to return to and left the app. With a pushed
+            // route, back lands on that page with its query, filters, results and scroll position untouched.
+            // Bucket dates are local days, so the asset's timestamp is matched in local time.
+            : () => unawaited(
+                buildContext.replaceRoute(MainTimelineRoute(scrollToDate: context.asset.createdAt.toLocal())),
+              ),
       ),
       ActionButtonType.cast => const ActionMenuItem(action: CastAction()),
     };
