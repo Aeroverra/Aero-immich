@@ -10,6 +10,12 @@ function cutShortJsonName(mediaName: string): string {
   return `${stem}.json`;
 }
 
+// "X.jpg" -> "X(n).jpg", how Google names the n-th file with the same name in a folder
+function numbered(name: string, n: number): string {
+  const dot = name.lastIndexOf('.');
+  return `${name.slice(0, dot)}(${n})${name.slice(dot)}`;
+}
+
 function firstMatcher(jsonName: string, fileName: string): string {
   for (const matcher of MATCHERS) {
     if (matcher.fn(jsonName, fileName)) {
@@ -178,5 +184,62 @@ describe('cut-short sidecar generator', () => {
   it('leaves a short name untruncated with the full supplemental-metadata trailer', () => {
     expect(cutShortJsonName('a.jpg')).toBe('a.jpg.supplemental-metadata.json');
     expect(firstMatcher('a.jpg.supplemental-metadata.json', 'a.jpg')).toBe('normal');
+  });
+});
+
+// The sidecar names Google Takeout has used for one media file, each with the file it belongs to
+function variants(name: string): Array<{ label: string; json: string; file: string }> {
+  const cut = cutShortJsonName(name);
+  const legacy = name.length > CUT_LENGTH ? `${name.slice(0, CUT_LENGTH)}.json` : `${name}.json`;
+  return [
+    { label: 'full supplemental-metadata', json: `${name}.supplemental-metadata.json`, file: name },
+    { label: 'cut supplemental-metadata', json: cut, file: name },
+    { label: 'legacy .json', json: legacy, file: name },
+    {
+      label: 'numbered full',
+      json: `${name}.supplemental-metadata(1).json`,
+      file: numbered(name, 1),
+    },
+    { label: 'numbered cut', json: `${cut.slice(0, -'.json'.length)}(1).json`, file: numbered(name, 1) },
+  ];
+}
+
+// Names of assets that ended up with a file-time date on immich-family (2026-09). Their Takeouts name every sidecar
+// "<media>.supplemental-metadata.json" in full (no cut, up to 79 characters); older Takeouts cut the name to
+// CUT_LENGTH or used "<media>.json", and add "(n)" after the cut for a same-name file. Every variant must claim its file
+// and never a sibling.
+describe('real Takeout names, every sidecar naming variant', () => {
+  const names = [
+    '[RWBY MMD] Apple Pie - Sisterly HD [JIC JIC] - Pornhub.com.mp4',
+    'Rwby Nora Gang Bang - Pornhub.com.mp4',
+    '[iRB] Toxic (pyrrha, Weiss, Blake) - Pornhub.com.mp4',
+    '20170608-120938-0074450 11024379_800533190002620_1254948441_n.jpg',
+    '20161106-010749-0081545 Screenshot_2016-08-08-21-24-25.png',
+    '0074459_11267034_709562962489093_938898794_n.jpg',
+    '20161210-001810-0082642 deadmoon114_1481316161512.jpg',
+    'Snapchat-1615986030.jpg',
+    'MVIMG_20190118_181717-ANIMATION.gif',
+    'IMG_20190309_193741-ANIMATION.gif',
+    'Screenshot_2016-07-25-12-58-11.png',
+  ];
+
+  for (const name of names) {
+    for (const { label, json, file } of variants(name)) {
+      it(`${label}: ${json} claims ${file}`, () => {
+        expect(firstMatcher(json, file)).not.toBe('');
+      });
+    }
+  }
+
+  it('no variant of one name claims another of these names', () => {
+    for (const name of names) {
+      for (const { json } of variants(name)) {
+        for (const other of names) {
+          if (other !== name) {
+            expect(firstMatcher(json, other), `${json} -> ${other}`).toBe('');
+          }
+        }
+      }
+    }
   });
 });

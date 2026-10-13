@@ -312,6 +312,7 @@ export const counterGroups = {
     'rotationsQueued',
     'rotationsApplied',
     'zoneAssumed',
+    'datesFromGoogle',
     'errors',
   ],
 } as const;

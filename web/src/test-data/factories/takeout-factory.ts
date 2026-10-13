@@ -94,6 +94,7 @@ const counters = (overrides: { [K in keyof TakeoutCountersDto]?: Partial<Takeout
       rotationsQueued: 0,
       rotationsApplied: 0,
       zoneAssumed: 0,
+      datesFromGoogle: 0,
       errors: 0,
     },
     bytes: { total: 0, done: 0 },

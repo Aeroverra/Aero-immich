@@ -2606,6 +2606,7 @@
   "takeout_counter_asset_jsons": "Asset JSON",
   "takeout_counter_banned": "Banned",
   "takeout_counter_better_on_server": "Better on server",
+  "takeout_counter_dates_from_google": "Dates taken from Google",
   "takeout_counter_duplicated_in_directory": "Duplicated in directory",
   "takeout_counter_edited": "Edited",
   "takeout_counter_errors": "Errors",
