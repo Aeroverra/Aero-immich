@@ -29,6 +29,7 @@ import {
   PersonResponseDto,
   PersonSearchDto,
   PersonStatisticsResponseDto,
+  PersonThumbnailDto,
   PersonUpdateDto,
 } from 'src/dtos/person.dto';
 import { ApiTag, Permission } from 'src/enum';
@@ -162,7 +163,8 @@ export class PersonController {
   @Authenticated({ permission: Permission.PersonRead })
   @Endpoint({
     summary: 'Get person thumbnail',
-    description: 'Retrieve the thumbnail file for a person.',
+    description:
+      'Retrieve the thumbnail file for a person. When the feature photo is hidden from the caller, a face of the person the caller may see (or a placeholder) is returned instead.',
     history: new HistoryBuilder().added('v1').beta('v1').stable('v2'),
   })
   async getPersonThumbnail(
@@ -170,8 +172,9 @@ export class PersonController {
     @Next() next: NextFunction,
     @Auth() auth: AuthDto,
     @Param() { id }: UUIDParamDto,
+    @Query() dto: PersonThumbnailDto,
   ) {
-    await sendFile(res, next, () => this.service.getThumbnail(auth, id), this.logger);
+    await sendFile(res, next, () => this.service.getThumbnail(auth, id, dto), this.logger);
   }
 
   @Post('assets/counts')

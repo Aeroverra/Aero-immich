@@ -31,5 +31,20 @@ void main() {
       final after = getFaceThumbnailUrl('person-1', updatedAt: DateTime.fromMillisecondsSinceEpoch(2));
       expect(before, isNot(after));
     });
+
+    test('passes the asset the person is shown with and the view scope', () {
+      final url = getFaceThumbnailUrl(
+        'person-1',
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(5),
+        assetId: 'asset-1',
+        scope: 'view-1-private',
+      );
+      expect(url, '$endpoint/people/person-1/thumbnail?c=5&assetId=asset-1&v=view-1-private');
+    });
+
+    test('a different view scope yields a different url', () {
+      expect(getFaceThumbnailUrl('person-1', scope: 'view-1'), isNot(getFaceThumbnailUrl('person-1')));
+      expect(getFaceThumbnailUrl('person-1', scope: 'view-1'), '$endpoint/people/person-1/thumbnail?v=view-1');
+    });
   });
 }

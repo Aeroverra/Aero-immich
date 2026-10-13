@@ -74,17 +74,20 @@
 {#if errored}
   <BrokenAsset class={[sharedClasses, brokenAssetClass]} width={widthStyle} height={heightStyle} />
 {:else}
-  <Image
-    src={url}
-    onLoad={setLoaded}
-    onError={setErrored}
-    class={['bg-gray-300 object-cover dark:bg-gray-700', sharedClasses, imageClass]}
-    {style}
-    alt={loaded || errored ? altText : ''}
-    draggable={false}
-    title={title ?? undefined}
-    loading={preload ? 'eager' : 'lazy'}
-  />
+  <!-- Image keeps the first src it gets, so a new url (another view or private mode state) needs a new element -->
+  {#key url}
+    <Image
+      src={url}
+      onLoad={setLoaded}
+      onError={setErrored}
+      class={['bg-gray-300 object-cover dark:bg-gray-700', sharedClasses, imageClass]}
+      {style}
+      alt={loaded || errored ? altText : ''}
+      draggable={false}
+      title={title ?? undefined}
+      loading={preload ? 'eager' : 'lazy'}
+    />
+  {/key}
 {/if}
 
 {#if hidden}

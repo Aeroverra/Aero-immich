@@ -20,7 +20,15 @@ String getPlaybackUrlForRemoteId(final String id) {
   return '${Store.get(StoreKey.serverEndpoint)}/assets/$id/video/playback?';
 }
 
-String getFaceThumbnailUrl(final String personId, {DateTime? updatedAt}) {
+/// The thumbnail of a person. [assetId] is the asset the person is shown with: when private mode or the active view
+/// hides the feature photo, the server cuts the face from that asset. [scope] (see `personThumbnailScopeProvider`)
+/// keeps faces cut for one view or private mode state apart from the others in the image cache.
+String getFaceThumbnailUrl(final String personId, {DateTime? updatedAt, String? assetId, String? scope}) {
   final url = '${Store.get(StoreKey.serverEndpoint)}/people/$personId/thumbnail';
-  return updatedAt != null ? '$url?c=${updatedAt.millisecondsSinceEpoch}' : url;
+  final query = [
+    if (updatedAt != null) 'c=${updatedAt.millisecondsSinceEpoch}',
+    if (assetId != null) 'assetId=$assetId',
+    if (scope != null) 'v=${Uri.encodeQueryComponent(scope)}',
+  ];
+  return query.isEmpty ? url : '$url?${query.join('&')}';
 }

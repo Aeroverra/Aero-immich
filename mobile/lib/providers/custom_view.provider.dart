@@ -111,6 +111,18 @@ final appliedViewFilterProvider = Provider<ViewFilter?>((ref) {
 /// re-reads it on login and resume, and returns to the default view whenever the app leaves the foreground.
 final activeViewProvider = StateNotifierProvider<ActiveViewNotifier, String?>((ref) => ActiveViewNotifier(ref));
 
+/// The server swaps in another face for a person whose feature photo the active view or locked private mode hides, so
+/// person thumbnail urls carry both and the image cache never shows a face cut for another state. Null on the default
+/// view with private mode locked, which keeps the plain url.
+final personThumbnailScopeProvider = Provider<String?>((ref) {
+  final viewId = ref.watch(activeViewProvider);
+  final isPrivate = ref.watch(privateModeProvider);
+  if (viewId == null && !isPrivate) {
+    return null;
+  }
+  return '${viewId ?? 'default'}${isPrivate ? '-private' : ''}';
+});
+
 /// Outcome of a switch with the PIN stored by the biometric enrolment
 enum ViewBiometricResult {
   /// no PIN is stored, the user never enrolled biometrics

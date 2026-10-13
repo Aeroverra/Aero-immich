@@ -1,10 +1,14 @@
-import { Kysely } from 'kysely';
-import { AssetFileType } from 'src/enum';
+import { Insertable, Kysely } from 'kysely';
+import { AssetFace, ViewFilter } from 'src/database';
+import { AssetFileType, AssetType, AssetVisibility, ViewAccess, ViewPrivateAssets } from 'src/enum';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
+import { TagRepository } from 'src/repositories/tag.repository';
 import { DB } from 'src/schema';
+import { AssetTable } from 'src/schema/tables/asset.table';
 import { BaseService } from 'src/services/base.service';
 import { newMediumService } from 'test/medium.factory';
+import { newUuid } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
 
 let defaultDatabase: Kysely<DB>;
@@ -21,6 +25,62 @@ const setup = (db?: Kysely<DB>) => {
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
+
+/** a person with faces of every size on photos, a video frame, and assets the caller may not see */
+const setupLibrary = async () => {
+  const { ctx, sut } = setup();
+  const { user } = await ctx.newUser();
+  const { person } = await ctx.newPerson({ ownerId: user.id });
+  const nsfw = await ctx.get(TagRepository).create({ userId: user.id, value: 'NSFW' });
+  const child = await ctx.get(TagRepository).create({ userId: user.id, value: 'NSFW/Cams', parentId: nsfw.id });
+
+  // a face covering size x size pixels of a 1000 x 1000 picture
+  const newFace = async (
+    size: number,
+    asset: Partial<Insertable<AssetTable>> = {},
+    face: Partial<Insertable<AssetFace>> = {},
+  ) => {
+    const { asset: created } = await ctx.newAsset({ ownerId: user.id, ...asset });
+    const { assetFace } = await ctx.newAssetFace({
+      assetId: created.id,
+      personGroupId: person.personGroupId,
+      imageWidth: 1000,
+      imageHeight: 1000,
+      boundingBoxX1: 0,
+      boundingBoxY1: 0,
+      boundingBoxX2: size,
+      boundingBoxY2: size,
+      ...face,
+    });
+    return { asset: created, face: assetFace };
+  };
+
+  const faces = {
+    // the biggest face is on an asset tagged with a child of the excluded tag
+    tagged: await newFace(900),
+    private: await newFace(800, { isPrivate: true }),
+    trashed: await newFace(700, { deletedAt: new Date() }),
+    hidden: await newFace(650, { visibility: AssetVisibility.Hidden }),
+    wholeAsset: await newFace(1000, {}, { isWholeAsset: true }),
+    videoFrame: await newFace(600, { type: AssetType.Video }, { frameTimestamp: 1500 }),
+    archived: await newFace(300, { visibility: AssetVisibility.Archive }),
+    small: await newFace(200),
+  };
+  await ctx.newTagAsset({ tagIds: [child.id], assetIds: [faces.tagged.asset.id] });
+
+  const view: ViewFilter = {
+    id: newUuid(),
+    ownerId: user.id,
+    access: ViewAccess.Open,
+    includeAll: true,
+    includeUntagged: false,
+    includeTagIds: [],
+    excludeTagIds: [nsfw.id],
+    privateAssets: ViewPrivateAssets.Unlocked,
+  };
+
+  return { sut, user, person, faces, view };
+};
 
 describe(PersonRepository.name, () => {
   describe('createAll', () => {
@@ -225,6 +285,84 @@ describe(PersonRepository.name, () => {
         expect.objectContaining({
           previewPath: 'preview_unedited.jpg',
         }),
+      );
+    });
+  });
+
+  describe('getVisibleFaceForThumbnail', () => {
+    it('should prefer a big located face on a photo', async () => {
+      const { sut, user, person, faces } = await setupLibrary();
+
+      const face = await sut.getVisibleFaceForThumbnail(
+        { ownerId: user.id, personGroupId: person.personGroupId },
+        { privateMode: false, userId: user.id },
+      );
+
+      expect(face).toEqual(
+        expect.objectContaining({ id: faces.tagged.face.id, x2: 900, originalPath: expect.any(String) }),
+      );
+    });
+
+    it('should skip faces on assets the active view hides', async () => {
+      const { sut, user, person, faces, view } = await setupLibrary();
+
+      const face = await sut.getVisibleFaceForThumbnail(
+        { ownerId: user.id, personGroupId: person.personGroupId },
+        { privateMode: false, userId: user.id, view },
+      );
+
+      // private, trashed and hidden assets never count, and a video frame face beats a whole-asset mark only after photos
+      expect(face?.id).toBe(faces.archived.face.id);
+    });
+
+    it('should use private assets in private mode', async () => {
+      const { sut, user, person, faces, view } = await setupLibrary();
+
+      const face = await sut.getVisibleFaceForThumbnail(
+        { ownerId: user.id, personGroupId: person.personGroupId },
+        { privateMode: true, userId: user.id, view },
+      );
+
+      expect(face?.id).toBe(faces.private.face.id);
+    });
+
+    it('should only use the given asset', async () => {
+      const { sut, user, person, faces, view } = await setupLibrary();
+      const id = { ownerId: user.id, personGroupId: person.personGroupId };
+      const scope = { privateMode: false, userId: user.id, view };
+
+      await expect(sut.getVisibleFaceForThumbnail(id, scope, faces.small.asset.id)).resolves.toEqual(
+        expect.objectContaining({ id: faces.small.face.id }),
+      );
+      await expect(sut.getVisibleFaceForThumbnail(id, scope, faces.videoFrame.asset.id)).resolves.toEqual(
+        expect.objectContaining({ id: faces.videoFrame.face.id, frameTimestamp: 1500 }),
+      );
+      await expect(sut.getVisibleFaceForThumbnail(id, scope, faces.tagged.asset.id)).resolves.toBeUndefined();
+      await expect(sut.getVisibleFaceForThumbnail(id, scope, faces.private.asset.id)).resolves.toBeUndefined();
+    });
+
+    it('should fall back to the video frame face and the whole-asset mark last', async () => {
+      const { sut, user, person, faces, view } = await setupLibrary();
+      const id = { ownerId: user.id, personGroupId: person.personGroupId };
+      const scope = { privateMode: false, userId: user.id, view };
+      const database = defaultDatabase;
+      await database
+        .updateTable('asset')
+        .set({ deletedAt: new Date() })
+        .where('id', 'in', [faces.small.asset.id, faces.archived.asset.id])
+        .execute();
+
+      await expect(sut.getVisibleFaceForThumbnail(id, scope)).resolves.toEqual(
+        expect.objectContaining({ id: faces.videoFrame.face.id }),
+      );
+
+      await database
+        .updateTable('asset')
+        .set({ deletedAt: new Date() })
+        .where('id', '=', faces.videoFrame.asset.id)
+        .execute();
+      await expect(sut.getVisibleFaceForThumbnail(id, scope)).resolves.toEqual(
+        expect.objectContaining({ id: faces.wholeAsset.face.id }),
       );
     });
   });

@@ -26,6 +26,7 @@ import {
 } from 'src/enum';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { BoundingBox } from 'src/repositories/machine-learning.repository';
+import { MediaRepository } from 'src/repositories/media.repository';
 import { BaseService } from 'src/services/base.service';
 import {
   AudioStreamInfo,
@@ -56,6 +57,129 @@ interface UpsertFileOptions {
 
 type ThumbnailAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForGenerateThumbnailJob']>>>;
 type VideoConversionAsset = NonNullable<Awaited<ReturnType<AssetJobRepository['getForVideoConversion']>>>;
+
+/** A face and the asset it is on, as needed to cut the face out for a person thumbnail */
+export type FaceThumbnailData = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  oldWidth: number;
+  oldHeight: number;
+  type: AssetType;
+  originalPath: string;
+  previewPath: string | null;
+  exifOrientation: string | null;
+  frameTimestamp: number | null;
+  videoStream: VideoStreamInfo | null;
+};
+
+const getFaceCrop = (
+  dims: { old: ImageDimensions; new: ImageDimensions },
+  { x1, y1, x2, y2 }: BoundingBox,
+): CropParameters => {
+  // face bounding boxes can spill outside the image dimensions
+  const clampedX1 = clamp(x1, 0, dims.old.width);
+  const clampedY1 = clamp(y1, 0, dims.old.height);
+  const clampedX2 = clamp(x2, 0, dims.old.width);
+  const clampedY2 = clamp(y2, 0, dims.old.height);
+
+  const widthScale = dims.new.width / dims.old.width;
+  const heightScale = dims.new.height / dims.old.height;
+
+  const halfWidth = (widthScale * (clampedX2 - clampedX1)) / 2;
+  const halfHeight = (heightScale * (clampedY2 - clampedY1)) / 2;
+
+  const middleX = Math.round(widthScale * clampedX1 + halfWidth);
+  const middleY = Math.round(heightScale * clampedY1 + halfHeight);
+
+  // zoom out 10%
+  const targetHalfSize = Math.floor(Math.max(halfWidth, halfHeight) * 1.1);
+
+  // get the longest distance from the center of the image without overflowing
+  const newHalfSize = Math.min(
+    middleX - Math.max(0, middleX - targetHalfSize),
+    middleY - Math.max(0, middleY - targetHalfSize),
+    Math.min(dims.new.width - 1, middleX + targetHalfSize) - middleX,
+    Math.min(dims.new.height - 1, middleY + targetHalfSize) - middleY,
+  );
+
+  return {
+    x: middleX - newHalfSize,
+    y: middleY - newHalfSize,
+    width: newHalfSize * 2,
+    height: newHalfSize * 2,
+  };
+};
+
+/**
+ * Cuts a face out of its asset into a square person thumbnail at `outputPath`: from the frame the face was found in
+ * for a video frame face, from the preview for any other video face, and from the original (or the preview embedded
+ * in a raw file) for a photo. Shared by the feature photo job and the stand-ins the person thumbnail endpoint cuts on
+ * demand. False when a video face has no preview to cut from.
+ */
+export const generateFaceThumbnail = async (
+  { mediaRepository, storageCore }: { mediaRepository: MediaRepository; storageCore: StorageCore },
+  { image, ffmpeg }: SystemConfig,
+  face: FaceThumbnailData,
+  outputPath: string,
+): Promise<boolean> => {
+  const { x1, y1, x2, y2, oldWidth, oldHeight, exifOrientation, previewPath, originalPath } = face;
+  let inputImage: string | Buffer;
+  if (face.type === AssetType.Video && face.frameTimestamp !== null && face.videoStream) {
+    // the face was found in another frame than the preview, so crop it from that frame
+    const frameConfig = VideoFrameConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
+    inputImage = await mediaRepository.extractVideoFrame(
+      originalPath,
+      frameConfig.getFrameCommand(face.frameTimestamp, face.videoStream),
+    );
+  } else if (face.type === AssetType.Video) {
+    if (!previewPath) {
+      return false;
+    }
+    inputImage = previewPath;
+  } else if (image.extractEmbedded && mimeTypes.isRaw(originalPath)) {
+    // the embedded preview is used only when it is at least as big as a preview
+    const extracted = await mediaRepository.extract(originalPath);
+    const extractedSize = extracted ? await mediaRepository.getImageMetadata(extracted.buffer) : undefined;
+    const isBigEnough = !!extractedSize && Math.min(extractedSize.width, extractedSize.height) >= image.preview.size;
+    inputImage = extracted && isBigEnough ? extracted.buffer : originalPath;
+  } else {
+    inputImage = originalPath;
+  }
+
+  const { data: decodedImage, info } = await mediaRepository.decodeImage(inputImage, {
+    colorspace: image.colorspace,
+    processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
+    // if this is an extracted image, it may not have orientation metadata
+    orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
+  });
+
+  storageCore.ensureFolders(outputPath);
+
+  const thumbnailOptions: GenerateThumbnailOptions = {
+    colorspace: image.colorspace,
+    format: ImageFormat.Jpeg,
+    raw: info,
+    quality: image.thumbnail.quality,
+    progressive: false,
+    processInvalidImages: false,
+    size: FACE_THUMBNAIL_SIZE,
+    edits: [
+      {
+        action: AssetEditAction.Crop,
+        parameters: getFaceCrop(
+          { old: { width: oldWidth, height: oldHeight }, new: { width: info.width, height: info.height } },
+          { x1, y1, x2, y2 },
+        ),
+      },
+    ],
+  };
+
+  await mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, outputPath);
+
+  return true;
+};
 
 @Injectable()
 export class MediaService extends BaseService {
@@ -411,106 +535,32 @@ export class MediaService extends BaseService {
     ownerId,
     personGroupId,
   }: JobOf<JobName.PersonGenerateThumbnail>): Promise<JobStatus> {
-    const { image, ffmpeg } = await this.getConfig({ withCache: true });
     const data = await this.personRepository.getDataForThumbnailGenerationJob({ ownerId, personGroupId });
     if (!data) {
       this.logger.error(`Could not generate person thumbnail for ${personGroupId}: missing data`);
       return JobStatus.Failed;
     }
 
-    const { x1, y1, x2, y2, oldWidth, oldHeight, exifOrientation, previewPath, originalPath } = data;
-    let inputImage: string | Buffer;
-    if (data.type === AssetType.Video && data.frameTimestamp !== null && data.videoStream) {
-      // the face was found in another frame than the preview, so crop it from that frame
-      const frameConfig = VideoFrameConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
-      inputImage = await this.mediaRepository.extractVideoFrame(
-        originalPath,
-        frameConfig.getFrameCommand(data.frameTimestamp, data.videoStream),
-      );
-    } else if (data.type === AssetType.Video) {
-      if (!previewPath) {
-        this.logger.error(`Could not generate person thumbnail for video ${personGroupId}: missing preview path`);
-        return JobStatus.Failed;
-      }
-      inputImage = previewPath;
-    } else if (image.extractEmbedded && mimeTypes.isRaw(originalPath)) {
-      const extracted = await this.extractImage(originalPath, image.preview.size);
-      inputImage = extracted ? extracted.buffer : originalPath;
-    } else {
-      inputImage = originalPath;
+    const thumbnailPath = StorageCore.getPersonThumbnailPath({ ownerId, personGroupId });
+    const config = await this.getConfig({ withCache: true });
+    const repositories = { mediaRepository: this.mediaRepository, storageCore: this.storageCore };
+    if (!(await generateFaceThumbnail(repositories, config, data, thumbnailPath))) {
+      this.logger.error(`Could not generate person thumbnail for video ${personGroupId}: missing preview path`);
+      return JobStatus.Failed;
     }
 
-    const { data: decodedImage, info } = await this.mediaRepository.decodeImage(inputImage, {
-      colorspace: image.colorspace,
-      processInvalidImages: process.env.IMMICH_PROCESS_INVALID_IMAGES === 'true',
-      // if this is an extracted image, it may not have orientation metadata
-      orientation: Buffer.isBuffer(inputImage) && exifOrientation ? Number(exifOrientation) : undefined,
-    });
-
-    const thumbnailPath = StorageCore.getPersonThumbnailPath({ ownerId, personGroupId });
-    this.storageCore.ensureFolders(thumbnailPath);
-
-    const thumbnailOptions: GenerateThumbnailOptions = {
-      colorspace: image.colorspace,
-      format: ImageFormat.Jpeg,
-      raw: info,
-      quality: image.thumbnail.quality,
-      progressive: false,
-      processInvalidImages: false,
-      size: FACE_THUMBNAIL_SIZE,
-      edits: [
-        {
-          action: AssetEditAction.Crop,
-          parameters: this.getCrop(
-            { old: { width: oldWidth, height: oldHeight }, new: { width: info.width, height: info.height } },
-            { x1, y1, x2, y2 },
-          ),
-        },
-      ],
-    };
-
-    await this.mediaRepository.generateThumbnail(decodedImage, thumbnailOptions, thumbnailPath);
     await this.personRepository.update({ ownerId, personGroupId, thumbnailPath });
 
-    return JobStatus.Success;
-  }
-
-  private getCrop(
-    dims: { old: ImageDimensions; new: ImageDimensions },
-    { x1, y1, x2, y2 }: BoundingBox,
-  ): CropParameters {
-    // face bounding boxes can spill outside the image dimensions
-    const clampedX1 = clamp(x1, 0, dims.old.width);
-    const clampedY1 = clamp(y1, 0, dims.old.height);
-    const clampedX2 = clamp(x2, 0, dims.old.width);
-    const clampedY2 = clamp(y2, 0, dims.old.height);
-
-    const widthScale = dims.new.width / dims.old.width;
-    const heightScale = dims.new.height / dims.old.height;
-
-    const halfWidth = (widthScale * (clampedX2 - clampedX1)) / 2;
-    const halfHeight = (heightScale * (clampedY2 - clampedY1)) / 2;
-
-    const middleX = Math.round(widthScale * clampedX1 + halfWidth);
-    const middleY = Math.round(heightScale * clampedY1 + halfHeight);
-
-    // zoom out 10%
-    const targetHalfSize = Math.floor(Math.max(halfWidth, halfHeight) * 1.1);
-
-    // get the longest distance from the center of the image without overflowing
-    const newHalfSize = Math.min(
-      middleX - Math.max(0, middleX - targetHalfSize),
-      middleY - Math.max(0, middleY - targetHalfSize),
-      Math.min(dims.new.width - 1, middleX + targetHalfSize) - middleX,
-      Math.min(dims.new.height - 1, middleY + targetHalfSize) - middleY,
+    // stand-ins were cut because the old feature photo was hidden from someone; the next request cuts them again if needed
+    await this.storageRepository.unlinkDir(
+      StorageCore.getPersonFallbackFolder({ ownerId, personGroupId, thumbnailPath }),
+      {
+        recursive: true,
+        force: true,
+      },
     );
 
-    return {
-      x: middleX - newHalfSize,
-      y: middleY - newHalfSize,
-      width: newHalfSize * 2,
-      height: newHalfSize * 2,
-    };
+    return JobStatus.Success;
   }
 
   private async generateVideoThumbnails(asset: ThumbnailAsset, { ffmpeg, image }: SystemConfig) {

@@ -771,6 +771,190 @@ where
     and "asset"."isPrivate" = $9
   )
 
+-- PersonRepository.getVisibleFaceForThumbnail
+select
+  "asset_face"."id",
+  "asset_face"."updatedAt",
+  "asset_face"."boundingBoxX1" as "x1",
+  "asset_face"."boundingBoxY1" as "y1",
+  "asset_face"."boundingBoxX2" as "x2",
+  "asset_face"."boundingBoxY2" as "y2",
+  "asset_face"."imageWidth" as "oldWidth",
+  "asset_face"."imageHeight" as "oldHeight",
+  "asset"."type",
+  "asset"."originalPath",
+  "asset_exif"."orientation" as "exifOrientation",
+  "asset_face"."frameTimestamp",
+  (
+    select
+      "asset_file"."path"
+    from
+      "asset_file"
+    where
+      "asset_file"."assetId" = "asset"."id"
+      and "asset_file"."type" = 'preview'
+      and "asset_file"."isEdited" = false
+  ) as "previewPath",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "asset_video"."index",
+          "asset_video"."codecName",
+          "asset_video"."profile",
+          "asset_video"."level",
+          "asset_video"."bitrate",
+          "asset_exif"."exifImageWidth" as "width",
+          "asset_exif"."exifImageHeight" as "height",
+          "asset_video"."pixelFormat",
+          "asset_video"."frameCount",
+          "asset_exif"."fps" as "frameRate",
+          "asset_video"."timeBase",
+          case
+            when "asset_exif"."orientation" = '6' then -90
+            when "asset_exif"."orientation" = '8' then 90
+            when "asset_exif"."orientation" = '3' then 180
+            else 0
+          end as "rotation",
+          "asset_video"."colorPrimaries",
+          "asset_video"."colorMatrix",
+          "asset_video"."colorTransfer",
+          "asset_video"."dvProfile",
+          "asset_video"."dvLevel",
+          "asset_video"."dvBlSignalCompatibilityId"
+        from
+          (
+            select
+              1
+          ) as "dummy"
+        where
+          "asset_video"."assetId" is not null
+      ) as obj
+  ) as "videoStream"
+from
+  "asset_face"
+  inner join "asset" on "asset_face"."assetId" = "asset"."id"
+  left join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+  left join "asset_video" on "asset_video"."assetId" = "asset"."id"
+where
+  "asset_face"."personGroupId" = $1
+  and "asset_face"."deletedAt" is null
+  and "asset_face"."isVisible" is true
+  and "asset"."id" = $2
+  and "asset"."isPrivate" = $3
+  and (
+    (
+      (
+        not exists (
+          select
+          from
+            "tag_asset"
+            inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+          where
+            "tag_asset"."assetId" = "asset"."id"
+            and "tag"."userId" = $4
+        )
+        and (
+          "asset"."visibility" != 'hidden'
+          or not exists (
+            select
+            from
+              "asset" as "live_photo_still"
+            where
+              "live_photo_still"."livePhotoVideoId" = "asset"."id"
+              and exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "live_photo_still"."id"
+                  and "tag"."userId" = $5
+              )
+          )
+        )
+      )
+      or (
+        exists (
+          select
+          from
+            "tag_asset"
+            inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+          where
+            "tag_asset"."assetId" = "asset"."id"
+            and "tag_closure"."id_ancestor" = any ($6::uuid[])
+        )
+        or (
+          "asset"."visibility" = 'hidden'
+          and exists (
+            select
+            from
+              "asset" as "live_photo_still"
+            where
+              "live_photo_still"."livePhotoVideoId" = "asset"."id"
+              and exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "live_photo_still"."id"
+                  and "tag_closure"."id_ancestor" = any ($7::uuid[])
+              )
+          )
+        )
+      )
+    )
+    and (
+      not exists (
+        select
+        from
+          "tag_asset"
+          inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+        where
+          "tag_asset"."assetId" = "asset"."id"
+          and "tag_closure"."id_ancestor" = any ($8::uuid[])
+      )
+      and (
+        "asset"."visibility" != 'hidden'
+        or not exists (
+          select
+          from
+            "asset" as "live_photo_still"
+          where
+            "live_photo_still"."livePhotoVideoId" = "asset"."id"
+            and exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "live_photo_still"."id"
+                and "tag_closure"."id_ancestor" = any ($9::uuid[])
+            )
+        )
+      )
+    )
+    and "asset"."isPrivate" = $10
+  )
+order by
+  "asset_face"."isWholeAsset" asc,
+  asset_face."frameTimestamp" is null desc,
+  (
+    asset_face."boundingBoxX2" - asset_face."boundingBoxX1"
+  )::float8 * (
+    asset_face."boundingBoxY2" - asset_face."boundingBoxY1"
+  ) / greatest(
+    asset_face."imageWidth" * asset_face."imageHeight",
+    1
+  ) desc,
+  "asset"."fileCreatedAt" desc,
+  "asset_face"."id"
+limit
+  $11
+
 -- PersonRepository.getLatestFaceDate
 select
   max("asset_job_status"."facesRecognizedAt")::text as "latestDate"

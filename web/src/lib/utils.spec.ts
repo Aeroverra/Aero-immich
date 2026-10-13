@@ -1,5 +1,7 @@
 import { AssetTypeEnum } from '@immich/sdk';
-import { AbortError, getAssetUrl, semverToName, uploadRequest } from '$lib/utils';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import { viewManager } from '$lib/managers/view-manager.svelte';
+import { AbortError, getAssetUrl, getPeopleThumbnailUrl, semverToName, uploadRequest } from '$lib/utils';
 import { assetFactory } from '@test-data/factories/asset-factory';
 import { sharedLinkFactory } from '@test-data/factories/shared-link-factory';
 
@@ -262,6 +264,43 @@ describe('utils', () => {
       expect(url).toContain(asset.id);
     });
   });
+  describe(getPeopleThumbnailUrl.name, () => {
+    const person = {
+      id: 'person-1',
+      name: '',
+      birthDate: null,
+      thumbnailPath: '/thumb.jpeg',
+      isHidden: false,
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    };
+
+    afterEach(() => {
+      viewManager.active = { viewId: null, view: null, expiresAt: null };
+      privateModeManager.enabled = false;
+    });
+
+    it('should keep the plain url without a view or private mode', () => {
+      expect(getPeopleThumbnailUrl(person)).toBe(
+        '/api/people/person-1/thumbnail?updatedAt=2026-10-01T00%3A00%3A00.000Z',
+      );
+    });
+
+    it('should pass the asset the person is shown with', () => {
+      expect(getPeopleThumbnailUrl(person, undefined, 'asset-1')).toContain('assetId=asset-1');
+    });
+
+    it('should change the url with the active view and private mode', () => {
+      viewManager.active = { viewId: 'view-1', view: null, expiresAt: null };
+      expect(getPeopleThumbnailUrl(person)).toContain('c=view-1');
+
+      privateModeManager.enabled = true;
+      expect(getPeopleThumbnailUrl(person)).toContain('c=view-1-private');
+
+      viewManager.active = { viewId: null, view: null, expiresAt: null };
+      expect(getPeopleThumbnailUrl(person)).toContain('c=default-private');
+    });
+  });
+
   describe('semverToName', () => {
     it('should not append release candidate tag if prelease is not set', () => {
       expect(semverToName({ major: 3, minor: 0, patch: 0, prerelease: null })).toEqual('v3.0.0');

@@ -10811,9 +10811,20 @@
     },
     "/people/{id}/thumbnail": {
       "get": {
-        "description": "Retrieve the thumbnail file for a person.",
+        "description": "Retrieve the thumbnail file for a person. When the feature photo is hidden from the caller, a face of the person the caller may see (or a placeholder) is returned instead.",
         "operationId": "getPersonThumbnail",
         "parameters": [
+          {
+            "name": "assetId",
+            "required": false,
+            "in": "query",
+            "description": "Asset the thumbnail is shown with. When the feature photo is hidden from the caller (private mode, active view), the face of the person on this asset is used instead",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
           {
             "name": "id",
             "required": true,
