@@ -38804,7 +38804,7 @@
             "$ref": "#/components/schemas/TakeoutHeicJpgMode"
           },
           "homeTimeZone": {
-            "description": "IANA time zone used when a file has no time zone of its own",
+            "description": "IANA time zone for the date range filter and the session tag start time",
             "type": "string"
           },
           "includeArchived": {
@@ -38922,7 +38922,7 @@
             "$ref": "#/components/schemas/TakeoutHeicJpgMode"
           },
           "homeTimeZone": {
-            "description": "IANA time zone used when a file has no time zone of its own",
+            "description": "IANA time zone for the date range filter and the session tag start time",
             "type": "string"
           },
           "includeArchived": {
