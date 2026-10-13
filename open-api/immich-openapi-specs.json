@@ -23234,6 +23234,44 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
             "type": "string"
           },
+          "embedding": {
+            "description": "Face embedding (512 values) from the facial recognition model, so facial recognition can match other faces to this one",
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 512,
+            "minItems": 512,
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Beta"
+              }
+            ],
+            "x-immich-state": "Beta"
+          },
+          "frameTimestamp": {
+            "description": "Position in milliseconds of the video frame the face is in (videos only). The box is then in the pixel space of that frame as decoded from the original video, and imageWidth and imageHeight are the frame size",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Beta"
+              }
+            ],
+            "x-immich-state": "Beta"
+          },
           "height": {
             "description": "Face bounding box height",
             "maximum": 9007199254740991,

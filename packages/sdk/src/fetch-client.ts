@@ -1897,6 +1897,10 @@ export type AssetFaceResponseDto = {
 export type AssetFaceCreateDto = {
     /** Asset ID */
     assetId: string;
+    /** Face embedding (512 values) from the facial recognition model, so facial recognition can match other faces to this one */
+    embedding?: number[];
+    /** Position in milliseconds of the video frame the face is in (videos only). The box is then in the pixel space of that frame as decoded from the original video, and imageWidth and imageHeight are the frame size */
+    frameTimestamp?: number;
     /** Face bounding box height */
     height: number;
     /** Image height in pixels */
