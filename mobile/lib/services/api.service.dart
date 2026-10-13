@@ -38,6 +38,7 @@ class ApiService {
   late SessionsApi sessionsApi;
   late TagsApi tagsApi;
   late CustomViewsApi customViewsApi;
+  late VideoBookmarksApi videoBookmarksApi;
 
   ApiService() {
     // The below line ensures that the api clients are initialized when the service is instantiated
@@ -81,6 +82,7 @@ class ApiService {
     sessionsApi = SessionsApi(_apiClient);
     tagsApi = TagsApi(_apiClient);
     customViewsApi = CustomViewsApi(_apiClient);
+    videoBookmarksApi = VideoBookmarksApi(_apiClient);
   }
 
   Future<String> resolveAndSetEndpoint(String serverUrl) async {

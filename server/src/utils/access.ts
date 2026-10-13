@@ -345,6 +345,12 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
       return await access.view.checkOwnerAccess(auth.user.id, ids);
     }
 
+    case Permission.VideoBookmarkRead:
+    case Permission.VideoBookmarkUpdate:
+    case Permission.VideoBookmarkDelete: {
+      return await access.videoBookmark.checkOwnerAccess(auth.user.id, ids);
+    }
+
     case Permission.TimelineRead: {
       const isOwner = ids.has(auth.user.id) ? new Set([auth.user.id]) : new Set<string>();
       const isPartner = await access.timeline.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner));

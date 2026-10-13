@@ -80,6 +80,10 @@ export const newAccessRepositoryMock = (): IAccessRepositoryMock => {
       checkPartnerAccess: vitest.fn().mockResolvedValue(new Set()),
     },
 
+    videoBookmark: {
+      checkOwnerAccess: vitest.fn().mockResolvedValue(new Set()),
+    },
+
     view: {
       checkOwnerAccess: vitest.fn().mockResolvedValue(new Set()),
     },
