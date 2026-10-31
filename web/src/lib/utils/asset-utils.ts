@@ -293,6 +293,27 @@ export const isGroupingAutoStacks = () =>
 export const isStackGrouped = (stack: { source?: StackSource }) =>
   stack.source !== StackSource.Auto || isGroupingAutoStacks();
 
+/**
+ * [assets] without the ones whose grouped stack already has an asset in [shown] or earlier in [assets], so a stack
+ * found twice by a search (both files of a Video Boost pair) shows once, like in the timeline
+ */
+export const withoutShownStacks = <T extends { stack?: { id: string; source?: StackSource } | null }>(
+  assets: T[],
+  shown: T[],
+) => {
+  const stackIds = new Set(shown.map(({ stack }) => stack?.id));
+  return assets.filter(({ stack }) => {
+    if (!stack || !isStackGrouped(stack)) {
+      return true;
+    }
+    if (stackIds.has(stack.id)) {
+      return false;
+    }
+    stackIds.add(stack.id);
+    return true;
+  });
+};
+
 export type StackResponse = {
   stack?: StackResponseDto;
   toDeleteIds: string[];
