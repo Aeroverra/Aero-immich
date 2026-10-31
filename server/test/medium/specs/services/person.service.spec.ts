@@ -14,6 +14,7 @@ import { DatabaseRepository } from 'src/repositories/database.repository';
 import { JobRepository } from 'src/repositories/job.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { MachineLearningRepository } from 'src/repositories/machine-learning.repository';
+import { PersonSuggestionRepository } from 'src/repositories/person-suggestion.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { StorageRepository } from 'src/repositories/storage.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
@@ -35,6 +36,7 @@ const setup = (db?: Kysely<DB>) => {
       CryptoRepository,
       DatabaseRepository,
       PersonRepository,
+      PersonSuggestionRepository,
       AssetRepository,
       AssetEditRepository,
       SystemMetadataRepository,
@@ -197,6 +199,7 @@ describe(PersonService.name, () => {
       jobRepo.waitForQueueCompletion.mockResolvedValue();
       jobRepo.getJobCounts.mockResolvedValue({ active: 0, waiting: 0, completed: 0, delayed: 0, failed: 0, paused: 0 });
       jobRepo.queueAll.mockResolvedValue();
+      jobRepo.queue.mockResolvedValue();
 
       const { user } = await ctx.newUser();
       const { user: user1 } = await ctx.newUser();
@@ -219,6 +222,8 @@ describe(PersonService.name, () => {
           { name: JobName.FacialRecognition, data: { id: assetFaceUser1.id, deferred: false } },
         ]),
       );
+      // the suggestions are worked out again once these faces are recognized
+      expect(jobRepo.queue).toHaveBeenCalledWith({ name: JobName.PersonSuggestionsQueueAll, data: { force: true } });
     });
 
     it('should only delete all people of a specified cluster group and queue their faces for recognition', async () => {
@@ -229,6 +234,7 @@ describe(PersonService.name, () => {
       jobRepo.waitForQueueCompletion.mockResolvedValue();
       jobRepo.getJobCounts.mockResolvedValue({ active: 0, waiting: 0, completed: 0, delayed: 0, failed: 0, paused: 0 });
       jobRepo.queueAll.mockResolvedValue();
+      jobRepo.queue.mockResolvedValue();
 
       const { user } = await ctx.newUser();
       const { user: user1 } = await ctx.newUser();

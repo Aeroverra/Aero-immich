@@ -30,6 +30,7 @@ import { NotificationAdminService } from 'src/services/notification-admin.servic
 import { NotificationService } from 'src/services/notification.service';
 import { OcrService } from 'src/services/ocr.service';
 import { PartnerService } from 'src/services/partner.service';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import { PluginService } from 'src/services/plugin.service';
 import { QueueService } from 'src/services/queue.service';
@@ -95,6 +96,7 @@ export const services = [
   CustomViewService,
   PartnerService,
   PersonService,
+  PersonSuggestionService,
   PluginService,
   QueueService,
   SearchService,

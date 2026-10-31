@@ -7,6 +7,7 @@ import {
   getAssetPlaybackPath,
   getAssetThumbnailPath,
   getBaseUrl,
+  getFaceThumbnailPath,
   getPeopleThumbnailPath,
   getUserProfileImagePath,
   linkOAuthAccount,
@@ -295,6 +296,16 @@ export const getPeopleThumbnailUrl = (person: PersonResponseDto, updatedAt?: str
   return createUrl(getPeopleThumbnailPath(person.id), {
     updatedAt: updatedAt ?? person.updatedAt,
     assetId,
+    c: viewId || isPrivate ? `${viewId ?? 'default'}${isPrivate ? '-private' : ''}` : undefined,
+  });
+};
+
+/** a face cut out of its picture; keyed by the face's last change and, like person thumbnails, by view and private mode */
+export const getFaceThumbnailUrl = (face: { id: string; updatedAt: string }) => {
+  const viewId = viewManager.active.viewId;
+  const isPrivate = privateModeManager.enabled;
+  return createUrl(getFaceThumbnailPath(face.id), {
+    updatedAt: face.updatedAt,
     c: viewId || isPrivate ? `${viewId ?? 'default'}${isPrivate ? '-private' : ''}` : undefined,
   });
 };
