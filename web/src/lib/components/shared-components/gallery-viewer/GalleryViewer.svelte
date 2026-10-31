@@ -29,6 +29,7 @@
   import { modalManager } from '@immich/ui';
   import { debounce } from 'lodash-es';
   import { t } from 'svelte-i18n';
+  import { SvelteMap } from 'svelte/reactivity';
 
   const {
     TIMELINE: { INTERSECTION_EXPAND_TOP, INTERSECTION_EXPAND_BOTTOM },
@@ -186,6 +187,39 @@
     handlePromiseError(trashOrDelete(hasTrashedAsset));
   };
 
+  /** where trashed assets were in the grid, so an undo puts them back in place */
+  const trashedPositions = new SvelteMap<string, { asset: AssetResponseDto; index: number }>();
+
+  const rememberPositions = (assetIds: string[]) => {
+    for (const id of assetIds) {
+      const index = assets.findIndex((asset) => asset.id === id);
+      if (index !== -1) {
+        trashedPositions.set(id, { asset: assets[index], index });
+      }
+    }
+  };
+
+  const putBackRestoredAssets = (restored: TimelineAsset[]) => {
+    const positions = restored
+      .map(({ id }) => trashedPositions.get(id))
+      .filter((position) => position !== undefined)
+      .sort((a, b) => a.index - b.index);
+
+    for (const { asset, index } of positions) {
+      trashedPositions.delete(asset.id);
+      if (assets.some(({ id }) => id === asset.id)) {
+        continue;
+      }
+      assets.splice(Math.min(index, assets.length), 0, { ...asset, isTrashed: false });
+    }
+  };
+
+  const handleUndoDelete = async (restored: TimelineAsset[]) => {
+    const asset = restored[0] ? trashedPositions.get(restored[0].id)?.asset : undefined;
+    putBackRestoredAssets(restored);
+    await navigateToAsset(asset);
+  };
+
   const trashOrDelete = async (force: boolean = false) => {
     const forceOrNoTrash = force || !featureFlagsManager.value.trash;
     const selectedAssets = assetInteraction.assets;
@@ -197,11 +231,15 @@
       }
     }
 
+    if (!forceOrNoTrash && !onReload) {
+      rememberPositions(selectedAssets.map(({ id }) => id));
+    }
+
     await deleteAssets(
       forceOrNoTrash,
       (assetIds) => (assets = assets.filter((asset) => !assetIds.includes(asset.id))),
       selectedAssets,
-      onReload,
+      (restored) => (onReload ? onReload() : putBackRestoredAssets(restored)),
     );
 
     assetInteraction.clear();
@@ -297,6 +335,9 @@
           break;
         }
         const nextAsset = assetCursor.nextAsset ?? assetCursor.previousAsset;
+        if (action.type === AssetAction.TRASH) {
+          rememberPositions([action.asset.id]);
+        }
         assets.splice(
           assets.findIndex((currentAsset) => currentAsset.id === action.asset.id),
           1,
@@ -395,6 +436,7 @@
       <AssetViewer
         cursor={assetCursor}
         onAction={handleAction}
+        onUndoDelete={handleUndoDelete}
         onRandom={handleRandom}
         onAssetChange={updateCurrentAsset}
         onClose={() => {
