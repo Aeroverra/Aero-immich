@@ -44,6 +44,7 @@ import { AssetDeletedChecksumTable } from 'src/schema/tables/asset-deleted-check
 import { AssetEditAuditTable } from 'src/schema/tables/asset-edit-audit.table';
 import { AssetEditTable } from 'src/schema/tables/asset-edit.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
+import { AssetFaceAttributeTable } from 'src/schema/tables/asset-face-attribute.table';
 import { AssetFaceAuditTable } from 'src/schema/tables/asset-face-audit.table';
 import { AssetFaceTable } from 'src/schema/tables/asset-face.table';
 import { AssetFileTable } from 'src/schema/tables/asset-file.table';
@@ -52,6 +53,7 @@ import { AssetMetadataAuditTable } from 'src/schema/tables/asset-metadata-audit.
 import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
 import { AssetOcrAuditTable } from 'src/schema/tables/asset-ocr-audit.table';
 import { AssetOcrTable } from 'src/schema/tables/asset-ocr.table';
+import { AssetQualityTable } from 'src/schema/tables/asset-quality.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import { ClusterGroupRequestTable } from 'src/schema/tables/cluster-group-request.table';
 import { ClusterGroupTable } from 'src/schema/tables/cluster-group.table';
@@ -121,6 +123,8 @@ export class ImmichDatabase {
     AssetMetadataAuditTable,
     AssetJobStatusTable,
     AssetDeletedChecksumTable,
+    AssetFaceAttributeTable,
+    AssetQualityTable,
     AssetOcrTable,
     AssetOcrAuditTable,
     AssetTable,
@@ -232,6 +236,8 @@ export interface DB {
   asset_metadata_audit: AssetMetadataAuditTable;
   asset_job_status: AssetJobStatusTable;
   asset_deleted_checksum: AssetDeletedChecksumTable;
+  asset_face_attribute: AssetFaceAttributeTable;
+  asset_quality: AssetQualityTable;
   asset_ocr: AssetOcrTable;
   asset_ocr_audit: AssetOcrAuditTable;
   asset_audio: AssetAudioTable;

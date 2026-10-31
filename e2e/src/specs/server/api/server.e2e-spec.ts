@@ -104,6 +104,7 @@ describe('/server', () => {
         oauth: false,
         oauthAutoLaunch: false,
         ocr: false,
+        faceAttributes: false,
         passwordLogin: true,
         realtimeTranscoding: false,
         stackSource: true,
