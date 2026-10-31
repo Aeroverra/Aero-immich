@@ -1858,6 +1858,8 @@ export type AssetFaceResponseDto = {
     imageHeight: number;
     /** Image width in pixels */
     imageWidth: number;
+    /** The person is somewhere in the asset without a location: the box covers the whole asset and should not be drawn */
+    isWholeAsset?: boolean;
     person: (PersonResponseDto) | null;
     sourceType?: SourceType;
 };
@@ -2176,6 +2178,18 @@ export type PeopleUpdateItem = {
 export type PeopleUpdateDto = {
     /** People to update */
     people: PeopleUpdateItem[];
+};
+export type PersonAssetCountsDto = {
+    /** Asset IDs */
+    assetIds: string[];
+};
+export type PersonAssetCountResponseDto = {
+    /** How many of the assets the person is on */
+    count: number;
+    /** Person ID */
+    personId: string;
+    /** How many of those the person is on only through a whole-asset mark, so removing the person takes them off; on the others a face of the person is located in the picture and stays */
+    removableCount: number;
 };
 export type MergePersonDto = {
     /** Person IDs to merge */
@@ -7095,6 +7109,21 @@ export function updatePeople({ peopleUpdateDto }: {
     })));
 }
 /**
+ * Count the people of assets
+ */
+export function getPersonAssetCounts({ personAssetCountsDto }: {
+    personAssetCountsDto: PersonAssetCountsDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PersonAssetCountResponseDto[];
+    }>("/people/assets/counts", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: personAssetCountsDto
+    })));
+}
+/**
  * Merge people
  */
 export function mergePeople({ mergePersonDto }: {
@@ -7150,7 +7179,23 @@ export function updatePerson({ id, personUpdateDto }: {
     })));
 }
 /**
- * Add a person to videos
+ * Remove a person from assets
+ */
+export function removePersonFromAssets({ id, bulkIdsDto }: {
+    id: string;
+    bulkIdsDto: BulkIdsDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: BulkIdResponseDto[];
+    }>(`/people/${encodeURIComponent(id)}/assets`, oazapfts.json({
+        ...opts,
+        method: "DELETE",
+        body: bulkIdsDto
+    })));
+}
+/**
+ * Add a person to assets
  */
 export function addPersonToAssets({ id, bulkIdsDto }: {
     id: string;
