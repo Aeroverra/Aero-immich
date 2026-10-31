@@ -58,6 +58,17 @@ const PersonSearchSchema = z
   })
   .meta({ id: 'PersonSearchDto' });
 
+const PersonThumbnailSchema = z
+  .object({
+    assetId: z
+      .uuidv4()
+      .optional()
+      .describe(
+        'Asset the thumbnail is shown with. When the feature photo is hidden from the caller (private mode, active view), the face of the person on this asset is used instead',
+      ),
+  })
+  .meta({ id: 'PersonThumbnailDto' });
+
 export const PersonResponseSchema = z
   .object({
     id: z.uuidv4().describe('Person ID'),
@@ -91,6 +102,7 @@ export class PersonUpdateDto extends createZodDto(PersonUpdateSchema) {}
 export class PeopleUpdateDto extends createZodDto(PeopleUpdateSchema) {}
 export class MergePersonDto extends createZodDto(MergePersonSchema) {}
 export class PersonSearchDto extends createZodDto(PersonSearchSchema) {}
+export class PersonThumbnailDto extends createZodDto(PersonThumbnailSchema) {}
 export class PersonResponseDto extends createZodDto(PersonResponseSchema) {}
 
 export const AssetFaceResponseSchema = z

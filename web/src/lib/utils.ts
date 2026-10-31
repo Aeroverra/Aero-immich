@@ -25,6 +25,8 @@ import { init, register, t } from 'svelte-i18n';
 import { derived, get } from 'svelte/store';
 import { defaultLang, locales } from '$lib/constants';
 import { authManager } from '$lib/managers/auth-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+import { viewManager } from '$lib/managers/view-manager.svelte';
 import { alwaysLoadOriginalFile, lang, locale } from '$lib/stores/preferences.store';
 import { isWebCompatibleImage } from '$lib/utils/asset-utils';
 import { handleError } from '$lib/utils/handle-error';
@@ -282,8 +284,20 @@ export const getAssetHlsSessionUrl = (id: string, sessionId: string) => {
 export const getProfileImageUrl = (user: UserResponseDto) =>
   createUrl(getUserProfileImagePath(user.id), { updatedAt: user.profileChangedAt });
 
-export const getPeopleThumbnailUrl = (person: PersonResponseDto, updatedAt?: string) =>
-  createUrl(getPeopleThumbnailPath(person.id), { updatedAt: updatedAt ?? person.updatedAt });
+/**
+ * The thumbnail of a person. Pass `assetId` where the person is shown with an asset: when private mode or the active
+ * view hides the feature photo, the server then cuts the face from that asset. The server swaps faces with private mode
+ * and the active view, so they are part of the url and the browser never reuses a face from before a switch.
+ */
+export const getPeopleThumbnailUrl = (person: PersonResponseDto, updatedAt?: string, assetId?: string) => {
+  const viewId = viewManager.active.viewId;
+  const isPrivate = privateModeManager.enabled;
+  return createUrl(getPeopleThumbnailPath(person.id), {
+    updatedAt: updatedAt ?? person.updatedAt,
+    assetId,
+    c: viewId || isPrivate ? `${viewId ?? 'default'}${isPrivate ? '-private' : ''}` : undefined,
+  });
+};
 
 export const copyToClipboard = async (secret: string | unknown) => {
   const $t = get(t);

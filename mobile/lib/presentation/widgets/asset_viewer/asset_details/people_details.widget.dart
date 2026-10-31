@@ -15,6 +15,7 @@ import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.
 import 'package:immich_mobile/presentation/widgets/people/person_edit_name_modal.widget.dart';
 import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
@@ -34,6 +35,7 @@ class PeopleDetails extends ConsumerWidget {
     }
 
     final peopleFuture = ref.watch(peopleAssetProvider(asset.id));
+    final thumbnailScope = ref.watch(personThumbnailScopeProvider);
     final faceTimestamps = asset.isVideo
         ? ref.watch(videoFaceTimestampsProvider(asset.id)).valueOrNull ?? const <String, List<int>>{}
         : const <String, List<int>>{};
@@ -95,6 +97,8 @@ class PeopleDetails extends ConsumerWidget {
                       for (final person in people)
                         _Avatar(
                           person: person,
+                          assetId: asset.id,
+                          thumbnailScope: thumbnailScope,
                           assetFileCreatedAt: asset.createdAt,
                           timestamps: faceTimestamps[person.id] ?? const [],
                           onTimestampTap: jumpTo,
@@ -130,6 +134,10 @@ class PeopleDetails extends ConsumerWidget {
 
 class _Avatar extends StatelessWidget {
   final Person person;
+
+  /// the asset the person is shown with, whose face stands in when the feature photo is hidden
+  final String assetId;
+  final String? thumbnailScope;
   final DateTime assetFileCreatedAt;
   final VoidCallback? onTap;
   final VoidCallback? onNameTap;
@@ -141,6 +149,8 @@ class _Avatar extends StatelessWidget {
 
   const _Avatar({
     required this.person,
+    required this.assetId,
+    required this.thumbnailScope,
     required this.assetFileCreatedAt,
     this.onTap,
     this.onNameTap,
@@ -170,7 +180,12 @@ class _Avatar extends StatelessWidget {
                   child: CircleAvatar(
                     maxRadius: imageSize / 2,
                     backgroundImage: RemoteImageProvider(
-                      url: getFaceThumbnailUrl(person.id, updatedAt: person.updatedAt),
+                      url: getFaceThumbnailUrl(
+                        person.id,
+                        updatedAt: person.updatedAt,
+                        assetId: assetId,
+                        scope: thumbnailScope,
+                      ),
                     ),
                   ),
                 ),
