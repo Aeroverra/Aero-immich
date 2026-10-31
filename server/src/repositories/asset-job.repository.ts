@@ -287,6 +287,8 @@ export class AssetJobRepository {
         'asset.ownerId',
         'asset.livePhotoVideoId',
         'asset.originalPath',
+        'asset.originalFileName',
+        'asset.checksum',
         'asset.isOffline',
       ])
       .$call(withExif)

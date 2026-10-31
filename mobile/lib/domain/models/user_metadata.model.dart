@@ -11,6 +11,18 @@ enum UserMetadataKey {
   license,
 }
 
+/// What the server does with an upload of a file the user permanently deleted before
+enum DeletedReimportMode {
+  /// store it and move it to the trash right away
+  trash,
+
+  /// reject it as a duplicate without storing it
+  skip,
+
+  /// store it and add it to the "Previously deleted" album
+  album,
+}
+
 @freezed
 abstract class Onboarding with _$Onboarding {
   const Onboarding._();
