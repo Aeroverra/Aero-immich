@@ -44,6 +44,7 @@
 
   // Stacks
   let stacksGroupAuto = $state(authManager.preferences.stacks?.groupAuto ?? true);
+  let autoStackEnabled = $state(authManager.preferences.autoStack?.enabled ?? false);
 
   // Private page
   let privateSidebar = $state(authManager.preferences.privateMode?.sidebarWeb ?? true);
@@ -64,6 +65,7 @@
           cast: { gCastEnabled },
           recentlyAdded: { sidebarWeb: recentlyAddedSidebar },
           stacks: { groupAuto: stacksGroupAuto },
+          autoStack: { enabled: autoStackEnabled },
           privateMode: {
             sidebarWeb: privateSidebar,
             timeoutMinutes: privateTimeout,
@@ -207,6 +209,12 @@
           <div class="mt-4 flex flex-col gap-4 sm:ms-4">
             <Field label={$t('group_automatic_stacks')} description={$t('group_automatic_stacks_description')}>
               <Switch bind:checked={stacksGroupAuto} />
+            </Field>
+            <Field
+              label={$t('stack_similar_photos_automatically')}
+              description={$t('stack_similar_photos_automatically_description')}
+            >
+              <Switch bind:checked={autoStackEnabled} />
             </Field>
           </div>
         </SettingAccordion>
