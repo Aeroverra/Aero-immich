@@ -766,6 +766,7 @@ describe(AssetMediaService.name, () => {
       mocks.asset.getForVideo.mockResolvedValue({
         originalPath: asset.originalPath,
         encodedVideoPath: asset.files[0].path,
+        editedVideoPath: null,
       });
 
       await expect(sut.playbackVideo(authStub.admin, asset.id)).resolves.toEqual(
@@ -783,6 +784,7 @@ describe(AssetMediaService.name, () => {
       mocks.asset.getForVideo.mockResolvedValue({
         originalPath: asset.originalPath,
         encodedVideoPath: null,
+        editedVideoPath: null,
       });
 
       await expect(sut.playbackVideo(authStub.admin, asset.id)).resolves.toEqual(
@@ -790,6 +792,24 @@ describe(AssetMediaService.name, () => {
           path: asset.originalPath,
           cacheControl: CacheControl.PrivateWithCache,
           contentType: 'application/octet-stream',
+        }),
+      );
+    });
+
+    it('should play the edited video of a rotated video', async () => {
+      const asset = AssetFactory.create({ type: AssetType.Video, originalPath: '/original/path.mov' });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.asset.getForVideo.mockResolvedValue({
+        originalPath: asset.originalPath,
+        encodedVideoPath: '/path/to/encoded/video.mp4',
+        editedVideoPath: '/path/to/encoded/video_edited.mp4',
+      });
+
+      await expect(sut.playbackVideo(authStub.admin, asset.id)).resolves.toEqual(
+        new ImmichFileResponse({
+          path: '/path/to/encoded/video_edited.mp4',
+          cacheControl: CacheControl.PrivateWithCache,
+          contentType: 'video/mp4',
         }),
       );
     });
