@@ -25,10 +25,17 @@ import {
   partner_delete_audit,
   person_delete_audit,
   person_group_delete_audit,
+  preserve_updated_at,
   stack_delete_audit,
+  tag_asset_after_delete,
+  tag_asset_after_insert,
+  tag_asset_delete_audit,
+  tag_delete_audit,
   updated_at,
   user_delete_audit,
   user_metadata_audit,
+  view_delete_audit,
+  view_tag_delete_audit,
 } from 'src/schema/functions';
 import { ActivityTable } from 'src/schema/tables/activity.table';
 import { AlbumAssetAuditTable } from 'src/schema/tables/album-asset-audit.table';
@@ -36,6 +43,8 @@ import { AlbumAssetTable } from 'src/schema/tables/album-asset.table';
 import { AlbumAuditTable } from 'src/schema/tables/album-audit.table';
 import { AlbumUserAuditTable } from 'src/schema/tables/album-user-audit.table';
 import { AlbumUserTable } from 'src/schema/tables/album-user.table';
+import { AlbumViewStateCheckpointTable } from 'src/schema/tables/album-view-state-checkpoint.table';
+import { AlbumViewStateTable } from 'src/schema/tables/album-view-state.table';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { ApiKeyTable } from 'src/schema/tables/api-key.table';
 import { AssetAuditTable } from 'src/schema/tables/asset-audit.table';
@@ -87,7 +96,9 @@ import { StackAutoExclusionTable } from 'src/schema/tables/stack-auto-exclusion.
 import { StackTable } from 'src/schema/tables/stack.table';
 import { SessionSyncCheckpointTable } from 'src/schema/tables/sync-checkpoint.table';
 import { SystemMetadataTable } from 'src/schema/tables/system-metadata.table';
+import { TagAssetAuditTable } from 'src/schema/tables/tag-asset-audit.table';
 import { TagAssetTable } from 'src/schema/tables/tag-asset.table';
+import { TagAuditTable } from 'src/schema/tables/tag-audit.table';
 import { TagClosureTable } from 'src/schema/tables/tag-closure.table';
 import { TagTable } from 'src/schema/tables/tag.table';
 import { UserAuditTable } from 'src/schema/tables/user-audit.table';
@@ -100,6 +111,10 @@ import {
   VideoStreamSessionTable,
   VideoStreamVariantTable,
 } from 'src/schema/tables/video-stream.table';
+import { ViewAuditTable } from 'src/schema/tables/view-audit.table';
+import { ViewTagAuditTable } from 'src/schema/tables/view-tag-audit.table';
+import { ViewTagTable } from 'src/schema/tables/view-tag.table';
+import { ViewTable } from 'src/schema/tables/view.table';
 import { WorkflowLogTable } from 'src/schema/tables/workflow-log.table';
 import { WorkflowStepTable } from 'src/schema/tables/workflow-step.table';
 import { WorkflowTable } from 'src/schema/tables/workflow.table';
@@ -163,7 +178,9 @@ export class ImmichDatabase {
     SessionSyncCheckpointTable,
     SystemMetadataTable,
     TagTable,
+    TagAuditTable,
     TagAssetTable,
+    TagAssetAuditTable,
     TagClosureTable,
     UserAuditTable,
     UserMetadataTable,
@@ -173,6 +190,12 @@ export class ImmichDatabase {
     VideoStreamSessionTable,
     VideoStreamVariantTable,
     VideoStreamSegmentTable,
+    ViewTable,
+    ViewAuditTable,
+    ViewTagTable,
+    ViewTagAuditTable,
+    AlbumViewStateTable,
+    AlbumViewStateCheckpointTable,
     PluginTable,
     PluginMethodTable,
     WorkflowTable,
@@ -203,6 +226,13 @@ export class ImmichDatabase {
     asset_face_audit,
     asset_ocr_delete_audit,
     album_user_delete,
+    tag_delete_audit,
+    tag_asset_delete_audit,
+    tag_asset_after_insert,
+    tag_asset_after_delete,
+    view_delete_audit,
+    view_tag_delete_audit,
+    preserve_updated_at,
   ];
 
   enum = [album_user_role_enum, assets_status_enum, asset_face_source_type, asset_visibility_enum];
@@ -225,6 +255,8 @@ export interface DB {
   album_asset_audit: AlbumAssetAuditTable;
   album_user: AlbumUserTable;
   album_user_audit: AlbumUserAuditTable;
+  album_view_state: AlbumViewStateTable;
+  album_view_state_checkpoint: AlbumViewStateCheckpointTable;
 
   api_key: ApiKeyTable;
 
@@ -297,7 +329,9 @@ export interface DB {
   system_metadata: SystemMetadataTable;
 
   tag: TagTable;
+  tag_audit: TagAuditTable;
   tag_asset: TagAssetTable;
+  tag_asset_audit: TagAssetAuditTable;
   tag_closure: TagClosureTable;
 
   user: UserTable;
@@ -310,6 +344,11 @@ export interface DB {
   video_stream_session: VideoStreamSessionTable;
   video_stream_variant: VideoStreamVariantTable;
   video_stream_segment: VideoStreamSegmentTable;
+
+  view: ViewTable;
+  view_audit: ViewAuditTable;
+  view_tag: ViewTagTable;
+  view_tag_audit: ViewTagAuditTable;
 
   plugin: PluginTable;
   plugin_method: PluginMethodTable;

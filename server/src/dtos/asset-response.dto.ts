@@ -15,6 +15,7 @@ import {
   AssetVisibility,
   AssetVisibilitySchema,
   ChecksumAlgorithm,
+  Permission,
   StackSourceSchema,
 } from 'src/enum';
 import { MaybeDehydrated } from 'src/types';
@@ -195,6 +196,10 @@ const mapStack = (entity: { stack?: Stack | null }) => {
   };
 };
 
+/** mirrors isPrivateMode in utils/access: an unlocked session, or an API key with privateMode.access */
+const canSeeHiddenTags = (auth?: AuthDto) =>
+  !!auth?.session?.privateMode || !!auth?.apiKey?.permissions.includes(Permission.PrivateModeAccess);
+
 export function mapAsset(entity: MaybeDehydrated<MapAsset>, options: AssetMapOptions = {}): AssetResponseDto {
   const { stripMetadata = false, withStack = false } = options;
 
@@ -237,7 +242,8 @@ export function mapAsset(entity: MaybeDehydrated<MapAsset>, options: AssetMapOpt
     duration: entity.duration,
     exifInfo: entity.exifInfo ? mapExif(entity.exifInfo) : undefined,
     livePhotoVideoId: entity.livePhotoVideoId,
-    tags: entity.tags?.map((tag) => mapTag(tag)),
+    // hidden tags (isHidden is inherited from hidden parents here) are left out unless private mode is unlocked
+    tags: entity.tags?.filter((tag) => !tag.isHidden || canSeeHiddenTags(options.auth)).map((tag) => mapTag(tag)),
     people: peopleFromFaces(entity.faces),
     checksum: hexOrBufferToBase64(entity.checksum)!,
     stack: withStack ? mapStack(entity) : undefined,

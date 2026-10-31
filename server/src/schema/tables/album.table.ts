@@ -1,4 +1,5 @@
 import {
+  BeforeUpdateTrigger,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -11,10 +12,13 @@ import {
 } from '@immich/sql-tools';
 import { UpdatedAtTrigger, UpdateIdColumn } from 'src/decorators';
 import { AssetOrder } from 'src/enum';
+import { preserve_updated_at } from 'src/schema/functions';
 import { AssetTable } from 'src/schema/tables/asset.table';
 
 @Table({ name: 'album' })
 @UpdatedAtTrigger('album_updatedAt')
+// named to fire after album_updatedAt
+@BeforeUpdateTrigger({ name: 'album_updatedAt_preserve', scope: 'row', function: preserve_updated_at })
 export class AlbumTable {
   @PrimaryGeneratedColumn()
   id!: Generated<string>;

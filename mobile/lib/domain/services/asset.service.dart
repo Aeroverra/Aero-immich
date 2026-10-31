@@ -54,12 +54,15 @@ class AssetService {
     return _remoteRepository.get(id);
   }
 
-  Future<List<RemoteAsset>> getStack(RemoteAsset asset) async {
+  Future<List<RemoteAsset>> getStack(
+    RemoteAsset asset, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) async {
     if (asset.stackId == null) {
       return const [];
     }
 
-    final stack = await _remoteRepository.getStackChildren(asset);
+    final stack = await _remoteRepository.getStackChildren(asset, privateFilter: privateFilter);
     // Include the primary asset in the stack as the first item
     return [asset, ...stack];
   }

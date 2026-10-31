@@ -7,6 +7,8 @@ class MockSyncApi extends Mock implements SyncApi {}
 
 class MockServerApi extends Mock implements ServerApi {}
 
+class MockCustomViewsApi extends Mock implements CustomViewsApi {}
+
 class MockPartnerApiRepository extends Mock implements PartnerApiRepository {}
 
 class MockConnectivityApi extends Mock implements ConnectivityApi {}

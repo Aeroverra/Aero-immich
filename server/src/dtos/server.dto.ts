@@ -145,6 +145,12 @@ const ServerFeaturesSchema = z
     sidecar: z.boolean().describe('Whether sidecar files are supported'),
     search: z.boolean().describe('Whether search is enabled'),
     email: z.boolean().describe('Whether email notifications are enabled'),
+    customViews: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether the server supports custom views (saved tag filters with an active view per session), hidden tags and the includeViews sync flag. Absent on servers without it.',
+      ),
     ocr: z.boolean().describe('Whether OCR is enabled'),
     faceAttributes: z.boolean().describe('Whether face attributes and image quality analysis is enabled'),
     realtimeTranscoding: z.boolean().describe('Whether real-time transcoding is enabled'),

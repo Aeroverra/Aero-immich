@@ -1,4 +1,10 @@
-import { AssetOrder, DeletedReimportMode, StackActionMode, type UserPreferencesResponseDto } from '@immich/sdk';
+import {
+  AssetOrder,
+  DeletedReimportMode,
+  LockTrigger,
+  StackActionMode,
+  type UserPreferencesResponseDto,
+} from '@immich/sdk';
 import { Sync } from 'factory.ts';
 
 export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
@@ -34,6 +40,10 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
     sidebarWeb: false,
     timeoutMinutes: 30,
     includeInMemories: false,
+    lockTrigger: LockTrigger.AppPause,
+  },
+  customViews: {
+    lockTrigger: LockTrigger.ScreenOff,
   },
   purchase: {
     hideBuyButtonUntil: '',
