@@ -123,3 +123,19 @@ export const groupTagsByParent = (tags: TagResponseDto[]) => {
       tags: [...list].sort((a, b) => compareNames(tagName(a.value), tagName(b.value))),
     }));
 };
+
+/** black or white, whichever reads better on the tag's color (#rgb or #rrggbb); undefined for anything else */
+export const tagTextColor = (color: string | null | undefined) => {
+  const hex = color?.match(/^#?([\da-f]{3}|[\da-f]{6})$/i)?.[1];
+  if (!hex) {
+    return;
+  }
+  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join('') : hex;
+  const [red, green, blue] = [0, 2, 4].map((start) => {
+    const channel = Number.parseInt(full.slice(start, start + 2), 16) / 255;
+    return channel <= 0.03928 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  // the luminance where black and white text have the same contrast
+  return luminance > 0.179 ? '#000000' : '#ffffff';
+};
