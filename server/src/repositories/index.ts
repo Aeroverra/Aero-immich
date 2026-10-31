@@ -49,6 +49,7 @@ import { SyncCheckpointRepository } from 'src/repositories/sync-checkpoint.repos
 import { SyncRepository } from 'src/repositories/sync.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { TagRepository } from 'src/repositories/tag.repository';
+import { TakeoutRepository } from 'src/repositories/takeout.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
@@ -110,6 +111,7 @@ export const repositories = [
   SyncCheckpointRepository,
   SystemMetadataRepository,
   TagRepository,
+  TakeoutRepository,
   TelemetryRepository,
   TrashRepository,
   UserRepository,

@@ -56,6 +56,7 @@ import { SyncCheckpointRepository } from 'src/repositories/sync-checkpoint.repos
 import { SyncRepository } from 'src/repositories/sync.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { TagRepository } from 'src/repositories/tag.repository';
+import { TakeoutRepository } from 'src/repositories/takeout.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
@@ -129,6 +130,7 @@ export const BASE_SERVICE_DEPENDENCIES = [
   ViewRepository,
   WebsocketRepository,
   WorkflowRepository,
+  TakeoutRepository,
 ] as const;
 
 @Injectable()
@@ -195,6 +197,7 @@ export class BaseService {
     protected viewRepository: ViewRepository,
     protected websocketRepository: WebsocketRepository,
     protected workflowRepository: WorkflowRepository,
+    protected takeoutRepository: TakeoutRepository,
   ) {
     this.logger.setContext(this.constructor.name);
     this.storageCore = StorageCore.create(
@@ -270,6 +273,7 @@ export class BaseService {
       ctx.viewRepository,
       ctx.websocketRepository,
       ctx.workflowRepository,
+      ctx.takeoutRepository,
     );
 
     service.logger.setContext(BaseService.name);

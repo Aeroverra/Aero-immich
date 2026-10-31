@@ -68,6 +68,7 @@ import { SyncCheckpointRepository } from 'src/repositories/sync-checkpoint.repos
 import { SyncRepository } from 'src/repositories/sync.repository';
 import { SystemMetadataRepository } from 'src/repositories/system-metadata.repository';
 import { TagRepository } from 'src/repositories/tag.repository';
+import { TakeoutRepository } from 'src/repositories/takeout.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
@@ -287,6 +288,7 @@ export type ServiceOverrides = {
   syncCheckpoint: SyncCheckpointRepository;
   systemMetadata: SystemMetadataRepository;
   tag: TagRepository;
+  takeout: TakeoutRepository;
   telemetry: TelemetryRepository;
   trash: TrashRepository;
   user: UserRepository;
@@ -380,6 +382,7 @@ export const getMocks = () => {
     // systemMetadata: automock(SystemMetadataRepository, { strict: false }),
     // eslint-disable-next-line no-sparse-arrays
     tag: automock(TagRepository, { args: [, loggerMock], strict: false }),
+    takeout: automock(TakeoutRepository, { strict: false }),
     telemetry: newTelemetryRepositoryMock(),
     trash: automock(TrashRepository),
     user: automock(UserRepository, { strict: false }),
@@ -463,6 +466,7 @@ export const newTestService = <T extends BaseService>(
     overrides.view || (mocks.view as As<ViewRepository>),
     overrides.websocket || (mocks.websocket as As<WebsocketRepository>),
     overrides.workflow || (mocks.workflow as As<WorkflowRepository>),
+    overrides.takeout || (mocks.takeout as As<TakeoutRepository>),
   );
 
   return {

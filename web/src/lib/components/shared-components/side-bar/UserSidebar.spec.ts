@@ -34,6 +34,15 @@ describe('UserSidebar component', () => {
     authManager.reset();
   });
 
+  it('shows the Takeouts link', () => {
+    authManager.setPreferences(preferencesFactory.build());
+
+    render(UserSidebar);
+
+    const link = screen.queryByRole('link', { name: 'Takeouts' });
+    expect(link).toHaveAttribute('href', '/takeouts');
+  });
+
   it.each([
     { sidebarWeb: true, enabled: true, shown: true },
     { sidebarWeb: true, enabled: false, shown: false },

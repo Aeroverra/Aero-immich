@@ -56,7 +56,9 @@ export const initLanguage = async () => {
 interface UploadRequestOptions {
   url: string;
   method?: 'POST' | 'PUT';
-  data: FormData;
+  data: FormData | Blob;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
   onUploadProgress?: (event: ProgressEvent<XMLHttpRequestEventTarget>) => void;
 }
 
@@ -98,18 +100,31 @@ export const cancelUploadRequests = () => {
 };
 
 export const uploadRequest = async <T>(options: UploadRequestOptions): Promise<{ data: T; status: number }> => {
-  const { onUploadProgress: onProgress, data, url } = options;
+  const { onUploadProgress: onProgress, data, url, headers, signal } = options;
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    const unsubscribe = trackUpload(() => xhr.abort());
+    // A caller-supplied signal aborts only this request; the global cancel channel is kept for asset uploads.
+    const unsubscribe = signal ? () => {} : trackUpload(() => xhr.abort());
+
+    const onSignalAbort = () => xhr.abort();
 
     xhr.addEventListener('error', (error) => {
       unsubscribe();
+      signal?.removeEventListener('abort', onSignalAbort);
       reject(error);
+    });
+
+    xhr.addEventListener('abort', () => {
+      unsubscribe();
+      signal?.removeEventListener('abort', onSignalAbort);
+      if (signal) {
+        reject(new AbortError());
+      }
     });
 
     xhr.addEventListener('load', () => {
       unsubscribe();
+      signal?.removeEventListener('abort', onSignalAbort);
       if (xhr.readyState === 4 && xhr.status >= 200 && xhr.status < 300) {
         resolve({ data: xhr.response as T, status: xhr.status });
       } else {
@@ -121,8 +136,21 @@ export const uploadRequest = async <T>(options: UploadRequestOptions): Promise<{
       xhr.upload.addEventListener('progress', (event) => onProgress(event));
     }
 
+    if (signal?.aborted) {
+      reject(new AbortError());
+      return;
+    }
+
     xhr.open(options.method || 'POST', url);
     xhr.responseType = 'json';
+
+    if (headers) {
+      for (const [name, value] of Object.entries(headers)) {
+        xhr.setRequestHeader(name, value);
+      }
+    }
+
+    signal?.addEventListener('abort', onSignalAbort);
     xhr.send(data);
   });
 };

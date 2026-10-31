@@ -23,7 +23,8 @@ describe(QueueService.name, () => {
     it('should update concurrency', () => {
       sut.onConfigUpdate({ newConfig: defaults, oldConfig: {} as SystemConfig });
 
-      expect(mocks.job.setConcurrency).toHaveBeenCalledTimes(22);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledTimes(23);
+      expect(mocks.job.setConcurrency).toHaveBeenCalledWith(QueueName.Takeout, 2);
       expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(5, QueueName.FacialRecognition, 1);
       expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(7, QueueName.DuplicateDetection, 1);
       expect(mocks.job.setConcurrency).toHaveBeenNthCalledWith(8, QueueName.AutoStack, 1);
@@ -84,6 +85,7 @@ describe(QueueService.name, () => {
         [QueueName.IntegrityCheck]: expected,
         [QueueName.Editor]: expected,
         [QueueName.VideoFrameAnalysis]: expected,
+        [QueueName.Takeout]: expected,
       });
     });
   });
