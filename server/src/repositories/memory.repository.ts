@@ -9,7 +9,13 @@ import { AssetOrderWithRandom, AssetVisibility } from 'src/enum';
 import { DB } from 'src/schema';
 import { MemoryTable } from 'src/schema/tables/memory.table';
 import { IBulkAsset } from 'src/types';
-import { PrivateScope, withPrivateMemoryVisibility, withPrivateScope } from 'src/utils/database';
+import {
+  isViewUnrestricted,
+  PrivateScope,
+  viewAssetPredicate,
+  withPrivateMemoryVisibility,
+  withPrivateScope,
+} from 'src/utils/database';
 
 @Injectable()
 export class MemoryRepository implements IBulkAsset {
@@ -58,10 +64,25 @@ export class MemoryRepository implements IBulkAsset {
     },
   )
   statistics(ownerId: string, dto: MemorySearchDto, scope: PrivateScope) {
-    return this.searchBuilder(ownerId, dto)
-      .$call(withPrivateMemoryVisibility(scope))
-      .select((qb) => qb.fn.countAll<number>().as('total'))
-      .executeTakeFirstOrThrow();
+    return (
+      this.searchBuilder(ownerId, dto)
+        .$call(withPrivateMemoryVisibility(scope))
+        // a memory without any asset that passes the active view is not listed, so it is not counted either
+        .$if(!isViewUnrestricted(scope.view), (qb) =>
+          qb.where((eb) =>
+            eb.exists(
+              eb
+                .selectFrom('memory_asset')
+                .innerJoin('asset', 'asset.id', 'memory_asset.assetId')
+                .whereRef('memory_asset.memoriesId', '=', 'memory.id')
+                .where('asset.deletedAt', 'is', null)
+                .where((eb) => viewAssetPredicate(eb, scope.view!)),
+            ),
+          ),
+        )
+        .select((qb) => qb.fn.countAll<number>().as('total'))
+        .executeTakeFirstOrThrow()
+    );
   }
 
   @GenerateSql(

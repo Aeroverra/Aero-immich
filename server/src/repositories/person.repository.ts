@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ExpressionBuilder, Insertable, Kysely, sql, Updateable } from 'kysely';
 import { jsonObjectFrom } from 'kysely/helpers/postgres';
 import { InjectKysely } from 'nestjs-kysely';
-import { AssetFace } from 'src/database';
+import { AssetFace, ViewFilter } from 'src/database';
 import { Chunked, ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
 import { AssetFileType, AssetVisibility, SourceType, UserMetadataKey } from 'src/enum';
 import { DB } from 'src/schema';
@@ -13,9 +13,12 @@ import { PersonTable } from 'src/schema/tables/person.table';
 import {
   asUuid,
   dummy,
+  dummyViewFilter,
   inSharedAlbum,
+  isViewUnrestricted,
   PrivateScope,
   removeUndefinedKeys,
+  viewAssetPredicate,
   withFilePath,
   withVideoStream,
   withPrivateScope,
@@ -470,6 +473,7 @@ export class PersonRepository {
           ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
           : eb('asset.isPrivate', '=', false),
       )
+      .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
       .executeTakeFirst();
 
     return {
@@ -746,6 +750,21 @@ export class PersonRepository {
       .where('person.personGroupId', '=', personGroupId)
       .executeTakeFirst()
       .then((row) => row?.isPrivate ?? false);
+  }
+
+  /** Whether the person's current feature photo belongs to an asset that passes the view. */
+  @GenerateSql({ params: [{ ownerId: DummyValue.UUID, personGroupId: DummyValue.UUID }, dummyViewFilter] })
+  isCoverAssetInView({ ownerId, personGroupId }: PersonId, view: ViewFilter) {
+    return this.db
+      .selectFrom('person')
+      .innerJoin('asset_face', 'asset_face.id', 'person.faceAssetId')
+      .innerJoin('asset', 'asset.id', 'asset_face.assetId')
+      .select('asset.id')
+      .where('person.ownerId', '=', ownerId)
+      .where('person.personGroupId', '=', personGroupId)
+      .where((eb) => viewAssetPredicate(eb, view))
+      .executeTakeFirst()
+      .then((row) => !!row);
   }
 
   @GenerateSql()

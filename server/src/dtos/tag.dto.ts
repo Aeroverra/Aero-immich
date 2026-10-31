@@ -13,6 +13,10 @@ const TagCreateSchema = z
       .describe('Tag name'),
     parentId: z.uuidv4().nullish().describe('Parent tag ID'),
     color: hexColor.nullable().optional().describe('Tag color (hex)'),
+    isHidden: z
+      .boolean()
+      .optional()
+      .describe('Hide the tag and its children everywhere unless private mode is unlocked'),
   })
   .meta({ id: 'TagCreateDto' });
 
@@ -24,6 +28,10 @@ export const TagUpdateSchema = z
       .optional()
       .describe('Tag name'),
     color: hexColor.nullable().optional().describe('Tag color (hex)'),
+    isHidden: z
+      .boolean()
+      .optional()
+      .describe('Hide the tag and its children everywhere unless private mode is unlocked'),
   })
   .meta({ id: 'TagUpdateDto' });
 
@@ -57,6 +65,9 @@ export const TagResponseSchema = z
     // TODO: use `isoDatetimeToDate` when using `ZodSerializerDto` on the controllers.
     updatedAt: z.string().meta({ format: 'date-time' }).describe('Last update date'),
     color: z.string().optional().describe('Tag color (hex)'),
+    isHidden: z
+      .boolean()
+      .describe('Whether the tag is hidden unless private mode is unlocked (children of a hidden tag are hidden too)'),
   })
   .meta({ id: 'TagResponseDto' });
 
@@ -76,5 +87,6 @@ export function mapTag(entity: MaybeDehydrated<Tag>): TagResponseDto {
     createdAt: asDateTimeString(entity.createdAt),
     updatedAt: asDateTimeString(entity.updatedAt),
     color: entity.color ?? undefined,
+    isHidden: !!entity.isHidden,
   };
 }

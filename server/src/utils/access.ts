@@ -1,5 +1,5 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { AuthSharedLink } from 'src/database';
+import { AuthSharedLink, ViewFilter } from 'src/database';
 import { AuthDto } from 'src/dtos/auth.dto';
 import { AlbumUserRole, Permission } from 'src/enum';
 import { AccessRepository, type AssetAccessOptions } from 'src/repositories/access.repository';
@@ -103,6 +103,21 @@ const toAssetAccessOptions = (auth: AuthDto): AssetAccessOptions => ({
   privateMode: isPrivateMode(auth),
 });
 
+/**
+ * Reads also respect the session's view: an asset the view hides looks like it does not exist. Writes do not, so
+ * an action on an asset that just left the view (tagging it out, undo) keeps working.
+ */
+const toAssetReadAccessOptions = (auth: AuthDto): AssetAccessOptions => {
+  const view = getActiveView(auth);
+  return { ...toAssetAccessOptions(auth), ...(view && { view }) };
+};
+
+/** the view as a trailing argument of an access check, left out entirely when the request has none */
+export const viewArgs = (auth: AuthDto): [ViewFilter] | [] => {
+  const view = getActiveView(auth);
+  return view ? [view] : [];
+};
+
 const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRequest): Promise<Set<string>> => {
   const { auth, permission, ids } = request;
 
@@ -120,13 +135,18 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
     }
 
     case Permission.AssetRead: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetReadAccessOptions(auth));
       const isAlbum = await access.asset.checkAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         isPrivateMode(auth),
+        ...viewArgs(auth),
       );
-      const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
+      const isPartner = await access.asset.checkPartnerAccess(
+        auth.user.id,
+        setDifference(ids, isOwner, isAlbum),
+        ...viewArgs(auth),
+      );
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
@@ -134,34 +154,49 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
       const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, {
         hasElevatedPermission: false,
         privateMode: isPrivateMode(auth),
+        ...(getActiveView(auth) && { view: getActiveView(auth) }),
       });
-      const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner));
+      const isPartner = await access.asset.checkPartnerAccess(
+        auth.user.id,
+        setDifference(ids, isOwner),
+        ...viewArgs(auth),
+      );
       return setUnion(isOwner, isPartner);
     }
 
     case Permission.AssetFileDownload: {
-      return access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      return access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetReadAccessOptions(auth));
     }
 
     case Permission.AssetView: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetReadAccessOptions(auth));
       const isAlbum = await access.asset.checkAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         isPrivateMode(auth),
+        ...viewArgs(auth),
       );
-      const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
+      const isPartner = await access.asset.checkPartnerAccess(
+        auth.user.id,
+        setDifference(ids, isOwner, isAlbum),
+        ...viewArgs(auth),
+      );
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
     case Permission.AssetDownload: {
-      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
+      const isOwner = await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetReadAccessOptions(auth));
       const isAlbum = await access.asset.checkAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         isPrivateMode(auth),
+        ...viewArgs(auth),
       );
-      const isPartner = await access.asset.checkPartnerAccess(auth.user.id, setDifference(ids, isOwner, isAlbum));
+      const isPartner = await access.asset.checkPartnerAccess(
+        auth.user.id,
+        setDifference(ids, isOwner, isAlbum),
+        ...viewArgs(auth),
+      );
       return setUnion(isOwner, isAlbum, isPartner);
     }
 
@@ -189,18 +224,22 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
       return await access.asset.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
-    case Permission.AssetFileRead:
+    case Permission.AssetFileRead: {
+      return await access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetReadAccessOptions(auth));
+    }
+
     case Permission.AssetFileDelete: {
       return await access.assetFile.checkOwnerAccess(auth.user.id, ids, toAssetAccessOptions(auth));
     }
 
     case Permission.AlbumRead: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth), ...viewArgs(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Viewer,
         isPrivateMode(auth),
+        ...viewArgs(auth),
       );
       return setUnion(isOwner, isShared);
     }
@@ -243,12 +282,13 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
     }
 
     case Permission.AlbumDownload: {
-      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth));
+      const isOwner = await access.album.checkOwnerAccess(auth.user.id, ids, isPrivateMode(auth), ...viewArgs(auth));
       const isShared = await access.album.checkSharedAlbumAccess(
         auth.user.id,
         setDifference(ids, isOwner),
         AlbumUserRole.Viewer,
         isPrivateMode(auth),
+        ...viewArgs(auth),
       );
       return setUnion(isOwner, isShared);
     }
@@ -295,7 +335,14 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
     case Permission.TagRead:
     case Permission.TagUpdate:
     case Permission.TagDelete: {
-      return await access.tag.checkOwnerAccess(auth.user.id, ids);
+      // hidden tags do not exist while private mode is locked
+      return await access.tag.checkOwnerAccess(auth.user.id, ids, ...(isPrivateMode(auth) ? [] : [false]));
+    }
+
+    case Permission.ViewRead:
+    case Permission.ViewUpdate:
+    case Permission.ViewDelete: {
+      return await access.view.checkOwnerAccess(auth.user.id, ids);
     }
 
     case Permission.TimelineRead: {
@@ -411,7 +458,14 @@ export const requirePrivateMode = (auth: AuthDto) => {
 export const isPrivateMode = (auth: AuthDto) =>
   !!auth.session?.privateMode || !!auth.apiKey?.permissions.includes(Permission.PrivateModeAccess);
 
-export const toPrivateScope = (auth: AuthDto): PrivateScope => ({
-  privateMode: isPrivateMode(auth),
-  userId: auth.user.id,
-});
+/**
+ * The view that applies to the request. Only login sessions have views: API keys and shared links always see
+ * everything their permissions allow.
+ */
+export const getActiveView = (auth: AuthDto) => (auth.sharedLink || auth.apiKey ? null : (auth.session?.view ?? null));
+
+export const toPrivateScope = (auth: AuthDto): PrivateScope => {
+  const view = getActiveView(auth);
+  // the view is left out when there is none, so the scope looks exactly like before views existed
+  return { privateMode: isPrivateMode(auth), userId: auth.user.id, ...(view && { view }) };
+};

@@ -13,6 +13,8 @@ import {
   StackSource,
   UserAvatarColor,
   UserStatus,
+  ViewAccess,
+  ViewPrivateAssets,
 } from 'src/enum';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
@@ -89,6 +91,7 @@ export type Tag = {
   updatedAt: Date;
   color: string | null;
   parentId: string | null;
+  isHidden: boolean;
 };
 
 export type Memory = {
@@ -197,10 +200,31 @@ export type Album = Selectable<AlbumTable> & {
   assets: ShallowDehydrateObject<Selectable<AssetTable>>[];
 };
 
+/**
+ * The rules of a view, as the read paths apply them. An asset passes when it is included (everything, untagged, or
+ * tagged with an include tag or one of its descendants) and not excluded (tagged with an exclude tag or one of its
+ * descendants); exclude wins. Tags belong to the owner, so other users' assets can only pass through `includeAll` or
+ * `includeUntagged`.
+ */
+export type ViewFilter = {
+  id: string;
+  ownerId: string;
+  access: ViewAccess;
+  includeAll: boolean;
+  includeUntagged: boolean;
+  includeTagIds: string[];
+  excludeTagIds: string[];
+  privateAssets: ViewPrivateAssets;
+};
+
 export type AuthSession = {
   id: string;
   hasElevatedPermission: boolean;
   privateMode: boolean;
+  /** the view the session switched to; null or undefined means the owner's default view */
+  viewId?: string | null;
+  /** the view that applies to this request (the switched view or the default one); null means everything */
+  view?: ViewFilter | null;
 };
 
 export type Partner = {
@@ -382,6 +406,8 @@ export const columns = {
     'session.updatedAt',
     'session.pinExpiresAt',
     'session.privateModeExpiresAt',
+    'session.viewId',
+    'session.viewExpiresAt',
     'session.appVersion',
   ],
   user: userColumns,
@@ -401,7 +427,7 @@ export const columns = {
     'quotaSizeInBytes',
     'quotaUsageInBytes',
   ],
-  tag: ['tag.id', 'tag.value', 'tag.createdAt', 'tag.updatedAt', 'tag.color', 'tag.parentId'],
+  tag: ['tag.id', 'tag.value', 'tag.createdAt', 'tag.updatedAt', 'tag.color', 'tag.parentId', 'tag.isHidden'],
   apiKey: ['id', 'name', 'userId', 'createdAt', 'updatedAt', 'permissions'],
   notification: ['id', 'createdAt', 'level', 'type', 'title', 'description', 'data', 'readAt'],
   pluginMethod: [

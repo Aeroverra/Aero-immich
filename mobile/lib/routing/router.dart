@@ -6,6 +6,7 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
+import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/domain/models/log.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/domain/models/person.model.dart';
@@ -44,6 +45,7 @@ import 'package:immich_mobile/presentation/pages/asset_selection_timeline.page.d
 import 'package:immich_mobile/presentation/pages/asset_troubleshoot.page.dart';
 import 'package:immich_mobile/presentation/pages/cleanup_preview.page.dart';
 import 'package:immich_mobile/presentation/pages/create_album.page.dart';
+import 'package:immich_mobile/presentation/pages/custom_view_editor.page.dart';
 import 'package:immich_mobile/presentation/pages/dev/main_timeline.page.dart';
 import 'package:immich_mobile/presentation/pages/dev/media_stat.page.dart';
 import 'package:immich_mobile/presentation/pages/download_info.page.dart';
@@ -69,6 +71,7 @@ import 'package:immich_mobile/presentation/pages/recently_taken.page.dart';
 import 'package:immich_mobile/presentation/pages/remote_album.page.dart';
 import 'package:immich_mobile/presentation/pages/search/search.page.dart';
 import 'package:immich_mobile/presentation/pages/slideshow.page.dart';
+import 'package:immich_mobile/presentation/pages/tag_review.page.dart';
 import 'package:immich_mobile/presentation/pages/trash.page.dart';
 import 'package:immich_mobile/presentation/pages/user_selection.page.dart';
 import 'package:immich_mobile/presentation/pages/video.page.dart';
@@ -171,6 +174,8 @@ class AppRouter extends RootStackRouter {
     ),
     AutoRoute(page: MemoryRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: FavoriteRoute.page, guards: [_authGuard, _duplicateGuard]),
+    AutoRoute(page: TagReviewRoute.page, guards: [_authGuard, _duplicateGuard]),
+    AutoRoute(page: CustomViewEditorRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: TrashRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: ArchiveRoute.page, guards: [_authGuard, _duplicateGuard]),
     AutoRoute(page: LockedFolderRoute.page, guards: [_authGuard, _lockedGuard, _duplicateGuard]),

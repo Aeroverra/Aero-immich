@@ -4,6 +4,8 @@ import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/services/tag.service.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.dart';
+import 'package:immich_mobile/presentation/widgets/tags/tag_assets_sheet.widget.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/toast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
@@ -54,6 +56,13 @@ class TagAction extends AssetActionBuilder {
       }
 
       final assetIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
+      // servers with custom views sync the tags, so the sheet can show and change what the assets carry
+      if (ref.read(customViewsSupportedProvider)) {
+        await showTagAssetsSheet(context, assetIds);
+        clearSelection();
+        return;
+      }
+
       final results = await showTagPickerModal(context: context);
       if (results == null || !context.mounted) {
         return;
