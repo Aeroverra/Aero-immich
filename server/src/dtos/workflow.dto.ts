@@ -89,6 +89,8 @@ const WorkflowLogEntrySchema = z
     at: isoDatetimeToDate.describe('Workflow run date/time'),
     result: WorkflowResultSchema.describe('Workflow run result'),
     triggerDataId: z.uuid().optional().describe('Workflow trigger data ID'),
+    runId: z.uuid().describe('Workflow run ID, shared by every asset of a manual run'),
+    isManual: z.boolean().describe('Whether the run was started by hand on existing assets'),
     lastStep: z
       .object({
         method: z.string().describe('Method of the step'),
@@ -105,6 +107,29 @@ const WorkflowGetLogsSchema = z.object({
   limit: z.coerce.number().int().positive().default(50).describe('Maximum number of logs'),
 });
 
+const WorkflowPreviewSchema = z
+  .object({
+    limit: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(100)
+      .default(12)
+      .describe('Maximum number of matching asset IDs to return'),
+  })
+  .meta({ id: 'WorkflowPreviewDto' });
+
+const WorkflowPreviewResponseSchema = z
+  .object({
+    total: z.int().min(0).describe('Number of assets a manual run goes through'),
+    scanned: z.int().min(0).describe('Number of assets checked, newest first'),
+    matched: z.int().min(0).describe('Number of checked assets that pass the filters'),
+    complete: z.boolean().describe('Whether every asset was checked (false when the preview ran out of time)'),
+    filters: z.int().min(0).describe('Number of leading filter steps that were checked'),
+    assetIds: z.array(z.uuid()).describe('IDs of the first matching assets'),
+  })
+  .meta({ id: 'WorkflowPreviewResponseDto' });
+
 export class WorkflowTriggerResponseDto extends createZodDto(WorkflowTriggerResponseSchema) {}
 export class WorkflowSearchDto extends createZodDto(WorkflowSearchSchema) {}
 export class WorkflowCreateDto extends createZodDto(WorkflowCreateSchema) {}
@@ -113,6 +138,8 @@ export class WorkflowResponseDto extends createZodDto(WorkflowResponseSchema) {}
 export class WorkflowShareResponseDto extends createZodDto(WorkflowShareResponseSchema) {}
 export class WorkflowLogEntryDto extends createZodDto(WorkflowLogEntrySchema) {}
 export class WorkflowGetLogsDto extends createZodDto(WorkflowGetLogsSchema) {}
+export class WorkflowPreviewDto extends createZodDto(WorkflowPreviewSchema) {}
+export class WorkflowPreviewResponseDto extends createZodDto(WorkflowPreviewResponseSchema) {}
 
 type Workflow = {
   id: string;

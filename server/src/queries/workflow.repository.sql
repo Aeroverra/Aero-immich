@@ -73,6 +73,7 @@ where
 -- WorkflowRepository.getForWorkflowRun
 select
   "workflow"."id",
+  "workflow"."ownerId",
   "workflow"."name",
   "workflow"."trigger",
   "workflow"."logging",
@@ -88,13 +89,16 @@ select
           "plugin_method"."name" as "methodName",
           "plugin_method"."types" as "types",
           "plugin_method"."hostFunctions",
-          "plugin_method"."allowedHosts"
+          "plugin_method"."allowedHosts",
+          "plugin_method"."uiHints"
         from
           "workflow_step"
           inner join "plugin_method" on "plugin_method"."id" = "workflow_step"."pluginMethodId"
         where
           "workflow_step"."workflowId" = "workflow"."id"
           and "workflow_step"."enabled" = $1
+        order by
+          "workflow_step"."order" asc
       ) as agg
   ) as "steps"
 from
@@ -111,6 +115,8 @@ select
   "workflow_log"."workflowId",
   "workflow_log"."workflowStepId",
   "workflow_log"."triggerDataId",
+  "workflow_log"."runId",
+  "workflow_log"."isManual",
   (
     select
       to_json(obj)
@@ -140,3 +146,284 @@ limit
 delete from "workflow"
 where
   "id" = $1
+
+-- WorkflowRepository.getForAssetV1
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."stackId",
+  "asset"."livePhotoVideoId",
+  "asset"."libraryId",
+  "asset"."duplicateId",
+  "asset"."createdAt",
+  "asset"."updatedAt",
+  "asset"."deletedAt",
+  "asset"."fileCreatedAt",
+  "asset"."fileModifiedAt",
+  "asset"."localDateTime",
+  "asset"."type",
+  "asset"."status",
+  "asset"."visibility",
+  "asset"."duration",
+  "asset"."checksum",
+  "asset"."originalPath",
+  "asset"."originalFileName",
+  "asset"."isOffline",
+  "asset"."isFavorite",
+  "asset"."isPrivate",
+  "asset"."isExternal",
+  "asset"."isEdited",
+  "asset"."width",
+  "asset"."height",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "tag"."id",
+          "tag"."value",
+          "tag"."createdAt",
+          "tag"."updatedAt",
+          "tag"."color",
+          "tag"."parentId",
+          exists (
+            select
+            from
+              "tag_closure"
+              inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+            where
+              "tag_closure"."id_descendant" = "tag"."id"
+              and "hidden_tag"."isHidden" = $1
+          ) as "isHidden"
+        from
+          "tag"
+          inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
+        where
+          "asset"."id" = "tag_asset"."assetId"
+      ) as agg
+  ) as "tags",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "asset_ocr"."text",
+          "asset_ocr"."textScore",
+          "asset_ocr"."x1",
+          "asset_ocr"."y1",
+          "asset_ocr"."x2",
+          "asset_ocr"."y2",
+          "asset_ocr"."x3",
+          "asset_ocr"."y3",
+          "asset_ocr"."x4",
+          "asset_ocr"."y4"
+        from
+          "asset_ocr"
+        where
+          "asset_ocr"."assetId" = "asset"."id"
+          and "asset_ocr"."isVisible" = $2
+        order by
+          "asset_ocr"."y1" asc,
+          "asset_ocr"."x1" asc
+      ) as agg
+  ) as "ocr",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "asset_exif"."make",
+          "asset_exif"."model",
+          "asset_exif"."orientation",
+          "asset_exif"."dateTimeOriginal",
+          "asset_exif"."modifyDate",
+          "asset_exif"."exifImageWidth",
+          "asset_exif"."exifImageHeight",
+          "asset_exif"."fileSizeInByte",
+          "asset_exif"."lensModel",
+          "asset_exif"."fNumber",
+          "asset_exif"."focalLength",
+          "asset_exif"."iso",
+          "asset_exif"."latitude",
+          "asset_exif"."longitude",
+          "asset_exif"."city",
+          "asset_exif"."state",
+          "asset_exif"."country",
+          "asset_exif"."description",
+          "asset_exif"."fps",
+          "asset_exif"."exposureTime",
+          "asset_exif"."livePhotoCID",
+          "asset_exif"."timeZone",
+          "asset_exif"."projectionType",
+          "asset_exif"."profileDescription",
+          "asset_exif"."colorspace",
+          "asset_exif"."bitsPerSample",
+          "asset_exif"."autoStackId",
+          "asset_exif"."rating",
+          "asset_exif"."tags",
+          "asset_exif"."updatedAt"
+        from
+          "asset_exif"
+        where
+          "asset_exif"."assetId" = "asset"."id"
+      ) as obj
+  ) as "exifInfo"
+from
+  "asset"
+where
+  "asset"."id" = $3
+
+-- WorkflowRepository.getForAssetsV1
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."stackId",
+  "asset"."livePhotoVideoId",
+  "asset"."libraryId",
+  "asset"."duplicateId",
+  "asset"."createdAt",
+  "asset"."updatedAt",
+  "asset"."deletedAt",
+  "asset"."fileCreatedAt",
+  "asset"."fileModifiedAt",
+  "asset"."localDateTime",
+  "asset"."type",
+  "asset"."status",
+  "asset"."visibility",
+  "asset"."duration",
+  "asset"."checksum",
+  "asset"."originalPath",
+  "asset"."originalFileName",
+  "asset"."isOffline",
+  "asset"."isFavorite",
+  "asset"."isPrivate",
+  "asset"."isExternal",
+  "asset"."isEdited",
+  "asset"."width",
+  "asset"."height",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "tag"."id",
+          "tag"."value",
+          "tag"."createdAt",
+          "tag"."updatedAt",
+          "tag"."color",
+          "tag"."parentId",
+          exists (
+            select
+            from
+              "tag_closure"
+              inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+            where
+              "tag_closure"."id_descendant" = "tag"."id"
+              and "hidden_tag"."isHidden" = $1
+          ) as "isHidden"
+        from
+          "tag"
+          inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
+        where
+          "asset"."id" = "tag_asset"."assetId"
+      ) as agg
+  ) as "tags",
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "asset_ocr"."text",
+          "asset_ocr"."textScore",
+          "asset_ocr"."x1",
+          "asset_ocr"."y1",
+          "asset_ocr"."x2",
+          "asset_ocr"."y2",
+          "asset_ocr"."x3",
+          "asset_ocr"."y3",
+          "asset_ocr"."x4",
+          "asset_ocr"."y4"
+        from
+          "asset_ocr"
+        where
+          "asset_ocr"."assetId" = "asset"."id"
+          and "asset_ocr"."isVisible" = $2
+        order by
+          "asset_ocr"."y1" asc,
+          "asset_ocr"."x1" asc
+      ) as agg
+  ) as "ocr",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "asset_exif"."make",
+          "asset_exif"."model",
+          "asset_exif"."orientation",
+          "asset_exif"."dateTimeOriginal",
+          "asset_exif"."modifyDate",
+          "asset_exif"."exifImageWidth",
+          "asset_exif"."exifImageHeight",
+          "asset_exif"."fileSizeInByte",
+          "asset_exif"."lensModel",
+          "asset_exif"."fNumber",
+          "asset_exif"."focalLength",
+          "asset_exif"."iso",
+          "asset_exif"."latitude",
+          "asset_exif"."longitude",
+          "asset_exif"."city",
+          "asset_exif"."state",
+          "asset_exif"."country",
+          "asset_exif"."description",
+          "asset_exif"."fps",
+          "asset_exif"."exposureTime",
+          "asset_exif"."livePhotoCID",
+          "asset_exif"."timeZone",
+          "asset_exif"."projectionType",
+          "asset_exif"."profileDescription",
+          "asset_exif"."colorspace",
+          "asset_exif"."bitsPerSample",
+          "asset_exif"."autoStackId",
+          "asset_exif"."rating",
+          "asset_exif"."tags",
+          "asset_exif"."updatedAt"
+        from
+          "asset_exif"
+        where
+          "asset_exif"."assetId" = "asset"."id"
+      ) as obj
+  ) as "exifInfo"
+from
+  "asset"
+where
+  "asset"."id" in ($3)
+
+-- WorkflowRepository.streamForRun
+select
+  "asset"."id"
+from
+  "asset"
+where
+  "asset"."ownerId" = $1
+  and "asset"."deletedAt" is null
+  and "asset"."visibility" != $2
+order by
+  "asset"."fileCreatedAt" desc,
+  "asset"."id" desc
+
+-- WorkflowRepository.getRunAssetCount
+select
+  count(*) as "count"
+from
+  "asset"
+where
+  "asset"."ownerId" = $1
+  and "asset"."deletedAt" is null
+  and "asset"."visibility" != $2
