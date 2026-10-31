@@ -148,7 +148,6 @@ class TranscriptionSegment(TypedDict):
 
 
 class TranscriptionOutput(TypedDict):
-    modelName: str
     language: str
     languageProbability: float
     duration: float

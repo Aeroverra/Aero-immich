@@ -25,7 +25,7 @@ describe(MachineLearningRepository.name, () => {
       void readBody(request).then((body) => {
         received = body;
         response.writeHead(status, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ 'speech-to-text': { modelName: 'small', language: 'en', segments: [] } }));
+        response.end(JSON.stringify({ 'speech-to-text': { language: 'en', segments: [] } }));
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -55,8 +55,8 @@ describe(MachineLearningRepository.name, () => {
   describe('transcribe', () => {
     it('should send the audio as a form and return the transcription', async () => {
       await expect(
-        sut.transcribe(Buffer.from('opus audio'), { modelName: 'auto', language: '', computeType: 'auto' }),
-      ).resolves.toEqual({ modelName: 'small', language: 'en', segments: [] });
+        sut.transcribe(Buffer.from('opus audio'), { modelName: 'large-v3-turbo', language: '', computeType: 'auto' }),
+      ).resolves.toEqual({ language: 'en', segments: [] });
 
       expect(received).toContain('opus audio');
       expect(received).toContain('"speech-to-text"');
@@ -66,7 +66,7 @@ describe(MachineLearningRepository.name, () => {
       status = 500;
 
       await expect(
-        sut.transcribe(Buffer.from('opus audio'), { modelName: 'auto', language: '', computeType: 'auto' }),
+        sut.transcribe(Buffer.from('opus audio'), { modelName: 'large-v3-turbo', language: '', computeType: 'auto' }),
       ).rejects.toThrow('failed for all URLs');
 
       expect(logger.log).not.toHaveBeenCalledWith(expect.stringContaining('unhealthy'));

@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from immich_ml.config import log, settings
 from immich_ml.models.base import InferenceModel
-from immich_ml.models.constants import WHISPER_AUTO, WHISPER_AUTO_MODELS, WHISPER_REPOS
+from immich_ml.models.constants import WHISPER_REPOS
 from immich_ml.schemas import ModelTask, ModelType, TranscriptionOutput, TranscriptionSegment
 
 if TYPE_CHECKING:
@@ -34,13 +34,8 @@ class WhisperTranscriber(InferenceModel):
     identity = (ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT)
 
     def __init__(self, model_name: str, computeType: str = "auto", **model_kwargs: Any) -> None:
-        device = self._device_default
-        if model_name == WHISPER_AUTO:
-            model_name = WHISPER_AUTO_MODELS[device]
         super().__init__(model_name, **model_kwargs)
-        # the name as given, the cleaned model_name loses its dots
-        self.display_name = model_name
-        self.device = device
+        self.device = self._device_default
         self.compute_type = self._resolve_compute_type(computeType)
         self.reload_lock = threading.Lock()
 
@@ -102,7 +97,6 @@ class WhisperTranscriber(InferenceModel):
             if (text := segment.text.strip())
         ]
         return {
-            "modelName": self.display_name,
             "language": info.language,
             "languageProbability": info.language_probability,
             "duration": round(info.duration, 2),

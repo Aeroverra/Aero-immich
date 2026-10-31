@@ -165,7 +165,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     },
     videoTranscription: {
       enabled: false,
-      modelName: 'auto',
+      modelName: 'large-v3-turbo',
       language: '',
       computeType: TranscriptionComputeType.Auto,
     },

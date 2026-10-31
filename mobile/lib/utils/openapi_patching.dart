@@ -96,7 +96,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
       computeType: TranscriptionComputeType.auto,
       enabled: false,
       language: '',
-      modelName: 'auto',
+      modelName: 'large-v3-turbo',
     ).toJson(),
   },
   'AdminConfigNightlyTasksDto': {'autoStack': false},

@@ -174,8 +174,6 @@ export type TranscriptionSegment = {
 };
 
 export type Transcription = {
-  /** the model that was used, `auto` resolves to one for the device */
-  modelName?: string;
   language: string | null;
   languageProbability: number | null;
   /** seconds of audio */

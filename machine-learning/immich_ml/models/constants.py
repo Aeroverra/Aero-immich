@@ -123,10 +123,6 @@ _WHISPER_MODELS = {
 # model names lose their dots when cleaned, so the repositories are looked up by the cleaned name
 WHISPER_REPOS = {clean_name(name): repo for name, repo in _WHISPER_MODELS.items()}
 
-# `auto` picks a model for the device: the accurate one on a GPU, a much faster one on a CPU
-WHISPER_AUTO = "auto"
-WHISPER_AUTO_MODELS = {"cuda": "large-v3-turbo", "cpu": "small"}
-
 SUPPORTED_PROVIDERS = [
     "CUDAExecutionProvider",
     "MIGraphXExecutionProvider",
@@ -220,7 +216,7 @@ def get_model_source(model_name: str) -> ModelSource | None:
     if cleaned_name in _OPENCV_MODELS:
         return ModelSource.OPENCV
 
-    if cleaned_name in WHISPER_REPOS or cleaned_name == WHISPER_AUTO:
+    if cleaned_name in WHISPER_REPOS:
         return ModelSource.WHISPER
 
     return None

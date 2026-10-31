@@ -1490,27 +1490,6 @@ class TestSpeechToText:
 
         assert WhisperTranscriber("large-v3-turbo").device == "cpu"
 
-    def test_auto_is_a_whisper_model_name(self) -> None:
-        assert get_model_class("auto", ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT) is WhisperTranscriber
-
-    def test_auto_picks_turbo_on_gpu(self, mocker: MockerFixture) -> None:
-        mocker.patch(
-            "immich_ml.models.speech_to_text.whisper.ort.get_available_providers",
-            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
-        )
-        mocker.patch("ctranslate2.get_cuda_device_count", return_value=1)
-
-        model = WhisperTranscriber("auto")
-
-        assert model.model_name == "large-v3-turbo"
-        assert model.cache_dir == settings.cache_folder / "speech-to-text" / "large-v3-turbo"
-
-    def test_auto_picks_small_on_cpu(self, cpu_only: None) -> None:
-        model = WhisperTranscriber("auto")
-
-        assert model.model_name == "small"
-        assert model.cache_dir == settings.cache_folder / "speech-to-text" / "small"
-
     def test_caps_cpu_threads_separately(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
         mocker.patch.object(settings, "transcription_threads", 2)
         mocker.patch.object(settings, "model_intra_op_threads", 8)
@@ -1583,7 +1562,6 @@ class TestSpeechToText:
 
         session.transcribe.assert_called_once_with(audio, language="es", vad_filter=False, beam_size=1)
         assert output == {
-            "modelName": "large-v3-turbo",
             "language": "en",
             "languageProbability": 0.98,
             "duration": 1080.5,
@@ -1631,7 +1609,6 @@ class TestSpeechToTextEndpoint:
         assert response.status_code == 200
         assert response.json() == {
             "speech-to-text": {
-                "modelName": "small.en",
                 "language": "en",
                 "languageProbability": 0.98,
                 "duration": 1080.5,

@@ -96,11 +96,7 @@ export class TranscriptService extends BaseService {
 
     const segments = toTranscriptSegments(result.segments);
     await this.transcriptRepository.replace(
-      {
-        assetId: id,
-        language: segments.length > 0 ? (result.language ?? null) : null,
-        modelName: result.modelName ?? modelName,
-      },
+      { assetId: id, language: segments.length > 0 ? (result.language ?? null) : null, modelName },
       segments,
     );
     this.logger.debug(`Transcribed ${segments.length} lines of speech in video ${id}`);

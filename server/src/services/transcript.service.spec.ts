@@ -21,8 +21,6 @@ const makeAsset = (overrides: Partial<TranscriptionAsset> = {}): TranscriptionAs
 });
 
 const transcription = {
-  // the model the machine learning service picked for the default `auto`
-  modelName: 'small',
   language: 'en',
   languageProbability: 0.98,
   duration: 30,
@@ -137,12 +135,12 @@ describe(TranscriptService.name, () => {
 
       expect(mocks.media.extractAudio).toHaveBeenCalledWith('/original/video.mp4', 1);
       expect(mocks.machineLearning.transcribe).toHaveBeenCalledWith(Buffer.from('audio'), {
-        modelName: 'auto',
+        modelName: 'large-v3-turbo',
         language: '',
         computeType: TranscriptionComputeType.Auto,
       });
       expect(mocks.transcript.replace).toHaveBeenCalledWith(
-        { assetId: 'asset-id', language: 'en', modelName: 'small' },
+        { assetId: 'asset-id', language: 'en', modelName: 'large-v3-turbo' },
         [
           { startTime: 110, endTime: 4490, text: "I'm going to do the best I can because I'm driving." },
           { startTime: 6790, endTime: 14_850, text: 'But I just went to the last full moon party.' },
@@ -181,7 +179,7 @@ describe(TranscriptService.name, () => {
       expect(mocks.media.extractAudio).not.toHaveBeenCalled();
       expect(mocks.machineLearning.transcribe).not.toHaveBeenCalled();
       expect(mocks.transcript.replace).toHaveBeenCalledWith(
-        { assetId: 'asset-id', language: null, modelName: 'auto' },
+        { assetId: 'asset-id', language: null, modelName: 'large-v3-turbo' },
         [],
       );
     });
@@ -208,7 +206,7 @@ describe(TranscriptService.name, () => {
 
       expect(mocks.media.extractAudio).not.toHaveBeenCalled();
       expect(mocks.transcript.replace).toHaveBeenCalledWith(
-        { assetId: 'asset-id', language: null, modelName: 'auto' },
+        { assetId: 'asset-id', language: null, modelName: 'large-v3-turbo' },
         [],
       );
     });
@@ -232,7 +230,7 @@ describe(TranscriptService.name, () => {
 
       expect(mocks.machineLearning.transcribe).not.toHaveBeenCalled();
       expect(mocks.transcript.replace).toHaveBeenCalledWith(
-        { assetId: 'asset-id', language: null, modelName: 'auto' },
+        { assetId: 'asset-id', language: null, modelName: 'large-v3-turbo' },
         [],
       );
     });
@@ -253,7 +251,7 @@ describe(TranscriptService.name, () => {
       await expect(sut.handleTranscribeVideo({ id: 'asset-id' })).resolves.toBe(JobStatus.Success);
 
       expect(mocks.transcript.replace).toHaveBeenCalledWith(
-        { assetId: 'asset-id', language: null, modelName: 'small' },
+        { assetId: 'asset-id', language: null, modelName: 'large-v3-turbo' },
         [],
       );
     });
