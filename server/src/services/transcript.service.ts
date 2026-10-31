@@ -31,7 +31,7 @@ export class TranscriptService extends BaseService {
 
     for await (const assets of batched(this.assetJobRepository.streamForVideoTranscription(force))) {
       await this.jobRepository.queueAll(
-        assets.map((asset) => ({ name: JobName.AssetTranscribeVideo, data: { id: asset.id } })),
+        assets.map((asset) => ({ name: JobName.AssetTranscribeVideo, data: { id: asset.id, force } })),
       );
     }
 
@@ -39,7 +39,7 @@ export class TranscriptService extends BaseService {
   }
 
   @OnJob({ name: JobName.AssetTranscribeVideo, queue: QueueName.VideoTranscription })
-  async handleTranscribeVideo({ id }: JobOf<JobName.AssetTranscribeVideo>): Promise<JobStatus> {
+  async handleTranscribeVideo({ id, force }: JobOf<JobName.AssetTranscribeVideo>): Promise<JobStatus> {
     const { machineLearning } = await this.getConfig({ withCache: true });
     if (!isVideoTranscriptionEnabled(machineLearning)) {
       return JobStatus.Skipped;
@@ -51,6 +51,11 @@ export class TranscriptService extends BaseService {
     }
 
     if (asset.type !== AssetType.Video || asset.visibility === AssetVisibility.Hidden || asset.deletedAt) {
+      return JobStatus.Skipped;
+    }
+
+    if (!force && asset.transcriptAssetId) {
+      // transcribed since it was queued, for example on request while a backfill was waiting
       return JobStatus.Skipped;
     }
 

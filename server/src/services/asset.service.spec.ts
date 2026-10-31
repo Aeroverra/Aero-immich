@@ -972,6 +972,31 @@ describe(AssetService.name, () => {
 
       expect(mocks.job.queueAll).toHaveBeenCalledWith([{ name: JobName.AssetEncodeVideo, data: { id: 'asset-1' } }]);
     });
+
+    it('should transcribe the selected videos ahead of the queue', async () => {
+      const video = AssetFactory.create({ type: AssetType.Video });
+      const image = AssetFactory.create({ type: AssetType.Image });
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([video.id, image.id]));
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoTranscription: { enabled: true } } });
+      mocks.asset.getByIds.mockResolvedValue([video, image]);
+
+      await sut.run(authStub.admin, { assetIds: [video.id, image.id], name: AssetJobName.TRANSCRIBE_VIDEO });
+
+      expect(mocks.asset.getByIds).toHaveBeenCalledWith([video.id, image.id]);
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([
+        { name: JobName.AssetTranscribeVideo, data: { id: video.id, force: true, next: true } },
+      ]);
+    });
+
+    it('should not transcribe while video transcription is off', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+
+      await expect(
+        sut.run(authStub.admin, { assetIds: ['asset-1'], name: AssetJobName.TRANSCRIBE_VIDEO }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mocks.job.queueAll).not.toHaveBeenCalled();
+    });
   });
 
   describe('upsertMetadata', () => {

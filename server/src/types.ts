@@ -231,6 +231,13 @@ export interface IEntityJob extends IBaseJob {
   notify?: boolean;
 }
 
+export interface IVideoTranscriptionJob extends IEntityJob {
+  /** transcribes the video again even if it already has a transcript */
+  force?: boolean;
+  /** runs before the videos already waiting in the queue */
+  next?: boolean;
+}
+
 export interface IAssetDeleteJob extends IEntityJob {
   deleteOnDisk: boolean;
 }
@@ -473,7 +480,7 @@ export type JobItem =
 
   // Video transcription
   | { name: JobName.AssetTranscribeVideoQueueAll; data: IBaseJob }
-  | { name: JobName.AssetTranscribeVideo; data: IEntityJob }
+  | { name: JobName.AssetTranscribeVideo; data: IVideoTranscriptionJob }
 
   // OCR
   | { name: JobName.OcrQueueAll; data: IBaseJob }

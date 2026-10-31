@@ -69,6 +69,7 @@ export enum AssetJobName {
   REFRESH_METADATA = 'refresh-metadata',
   REGENERATE_THUMBNAIL = 'regenerate-thumbnail',
   TRANSCODE_VIDEO = 'transcode-video',
+  TRANSCRIBE_VIDEO = 'transcribe-video',
 }
 
 const AssetJobNameSchema = z.enum(AssetJobName).describe('Job name').meta({ id: 'AssetJobName' });

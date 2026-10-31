@@ -164,6 +164,7 @@
         <ActionMenuItem action={Actions.RegenerateThumbnailJob} />
         <ActionMenuItem action={Actions.RefreshMetadataJob} />
         <ActionMenuItem action={Actions.TranscodeVideoJob} />
+        <ActionMenuItem action={Actions.TranscribeVideoJob} />
       </ButtonContextMenu>
     {:else}
       <DownloadAction />

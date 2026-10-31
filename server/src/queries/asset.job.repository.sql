@@ -984,6 +984,7 @@ select
   "asset"."deletedAt",
   "asset"."originalPath",
   "asset_video"."assetId" as "videoStreamAssetId",
+  "asset_transcript"."assetId" as "transcriptAssetId",
   (
     select
       to_json(obj)
@@ -1008,6 +1009,7 @@ from
   left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
   left join "asset_audio" on "asset_audio"."assetId" = "asset"."id"
   left join "asset_video" on "asset_video"."assetId" = "asset"."id"
+  left join "asset_transcript" on "asset_transcript"."assetId" = "asset"."id"
 where
   "asset"."id" = $1
 

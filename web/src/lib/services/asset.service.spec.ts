@@ -1,7 +1,9 @@
-import { getAssetInfo } from '@immich/sdk';
+import { AssetTypeEnum, getAssetInfo } from '@immich/sdk';
 import { toastManager } from '@immich/ui';
 import { vitest } from 'vitest';
 import { authManager } from '$lib/managers/auth-manager.svelte';
+import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+import { videoTranscriptManager } from '$lib/managers/video-transcript-manager.svelte';
 import { getAssetActions, handleDownloadAsset } from '$lib/services/asset.service';
 import { setSharedLink } from '$lib/utils';
 import { getFormatter } from '$lib/utils/i18n';
@@ -91,6 +93,35 @@ describe('AssetService', () => {
       expect($t).toHaveBeenNthCalledWith(1, 'downloading_asset_filename', { values: { filename: 'asset.heic' } });
       expect($t).toHaveBeenNthCalledWith(2, 'downloading_asset_filename', { values: { filename: 'asset-motion.mov' } });
       expect(toastManager.primary).toHaveBeenCalledWith('formatter');
+    });
+  });
+
+  describe('getAssetActions TranscribeVideoJob', () => {
+    afterEach(() => {
+      featureFlagsManager.value.videoTranscription = undefined;
+      videoTranscriptManager.clear();
+    });
+
+    it('should only be offered for videos while video transcription is on', () => {
+      const video = assetFactory.build({ type: AssetTypeEnum.Video });
+      const image = assetFactory.build({ type: AssetTypeEnum.Image });
+
+      expect(getAssetActions(() => '', video).TranscribeVideoJob.$if?.()).toBe(false);
+
+      featureFlagsManager.value.videoTranscription = true;
+      expect(getAssetActions(() => '', video).TranscribeVideoJob.$if?.()).toBe(true);
+      expect(getAssetActions(() => '', image).TranscribeVideoJob.$if?.()).toBe(false);
+    });
+
+    it('should offer a refresh for a video that already has a transcript', () => {
+      const video = assetFactory.build({ type: AssetTypeEnum.Video });
+      const translate = (key: string) => key;
+
+      expect(getAssetActions(translate as never, video).TranscribeVideoJob.title).toBe('transcribe_video');
+
+      videoTranscriptManager.assetId = video.id;
+      videoTranscriptManager.segments = [{ startTime: 0, endTime: 1000, text: 'Hello' }];
+      expect(getAssetActions(translate as never, video).TranscribeVideoJob.title).toBe('refresh_transcript');
     });
   });
 });

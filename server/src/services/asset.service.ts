@@ -52,7 +52,7 @@ import {
   updateLockedColumns,
 } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
-import { batched, findOrFail } from 'src/utils/misc';
+import { batched, findOrFail, isVideoTranscriptionEnabled } from 'src/utils/misc';
 import { transformOcrBoundingBox } from 'src/utils/transform';
 
 @Injectable()
@@ -560,6 +560,11 @@ export class AssetService extends BaseService {
   async run(auth: AuthDto, dto: AssetJobsDto) {
     await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: dto.assetIds });
 
+    if (dto.name === AssetJobName.TRANSCRIBE_VIDEO) {
+      await this.queueTranscriptions(dto.assetIds);
+      return;
+    }
+
     const jobs: JobItem[] = [];
 
     for (const id of dto.assetIds) {
@@ -587,6 +592,20 @@ export class AssetService extends BaseService {
     }
 
     await this.jobRepository.queueAll(jobs);
+  }
+
+  private async queueTranscriptions(assetIds: string[]) {
+    const { machineLearning } = await this.getConfig({ withCache: true });
+    if (!isVideoTranscriptionEnabled(machineLearning)) {
+      throw new BadRequestException('Video transcription is not enabled');
+    }
+
+    const videos = await this.assetRepository.getByIds(assetIds);
+    await this.jobRepository.queueAll(
+      videos
+        .filter((asset) => asset.type === AssetType.Video)
+        .map((asset) => ({ name: JobName.AssetTranscribeVideo, data: { id: asset.id, force: true, next: true } })),
+    );
   }
 
   private findOrFail(id: string) {

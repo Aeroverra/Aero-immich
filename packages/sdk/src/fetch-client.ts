@@ -9896,7 +9896,8 @@ export enum AssetJobName {
     RefreshFaces = "refresh-faces",
     RefreshMetadata = "refresh-metadata",
     RegenerateThumbnail = "regenerate-thumbnail",
-    TranscodeVideo = "transcode-video"
+    TranscodeVideo = "transcode-video",
+    TranscribeVideo = "transcribe-video"
 }
 export enum StackSource {
     Manual = "manual",
