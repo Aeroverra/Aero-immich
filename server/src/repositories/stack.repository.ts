@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { ExpressionBuilder, Insertable, Kysely, Updateable } from 'kysely';
+import { ExpressionBuilder, Insertable, Kysely, sql, Updateable } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { InjectKysely } from 'nestjs-kysely';
 import { columns } from 'src/database';
@@ -7,6 +7,7 @@ import { DummyValue, GenerateSql } from 'src/decorators';
 import { DB } from 'src/schema';
 import { StackTable } from 'src/schema/tables/stack.table';
 import {
+  anyUuid,
   asUuid,
   PrivateScope,
   withDefaultVisibility,
@@ -133,6 +134,28 @@ export class StackRepository {
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })
+  /** The stacks of [ids] with the number of assets each holds, for showing stacks in lists such as search results */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  getSummaries(ids: string[]) {
+    if (ids.length === 0) {
+      return Promise.resolve([]);
+    }
+
+    return this.db
+      .selectFrom('stack')
+      .select(['stack.id', 'stack.primaryAssetId', 'stack.ownerId', 'stack.source'])
+      .select((eb) =>
+        eb
+          .selectFrom('asset')
+          .select(sql<number>`count(*)::int`.as('count'))
+          .whereRef('asset.stackId', '=', 'stack.id')
+          .where('asset.deletedAt', 'is', null)
+          .as('assetCount'),
+      )
+      .where('stack.id', '=', anyUuid(ids))
+      .execute();
+  }
+
   async delete(id: string): Promise<void> {
     await this.db.deleteFrom('stack').where('id', '=', asUuid(id)).execute();
   }

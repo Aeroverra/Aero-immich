@@ -194,12 +194,33 @@ const isInAutoStack = (eb: ExpressionBuilder<DB, 'asset'>) =>
       .where('auto_stack.source', '=', StackSource.Auto),
   );
 
+/** The filters of a time bucket query that a stack member has to pass as well to stand for its stack */
+type StackMemberFilters = Pick<
+  AssetBuilderOptions,
+  'visibility' | 'isFavorite' | 'isPrivate' | 'assetType' | 'albumId' | 'tagId' | 'personId'
+>;
+
+/** whether the query can leave out a stack's primary asset while keeping another member */
+const hasStackMemberFilters = (options: StackMemberFilters) =>
+  (!!options.visibility && options.visibility !== AssetVisibility.Timeline) ||
+  options.isFavorite !== undefined ||
+  options.isPrivate !== undefined ||
+  !!options.assetType ||
+  !!options.albumId ||
+  !!options.tagId ||
+  !!options.personId;
+
 /**
- * While a view hides some stack members, the stack is represented by its primary asset when that passes the view and
- * otherwise by the first member that does (oldest first), so a stack disappears only when every member is hidden.
- * Members are private together, so the privacy of the row itself applies to all of them.
+ * While a view or the query's own filters (favorites, videos, a tag, a person, an album) leave out some stack members,
+ * the stack is represented by its primary asset when that passes and otherwise by the first member that does (oldest
+ * first), so every stack shows once and disappears only when no member passes. Members are private together, so the
+ * privacy of the row itself applies to all of them.
  */
-const isStackRepresentative = (eb: ExpressionBuilder<DB, 'asset'>, scope: PrivateScope) =>
+const isStackRepresentative = (
+  eb: ExpressionBuilder<DB, 'asset'>,
+  scope: PrivateScope,
+  filters: StackMemberFilters = {},
+) =>
   eb(
     'asset.id',
     '=',
@@ -210,12 +231,54 @@ const isStackRepresentative = (eb: ExpressionBuilder<DB, 'asset'>, scope: Privat
       .whereRef('member.stackId', '=', 'asset.stackId')
       .where('member.deletedAt', 'is', null)
       .where((eb) =>
-        eb.or([
-          eb('member.id', '=', eb.ref('member_stack.primaryAssetId')),
-          eb('member.visibility', '=', AssetVisibility.Timeline),
-        ]),
+        filters.visibility && filters.visibility !== AssetVisibility.Timeline
+          ? eb('member.visibility', '=', filters.visibility)
+          : eb.or([
+              eb('member.id', '=', eb.ref('member_stack.primaryAssetId')),
+              eb('member.visibility', '=', AssetVisibility.Timeline),
+            ]),
       )
-      .where((eb) => viewAssetPredicate(eb, scope.view!, { assetIdRef: 'member.id', isPrivateRef: 'member.isPrivate' }))
+      .$if(filters.isFavorite !== undefined, (qb) => qb.where('member.isFavorite', '=', filters.isFavorite!))
+      .$if(filters.isPrivate !== undefined, (qb) => qb.where('member.isPrivate', '=', filters.isPrivate!))
+      .$if(!!filters.assetType, (qb) => qb.where('member.type', '=', filters.assetType!))
+      .$if(!!filters.albumId, (qb) =>
+        qb.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('album_asset as member_album')
+              .whereRef('member_album.assetId', '=', 'member.id')
+              .where('member_album.albumId', '=', asUuid(filters.albumId!)),
+          ),
+        ),
+      )
+      .$if(!!filters.tagId, (qb) =>
+        qb.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('tag_closure as member_tag_closure')
+              .innerJoin('tag_asset as member_tag', 'member_tag.tagId', 'member_tag_closure.id_descendant')
+              .whereRef('member_tag.assetId', '=', 'member.id')
+              .where('member_tag_closure.id_ancestor', '=', filters.tagId!),
+          ),
+        ),
+      )
+      .$if(!!filters.personId, (qb) =>
+        qb.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('asset_face as member_face')
+              .whereRef('member_face.assetId', '=', 'member.id')
+              .where('member_face.personGroupId', '=', asUuid(filters.personId!))
+              .where('member_face.deletedAt', 'is', null)
+              .where('member_face.isVisible', 'is', true),
+          ),
+        ),
+      )
+      .$if(!isViewUnrestricted(scope.view), (qb) =>
+        qb.where((eb) =>
+          viewAssetPredicate(eb, scope.view!, { assetIdRef: 'member.id', isPrivateRef: 'member.isPrivate' }),
+        ),
+      )
       .orderBy((eb) => eb('member.id', '=', eb.ref('member_stack.primaryAssetId')), 'desc')
       .orderBy('member.fileCreatedAt', 'asc')
       .orderBy('member.id', 'asc')
@@ -930,7 +993,7 @@ export class AssetRepository {
               .where('album_asset.albumId', '=', asUuid(options.albumId!)),
           )
           .$if(!!options.personId, (qb) => hasPeople(qb, [options.personId!]))
-          .$if(!!options.withStacked && isViewUnrestricted(scope.view), (qb) =>
+          .$if(!!options.withStacked && isViewUnrestricted(scope.view) && !hasStackMemberFilters(options), (qb) =>
             qb
               .leftJoin('stack', (join) =>
                 join.onRef('stack.id', '=', 'asset.stackId').onRef('stack.primaryAssetId', '=', 'asset.id'),
@@ -943,12 +1006,12 @@ export class AssetRepository {
                 ]),
               ),
           )
-          .$if(!!options.withStacked && !isViewUnrestricted(scope.view), (qb) =>
+          .$if(!!options.withStacked && (!isViewUnrestricted(scope.view) || hasStackMemberFilters(options)), (qb) =>
             qb.where((eb) =>
               eb.or([
                 eb('asset.stackId', 'is', null),
                 ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
-                isStackRepresentative(eb, scope),
+                isStackRepresentative(eb, scope, options),
               ]),
             ),
           )
@@ -1058,7 +1121,7 @@ export class AssetRepository {
           .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
           .$if(!!options.withStacked, (qb) =>
             qb
-              .$if(isViewUnrestricted(scope.view), (qb) =>
+              .$if(isViewUnrestricted(scope.view) && !hasStackMemberFilters(options), (qb) =>
                 qb.where((eb) =>
                   eb.not(
                     eb.exists(
@@ -1073,12 +1136,12 @@ export class AssetRepository {
                   ),
                 ),
               )
-              .$if(!isViewUnrestricted(scope.view), (qb) =>
+              .$if(!isViewUnrestricted(scope.view) || hasStackMemberFilters(options), (qb) =>
                 qb.where((eb) =>
                   eb.or([
                     eb('asset.stackId', 'is', null),
                     ...(options.withAutoStacked === false ? [isInAutoStack(eb)] : []),
-                    isStackRepresentative(eb, scope),
+                    isStackRepresentative(eb, scope, options),
                   ]),
                 ),
               )
@@ -1089,7 +1152,7 @@ export class AssetRepository {
                     .select(sql`array[stacked."stackId"::text, count('stacked')::text]`.as('stack'))
                     .whereRef('stacked.stackId', '=', 'asset.stackId')
                     .where('stacked.deletedAt', 'is', null)
-                    .where('stacked.visibility', '=', AssetVisibility.Timeline)
+                    .where('stacked.visibility', '=', options.visibility ?? AssetVisibility.Timeline)
                     .$if(!scope.privateMode, (qb) => qb.where('stacked.isPrivate', '=', false))
                     .$if(!isViewUnrestricted(scope.view), (qb) =>
                       qb.where((eb) =>

@@ -433,17 +433,35 @@ export class SearchService extends BaseService {
     return [auth.user.id, ...partnerIds];
   }
 
-  private mapResponse(
+  /**
+   * Search results list assets one by one, stack members included, so each result says which stack it belongs to:
+   * clients show the stack badge and act on the whole stack like they do in the timeline.
+   */
+  private async withStacks(assets: MapAsset[]): Promise<MapAsset[]> {
+    const stackIds = [...new Set(assets.map((asset) => asset.stackId).filter((id): id is string => !!id))];
+    if (stackIds.length === 0) {
+      return assets;
+    }
+
+    const stacks = new Map((await this.stackRepository.getSummaries(stackIds)).map((stack) => [stack.id, stack]));
+    return assets.map((asset) => {
+      const stack = asset.stackId ? stacks.get(asset.stackId) : undefined;
+      return stack ? { ...asset, stack: { ...stack, assetCount: stack.assetCount ?? 0, assets: [] } } : asset;
+    });
+  }
+
+  private async mapResponse(
     assets: MapAsset[],
     options: AssetMapOptions,
     page: { nextPage?: string | null; nextCursor?: string | null } = {},
-  ): SearchResponseDto {
+  ): Promise<SearchResponseDto> {
+    const items = await this.withStacks(assets);
     return {
       albums: { total: 0, count: 0, items: [], facets: [] },
       assets: {
         total: assets.length,
         count: assets.length,
-        items: assets.map((asset) => mapAsset(asset, options)),
+        items: items.map((asset) => mapAsset(asset, { ...options, withStack: true })),
         facets: [],
         nextPage: page.nextPage ?? null,
         nextCursor: page.nextCursor ?? null,
