@@ -8,6 +8,7 @@ import 'package:immich_mobile/providers/cast.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/current_album.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/setting.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
@@ -32,6 +33,8 @@ class ViewerKebabMenu extends ConsumerWidget {
     final timelineOrigin = ref.watch(timelineServiceProvider).origin;
     final isTrashEnable = ref.watch(serverInfoProvider.select((state) => state.serverFeatures.trash));
     final isInLockedView = ref.watch(inLockedViewProvider);
+    final isInPrivateView = ref.watch(inPrivateViewProvider);
+    final isPrivateMode = ref.watch(isPrivateModeProvider);
     final currentAlbum = ref.watch(currentRemoteAlbumProvider);
     final isArchived = asset is RemoteAsset && asset.visibility == AssetVisibility.archive;
     final advancedTroubleshooting = ref.watch(settingsProvider.notifier).get(.advancedTroubleshooting);
@@ -48,6 +51,8 @@ class ViewerKebabMenu extends ConsumerWidget {
       source: ActionSource.viewer,
       isCasting: isCasting,
       timelineOrigin: timelineOrigin,
+      isInPrivateView: isInPrivateView,
+      isPrivateMode: isPrivateMode,
     );
 
     final menuChildren = ActionButtonBuilder.buildViewerKebabMenu(actionContext, context);

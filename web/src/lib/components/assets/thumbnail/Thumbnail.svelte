@@ -16,6 +16,7 @@
     mdiCheckCircle,
     mdiFileGifBox,
     mdiHeart,
+    mdiLockOutline,
     mdiMagnifyPlusOutline,
     mdiMotionPauseOutline,
     mdiMotionPlayOutline,
@@ -84,6 +85,23 @@
   let height = $derived(thumbnailSize || thumbnailHeight || 235);
 
   let assetOwner = $derived(albumUsers?.find((user) => user.id === asset.ownerId) ?? null);
+
+  // bottom-left badges stack upwards: favorite, then archive, then private
+  let showFavoriteBadge = $derived(!authManager.isSharedLink && asset.isFavorite);
+  let showArchiveBadge = $derived(
+    !authManager.isSharedLink && showArchiveIcon && asset.visibility === AssetVisibility.Archive,
+  );
+  let showPrivateBadge = $derived(!authManager.isSharedLink && asset.isPrivate);
+  let privateBadgeOffset = $derived.by(() => {
+    const badgesBelow = Number(showFavoriteBadge) + Number(showArchiveBadge);
+    if (badgesBelow === 0) {
+      return 'bottom-2';
+    }
+    if (badgesBelow === 1) {
+      return 'bottom-10';
+    }
+    return 'bottom-18';
+  });
 
   const onIconClickedHandler = (e?: MouseEvent) => {
     e?.stopPropagation();
@@ -333,7 +351,7 @@
         {/if}
 
         <!-- Favorite asset star -->
-        {#if !authManager.isSharedLink && asset.isFavorite}
+        {#if showFavoriteBadge}
           <div class="absolute inset-s-2 bottom-2 z-2">
             <Icon data-icon-favorite icon={mdiHeart} size="24" class="text-white" />
           </div>
@@ -347,9 +365,16 @@
           </div>
         {/if}
 
-        {#if !authManager.isSharedLink && showArchiveIcon && asset.visibility === AssetVisibility.Archive}
-          <div class={['absolute inset-s-2 z-2', asset.isFavorite ? 'bottom-10' : 'bottom-2']}>
+        {#if showArchiveBadge}
+          <div class={['absolute inset-s-2 z-2', showFavoriteBadge ? 'bottom-10' : 'bottom-2']}>
             <Icon data-icon-archive icon={mdiArchiveArrowDownOutline} size="24" class="text-white" />
+          </div>
+        {/if}
+
+        <!-- Private asset lock -->
+        {#if showPrivateBadge}
+          <div class={['absolute inset-s-2 z-2', privateBadgeOffset]}>
+            <Icon data-icon-private icon={mdiLockOutline} size="24" class="text-white" />
           </div>
         {/if}
 

@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_album.repository.dart';
 import 'package:immich_mobile/models/albums/album_search.model.dart';
@@ -51,16 +52,16 @@ class RemoteAlbumService {
     return AlbumAssetCandidates(remoteAssetIds: remoteIds, localAssetsToUpload: localToUpload);
   }
 
-  Stream<RemoteAlbum?> watchAlbum(String albumId) {
-    return _repository.watchAlbum(albumId);
+  Stream<RemoteAlbum?> watchAlbum(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.watchAlbum(albumId, privateFilter: privateFilter);
   }
 
-  Future<List<RemoteAlbum>> getAll() {
-    return _repository.getAll();
+  Future<List<RemoteAlbum>> getAll({PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.getAll(privateFilter: privateFilter);
   }
 
-  Future<RemoteAlbum?> get(String albumId) {
-    return _repository.get(albumId);
+  Future<RemoteAlbum?> get(String albumId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.get(albumId, privateFilter: privateFilter);
   }
 
   Future<List<RemoteAlbum>> sortAlbums(
@@ -120,12 +121,14 @@ class RemoteAlbumService {
     required UserDto owner,
     required List<String> assetIds,
     String? description,
+    bool confirmPrivate = false,
   }) async {
     final album = await _albumApiRepository.createDriftAlbum(
       title,
       owner,
       description: description,
       assetIds: assetIds,
+      confirmPrivate: confirmPrivate,
     );
     await _repository.create(album, assetIds);
 
@@ -157,8 +160,11 @@ class RemoteAlbumService {
     return updatedAlbum;
   }
 
-  Stream<(DateTime, DateTime)> watchDateRange(String albumId) {
-    return _repository.watchDateRange(albumId);
+  Stream<(DateTime, DateTime)> watchDateRange(
+    String albumId, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
+    return _repository.watchDateRange(albumId, privateFilter: privateFilter);
   }
 
   Future<List<UserDto>> getSharedUsers(String albumId) {
@@ -173,8 +179,14 @@ class RemoteAlbumService {
     return _repository.getAssets(albumId);
   }
 
-  Future<({int added, int failed})> addAssets({required String albumId, required List<String> assetIds}) async {
-    final album = await _albumApiRepository.addAssets(albumId, assetIds);
+  /// [confirmPrivate] acknowledges that private assets among [assetIds] become visible to everyone
+  /// the album is shared with; the server refuses the add for a shared album without it.
+  Future<({int added, int failed})> addAssets({
+    required String albumId,
+    required List<String> assetIds,
+    bool confirmPrivate = false,
+  }) async {
+    final album = await _albumApiRepository.addAssets(albumId, assetIds, confirmPrivate: confirmPrivate);
 
     await _repository.addAssets(albumId, album.added);
 
@@ -191,10 +203,15 @@ class RemoteAlbumService {
     required AlbumAssetCandidates candidates,
     UploadCallbacks uploadCallbacks = const UploadCallbacks(),
     Completer<void>? cancelToken,
+    bool confirmPrivate = false,
   }) async {
     int addedCount = 0;
     if (candidates.remoteAssetIds.isNotEmpty) {
-      addedCount += (await addAssets(albumId: albumId, assetIds: candidates.remoteAssetIds)).added;
+      addedCount += (await addAssets(
+        albumId: albumId,
+        assetIds: candidates.remoteAssetIds,
+        confirmPrivate: confirmPrivate,
+      )).added;
     }
     if (candidates.localAssetsToUpload.isNotEmpty) {
       addedCount += await _uploadAndAddLocals(
@@ -290,8 +307,8 @@ class RemoteAlbumService {
     await _repository.deleteAlbum(albumId);
   }
 
-  Future<void> addUsers({required String albumId, required List<String> userIds}) async {
-    await _albumApiRepository.addUsers(albumId, userIds);
+  Future<void> addUsers({required String albumId, required List<String> userIds, bool confirmPrivate = false}) async {
+    await _albumApiRepository.addUsers(albumId, userIds, confirmPrivate: confirmPrivate);
 
     return _repository.addUsers(albumId, userIds);
   }
@@ -308,12 +325,22 @@ class RemoteAlbumService {
     return _repository.setActivityStatus(albumId, enabled);
   }
 
-  Future<int> getCount() {
-    return _repository.getCount();
+  Future<int> getCount({PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
+    return _repository.getCount(privateFilter: privateFilter);
   }
 
-  Future<List<RemoteAlbum>> getAlbumsContainingAsset(String assetId) {
-    return _repository.getAlbumsContainingAsset(assetId);
+  Future<List<RemoteAlbum>> getAlbumsContainingAsset(
+    String assetId, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
+    return _repository.getAlbumsContainingAsset(assetId, privateFilter: privateFilter);
+  }
+
+  Future<List<RemoteAlbum>> getAlbumsContainingAssets(
+    List<String> assetIds, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) {
+    return _repository.getAlbumsContainingAssets(assetIds, privateFilter: privateFilter);
   }
 
   Future<List<RemoteAlbum>> _sortByAssetDate(

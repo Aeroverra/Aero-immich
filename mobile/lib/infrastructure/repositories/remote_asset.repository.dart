@@ -9,6 +9,7 @@ import 'package:immich_mobile/data/db/main/table/remote/stack.drift.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/domain/models/exif.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/remote_asset.repository.drift.dart';
 import 'package:immich_mobile/utils/option.dart';
@@ -87,7 +88,7 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
         .getSingleOrNull();
   }
 
-  Future<List<(String, String)>> getPlaces(String userId) {
+  Future<List<(String, String)>> getPlaces(String userId, {PrivateModeFilter privateFilter = PrivateModeFilter.off}) {
     final asset = Subquery(
       _db.remoteAssetEntity.select()
         ..where((row) => row.ownerId.equals(userId))
@@ -107,7 +108,11 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
           ..where(
             _db.remoteExifEntity.city.isNotNull() &
                 asset.ref(_db.remoteAssetEntity.deletedAt).isNull() &
-                asset.ref(_db.remoteAssetEntity.visibility).equals(AssetVisibility.timeline.index),
+                asset.ref(_db.remoteAssetEntity.visibility).equals(AssetVisibility.timeline.index) &
+                (privateFilter.showsOwnPrivate
+                    ? asset.ref(_db.remoteAssetEntity.isPrivate).equals(false) |
+                          asset.ref(_db.remoteAssetEntity.ownerId).equals(privateFilter.userId!)
+                    : asset.ref(_db.remoteAssetEntity.isPrivate).equals(false)),
           )
           ..groupBy([_db.remoteExifEntity.city])
           ..orderBy([OrderingTerm.asc(_db.remoteExifEntity.city)]);
@@ -251,8 +256,9 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
     Option<bool> isFavorite = const .none(),
     Option<AssetVisibility> visibility = const .none(),
     Option<DateTime> createdAt = const .none(),
+    Option<bool> isPrivate = const .none(),
   }) async {
-    if ([isFavorite, visibility, createdAt].every((option) => option.isNone)) {
+    if ([isFavorite, visibility, createdAt, isPrivate].every((option) => option.isNone)) {
       return;
     }
 
@@ -260,6 +266,7 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
       visibility: visibility.toDriftValue(),
       isFavorite: isFavorite.toDriftValue(),
       createdAt: createdAt.toDriftValue(),
+      isPrivate: isPrivate.toDriftValue(),
     );
     return _db.batch((batch) {
       for (final remoteId in remoteIds) {
@@ -299,5 +306,31 @@ class RemoteAssetRepository extends DatabaseAccessor<Drift> with $RemoteAssetRep
         );
       }
     });
+  }
+
+  /// Ids of every private asset owned by [ownerId], used to evict cached images when private mode turns off
+  Future<List<String>> getPrivateAssetIds(String ownerId) {
+    final query = _db.remoteAssetEntity.selectOnly()
+      ..addColumns([_db.remoteAssetEntity.id])
+      ..where(_db.remoteAssetEntity.ownerId.equals(ownerId) & _db.remoteAssetEntity.isPrivate.equals(true));
+    return query.map((row) => row.read(_db.remoteAssetEntity.id)!).get();
+  }
+
+  Future<bool> hasPrivateAssets(List<String> ids) async {
+    if (ids.isEmpty) {
+      return false;
+    }
+    final count = await _db.remoteAssetEntity
+        .count(where: (row) => row.id.isIn(ids) & row.isPrivate.equals(true))
+        .getSingle();
+    return count > 0;
+  }
+
+  Future<bool> isAlbumPrivate(String albumId) async {
+    final query = _db.remoteAlbumEntity.selectOnly()
+      ..addColumns([_db.remoteAlbumEntity.isPrivate])
+      ..where(_db.remoteAlbumEntity.id.equals(albumId));
+    final row = await query.getSingleOrNull();
+    return row?.read(_db.remoteAlbumEntity.isPrivate) ?? false;
   }
 }

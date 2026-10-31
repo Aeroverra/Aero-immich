@@ -14,6 +14,7 @@ import { SystemMetadataRepository } from 'src/repositories/system-metadata.repos
 import { DB } from 'src/schema';
 import { GeodataPlacesTable } from 'src/schema/tables/geodata-places.table';
 import { NaturalEarthCountriesTable } from 'src/schema/tables/natural-earth-countries.table';
+import { PrivateScope, withPrivateAlbumScope, withPrivateScope } from 'src/utils/database';
 
 export interface MapMarkerSearchOptions {
   isArchived?: boolean;
@@ -70,22 +71,33 @@ export class MapRepository {
     this.logger.log('Geodata import completed');
   }
 
-  @GenerateSql({ params: [DummyValue.UUID] })
-  getAlbumMapMarkers(albumId: string) {
+  @GenerateSql({ params: [DummyValue.UUID, { privateMode: false, userId: DummyValue.UUID }] })
+  getAlbumMapMarkers(albumId: string, scope: PrivateScope) {
     return this.mapMarkersQuery()
       .innerJoin('album_asset', 'asset.id', 'album_asset.assetId')
       .where('album_asset.albumId', '=', albumId)
+      .$call(withPrivateAlbumScope(scope))
       .execute();
   }
 
-  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID], [DummyValue.UUID]] })
+  @GenerateSql({
+    params: [
+      DummyValue.UUID,
+      [DummyValue.UUID],
+      [DummyValue.UUID],
+      {},
+      { privateMode: false, userId: DummyValue.UUID },
+    ],
+  })
   getMapMarkers(
     authUserId: string,
     ownerIds: string[],
     albumIds: string[],
-    { isArchived, isFavorite, fileCreatedAfter, fileCreatedBefore }: MapMarkerSearchOptions = {},
+    { isArchived, isFavorite, fileCreatedAfter, fileCreatedBefore }: MapMarkerSearchOptions,
+    scope: PrivateScope,
   ) {
     return this.mapMarkersQuery()
+      .$call(withPrivateScope(scope))
       .$if(isArchived === true, (qb) =>
         qb.where((eb) =>
           eb.or([

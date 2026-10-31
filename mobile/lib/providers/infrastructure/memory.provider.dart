@@ -4,6 +4,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
 import 'package:immich_mobile/domain/services/memory.service.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 
 final memoryLaneProvider = FutureProvider.autoDispose<List<Memory>>((ref) {
@@ -18,7 +19,7 @@ final memoryLaneProvider = FutureProvider.autoDispose<List<Memory>>((ref) {
   ref.onDispose(timer.cancel);
 
   final service = MemoryService(ref.watch(driftProvider).memoryRepository);
-  return service.getMemoryLane(userId);
+  return service.getMemoryLane(userId, privateFilter: ref.watch(privateModeFilterProvider));
 });
 
 final allMemoriesProvider = FutureProvider.autoDispose.family<List<Memory>, bool>((ref, onlyFavorites) {
@@ -28,5 +29,5 @@ final allMemoriesProvider = FutureProvider.autoDispose.family<List<Memory>, bool
   }
 
   final service = MemoryService(ref.watch(driftProvider).memoryRepository);
-  return service.getAll(userId, onlyFavorites: onlyFavorites);
+  return service.getAll(userId, onlyFavorites: onlyFavorites, privateFilter: ref.watch(privateModeFilterProvider));
 });

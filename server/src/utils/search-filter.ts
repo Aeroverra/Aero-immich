@@ -1,7 +1,7 @@
 import { AuthDto } from 'src/dtos/auth.dto';
 import { SearchFilter, SearchFilterBranch } from 'src/dtos/search.dto';
 import { AssetVisibility } from 'src/enum';
-import { requireElevatedPermission } from 'src/utils/access';
+import { isPrivateMode, requireElevatedPermission, requirePrivateMode } from 'src/utils/access';
 
 type EnumField = 'type' | 'visibility';
 type EnumOperator = keyof NonNullable<SearchFilterBranch[EnumField]>;
@@ -56,6 +56,25 @@ export const applyLockedVisibilityPolicy = (auth: AuthDto, filter: SearchFilter)
   }
 
   return { ...filter, visibility: { ne: AssetVisibility.Locked } };
+};
+
+/**
+ * A filter that asks for private assets is rejected with 401 unless the session is in private mode.
+ * Hiding private assets otherwise is left to the search scope, which also keeps partners' private
+ * assets out while private mode is on.
+ */
+export const applyPrivatePolicy = (auth: AuthDto, filter: SearchFilter): SearchFilter => {
+  if (isPrivateMode(auth)) {
+    return filter;
+  }
+
+  const decidingConditions =
+    filter.isPrivate === undefined ? (filter.or ?? []).map((branch) => branch.isPrivate) : [filter.isPrivate];
+  if (decidingConditions.some((condition) => condition?.eq === true)) {
+    requirePrivateMode(auth);
+  }
+
+  return filter;
 };
 
 export const collectFilterIds = (filter: SearchFilter, field: IdsFilterField): string[] => {

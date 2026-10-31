@@ -13,7 +13,9 @@ import { get, writable } from 'svelte/store';
 import { page } from '$app/state';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { Route } from '$lib/route';
+import { handleAlbumRemoteUpdate } from '$lib/services/album.service';
 import { maintenanceStore } from '$lib/stores/maintenance.store';
 import { notificationManager } from '$lib/stores/notification-manager.svelte';
 import { createEventEmitter } from '$lib/utils/eventemitter';
@@ -31,6 +33,8 @@ export interface Events {
   on_asset_hidden: (assetId: string) => void;
   on_asset_restore: (assetIds: string[]) => void;
   on_asset_stack_update: (assetIds: string[]) => void;
+  on_asset_private_update: (assetIds: string[]) => void;
+  on_album_update: (albumId: string) => void;
   on_person_thumbnail: (personId: string) => void;
   on_server_version: (serverVersion: ServerVersionResponseDto) => void;
   on_config_update: () => void;
@@ -85,6 +89,8 @@ websocket
   .on('on_asset_trash', (assets) => eventManager.emit('AssetsDelete', assets))
   .on('on_asset_update', (asset) => eventManager.emit('AssetUpdate', asset))
   .on('on_person_thumbnail', (id) => eventManager.emit('PersonThumbnailReady', { id }))
+  .on('on_asset_private_update', () => privateModeManager.invalidate())
+  .on('on_album_update', (id) => void handleAlbumRemoteUpdate(id))
   .on('on_notification', () => notificationManager.refresh())
   .on('connect_error', (e) => console.log('Websocket Connect Error', e));
 

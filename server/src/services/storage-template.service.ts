@@ -309,13 +309,21 @@ export class StorageTemplateService extends BaseService {
       if (this.template.needsAlbum) {
         // For motion videos, use the still photo's album information since motion videos
         // don't have album metadata attached directly
-        const albums = await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id);
+        // storage paths are the owner's own files, so a private album still names the folder
+        const albums = await this.albumRepository.getByAssetId(assetForMetadata.ownerId, assetForMetadata.id, {
+          privateMode: true,
+          userId: assetForMetadata.ownerId,
+        });
         const album = albums?.[0];
         if (album) {
           albumName = album.albumName || null;
 
           if (this.template.needsAlbumMetadata) {
-            const [metadata] = await this.albumRepository.getMetadataForIds([album.id]);
+            // storage paths reflect the whole album, so private assets count towards its date range
+            const [metadata] = await this.albumRepository.getMetadataForIds([album.id], {
+              privateMode: true,
+              userId: assetForMetadata.ownerId,
+            });
             albumStartDate = metadata?.startDate || null;
             albumEndDate = metadata?.endDate || null;
           }

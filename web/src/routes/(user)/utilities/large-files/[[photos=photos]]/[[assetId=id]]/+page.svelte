@@ -18,7 +18,8 @@
 
   let { data }: Props = $props();
 
-  let assets = $state(data.assets);
+  // writable: local edits stick until the load re-runs (e.g. private mode toggles) and hands over a fresh list
+  let assets = $derived(data.assets);
   let asset = $derived(data.asset);
 
   $effect(() => {

@@ -19,6 +19,45 @@ beforeAll(async () => {
 });
 
 describe(SyncEntityType.AssetV2, () => {
+  it('should sync every member of a stack and the album holding one of them once another member turns private', async () => {
+    const { auth, ctx } = await setup();
+    const assetRepo = ctx.get(AssetRepository);
+    const { asset: inAlbum } = await ctx.newAsset({ ownerId: auth.user.id });
+    const { asset: loose } = await ctx.newAsset({ ownerId: auth.user.id });
+    const { album } = await ctx.newAlbum({ ownerId: auth.user.id }, [inAlbum.id]);
+    await ctx.newStack({ ownerId: auth.user.id }, [inAlbum.id, loose.id]);
+    const types = [SyncRequestType.AssetsV2, SyncRequestType.AlbumsV2];
+    await ctx.syncAckAll(auth, await ctx.syncStream(auth, types));
+    await ctx.assertSyncIsComplete(auth, types);
+
+    // the flag lands on the targeted asset first and on the rest of its stack afterwards, like the asset service does
+    await assetRepo.updateAll([loose.id], { isPrivate: true });
+    await assetRepo.updateAll([inAlbum.id], { isPrivate: true });
+
+    const response = await ctx.syncStream(auth, types);
+    expect(response).toHaveLength(4);
+    expect(response).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: loose.id, isPrivate: true }),
+        }),
+        expect.objectContaining({
+          type: SyncEntityType.AssetV2,
+          data: expect.objectContaining({ id: inAlbum.id, isPrivate: true }),
+        }),
+        expect.objectContaining({
+          type: SyncEntityType.AlbumV2,
+          data: expect.objectContaining({ id: album.id, isPrivate: true }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]),
+    );
+
+    await ctx.syncAckAll(auth, response);
+    await ctx.assertSyncIsComplete(auth, types);
+  });
+
   it('should detect and sync the first asset', async () => {
     const originalFileName = 'firstAsset';
     const checksum = '1115vHcVkZzNp3Q9G+FEA0nu6zUbGb4Tj4UOXkN0wRA=';
@@ -57,6 +96,7 @@ describe(SyncEntityType.AssetV2, () => {
           fileModifiedAt: asset.fileModifiedAt,
           createdAt: asset.createdAt,
           isFavorite: asset.isFavorite,
+          isPrivate: asset.isPrivate,
           localDateTime: asset.localDateTime,
           type: asset.type,
           visibility: asset.visibility,
@@ -119,5 +159,20 @@ describe(SyncEntityType.AssetV2, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetsV2]);
+  });
+
+  it('should carry the private flag', async () => {
+    const { auth, ctx } = await setup();
+    const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+
+    const response = await ctx.syncStream(auth, [SyncRequestType.AssetsV2]);
+    expect(response).toEqual([
+      {
+        ack: expect.any(String),
+        data: expect.objectContaining({ id: asset.id, isPrivate: true }),
+        type: SyncEntityType.AssetV2,
+      },
+      expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+    ]);
   });
 });

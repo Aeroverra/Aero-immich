@@ -1,7 +1,7 @@
 import { Kysely } from 'kysely';
 import { DateTime } from 'luxon';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
-import { AssetFileType, MemoryType } from 'src/enum';
+import { AssetFileType, MemoryType, UserMetadataKey } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
 import { DatabaseRepository } from 'src/repositories/database.repository';
@@ -41,6 +41,26 @@ const create = async (ctx: ReturnType<typeof setup>['ctx']) => {
   const { asset } = await ctx.newAsset({ ownerId: user.id });
 
   return { memory, asset, user };
+};
+
+const prepareOnThisDay = async (ctx: ReturnType<typeof setup>['ctx'], now: DateTime<true>) => {
+  const assetRepo = ctx.get(AssetRepository);
+  const { user } = await ctx.newUser();
+  const localDateTime = now.minus({ years: 1 }).toISO();
+  const { asset: plain } = await ctx.newAsset({ ownerId: user.id, localDateTime });
+  const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, localDateTime, isPrivate: true });
+  for (const asset of [plain, hidden]) {
+    await Promise.all([
+      ctx.newExif({ assetId: asset.id, make: 'Canon' }),
+      ctx.newJobStatus({ assetId: asset.id }),
+      assetRepo.upsertFiles([
+        { assetId: asset.id, type: AssetFileType.Preview, path: `/path/to/${asset.id}/preview.jpg` },
+        { assetId: asset.id, type: AssetFileType.Thumbnail, path: `/path/to/${asset.id}/thumbnail.jpg` },
+      ]),
+    ]);
+  }
+
+  return { user, plain, hidden };
 };
 
 describe(MemoryService.name, () => {
@@ -313,7 +333,7 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
       expect(memories[0]).toEqual(
         expect.objectContaining({
@@ -353,7 +373,7 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
       expect(memories[0]).toEqual(
         expect.objectContaining({
@@ -408,13 +428,50 @@ describe(MemoryService.name, () => {
       vi.setSystemTime(now.toJSDate());
       await sut.onMemoriesCreate();
 
-      const memories = await memoryRepo.search(user.id, {});
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memories.length).toBe(1);
 
       await sut.onMemoriesCreate();
 
-      const memoriesAfter = await memoryRepo.search(user.id, {});
+      const memoriesAfter = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
       expect(memoriesAfter.length).toBe(1);
+    });
+  });
+
+  describe('onMemoriesCreate (private assets)', () => {
+    it('should leave private assets out of generated memories by default', async () => {
+      const { sut, ctx } = setup();
+      const memoryRepo = ctx.get(MemoryRepository);
+      const now = DateTime.fromObject({ year: 2025, month: 4, day: 10 }, { zone: 'utc' }) as DateTime<true>;
+      const { user, plain } = await prepareOnThisDay(ctx, now);
+
+      vi.setSystemTime(now.toJSDate());
+      await sut.onMemoriesCreate();
+
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
+      expect(memories).toHaveLength(1);
+      expect(memories[0].assets.map(({ id }) => id)).toEqual([plain.id]);
+    });
+
+    it('should include private assets in generated memories when the preference is on', async () => {
+      const { sut, ctx } = setup();
+      const memoryRepo = ctx.get(MemoryRepository);
+      const now = DateTime.fromObject({ year: 2025, month: 4, day: 10 }, { zone: 'utc' }) as DateTime<true>;
+      const { user, plain, hidden } = await prepareOnThisDay(ctx, now);
+      await ctx.get(UserRepository).upsertMetadata(user.id, {
+        key: UserMetadataKey.Preferences,
+        value: { privateMode: { includeInMemories: true } },
+      });
+
+      vi.setSystemTime(now.toJSDate());
+      await sut.onMemoriesCreate();
+
+      const memories = await memoryRepo.search(user.id, {}, { privateMode: true, userId: user.id });
+      expect(memories).toHaveLength(1);
+      expect(memories[0].assets.map(({ id }) => id).sort()).toEqual([plain.id, hidden.id].sort());
+
+      // the generated memory now holds a private asset, so it is private as a whole
+      await expect(sut.search(factory.auth({ user }), {})).resolves.toEqual([]);
     });
   });
 
@@ -422,6 +479,40 @@ describe(MemoryService.name, () => {
     it('should run without error', async () => {
       const { sut } = setup();
       await expect(sut.onMemoriesCleanup()).resolves.not.toThrow();
+    });
+  });
+
+  describe('private mode', () => {
+    it('should hide a memory with any private asset outside private mode', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { memory: mixed } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: mixed.id, assetId: plain.id });
+      await ctx.newMemoryAsset({ memoryId: mixed.id, assetId: hidden.id });
+      const { memory: secret } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: secret.id, assetId: hidden.id });
+      const { memory: open } = await ctx.newMemory({ ownerId: user.id });
+      await ctx.newMemoryAsset({ memoryId: open.id, assetId: plain.id });
+      const off = factory.auth({ user });
+      const on = factory.auth({ user, session: { privateMode: true } });
+
+      // one private asset makes the memory private as a whole, for the owner too
+      const hiddenList = await sut.search(off, {});
+      expect(hiddenList.map(({ id }) => id)).toEqual([open.id]);
+      await expect(sut.get(off, mixed.id)).rejects.toThrow('Memory not found');
+      await expect(sut.get(off, secret.id)).rejects.toThrow('Memory not found');
+      await expect(sut.get(off, open.id)).resolves.toMatchObject({ id: open.id });
+      await expect(sut.statistics(off, {})).resolves.toEqual({ total: 1 });
+
+      const fullList = await sut.search(on, {});
+      expect(fullList.map(({ id }) => id).sort()).toEqual([mixed.id, secret.id, open.id].sort());
+      expect(fullList.find(({ id }) => id === mixed.id)?.assets).toHaveLength(2);
+      await expect(sut.get(on, mixed.id)).resolves.toMatchObject({
+        assets: expect.arrayContaining([expect.objectContaining({ id: hidden.id })]),
+      });
+      await expect(sut.statistics(on, {})).resolves.toEqual({ total: 3 });
     });
   });
 });

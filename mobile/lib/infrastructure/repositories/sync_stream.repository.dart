@@ -262,6 +262,7 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
             width: Value(asset.width),
             height: Value(asset.height),
             isEdited: Value(asset.isEdited),
+            isPrivate: Value(asset.isPrivate),
           );
 
           batch.insert(
@@ -507,6 +508,7 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
             thumbnailAssetId: Value(album.thumbnailAssetId),
             createdAt: Value(album.createdAt),
             updatedAt: Value(album.updatedAt),
+            isPrivate: Value(album.isPrivate),
           );
 
           batch.insert(

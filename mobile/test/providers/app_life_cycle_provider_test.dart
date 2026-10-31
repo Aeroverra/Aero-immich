@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/memory.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/providers/permission.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/providers/websocket.provider.dart';
 import 'package:immich_mobile/utils/upload_speed_calculator.dart';
@@ -76,6 +77,21 @@ class TestWebsocketNotifier extends WebsocketNotifier {
 
   @override
   void disconnect() => disconnectCount++;
+}
+
+class TestPrivateModeNotifier extends PrivateModeNotifier {
+  TestPrivateModeNotifier(super.ref);
+
+  int disableCount = 0;
+
+  @override
+  Future<void> refresh() async {}
+
+  @override
+  Future<void> disable() async {
+    disableCount++;
+    state = false;
+  }
 }
 
 class TestDriftBackupNotifier extends BackupNotifier {
@@ -148,6 +164,7 @@ void main() {
           return websocket = TestWebsocketNotifier(ref);
         }),
         backupProvider.overrideWith((_) => TestDriftBackupNotifier()),
+        privateModeProvider.overrideWith(TestPrivateModeNotifier.new),
         backgroundWorkerLockServiceProvider.overrideWithValue(lockService),
         backgroundSyncProvider.overrideWithValue(backgroundSync),
         appConfigProvider.overrideWithValue(defaultConfig),
@@ -215,6 +232,16 @@ void main() {
     expect(serverVersionCount, 2);
     expect(websocket.disconnectCount, 2);
     expect(websocket.connectCount, 1);
+  });
+
+  test('pause turns private mode off', () async {
+    final notifier = container.read(privateModeProvider.notifier) as TestPrivateModeNotifier;
+    notifier.state = true;
+
+    await lifeCycle.handleAppPause();
+
+    expect(notifier.disableCount, 1);
+    expect(notifier.state, isFalse);
   });
 
   test('resume re-queries the memory lane', () async {

@@ -7,6 +7,7 @@ import 'package:immich_mobile/domain/services/remote_album.service.dart';
 import 'package:immich_mobile/infrastructure/repositories/local_album.repository.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/remote_album.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/repositories/album_api_repository.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 
@@ -34,5 +35,7 @@ final remoteAlbumProvider = NotifierProvider<RemoteAlbumNotifier, RemoteAlbumSta
 );
 
 final albumsContainingAssetProvider = FutureProvider.family<List<RemoteAlbum>, String>(
-  (ref, assetId) => ref.watch(remoteAlbumServiceProvider).getAlbumsContainingAsset(assetId),
+  (ref, assetId) => ref
+      .watch(remoteAlbumServiceProvider)
+      .getAlbumsContainingAsset(assetId, privateFilter: ref.watch(privateModeFilterProvider)),
 );

@@ -1,9 +1,11 @@
 import { AssetOrder, AssetOrderBy, getAssetInfo, getTimeBuckets, type AssetResponseDto } from '@immich/sdk';
 import { clamp, isEqual } from 'lodash-es';
+import { tick } from 'svelte';
 import { SvelteDate, SvelteSet } from 'svelte/reactivity';
 import { VirtualScrollManager } from '$lib/managers/VirtualScrollManager/VirtualScrollManager.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
+import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { GroupInsertionCache } from '$lib/managers/timeline-manager/group-insertion-cache.svelte';
 import { updateTimelineMonthViewportProximity } from '$lib/managers/timeline-manager/internal/intersection-support.svelte';
 import { updateGeometry } from '$lib/managers/timeline-manager/internal/layout-support.svelte';
@@ -46,6 +48,16 @@ type ViewportTopMonthIntersection = {
   viewportTopRatioInMonth: number;
   // Where month bottom is in viewport (0 = viewport top, 1 = viewport bottom)
   monthBottomViewportRatio: number;
+};
+
+type ScrollAnchor = {
+  yearMonth: TimelineYearMonth;
+  // Where the viewport top intersects the month (0 = month top, 1 = month bottom)
+  viewportTopRatioInMonth: number;
+  // First asset intersecting the viewport top, when the month was loaded
+  assetId?: string;
+  // Asset top relative to the viewport top (negative when partially scrolled past)
+  assetOffset?: number;
 };
 export class TimelineManager extends VirtualScrollManager {
   override bottomSectionHeight = $state(60);
@@ -122,6 +134,7 @@ export class TimelineManager extends VirtualScrollManager {
           }
         },
         AssetsUnarchive: (assets) => this.upsertAssets(assets),
+        PrivateModeChange: () => void this.reset(),
       }),
     );
   }
@@ -280,19 +293,131 @@ export class TimelineManager extends VirtualScrollManager {
       return;
     }
 
+    await this.#reload(options);
+  }
+
+  /**
+   * Re-run the initial load with the current options, ignoring the equality guard in updateOptions.
+   * Used when the server-side view changes (e.g. private mode toggles) but the options do not.
+   */
+  async reset() {
+    if (this.#options === TimelineManager.#INIT_OPTIONS) {
+      return;
+    }
+    // a private-only timeline cannot be loaded once the mode is off; the page navigates away instead
+    if (this.#options.isPrivate && !privateModeManager.enabled) {
+      return;
+    }
+
+    await this.#reload(this.#options, { keepScrollPosition: true });
+  }
+
+  async #reload(options: TimelineManagerOptions, { keepScrollPosition = false } = {}) {
     this.suspendTransitions = true;
+    const anchor = keepScrollPosition ? this.#captureScrollAnchor() : undefined;
     try {
+      // the init task only disconnects when it is cancelled mid-flight; an executed task is simply re-armed,
+      // so the websocket must be released here or the loaded callback throws on connect()
+      this.disconnect();
       await this.initTask.reset();
       await this.#init(options);
       this.updateViewportGeometry(false);
       this.#createScrubberMonths();
+      if (anchor) {
+        await this.#restoreScrollAnchor(anchor);
+      }
     } finally {
       this.suspendTransitions = false;
     }
   }
 
+  /**
+   * Remember what is at the top of the viewport before the months are thrown away: the first asset that
+   * intersects the viewport top in the top-most visible month (plus its offset from the viewport top),
+   * and, as a fallback, how far down that month the viewport top sits.
+   */
+  #captureScrollAnchor(): ScrollAnchor | undefined {
+    if (this.hasEmptyViewport) {
+      return;
+    }
+    this.updateSlidingWindow();
+    const viewportTop = this.visibleWindow.top;
+    if (viewportTop <= 0) {
+      return;
+    }
+
+    const month = this.months.find((month) => month.isInViewport);
+    if (!month) {
+      return;
+    }
+
+    const anchor: ScrollAnchor = {
+      yearMonth: { ...month.yearMonth },
+      viewportTopRatioInMonth: this.#calculateVewportTopRatioInMonth(month),
+    };
+    if (!month.isLoaded) {
+      return anchor;
+    }
+
+    for (const day of month.timelineDays) {
+      for (const viewerAsset of day.viewerAssets) {
+        const position = viewerAsset.position;
+        if (!position) {
+          continue;
+        }
+        // same arithmetic as TimelineMonth.findAssetAbsolutePosition
+        const assetTop = month.top + day.top + position.top + this.headerHeight;
+        if (assetTop + position.height > viewportTop) {
+          anchor.assetId = viewerAsset.id;
+          anchor.assetOffset = assetTop - viewportTop;
+          return anchor;
+        }
+      }
+    }
+
+    return anchor;
+  }
+
+  /**
+   * Put the anchored asset back at the same offset from the viewport top. When the asset is gone
+   * (for example it just became hidden), land on the nearest month by date at the same relative position.
+   * Months above the anchor that are still estimates are compensated later by TimelineMonth.height,
+   * which shifts the scroll position whenever a month above the viewport changes height.
+   */
+  async #restoreScrollAnchor(anchor: ScrollAnchor) {
+    const month =
+      getTimelineMonthByDate(this, anchor.yearMonth) ?? findClosestTimelineMonthForDate(this.months, anchor.yearMonth);
+    if (!month) {
+      return;
+    }
+
+    // avoid deferred layouts so the positions below are real, see Timeline.scrollAndLoadAsset
+    this.isScrollingOnLoad = true;
+    try {
+      if (anchor.assetId !== undefined && anchor.assetOffset !== undefined) {
+        await this.loadTimelineMonth(month.yearMonth, { cancelable: false });
+        // let the DOM pick up the new total height before scrolling, otherwise the browser clamps the target
+        await tick();
+        const position = month.findAssetAbsolutePosition(anchor.assetId);
+        if (position) {
+          this.scrollTo(position.top - anchor.assetOffset);
+          return;
+        }
+      }
+
+      await tick();
+      this.scrollTo(month.top + month.height * anchor.viewportTopRatioInMonth);
+    } finally {
+      this.isScrollingOnLoad = false;
+    }
+  }
+
   async #init(options: TimelineManagerOptions) {
     this.isInitialized = false;
+    // months that are still loading would otherwise finish later and lay themselves out against the new months
+    for (const month of this.months) {
+      month.cancel();
+    }
     this.months = [];
     this.albumAssets.clear();
     await this.initTask.execute(async () => {
@@ -621,6 +746,8 @@ export class TimelineManager extends VirtualScrollManager {
       isMismatched(this.#options.visibility, asset.visibility) ||
       isMismatched(this.#options.isFavorite, asset.isFavorite) ||
       isMismatched(this.#options.isTrashed, asset.isTrashed) ||
+      isMismatched(this.#options.isPrivate, asset.isPrivate) ||
+      (asset.isPrivate && !privateModeManager.enabled) ||
       (this.#options.tagId && asset.tags && !asset.tags.includes(this.#options.tagId)) ||
       (this.#options.assetFilter !== undefined && !this.#options.assetFilter.has(asset.id))
     );

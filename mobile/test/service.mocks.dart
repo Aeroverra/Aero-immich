@@ -13,6 +13,7 @@ import 'package:immich_mobile/services/background_upload.service.dart';
 import 'package:immich_mobile/services/cleanup.service.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
 import 'package:immich_mobile/services/gcast.service.dart';
+import 'package:immich_mobile/services/local_auth.service.dart';
 import 'package:immich_mobile/services/network.service.dart';
 import 'package:immich_mobile/services/secure_storage.service.dart';
 import 'package:immich_mobile/services/server_info.service.dart';
@@ -55,6 +56,8 @@ class MockToastService extends Mock implements ToastService {}
 class MockAuthService extends Mock implements AuthService {}
 
 class MockSecureStorageService extends Mock implements SecureStorageService {}
+
+class MockLocalAuthService extends Mock implements LocalAuthService {}
 
 class MockWidgetService extends Mock implements WidgetService {}
 
