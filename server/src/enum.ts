@@ -881,6 +881,8 @@ export enum BootstrapEventPriority {
   PluginSync = 190,
   // Load plugins into memory after sync
   PluginLoad = 200,
+  // Start processing jobs last, so queued jobs never run before config, machine learning or plugins are initialized
+  JobWorkers = 300,
 }
 
 export enum QueueName {
