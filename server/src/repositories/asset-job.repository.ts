@@ -167,6 +167,16 @@ export class AssetJobRepository {
       .then((row) => row?.lockedProperties ?? []);
   }
 
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getExifUpdateIdForMetadataExtraction(assetId: string) {
+    return this.db
+      .selectFrom('asset_exif')
+      .select('asset_exif.updateId')
+      .where('asset_exif.assetId', '=', assetId)
+      .executeTakeFirst()
+      .then((row) => row?.updateId ?? null);
+  }
+
   @GenerateSql({ params: [DummyValue.UUID, AssetFileType.Thumbnail] })
   getAlbumThumbnailFiles(id: string, fileType?: AssetFileType) {
     return this.db
