@@ -55,6 +55,7 @@ import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
 import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
+import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -115,6 +116,7 @@ export const repositories = [
   TelemetryRepository,
   TrashRepository,
   UserRepository,
+  VideoBookmarkRepository,
   ViewRepository,
   VersionHistoryRepository,
   VideoStreamRepository,

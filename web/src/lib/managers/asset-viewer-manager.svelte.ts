@@ -31,8 +31,8 @@ export type Events = {
   ZoomChange: [ZoomImageWheelState];
   Copy: [];
   FaceEditModeChange: [boolean];
-  /** seek the open video to a position in milliseconds, for example where a face was found */
-  VideoSeek: [number];
+  /** seek the open video to a position in milliseconds, for example where a face was found; paused unless play */
+  VideoSeek: [positionMs: number, play?: boolean];
 };
 
 class AssetViewerManager extends BaseEventManager<Events> {

@@ -214,6 +214,8 @@ export const endpointTags: Record<ApiTag, string> = {
     'Administrative endpoints for managing users, including creating, updating, deleting, and restoring users. Also includes endpoints for resetting passwords and PIN codes.',
   [ApiTag.Users]:
     'Endpoints for viewing and updating the current users, including product key information, profile picture data, onboarding progress, and more.',
+  [ApiTag.VideoBookmarks]:
+    'A video bookmark marks a moment in a video to jump back to, with an optional label. Bookmarks are personal: every user only sees their own, on any video they can view.',
   [ApiTag.Views]: 'Endpoints for specialized views, such as the folder view.',
   [ApiTag.Workflows]:
     'A workflow is a set of actions that run whenever a triggering event occurs. Workflows also can include filters to further limit execution.',

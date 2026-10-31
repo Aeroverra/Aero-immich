@@ -3941,6 +3941,34 @@ export type CreateProfileImageResponseDto = {
     /** User ID */
     userId: string;
 };
+export type VideoBookmarkResponseDto = {
+    /** Video asset ID */
+    assetId: string;
+    /** Creation date */
+    createdAt: string;
+    /** Bookmark ID */
+    id: string;
+    /** Label, empty for none */
+    label: string;
+    /** Position in the video in milliseconds */
+    time: number;
+    /** Last update date */
+    updatedAt: string;
+};
+export type VideoBookmarkCreateDto = {
+    /** Video asset ID */
+    assetId: string;
+    /** Label, empty for none */
+    label?: string;
+    /** Position in the video in milliseconds */
+    time: number;
+};
+export type VideoBookmarkUpdateDto = {
+    /** Label, empty for none */
+    label?: string;
+    /** Position in the video in milliseconds */
+    time?: number;
+};
 export type CustomViewResponseDto = {
     access: ViewAccess;
     /** Creation date */
@@ -8971,6 +8999,63 @@ export function getProfileImage({ id }: {
     }));
 }
 /**
+ * Retrieve video bookmarks
+ */
+export function getVideoBookmarks({ assetId }: {
+    assetId: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: VideoBookmarkResponseDto[];
+    }>(`/video-bookmarks${QS.query(QS.explode({
+        assetId
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Create a video bookmark
+ */
+export function createVideoBookmark({ videoBookmarkCreateDto }: {
+    videoBookmarkCreateDto: VideoBookmarkCreateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: VideoBookmarkResponseDto;
+    }>("/video-bookmarks", oazapfts.json({
+        ...opts,
+        method: "POST",
+        body: videoBookmarkCreateDto
+    })));
+}
+/**
+ * Delete a video bookmark
+ */
+export function deleteVideoBookmark({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/video-bookmarks/${encodeURIComponent(id)}`, {
+        ...opts,
+        method: "DELETE"
+    }));
+}
+/**
+ * Update a video bookmark
+ */
+export function updateVideoBookmark({ id, videoBookmarkUpdateDto }: {
+    id: string;
+    videoBookmarkUpdateDto: VideoBookmarkUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: VideoBookmarkResponseDto;
+    }>(`/video-bookmarks/${encodeURIComponent(id)}`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: videoBookmarkUpdateDto
+    })));
+}
+/**
  * Retrieve assets by original path
  */
 export function getAssetsByOriginalPath({ path }: {
@@ -9547,6 +9632,10 @@ export enum Permission {
     UserProfileImageRead = "userProfileImage.read",
     UserProfileImageUpdate = "userProfileImage.update",
     UserProfileImageDelete = "userProfileImage.delete",
+    VideoBookmarkCreate = "videoBookmark.create",
+    VideoBookmarkRead = "videoBookmark.read",
+    VideoBookmarkUpdate = "videoBookmark.update",
+    VideoBookmarkDelete = "videoBookmark.delete",
     ViewCreate = "view.create",
     ViewRead = "view.read",
     ViewUpdate = "view.update",

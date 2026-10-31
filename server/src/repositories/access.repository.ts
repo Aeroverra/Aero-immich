@@ -668,6 +668,26 @@ class ViewAccess {
   }
 }
 
+class VideoBookmarkAccess {
+  constructor(private db: Kysely<DB>) {}
+
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @ChunkedSet({ paramIndex: 1 })
+  async checkOwnerAccess(userId: string, bookmarkIds: Set<string>) {
+    if (bookmarkIds.size === 0) {
+      return new Set<string>();
+    }
+
+    return this.db
+      .selectFrom('video_bookmark')
+      .select('video_bookmark.id')
+      .where('video_bookmark.id', 'in', [...bookmarkIds])
+      .where('video_bookmark.userId', '=', userId)
+      .execute()
+      .then((bookmarks) => new Set(bookmarks.map((bookmark) => bookmark.id)));
+  }
+}
+
 class WorkflowAccess {
   constructor(private db: Kysely<DB>) {}
 
@@ -706,6 +726,7 @@ export class AccessRepository {
   stack: StackAccess;
   tag: TagAccess;
   timeline: TimelineAccess;
+  videoBookmark: VideoBookmarkAccess;
   view: ViewAccess;
   workflow: WorkflowAccess;
 
@@ -726,6 +747,7 @@ export class AccessRepository {
     this.stack = new StackAccess(db);
     this.tag = new TagAccess(db);
     this.timeline = new TimelineAccess(db);
+    this.videoBookmark = new VideoBookmarkAccess(db);
     this.view = new ViewAccess(db);
     this.workflow = new WorkflowAccess(db);
   }
