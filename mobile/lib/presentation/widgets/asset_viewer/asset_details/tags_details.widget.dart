@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/custom_view.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
@@ -12,13 +13,15 @@ import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/tagging.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:logging/logging.dart';
 
 final _log = Logger('TagsDetails');
 
 /// The tags of the asset as chips that remove the tag, plus a chip that opens the tag sheet. Hidden tags are left out
-/// while private mode is locked. Only for the user's own uploaded assets on servers with custom views.
+/// while private mode is locked. Only for the user's own uploaded assets on servers with custom views. A manual stack
+/// (a Video Boost pair, RAW and JPEG) is one item, so both change the tags of the whole stack.
 class TagsDetails extends ConsumerWidget {
   final BaseAsset asset;
 
@@ -42,9 +45,19 @@ class TagsDetails extends ConsumerWidget {
 
     final tags = ref.watch(assetTagsProvider(remote.id)).valueOrNull ?? const <TagEntry>[];
 
+    Future<List<String>?> stackAssetIds() async {
+      final stacked = await resolveStackedAssets(context, ref, ActionSource.viewer, [
+        asset,
+      ], wholeManualStackInViewer: true);
+      return stacked == null ? null : [remote.id, ...stacked.map((member) => member.id)];
+    }
+
     Future<void> remove(TagEntry tag) async {
       try {
-        await ref.read(taggingServiceProvider).removeTag(tag.id, [remote.id]);
+        final assetIds = await stackAssetIds();
+        if (assetIds != null) {
+          await ref.read(taggingServiceProvider).removeTag(tag.id, assetIds);
+        }
       } catch (error, stack) {
         _log.warning('Failed to remove tag ${tag.id}', error, stack);
         if (context.mounted) {
@@ -78,7 +91,13 @@ class TagsDetails extends ConsumerWidget {
                 key: const Key('asset-tag-add'),
                 avatar: const Icon(Icons.add, size: 18),
                 label: Text(context.t.add_tag),
-                onPressed: () => unawaited(showTagAssetsSheet(context, [remote.id])),
+                onPressed: () => unawaited(
+                  stackAssetIds().then((assetIds) {
+                    if (assetIds != null && context.mounted) {
+                      return showTagAssetsSheet(context, assetIds);
+                    }
+                  }),
+                ),
               ),
             ],
           ),
