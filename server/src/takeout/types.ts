@@ -510,12 +510,13 @@ export interface PlanContext {
 }
 
 // ---------- time zone (section 13: "Google unless 100% sure" capture-time rule) ----------
-// Where the resolved zone came from. Only the first four are produced by section 13; 'device', 'gps', 'home',
-// 'exif' and 'filename' are kept for backward compatibility with older run rows.
+// Where the resolved zone came from. Only the first five are produced by section 13; 'device', 'home', 'exif' and
+// 'filename' are kept for backward compatibility with older run rows.
 //   fileOffset    rule 1: the file's own explicit offset (OffsetTimeOriginal / QuickTime CreationDate offset)
 //   derivedOffset rule 2: PHONE clock minus Google is a whole 15-min offset within 2s
 //   screenshot    rule 3: Screenshot_YYYYMMDD-HHMMSS name minus Google is a whole 15-min offset within 2s
-//   google        Google's photoTakenTime kept with NO zone (camera, or no zone evidence; flagged zoneAssumed)
+//   gps           no rule above applied: the zone at the capture position (the file's GPS, else Google's location)
+//   google        Google's photoTakenTime kept with NO zone (no zone evidence and no position; flagged zoneAssumed)
 export type ZoneSource =
   'fileOffset' | 'device' | 'derivedOffset' | 'google' | 'screenshot' | 'gps' | 'home' | 'exif' | 'filename';
 
@@ -543,6 +544,9 @@ export interface CaptureExifInput {
   // The file's GPSDateTime (a UTC instant), when present: an independent clock that can prove a rule-1 file
   // moment that disagrees with Google (section 13.1). Null otherwise.
   gpsDateTime: Date | null;
+  // The IANA zone at the capture position: the file's GPS, else the location Google has for it. Null without a
+  // position. Used only when no rule above supplies a zone.
+  gpsZone: string | null;
 }
 
 export interface CaptureTimeInput {

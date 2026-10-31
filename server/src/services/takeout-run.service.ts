@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import geotz from 'geo-tz';
 import { randomUUID } from 'node:crypto';
 import { statfs, utimes } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
@@ -2144,11 +2145,11 @@ export class TakeoutRunService extends BaseService {
     const exif = (await this.metadataRepository.readTags(targetPath).catch(() => ({}) as ImmichTags)) as ImmichTags;
     const capture = resolveCaptureTime({
       googleInstant: captureDate,
-      exif: deriveCaptureExif(exif),
+      exif: deriveCaptureExif(exif, plan),
       names: [originalFileName, row.takeoutPath.split('/').pop()],
     });
-    // No zone evidence (flagged zoneAssumed): no zone is invented, the moment shows in UTC. A guessed home zone was
-    // wrong for every capture away from home; a file or rule that knows its offset always supplies it.
+    // No zone evidence and no position (flagged zoneAssumed): no zone is invented, the moment shows in UTC. A guessed
+    // home zone was wrong for every capture away from home; a file or rule that knows its offset always supplies it.
     const zone = capture.zone;
     const zoneSource = capture.zoneSource;
     // The capture instant the algorithm chose (may differ from Google's for a phone that carries its own offset).
@@ -2257,12 +2258,13 @@ export class TakeoutRunService extends BaseService {
     let sidecarDate: string | undefined;
     // The capture date is stored WITH an explicit offset as locked exif (the same values PUT dateTimeOriginal
     // stores), so the UI shows it at once and the extraction keeps it. putDate is false when the file already
-    // carries its own date+zone (rule 1) or when there is no instant. The offset is sent only when a section 13
-    // rule supplied one; otherwise the moment is stored with no zone.
+    // carries its own date+zone (rule 1) or when there is no instant. The offset is the one a section 13 rule
+    // supplied; without one the moment is stored as UTC, said out loud: a date with no zone is written to the sidecar
+    // in the zone of the server process (TZ), and extraction then reads that offset as the zone of the capture.
     if (capture.putDate && effectiveInstant) {
       const putZone = capture.putOffsetZone ?? zone;
       const dateTimeOriginal = putZone ? sidecarDateString(effectiveInstant, putZone) : effectiveInstant.toISOString();
-      const timeZone = putZone ? (extractTimeZone(dateTimeOriginal)?.name ?? null) : null;
+      const timeZone = extractTimeZone(dateTimeOriginal)?.name ?? 'UTC';
       await this.assetRepository.upsertExif({
         exif: updateLockedColumns({ assetId: asset.id, dateTimeOriginal, timeZone }),
         lockedPropertiesBehavior: 'append',
@@ -2470,7 +2472,7 @@ export class TakeoutRunService extends BaseService {
 
     const capture = resolveCaptureTime({
       googleInstant,
-      exif: deriveCaptureExif(mediaTags),
+      exif: deriveCaptureExif(mediaTags, row.plan),
       names: [asset.originalFileName, row.originalFileName, row.takeoutPath?.split('/').pop()].filter(Boolean),
     });
     if (!capture.putDate || !capture.instant) {
@@ -2478,7 +2480,8 @@ export class TakeoutRunService extends BaseService {
     }
     const putZone = capture.putOffsetZone;
     const dateTimeOriginal = putZone ? sidecarDateString(capture.instant, putZone) : capture.instant.toISOString();
-    const timeZone = putZone ? (extractTimeZone(dateTimeOriginal)?.name ?? null) : null;
+    // UTC said out loud when no rule has a zone: SidecarWrite writes a date without one in the zone of the server
+    const timeZone = extractTimeZone(dateTimeOriginal)?.name ?? 'UTC';
     await this.assetRepository.upsertExif({
       exif: updateLockedColumns({ assetId, dateTimeOriginal, timeZone }),
       lockedPropertiesBehavior: 'append',
@@ -2813,7 +2816,10 @@ const UTC_ZONE_RE = /^(?:etc\/)?(?:utc|gmt|z)(?:[+-]0{1,2}(?::00)?)?$/i;
 // Reduce a full exiftool read to the primitives the section 13 capture-time rule needs. Splitting the exiftool
 // `zone`/`zoneSource` into an explicit file offset (kept) vs a GPS-derived zone (ignored: GPS never supplies the
 // zone) happens here, at the Nest boundary, so the pure library never interprets exiftool output.
-function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
+function deriveCaptureExif(
+  raw: ImmichTags,
+  google?: { latitude?: number; longitude?: number } | null,
+): CaptureExifInput {
   const exif = raw as ImmichTags & Record<string, unknown>;
   const make = firstString(exif.Make, exif.AndroidMake, exif.DeviceManufacturer, exif.Device?.Manufacturer);
   const model = firstString(exif.Model, exif.AndroidModel, exif.DeviceModelName, exif.Device?.ModelName);
@@ -2843,8 +2849,12 @@ function deriveCaptureExif(raw: ImmichTags): CaptureExifInput {
   const fileClockIsUtc =
     isVideo && fileClock !== null && !originalClock && !fileOffsetZone && (zone === null || UTC_ZONE_RE.test(zone));
   const gpsDateTime = exifWallClock(exif.GPSDateTime);
+  // The position the asset ends up with: the file's own GPS, else Google's (written to the sidecar for it).
+  const latitude = fileHasGps ? (exif.GPSLatitude as number) : (google?.latitude ?? 0);
+  const longitude = fileHasGps ? (exif.GPSLongitude as number) : (google?.longitude ?? 0);
+  const gpsZone = hasLocation(latitude, longitude) ? (geotz.find(latitude, longitude)[0] ?? null) : null;
 
-  return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime };
+  return { make, model, fileOffsetZone, fileHasGps, fileClock, fileClockIsUtc, gpsDateTime, gpsZone };
 }
 
 /**
