@@ -53,6 +53,11 @@ class AssetCacheManager {
           this.invalidateAsset(id);
         }
       },
+      PersonAssetsAdd: (assetIds) => {
+        for (const id of assetIds) {
+          this.invalidateAsset(id);
+        }
+      },
       PrivateModeChange: () => {
         this.invalidate();
       },
