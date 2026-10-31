@@ -132,22 +132,23 @@
       />
     </div>
 
-    <section class="pt-2" data-testid="detail-panel-tags">
-      {#if tags.length > 0}
-        <TagGroups {tags} link onRemove={(tag) => setTag(tag, false)} />
-      {:else if !tagPicker.isOpen.current}
-        <Button size="small" variant="ghost" leadingIcon={mdiTagPlusOutline} onclick={toggleOpen}>
-          {$t('add_tag')}
-        </Button>
-      {/if}
-    </section>
-
+    <!-- while editing, the tree shows what the asset carries, so the tag list makes way for the search -->
     {#if tagPicker.isOpen.current}
-      <div class="mt-3 border-t pt-3 dark:border-gray-700">
+      <div class="pt-2" data-testid="detail-panel-tags-picker">
         {#if allTags}
           <TagTreePicker tags={allTags} checkedIds={tagIds} onToggle={setTag} onCreate={createTag} rememberSearch />
         {/if}
       </div>
+    {:else}
+      <section class="pt-2" data-testid="detail-panel-tags">
+        {#if tags.length > 0}
+          <TagGroups {tags} link onRemove={(tag) => setTag(tag, false)} />
+        {:else}
+          <Button size="small" variant="ghost" leadingIcon={mdiTagPlusOutline} onclick={toggleOpen}>
+            {$t('add_tag')}
+          </Button>
+        {/if}
+      </section>
     {/if}
   </section>
 {/if}
