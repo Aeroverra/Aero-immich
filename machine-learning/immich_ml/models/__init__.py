@@ -7,6 +7,7 @@ from immich_ml.models.face_attributes.landmarks import FaceLandmarker
 from immich_ml.models.image_quality.laplacian import LaplacianImageQuality
 from immich_ml.models.ocr.detection import TextDetector
 from immich_ml.models.ocr.recognition import TextRecognizer
+from immich_ml.models.speech_to_text.whisper import WhisperTranscriber
 from immich_ml.schemas import ModelSource, ModelTask, ModelType
 
 from .constants import get_model_source
@@ -43,6 +44,9 @@ def get_model_class(model_name: str, model_type: ModelType, model_task: ModelTas
 
         case ModelSource.PADDLE, ModelType.RECOGNITION, ModelTask.OCR:
             return TextRecognizer
+
+        case ModelSource.WHISPER, ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT:
+            return WhisperTranscriber
 
         case _:
             raise ValueError(f"Unknown model combination: {source}, {model_type}, {model_task}")
