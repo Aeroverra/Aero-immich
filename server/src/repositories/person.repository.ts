@@ -794,6 +794,70 @@ export class PersonRepository {
       .then((row) => !!row);
   }
 
+  /**
+   * The face to cut a stand-in thumbnail from when the feature photo is hidden from the caller: the person's best face
+   * on an asset the caller may see right now (private mode and the active view included). With `assetId` only faces on
+   * that asset count (the caller already passed the access check for it); without it only the owner's own timeline or
+   * archived assets that are not in the trash. Best = a located face before a whole-asset mark, a face on a photo
+   * before one found in a video frame, then the face that fills the most of its picture, newest asset first.
+   */
+  @GenerateSql({
+    params: [
+      { ownerId: DummyValue.UUID, personGroupId: DummyValue.UUID },
+      { privateMode: false, userId: DummyValue.UUID, view: dummyViewFilter },
+      DummyValue.UUID,
+    ],
+  })
+  getVisibleFaceForThumbnail({ ownerId, personGroupId }: PersonId, scope: PrivateScope, assetId?: string) {
+    return this.db
+      .selectFrom('asset_face')
+      .innerJoin('asset', 'asset_face.assetId', 'asset.id')
+      .leftJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .leftJoin('asset_video', 'asset_video.assetId', 'asset.id')
+      .select([
+        'asset_face.id',
+        'asset_face.updatedAt',
+        'asset_face.boundingBoxX1 as x1',
+        'asset_face.boundingBoxY1 as y1',
+        'asset_face.boundingBoxX2 as x2',
+        'asset_face.boundingBoxY2 as y2',
+        'asset_face.imageWidth as oldWidth',
+        'asset_face.imageHeight as oldHeight',
+        'asset.type',
+        'asset.originalPath',
+        'asset_exif.orientation as exifOrientation',
+        'asset_face.frameTimestamp',
+      ])
+      .select((eb) => withFilePath(eb, AssetFileType.Preview).as('previewPath'))
+      .select((eb) => withVideoStream(eb).as('videoStream'))
+      .where('asset_face.personGroupId', '=', personGroupId)
+      .where('asset_face.deletedAt', 'is', null)
+      .where('asset_face.isVisible', 'is', true)
+      .$if(!!assetId, (qb) => qb.where('asset.id', '=', assetId!))
+      .$if(!assetId, (qb) =>
+        qb
+          .where('asset.ownerId', '=', ownerId)
+          .where('asset.deletedAt', 'is', null)
+          .where('asset.visibility', 'in', [AssetVisibility.Timeline, AssetVisibility.Archive]),
+      )
+      .orderBy('asset_face.isWholeAsset', 'asc')
+      .orderBy(sql`asset_face."frameTimestamp" is null`, 'desc')
+      .orderBy(
+        sql`(asset_face."boundingBoxX2" - asset_face."boundingBoxX1")::float8 * (asset_face."boundingBoxY2" - asset_face."boundingBoxY1") / greatest(asset_face."imageWidth" * asset_face."imageHeight", 1)`,
+        'desc',
+      )
+      .orderBy('asset.fileCreatedAt', 'desc')
+      .orderBy('asset_face.id')
+      .limit(1)
+      .where((eb) =>
+        scope.privateMode
+          ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
+          : eb('asset.isPrivate', '=', false),
+      )
+      .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
+      .executeTakeFirst();
+  }
+
   @GenerateSql()
   async getLatestFaceDate(): Promise<string | undefined> {
     const result = (await this.db

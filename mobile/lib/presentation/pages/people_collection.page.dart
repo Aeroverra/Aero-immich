@@ -8,6 +8,7 @@ import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/extensions/string_extensions.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/widgets/images/remote_image_provider.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/people.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/utils/image_url_builder.dart';
@@ -101,7 +102,11 @@ class _PeopleCollectionPageState extends ConsumerState<PeopleCollectionPage> {
                               key: ValueKey(person.id),
                               maxRadius: isTablet ? 100 / 2 : 96 / 2,
                               backgroundImage: RemoteImageProvider(
-                                url: getFaceThumbnailUrl(person.id, updatedAt: person.updatedAt),
+                                url: getFaceThumbnailUrl(
+                                  person.id,
+                                  updatedAt: person.updatedAt,
+                                  scope: ref.watch(personThumbnailScopeProvider),
+                                ),
                               ),
                             ),
                           ),
