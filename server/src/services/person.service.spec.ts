@@ -1,5 +1,6 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
+import { AssetEditAction } from 'src/dtos/editing.dto';
 import { mapFaces, mapPerson } from 'src/dtos/person.dto';
 import { AssetFileType, AssetType, CacheControl, JobName, JobStatus, SourceType, SystemMetadataKey } from 'src/enum';
 import { PersonService } from 'src/services/person.service';
@@ -1236,6 +1237,76 @@ describe(PersonService.name, () => {
       ]);
       expect(mocks.person.reassignFace).not.toHaveBeenCalled();
       expect(mocks.person.reassignFaces).not.toHaveBeenCalled();
+    });
+
+    it('should store a face found on the edited preview relative to the unedited image', async () => {
+      const asset = AssetFactory.from({ width: 3220, height: 2580 })
+        .exif({ exifImageWidth: 2580, exifImageHeight: 3220, orientation: null })
+        .edit({ action: AssetEditAction.Rotate, parameters: { angle: 270 }, sequence: 0 })
+        .file({ type: AssetFileType.Preview })
+        .file({ type: AssetFileType.Preview, isEdited: true })
+        .build();
+      const faceId = 'new-face-id';
+      mocks.crypto.randomUUID.mockReturnValue(faceId);
+      mocks.machineLearning.detectFaces.mockResolvedValue({
+        imageWidth: 1797,
+        imageHeight: 1440,
+        faces: [{ boundingBox: { x1: 1291, y1: 309, x2: 1416, y2: 485 }, embedding: '[1, 2, 3, 4]', score: 0.9 }],
+      });
+      mocks.assetJob.getForDetectFacesJob.mockResolvedValue(getForDetectedFaces(asset));
+
+      await sut.handleDetectFaces({ id: asset.id });
+
+      expect(mocks.machineLearning.detectFaces).toHaveBeenCalledWith(
+        asset.files.find((file) => file.isEdited)!.path,
+        expect.anything(),
+      );
+      expect(mocks.person.refreshFaces).toHaveBeenCalledWith(
+        [
+          {
+            id: faceId,
+            assetId: asset.id,
+            imageWidth: 2580,
+            imageHeight: 3220,
+            boundingBoxX1: 1711,
+            boundingBoxY1: 2313,
+            boundingBoxX2: 2026,
+            boundingBoxY2: 2537,
+          },
+        ],
+        [],
+        [{ faceId, embedding: '[1, 2, 3, 4]' }],
+      );
+    });
+
+    it('should match a face found on the edited preview with the stored face', async () => {
+      const asset = AssetFactory.from({ width: 3220, height: 2580 })
+        .exif({ exifImageWidth: 2580, exifImageHeight: 3220, orientation: null })
+        .edit({ action: AssetEditAction.Rotate, parameters: { angle: 270 }, sequence: 0 })
+        .file({ type: AssetFileType.Preview })
+        .file({ type: AssetFileType.Preview, isEdited: true })
+        .face({
+          imageWidth: 1440,
+          imageHeight: 1797,
+          boundingBoxX1: 955,
+          boundingBoxY1: 1291,
+          boundingBoxX2: 1131,
+          boundingBoxY2: 1416,
+          sourceType: SourceType.MachineLearning,
+        })
+        .build();
+      mocks.machineLearning.detectFaces.mockResolvedValue({
+        imageWidth: 1797,
+        imageHeight: 1440,
+        faces: [{ boundingBox: { x1: 1291, y1: 309, x2: 1416, y2: 485 }, embedding: '[1, 2, 3, 4]', score: 0.9 }],
+      });
+      mocks.assetJob.getForDetectFacesJob.mockResolvedValue(getForDetectedFaces(asset));
+
+      await sut.handleDetectFaces({ id: asset.id });
+
+      // the stored face is kept as is, not removed and added again
+      expect(mocks.person.refreshFaces).not.toHaveBeenCalled();
+      expect(mocks.job.queueAll).not.toHaveBeenCalled();
     });
 
     it('should keep faces found in other frames of a video', async () => {
