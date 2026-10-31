@@ -3,6 +3,7 @@
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import { IconButton, modalManager } from '@immich/ui';
   import { mdiTagMultipleOutline } from '@mdi/js';
   import { t } from 'svelte-i18n';
@@ -17,8 +18,12 @@
   const icon = mdiTagMultipleOutline;
 
   const handleTagAssets = async () => {
-    const assets = assetMultiSelectManager.ownedAssets;
-    const didUpdate = await modalManager.show(AssetTagModal, { assetIds: assets.map(({ id }) => id) });
+    const assetIds = await resolveStackSelection(assetMultiSelectManager.ownedAssets);
+    if (!assetIds) {
+      return;
+    }
+
+    const didUpdate = await modalManager.show(AssetTagModal, { assetIds });
     if (didUpdate) {
       assetMultiSelectManager.clear();
     }
