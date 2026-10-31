@@ -139,6 +139,11 @@ const BaseSearchSchema = z.object({
       deprecated: true,
     }),
   ocr: z.string().optional().describe('Filter by OCR text content').meta(DEPRECATED_FLAT_FIELD),
+  transcript: z
+    .string()
+    .optional()
+    .describe('Filter videos by words said in them (video transcription)')
+    .meta(DEPRECATED_FLAT_FIELD),
 });
 
 const BaseSearchWithResultsSchema = BaseSearchSchema.extend({
@@ -341,6 +346,7 @@ const searchFilterBranchShape = {
   originalFileName: StringPatternFilterSchema,
   originalPath: StringPatternFilterSchema,
   ocr: StringSimilarityFilterSchema,
+  transcript: StringSimilarityFilterSchema,
   rating: NumberFilterNullableSchema,
   fileSizeInBytes: NumberFilterSchema,
   takenAt: DateFilterSchema,
@@ -524,6 +530,16 @@ const SearchMatchedFrameResponseSchema = z
   .describe('A video that matched a smart search on one of its sampled frames rather than its thumbnail')
   .meta({ id: 'SearchMatchedFrameResponseDto' });
 
+const SearchMatchedTranscriptResponseSchema = z
+  .object({
+    assetId: z.uuidv4().describe('Video asset ID'),
+    startTime: z.int().min(0).describe('Position in milliseconds where the matching line of speech starts'),
+    endTime: z.int().min(0).describe('Position in milliseconds where the matching line of speech ends'),
+    text: z.string().describe('The line of speech that matched'),
+  })
+  .describe('A video that matched a spoken words search, with the line of its transcript that matched best')
+  .meta({ id: 'SearchMatchedTranscriptResponseDto' });
+
 const SearchAssetResponseSchema = z
   .object({
     total: z
@@ -540,6 +556,11 @@ const SearchAssetResponseSchema = z
       .array(SearchMatchedFrameResponseSchema)
       .optional()
       .describe('Smart search only: the videos of this page that matched on a sampled frame, with its position')
+      .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
+    matchedTranscripts: z
+      .array(SearchMatchedTranscriptResponseSchema)
+      .optional()
+      .describe('Spoken words search only: the videos of this page whose speech matched, with the line that matched')
       .meta(new HistoryBuilder().added('v3.2.2').beta('v3.2.2').getExtensions()),
   })
   .meta({ id: 'SearchAssetResponseDto' });

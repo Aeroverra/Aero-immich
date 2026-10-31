@@ -161,6 +161,12 @@ const ServerFeaturesSchema = z
         'Whether stacks know how they were created (manual or automatic): stack sync V2, automatic stack grouping and the withAutoStacked timeline option. Absent on servers without it.',
       ),
     videoFrameAnalysis: z.boolean().describe('Whether enhanced video analysis of sampled frames is enabled'),
+    videoTranscription: z
+      .boolean()
+      .optional()
+      .describe(
+        'Whether speech in videos is transcribed (transcripts, captions and spoken word search). Absent on servers without it.',
+      ),
   })
   .meta({ id: 'ServerFeaturesDto' });
 

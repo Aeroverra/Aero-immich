@@ -188,6 +188,7 @@
       searchResultAlbums.push(...albums.items);
       searchResultAssets.push(...withoutShownStacks(assets.items, searchResultAssets));
       videoSearchMatchManager.add(assets.matchedFrames);
+      videoSearchMatchManager.addSpeech(assets.matchedTranscripts);
 
       nextPage = Number(assets.nextPage) || 0;
     } catch (error) {
@@ -244,6 +245,7 @@
       description: $t('description'),
       queryAssetId: $t('query_asset_id'),
       ocr: $t('ocr'),
+      transcript: $t('spoken_words'),
       isPrivate: $t('search_private_filter'),
     };
     return keyMap[key] || key;

@@ -8,7 +8,7 @@
 
   let queryType = $derived(searchManager.filter.queryType);
 
-  const setType = (type: 'smart' | 'metadata' | 'description' | 'fullPath' | 'ocr') => {
+  const setType = (type: 'smart' | 'metadata' | 'description' | 'fullPath' | 'ocr' | 'transcript') => {
     searchManager.filter.queryType = type;
   };
 </script>
@@ -34,6 +34,11 @@
       {#if featureFlagsManager.value.ocr}
         <SearchButton checked active={queryType === 'ocr'} onclick={() => setType('ocr')}>
           {getSearchTypeTitle('ocr')}
+        </SearchButton>
+      {/if}
+      {#if featureFlagsManager.value.videoTranscription}
+        <SearchButton checked active={queryType === 'transcript'} onclick={() => setType('transcript')}>
+          {getSearchTypeTitle('transcript')}
         </SearchButton>
       {/if}
     </div>

@@ -98,6 +98,31 @@ _PADDLE_MODELS = {
     "TH__PP-OCRv5_mobile",
 }
 
+# faster-whisper model names mapped to the CTranslate2 conversions of the Whisper models on Hugging Face
+_WHISPER_MODELS = {
+    "tiny": "Systran/faster-whisper-tiny",
+    "tiny.en": "Systran/faster-whisper-tiny.en",
+    "base": "Systran/faster-whisper-base",
+    "base.en": "Systran/faster-whisper-base.en",
+    "small": "Systran/faster-whisper-small",
+    "small.en": "Systran/faster-whisper-small.en",
+    "medium": "Systran/faster-whisper-medium",
+    "medium.en": "Systran/faster-whisper-medium.en",
+    "large-v1": "Systran/faster-whisper-large-v1",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large-v3-turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "turbo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo",
+    "distil-small.en": "Systran/faster-distil-whisper-small.en",
+    "distil-medium.en": "Systran/faster-distil-whisper-medium.en",
+    "distil-large-v2": "Systran/faster-distil-whisper-large-v2",
+    "distil-large-v3": "Systran/faster-distil-whisper-large-v3",
+    "distil-large-v3.5": "distil-whisper/distil-large-v3.5-ct2",
+}
+
+# model names lose their dots when cleaned, so the repositories are looked up by the cleaned name
+WHISPER_REPOS = {clean_name(name): repo for name, repo in _WHISPER_MODELS.items()}
+
 SUPPORTED_PROVIDERS = [
     "CUDAExecutionProvider",
     "MIGraphXExecutionProvider",
@@ -190,5 +215,8 @@ def get_model_source(model_name: str) -> ModelSource | None:
 
     if cleaned_name in _OPENCV_MODELS:
         return ModelSource.OPENCV
+
+    if cleaned_name in WHISPER_REPOS:
+        return ModelSource.WHISPER
 
     return None

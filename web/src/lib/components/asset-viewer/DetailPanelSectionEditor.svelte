@@ -18,6 +18,7 @@
     [DetailPanelSection.Description]: $t('description'),
     [DetailPanelSection.Rating]: $t('rating'),
     [DetailPanelSection.Bookmarks]: $t('video_bookmarks'),
+    [DetailPanelSection.Transcript]: $t('transcript'),
     [DetailPanelSection.People]: $t('people'),
     [DetailPanelSection.Details]: $t('details'),
     [DetailPanelSection.Map]: $t('map'),

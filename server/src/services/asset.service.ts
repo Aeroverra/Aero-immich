@@ -22,6 +22,7 @@ import {
 import { AuthDto } from 'src/dtos/auth.dto';
 import { AssetEditAction, AssetEditActionItem, AssetEditsCreateDto, AssetEditsResponseDto } from 'src/dtos/editing.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
+import { AssetTranscriptResponseDto } from 'src/dtos/transcript.dto';
 import {
   AssetFileType,
   AssetStatus,
@@ -475,6 +476,16 @@ export class AssetService extends BaseService {
   async getMetadata(auth: AuthDto, id: string): Promise<AssetMetadataResponseDto[]> {
     await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
     return this.assetRepository.getMetadata(id);
+  }
+
+  async getTranscript(auth: AuthDto, id: string): Promise<AssetTranscriptResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
+    const transcript = await this.transcriptRepository.getByAssetId(id);
+    return {
+      assetId: id,
+      language: transcript?.language ?? null,
+      segments: (transcript?.segments ?? []).map(({ startTime, endTime, text }) => ({ startTime, endTime, text })),
+    };
   }
 
   async getOcr(auth: AuthDto, id: string): Promise<AssetOcrResponseDto[]> {

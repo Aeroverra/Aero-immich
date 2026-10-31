@@ -702,6 +702,21 @@ export enum LogLevel {
 
 export const LogLevelSchema = z.enum(LogLevel).describe('Log level').meta({ id: 'LogLevel' });
 
+/** How the speech to text model computes: lower precision uses less memory and is faster, at a small accuracy cost */
+export enum TranscriptionComputeType {
+  /** int8_float16 on a GPU, int8 on a CPU */
+  Auto = 'auto',
+  Int8 = 'int8',
+  Int8Float16 = 'int8_float16',
+  Float16 = 'float16',
+  Float32 = 'float32',
+}
+
+export const TranscriptionComputeTypeSchema = z
+  .enum(TranscriptionComputeType)
+  .describe('Precision of the speech to text model')
+  .meta({ id: 'TranscriptionComputeType' });
+
 export enum LogFormat {
   Console = 'console',
   Json = 'json',
@@ -945,6 +960,7 @@ export enum QueueName {
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
   VideoFrameAnalysis = 'videoFrameAnalysis',
+  VideoTranscription = 'videoTranscription',
   Takeout = 'takeout',
 }
 
@@ -1046,6 +1062,10 @@ export enum JobName {
   // Video frame analysis
   AssetAnalyzeVideoFramesQueueAll = 'AssetAnalyzeVideoFramesQueueAll',
   AssetAnalyzeVideoFrames = 'AssetAnalyzeVideoFrames',
+
+  // Video transcription
+  AssetTranscribeVideoQueueAll = 'AssetTranscribeVideoQueueAll',
+  AssetTranscribeVideo = 'AssetTranscribeVideo',
 
   // OCR
   OcrQueueAll = 'OcrQueueAll',

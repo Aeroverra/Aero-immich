@@ -26,6 +26,7 @@ import {
   isOcrEnabled,
   isSmartSearchEnabled,
   isVideoFrameAnalysisEnabled,
+  isVideoTranscriptionEnabled,
 } from 'src/utils/misc';
 
 @Injectable()
@@ -113,6 +114,7 @@ export class ServerService extends BaseService {
       realtimeTranscoding: ffmpeg.realtime.enabled,
       stackSource: true,
       videoFrameAnalysis: isVideoFrameAnalysisEnabled(machineLearning),
+      videoTranscription: isVideoTranscriptionEnabled(machineLearning),
     };
   }
 
