@@ -48,6 +48,11 @@ class AssetCacheManager {
       AssetUpdate: (asset) => {
         this.invalidateAsset(asset.id);
       },
+      AssetsTag: (assetIds) => {
+        for (const id of assetIds) {
+          this.invalidateAsset(id);
+        }
+      },
       PrivateModeChange: () => {
         this.invalidate();
       },
