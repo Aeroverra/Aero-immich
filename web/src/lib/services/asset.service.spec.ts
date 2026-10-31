@@ -1,4 +1,4 @@
-import { getAssetInfo } from '@immich/sdk';
+import { AssetTypeEnum, getAssetInfo } from '@immich/sdk';
 import { toastManager } from '@immich/ui';
 import { vitest } from 'vitest';
 import { authManager } from '$lib/managers/auth-manager.svelte';
@@ -68,6 +68,37 @@ describe('AssetService', () => {
       setSharedLink(sharedLinkFactory.build({ allowDownload: true }));
       const assetActions = getAssetActions(() => '', asset);
       expect(assetActions.SharedLinkDownload.$if?.()).toStrictEqual(true);
+    });
+
+    describe('Edit', () => {
+      const ownerId = 'owner';
+
+      beforeEach(() => {
+        authManager.setUser(userAdminFactory.build({ id: ownerId }));
+        setSharedLink(undefined);
+      });
+
+      it('should edit the photos of the owner', () => {
+        const asset = assetFactory.build({ ownerId, type: AssetTypeEnum.Image, originalPath: 'photo.jpg' });
+        expect(getAssetActions(() => '', asset).Edit.$if?.()).toStrictEqual(true);
+      });
+
+      it('should edit (rotate) videos and motion photos of the owner', () => {
+        const video = assetFactory.build({ ownerId, type: AssetTypeEnum.Video, originalPath: 'video.mp4' });
+        const motionPhoto = assetFactory.build({
+          ownerId,
+          type: AssetTypeEnum.Image,
+          originalPath: 'photo.jpg',
+          livePhotoVideoId: 'motion-1',
+        });
+        expect(getAssetActions(() => '', video).Edit.$if?.()).toStrictEqual(true);
+        expect(getAssetActions(() => '', motionPhoto).Edit.$if?.()).toStrictEqual(true);
+      });
+
+      it('should not edit the videos of someone else', () => {
+        const video = assetFactory.build({ ownerId: 'someone-else', type: AssetTypeEnum.Video });
+        expect(getAssetActions(() => '', video).Edit.$if?.()).toStrictEqual(false);
+      });
     });
   });
 

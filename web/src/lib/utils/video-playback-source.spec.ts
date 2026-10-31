@@ -19,6 +19,12 @@ describe('getVideoPlaybackSource', () => {
     );
   });
 
+  it('should be the rotated transcoded copy when the original of a rotated video is requested', () => {
+    const options = { realtimeTranscoding: false, playOriginalVideo: true, isEdited: true };
+    expect(getVideoPlaybackSource({ ...options, hasEncodedVideo: true })).toBe('transcoded');
+    expect(getVideoPlaybackSource({ ...options, hasEncodedVideo: false })).toBe('original');
+  });
+
   it('should be a live transcode when realtime transcoding is on', () => {
     expect(getVideoPlaybackSource({ realtimeTranscoding: true, playOriginalVideo: true, hasEncodedVideo: false })).toBe(
       'live',

@@ -21,7 +21,7 @@ class EditorProvider extends Notifier<EditorState> {
     state = const EditorState();
   }
 
-  void init(List<AssetEdit> edits, ExifInfo exifInfo) {
+  void init(List<AssetEdit> edits, ExifInfo exifInfo, {bool rotateOnly = false}) {
     clear();
 
     final existingCrop = edits.whereType<CropEdit>().firstOrNull;
@@ -41,6 +41,7 @@ class EditorProvider extends Notifier<EditorState> {
       crop: crop,
       flipHorizontal: transform.mirrorHorizontal,
       flipVertical: transform.mirrorVertical,
+      rotateOnly: rotateOnly,
     );
 
     _animateRotation(transform.rotation, duration: Duration.zero);
@@ -150,6 +151,8 @@ abstract class EditorState with _$EditorState {
     @Default(0) int originalHeight,
     @Default(Duration.zero) Duration animationDuration,
     @Default(false) bool hasUnsavedEdits,
+    // videos and motion photos can only be rotated
+    @Default(false) bool rotateOnly,
   }) = _EditorState;
 
   bool get hasEdits {

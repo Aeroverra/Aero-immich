@@ -604,6 +604,7 @@ where
     where
       "asset_file"."assetId" = "asset"."id"
       and "asset_file"."type" = 'encoded_video'
+      and "asset_file"."isEdited" = false
   )
   and "asset"."deletedAt" is null
 
