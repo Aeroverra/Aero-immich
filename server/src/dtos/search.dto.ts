@@ -37,6 +37,18 @@ const BaseSearchSchema = z.object({
   visibility: AssetVisibilitySchema.optional().meta(DEPRECATED_FLAT_FIELD),
   createdBefore: isoDatetimeToDate.optional().describe('Filter by creation date (before)').meta(DEPRECATED_FLAT_FIELD),
   createdAfter: isoDatetimeToDate.optional().describe('Filter by creation date (after)').meta(DEPRECATED_FLAT_FIELD),
+  uploadedBefore: isoDatetimeToDate
+    .optional()
+    .describe(
+      'Filter by upload date (before): the Google Photos upload time for assets imported from Google Photos, else the creation date',
+    )
+    .meta(DEPRECATED_FLAT_FIELD),
+  uploadedAfter: isoDatetimeToDate
+    .optional()
+    .describe(
+      'Filter by upload date (after): the Google Photos upload time for assets imported from Google Photos, else the creation date',
+    )
+    .meta(DEPRECATED_FLAT_FIELD),
   updatedBefore: isoDatetimeToDate.optional().describe('Filter by update date (before)').meta(DEPRECATED_FLAT_FIELD),
   updatedAfter: isoDatetimeToDate.optional().describe('Filter by update date (after)').meta(DEPRECATED_FLAT_FIELD),
   trashedBefore: isoDatetimeToDate.optional().describe('Filter by trash date (before)').meta(DEPRECATED_FLAT_FIELD),
@@ -71,6 +83,12 @@ const BaseSearchSchema = z.object({
     .describe('Leave out assets with any of these tags or their child tags')
     .meta(DEPRECATED_FLAT_FIELD),
   albumIds: z.array(z.uuidv4()).optional().describe('Filter by album IDs').meta(DEPRECATED_FLAT_FIELD),
+  // the flat counterpart of filter.albumIds.none
+  excludeAlbumIds: z
+    .array(z.uuidv4())
+    .optional()
+    .describe('Leave out assets in any of these albums')
+    .meta(DEPRECATED_FLAT_FIELD),
   rating: z
     .int()
     .min(1)

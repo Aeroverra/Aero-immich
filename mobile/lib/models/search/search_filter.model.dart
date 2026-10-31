@@ -80,6 +80,12 @@ abstract class SearchDateFilter with _$SearchDateFilter {
       SearchDateFilter.fromMap(json.decode(source) as Map<String, dynamic>);
 }
 
+/// Upload date bounds: the Google Photos upload time for assets imported from Google Photos, else the Immich upload time
+@freezed
+abstract class SearchUploadDateFilter with _$SearchUploadDateFilter {
+  const factory SearchUploadDateFilter({DateTime? uploadedAfter, DateTime? uploadedBefore}) = _SearchUploadDateFilter;
+}
+
 @Freezed(fromJson: false, toJson: false)
 abstract class SearchRatingFilter with _$SearchRatingFilter {
   const SearchRatingFilter._();
@@ -149,6 +155,10 @@ abstract class SearchFilter with _$SearchFilter {
     // video length bounds in milliseconds; either one keeps the search to videos
     int? minDuration,
     int? maxDuration,
+    // only assets in all of these albums, whoever added them
+    List<String>? albumIds,
+    // assets in any of these albums are left out
+    List<String>? excludeAlbumIds,
     required Set<Person> people,
     required SearchLocationFilter location,
     required SearchCameraFilter camera,
@@ -157,6 +167,7 @@ abstract class SearchFilter with _$SearchFilter {
     required SearchDisplayFilters display,
     required AssetType mediaType,
     @Default(SearchPrivateFilter.all) SearchPrivateFilter private,
+    @Default(SearchUploadDateFilter()) SearchUploadDateFilter uploaded,
   }) = _SearchFilter;
 
   bool get isEmpty {
@@ -169,6 +180,8 @@ abstract class SearchFilter with _$SearchFilter {
         (excludeTagIds ?? []).isEmpty &&
         minDuration == null &&
         maxDuration == null &&
+        (albumIds ?? []).isEmpty &&
+        (excludeAlbumIds ?? []).isEmpty &&
         people.isEmpty &&
         location.country == null &&
         location.state == null &&
@@ -177,6 +190,8 @@ abstract class SearchFilter with _$SearchFilter {
         camera.model == null &&
         date.takenBefore == null &&
         date.takenAfter == null &&
+        uploaded.uploadedAfter == null &&
+        uploaded.uploadedBefore == null &&
         display.isNotInAlbum == false &&
         display.isArchive == false &&
         display.isFavorite == false &&

@@ -121,7 +121,16 @@ export const AssetResponseSchema = SanitizedAssetResponseSchema.extend(
     hasEncodedVideo: z
       .boolean()
       .optional()
-      .describe('Whether a transcoded copy of the video exists. Video playback serves it instead of the original file.'),
+      .describe(
+        'Whether a transcoded copy of the video exists. Video playback serves it instead of the original file.',
+      ),
+    uploadedAt: z
+      .string()
+      .meta({ format: 'date-time' })
+      .optional()
+      .describe(
+        'When the asset was uploaded: its Google Photos upload time when it was imported from Google Photos, else createdAt. Only on the single asset endpoint.',
+      ),
   }).shape,
 ).meta({ id: 'AssetResponseDto' });
 

@@ -77,6 +77,30 @@ const newTaggedLibrary = async () => {
   return { ...library, holiday, beach, work };
 };
 
+/** inAlbum is in Trip, plain is in Trip and Party */
+const newAlbumLibrary = async () => {
+  const library = await newLibrary();
+  const { ctx, user, inAlbum, plain } = library;
+  const { album: trip } = await ctx.newAlbum({ ownerId: user.id }, [inAlbum.id, plain.id]);
+  const { album: party } = await ctx.newAlbum({ ownerId: user.id }, [plain.id]);
+  return { ...library, trip, party };
+};
+
+/** a phone upload from June 2026, and a Google Photos import (added in September) uploaded to Google in 2019 */
+const newUploadLibrary = async () => {
+  const { sut, ctx } = setup();
+  const { user } = await ctx.newUser();
+  const { asset: phone } = await ctx.newAsset({ ownerId: user.id, createdAt: new Date('2026-06-15T12:00:00Z') });
+  const { asset: google } = await ctx.newAsset({ ownerId: user.id, createdAt: new Date('2026-09-20T12:00:00Z') });
+  await ctx.newMetadata({
+    assetId: google.id,
+    key: 'google-photos',
+    value: { uploadedAt: '2019-03-10T08:30:00Z', takenAt: '2018-12-24T18:00:00Z' },
+  });
+  const auth = factory.auth({ user: { id: user.id } });
+  return { sut, ctx, user, auth, phone, google };
+};
+
 const ids = (items: { id: string }[]) => items.map(({ id }) => id).toSorted();
 
 beforeAll(async () => {
@@ -454,6 +478,137 @@ describe(SearchService.name, () => {
       );
 
       expect(ids(items)).toEqual(ids([long]));
+    });
+  });
+
+  describe('albums', () => {
+    it('should leave out assets in any excluded album', async () => {
+      const { sut, auth, trip, party, tagged, plainFavorite } = await newAlbumLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, excludeAlbumIds: [trip.id, party.id] });
+
+      expect(ids(response.assets.items)).toEqual(ids([tagged, plainFavorite]));
+    });
+
+    it('should combine searched and excluded albums', async () => {
+      const { sut, auth, trip, party, inAlbum } = await newAlbumLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, albumIds: [trip.id], excludeAlbumIds: [party.id] });
+
+      expect(ids(response.assets.items)).toEqual(ids([inAlbum]));
+    });
+
+    it('should apply excluded albums to smart search', async () => {
+      const { ctx, user, party, tagged, inAlbum, plain, plainFavorite } = await newAlbumLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      for (const [index, asset] of [tagged, inAlbum, plain, plainFavorite].entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), userIds: [user.id], excludeAlbumIds: [party.id] },
+      );
+
+      expect(ids(items)).toEqual(ids([tagged, inAlbum, plainFavorite]));
+    });
+
+    it('should smart search everything in a shared album, whoever added it', async () => {
+      const { ctx, user, trip, inAlbum, plain } = await newAlbumLibrary();
+      const { user: friend } = await ctx.newUser();
+      const { asset: friendAsset } = await ctx.newAsset({ ownerId: friend.id });
+      await ctx.newAlbumUser({ albumId: trip.id, userId: friend.id, role: AlbumUserRole.Editor });
+      await ctx.newAlbumAsset({ albumId: trip.id, assetId: friendAsset.id });
+      await ctx.newAsset({ ownerId: friend.id });
+      const searchRepository = ctx.get(SearchRepository);
+      for (const [index, asset] of [inAlbum, plain, friendAsset].entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      // the service leaves userIds out for an album search, after the album access check
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), albumIds: [trip.id], privateScope: { privateMode: false, userId: user.id } },
+      );
+
+      expect(ids(items)).toEqual(ids([inAlbum, plain, friendAsset]));
+    });
+
+    it('should refuse to leave out an album the user cannot read', async () => {
+      const { sut, ctx, auth } = await newAlbumLibrary();
+      const { user: stranger } = await ctx.newUser();
+      const { album } = await ctx.newAlbum({ ownerId: stranger.id });
+
+      await expect(sut.searchMetadata(auth, { size: 250, excludeAlbumIds: [album.id] })).rejects.toThrow(
+        'Not found or no album.read access',
+      );
+    });
+
+    it('should refuse a hidden tag inside an album search while private mode is locked', async () => {
+      const { sut, ctx, auth, user, trip } = await newAlbumLibrary();
+      const { tag: secret } = await ctx.newTag({ userId: user.id, value: 'Secret', isHidden: true });
+
+      await expect(sut.searchMetadata(auth, { size: 250, albumIds: [trip.id], tagIds: [secret.id] })).rejects.toThrow(
+        'Not found or no tag.read access',
+      );
+    });
+  });
+
+  describe('upload date', () => {
+    it('should use the Google Photos upload time for imported assets, else the creation date', async () => {
+      const { sut, auth, phone, google } = await newUploadLibrary();
+
+      const in2019 = await sut.searchMetadata(auth, {
+        size: 250,
+        uploadedAfter: new Date('2019-01-01T00:00:00Z'),
+        uploadedBefore: new Date('2019-12-31T23:59:59.999Z'),
+      });
+      const sinceMay = await sut.searchMetadata(auth, { size: 250, uploadedAfter: new Date('2026-05-01T00:00:00Z') });
+      const beforeMay = await sut.searchMetadata(auth, { size: 250, uploadedBefore: new Date('2026-05-01T00:00:00Z') });
+
+      expect(ids(in2019.assets.items)).toEqual([google.id]);
+      expect(ids(sinceMay.assets.items)).toEqual([phone.id]);
+      expect(ids(beforeMay.assets.items)).toEqual([google.id]);
+    });
+
+    it('should include both bounds to the second', async () => {
+      const { sut, auth, google } = await newUploadLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        uploadedAfter: new Date('2019-03-10T08:30:00Z'),
+        uploadedBefore: new Date('2019-03-10T08:30:00.999Z'),
+      });
+
+      expect(ids(response.assets.items)).toEqual([google.id]);
+    });
+
+    it('should fall back to the creation date for a malformed upload time', async () => {
+      const { sut, ctx, auth, user } = await newUploadLibrary();
+      const { asset: odd } = await ctx.newAsset({ ownerId: user.id, createdAt: new Date('2026-07-01T12:00:00Z') });
+      await ctx.newMetadata({ assetId: odd.id, key: 'google-photos', value: { uploadedAt: 'yesterday' } });
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        uploadedAfter: new Date('2026-07-01T00:00:00Z'),
+        uploadedBefore: new Date('2026-07-01T23:59:59Z'),
+      });
+
+      expect(ids(response.assets.items)).toEqual([odd.id]);
+    });
+
+    it('should apply the upload date to smart search', async () => {
+      const { ctx, user, phone, google } = await newUploadLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      await searchRepository.upsert(phone.id, unitVector(0));
+      await searchRepository.upsert(google.id, unitVector(1));
+
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), userIds: [user.id], uploadedBefore: new Date('2020-01-01T00:00:00Z') },
+      );
+
+      expect(ids(items)).toEqual([google.id]);
     });
   });
 

@@ -44,7 +44,12 @@ import {
   onBeforeLink,
   onBeforeUnlink,
 } from 'src/utils/asset.util';
-import { type PrivateScope, updateLockedColumns } from 'src/utils/database';
+import {
+  GOOGLE_PHOTOS_METADATA_KEY,
+  type PrivateScope,
+  getGoogleUploadedAt,
+  updateLockedColumns,
+} from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
 import { batched, findOrFail } from 'src/utils/misc';
 import { transformOcrBoundingBox } from 'src/utils/transform';
@@ -97,6 +102,8 @@ export class AssetService extends BaseService {
     }
 
     const data = mapAsset(asset, { withStack: true, auth });
+    const google = await this.assetRepository.getMetadataByKey(id, GOOGLE_PHOTOS_METADATA_KEY);
+    data.uploadedAt = getGoogleUploadedAt(google?.value)?.toISOString() ?? data.createdAt;
 
     if (auth.sharedLink) {
       delete data.owner;

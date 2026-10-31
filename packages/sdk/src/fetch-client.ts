@@ -1460,6 +1460,8 @@ export type AssetResponseDto = {
     "type": AssetTypeEnum;
     /** The UTC timestamp when the asset record was last updated in the database. This is automatically maintained by the database and reflects when any field in the asset was last modified. */
     updatedAt: string;
+    /** When the asset was uploaded: its Google Photos upload time when it was imported from Google Photos, else createdAt. Only on the single asset endpoint. */
+    uploadedAt?: string;
     visibility: AssetVisibility;
     /** Asset width */
     width: number | null;
@@ -2511,6 +2513,8 @@ export type MetadataSearchDto = {
     description?: string;
     /** Filter by encoded video file path */
     encodedVideoPath?: string;
+    /** Leave out assets in any of these albums */
+    excludeAlbumIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2578,6 +2582,10 @@ export type MetadataSearchDto = {
     updatedAfter?: string;
     /** Filter by update date (before) */
     updatedBefore?: string;
+    /** Filter by upload date (after): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedAfter?: string;
+    /** Filter by upload date (before): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedBefore?: string;
     visibility?: AssetVisibility;
     /** Include deleted assets */
     withDeleted?: boolean;
@@ -2646,6 +2654,8 @@ export type RandomSearchDto = {
     createdAfter?: string;
     /** Filter by creation date (before) */
     createdBefore?: string;
+    /** Leave out assets in any of these albums */
+    excludeAlbumIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2698,6 +2708,10 @@ export type RandomSearchDto = {
     updatedAfter?: string;
     /** Filter by update date (before) */
     updatedBefore?: string;
+    /** Filter by upload date (after): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedAfter?: string;
+    /** Filter by upload date (before): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedBefore?: string;
     visibility?: AssetVisibility;
     /** Include deleted assets */
     withDeleted?: boolean;
@@ -2719,6 +2733,8 @@ export type SmartSearchDto = {
     createdAfter?: string;
     /** Filter by creation date (before) */
     createdBefore?: string;
+    /** Leave out assets in any of these albums */
+    excludeAlbumIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2779,6 +2795,10 @@ export type SmartSearchDto = {
     updatedAfter?: string;
     /** Filter by update date (before) */
     updatedBefore?: string;
+    /** Filter by upload date (after): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedAfter?: string;
+    /** Filter by upload date (before): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedBefore?: string;
     visibility?: AssetVisibility;
     /** Include deleted assets */
     withDeleted?: boolean;
@@ -2798,6 +2818,8 @@ export type StatisticsSearchDto = {
     createdBefore?: string;
     /** Filter by description text */
     description?: string;
+    /** Leave out assets in any of these albums */
+    excludeAlbumIds?: string[];
     /** Leave out assets with any of these tags or their child tags */
     excludeTagIds?: string[];
     filter?: SearchFilter;
@@ -2848,6 +2870,10 @@ export type StatisticsSearchDto = {
     updatedAfter?: string;
     /** Filter by update date (before) */
     updatedBefore?: string;
+    /** Filter by upload date (after): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedAfter?: string;
+    /** Filter by upload date (before): the Google Photos upload time for assets imported from Google Photos, else the creation date */
+    uploadedBefore?: string;
     visibility?: AssetVisibility;
 };
 export type SearchStatisticsResponseDto = {
@@ -7393,12 +7419,13 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludeTagIds, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
     createdAfter?: string;
     createdBefore?: string;
+    excludeAlbumIds?: string[];
     excludeTagIds?: string[];
     isEncoded?: boolean;
     isFavorite?: boolean;
@@ -7426,6 +7453,8 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     $type?: AssetTypeEnum;
     updatedAfter?: string;
     updatedBefore?: string;
+    uploadedAfter?: string;
+    uploadedBefore?: string;
     visibility?: AssetVisibility;
     withDeleted?: boolean;
     withExif?: boolean;
@@ -7439,6 +7468,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         country,
         createdAfter,
         createdBefore,
+        excludeAlbumIds,
         excludeTagIds,
         isEncoded,
         isFavorite,
@@ -7466,6 +7496,8 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         "type": $type,
         updatedAfter,
         updatedBefore,
+        uploadedAfter,
+        uploadedBefore,
         visibility,
         withDeleted,
         withExif
