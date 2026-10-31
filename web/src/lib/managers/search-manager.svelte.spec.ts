@@ -183,3 +183,68 @@ describe('SearchManager albums and upload date', () => {
     expect(searchManager.filter.date.uploadedBefore?.toISODate()).toBe('2019-03-31');
   });
 });
+
+describe('SearchManager people and faces', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    searchManager.reset();
+  });
+
+  afterEach(() => {
+    searchManager.reset();
+  });
+
+  it('reads both sides of the face options from a query and submits them', async () => {
+    searchManager.setQuery({ personIds: ['ann'], onlyPersonIds: false, hasUnnamedFaces: false, hasNamedFaces: true });
+
+    expect(searchManager.filter.onlyPersonIds).toBe(false);
+    expect(searchManager.filter.hasUnnamedFaces).toBe(false);
+    expect(searchManager.filter.hasNamedFaces).toBe(true);
+    expect(searchManager.filter.hasPeople).toBeUndefined();
+    await searchManager.submit();
+    expect(submittedQuery()).toEqual({
+      personIds: ['ann'],
+      onlyPersonIds: false,
+      hasUnnamedFaces: false,
+      hasNamedFaces: true,
+    });
+  });
+
+  it('only sends only these people with people picked', async () => {
+    searchManager.filter.onlyPersonIds = true;
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).not.toHaveProperty('onlyPersonIds');
+  });
+
+  it('drops every other face option while searching for photos without people', async () => {
+    searchManager.setQuery({
+      personIds: ['ann'],
+      onlyPersonIds: true,
+      hasUnnamedFaces: true,
+      hasNamedFaces: false,
+      hasPeople: false,
+    });
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).toEqual({ hasPeople: false });
+  });
+
+  it('drops the people but keeps unnamed faces while searching for photos without anyone named', async () => {
+    searchManager.setQuery({ personIds: ['ann'], onlyPersonIds: true, hasUnnamedFaces: true, hasNamedFaces: false });
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).toEqual({ hasNamedFaces: false, hasUnnamedFaces: true });
+  });
+
+  it('sends with people alone', async () => {
+    searchManager.filter.hasPeople = true;
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).toEqual({ hasPeople: true });
+  });
+});

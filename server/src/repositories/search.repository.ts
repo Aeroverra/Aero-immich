@@ -111,6 +111,14 @@ export interface SearchOcrOptions {
 
 export interface SearchPeopleOptions {
   personIds?: string[];
+  /** with personIds: true = nobody else in the asset, false = someone else too; faces without a person count as someone else */
+  onlyPersonIds?: boolean;
+  /** true = at least one visible face, false = none */
+  hasPeople?: boolean;
+  /** true = a visible face of a person with a name, false = nobody named, faces or not */
+  hasNamedFaces?: boolean;
+  /** true = a visible face without a person, or whose person has no name and is not hidden */
+  hasUnnamedFaces?: boolean;
 }
 
 export interface SearchTagOptions {

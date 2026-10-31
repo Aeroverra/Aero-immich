@@ -69,6 +69,14 @@ export type SearchFilter = {
   ocr?: string;
   queryType: 'smart' | 'metadata' | 'description' | 'fullPath' | 'ocr';
   personIds: SvelteSet<string>;
+  /** with people picked: true = nobody else in the asset, false = someone else too; faces without a name count */
+  onlyPersonIds?: boolean;
+  /** true = assets with a face, false = without any (the picked people and other face options do not apply) */
+  hasPeople?: boolean;
+  /** true = someone named in the asset, false = nobody named, faces or not (the picked people do not apply) */
+  hasNamedFaces?: boolean;
+  /** true = a face nobody has named, false = no such face */
+  hasUnnamedFaces?: boolean;
   tagIds: SvelteSet<string> | null;
   /** assets with any of these tags (or their child tags) are left out */
   excludeTagIds: SvelteSet<string>;

@@ -47,6 +47,22 @@ class SearchApiRepository extends ApiRepository {
         filter.display.isNotInAlbum || (filter.excludeAlbumIds ?? []).isEmpty
         ? const Optional.absent()
         : Optional.present(filter.excludeAlbumIds);
+    // an asset without any face, or without anyone named, shows none of the picked people
+    final noFaces = filter.hasPeople == false;
+    final personIds = noFaces || filter.hasNamedFaces == false ? <String>[] : filter.people.map((e) => e.id).toList();
+    final Optional<bool?> onlyPersonIds = personIds.isEmpty || filter.onlyPeople == null
+        ? const Optional.absent()
+        : Optional.present(filter.onlyPeople);
+    final Optional<bool?> hasPeople = filter.hasPeople == null
+        ? const Optional.absent()
+        : Optional.present(filter.hasPeople);
+    // an asset without any face has no named and no unnamed face either
+    final Optional<bool?> hasNamedFaces = noFaces || filter.hasNamedFaces == null
+        ? const Optional.absent()
+        : Optional.present(filter.hasNamedFaces);
+    final Optional<bool?> hasUnnamedFaces = noFaces || filter.hasUnnamedFaces == null
+        ? const Optional.absent()
+        : Optional.present(filter.hasUnnamedFaces);
     final Optional<DateTime?> uploadedAfter = filter.uploaded.uploadedAfter == null
         ? const Optional.absent()
         : Optional.present(filter.uploaded.uploadedAfter);
@@ -81,7 +97,11 @@ class SearchApiRepository extends ApiRepository {
           isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
           isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
           isPrivate: isPrivate,
-          personIds: Optional.present(filter.people.map((e) => e.id).toList()),
+          personIds: Optional.present(personIds),
+          onlyPersonIds: onlyPersonIds,
+          hasPeople: hasPeople,
+          hasNamedFaces: hasNamedFaces,
+          hasUnnamedFaces: hasUnnamedFaces,
           tagIds: tagIds,
           excludeTagIds: excludeTagIds,
           albumIds: albumIds,
@@ -120,7 +140,11 @@ class SearchApiRepository extends ApiRepository {
         isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
         isNotInAlbum: filter.display.isNotInAlbum ? const Optional.present(true) : const Optional.absent(),
         isPrivate: isPrivate,
-        personIds: Optional.present(filter.people.map((e) => e.id).toList()),
+        personIds: Optional.present(personIds),
+        onlyPersonIds: onlyPersonIds,
+        hasPeople: hasPeople,
+        hasNamedFaces: hasNamedFaces,
+        hasUnnamedFaces: hasUnnamedFaces,
         tagIds: tagIds,
         excludeTagIds: excludeTagIds,
         albumIds: albumIds,

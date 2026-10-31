@@ -69,6 +69,10 @@ class SearchManager {
       queryType,
       queryAssetId: 'queryAssetId' in searchQuery ? searchQuery.queryAssetId : undefined,
       personIds: new SvelteSet('personIds' in searchQuery ? searchQuery.personIds : []),
+      onlyPersonIds: searchQuery.onlyPersonIds,
+      hasPeople: searchQuery.hasPeople,
+      hasNamedFaces: searchQuery.hasNamedFaces,
+      hasUnnamedFaces: searchQuery.hasUnnamedFaces,
       tagIds:
         'tagIds' in searchQuery
           ? searchQuery.tagIds === null
@@ -157,7 +161,13 @@ class SearchManager {
         !this.filter.display.isNotInAlbum && this.filter.excludeAlbumIds.size > 0
           ? [...this.filter.excludeAlbumIds]
           : undefined,
-      personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
+      // an asset without faces, or without anyone named, shows none of the picked people
+      personIds: this.#withPickedPeople() ? [...this.filter.personIds] : undefined,
+      onlyPersonIds: this.#withPickedPeople() ? this.filter.onlyPersonIds : undefined,
+      hasPeople: this.filter.hasPeople,
+      // an asset without any face has no named and no unnamed face either
+      hasNamedFaces: this.filter.hasPeople === false ? undefined : this.filter.hasNamedFaces,
+      hasUnnamedFaces: this.filter.hasPeople === false ? undefined : this.filter.hasUnnamedFaces,
       tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
       minDuration: this.filter.minDuration,
       maxDuration: this.filter.maxDuration,
@@ -168,6 +178,10 @@ class SearchManager {
       rating: this.filter.rating,
       isPrivate: privateModeManager.enabled ? this.filter.isPrivate : undefined,
     };
+  }
+
+  #withPickedPeople() {
+    return this.filter.hasPeople !== false && this.filter.hasNamedFaces !== false && this.filter.personIds.size > 0;
   }
 
   #withNullAsEmptyString<T>(value: T | null) {
