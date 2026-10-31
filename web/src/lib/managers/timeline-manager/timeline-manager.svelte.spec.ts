@@ -507,6 +507,55 @@ describe('TimelineManager', () => {
     });
   });
 
+  describe('AssetsRestore events', () => {
+    let timelineManager: TimelineManager;
+
+    beforeEach(async () => {
+      timelineManager = new TimelineManager();
+      sdkMock.getTimeBuckets.mockResolvedValue([]);
+
+      await timelineManager.updateViewport({ width: 1588, height: 1000 });
+    });
+
+    afterEach(() => {
+      timelineManager.destroy();
+    });
+
+    it('puts assets restored from the trash back in the timeline', async () => {
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+      const restored = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isTrashed: false, visibility: AssetVisibility.Timeline }),
+      );
+
+      eventManager.emit('AssetsRestore', [restored]);
+
+      expect(timelineManager.assetCount).toEqual(1);
+      expect(timelineManager.months[0].getFirstAsset().id).toEqual(restored.id);
+    });
+
+    it('leaves out restored assets the timeline does not show', async () => {
+      await timelineManager.updateOptions({ visibility: AssetVisibility.Timeline });
+      const archived = deriveLocalDateTimeFromFileCreatedAt(
+        timelineAssetFactory.build({ isTrashed: false, visibility: AssetVisibility.Archive }),
+      );
+
+      eventManager.emit('AssetsRestore', [archived]);
+
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+
+    it('does not add restored assets to the trash timeline', async () => {
+      await timelineManager.updateOptions({ isTrashed: true });
+
+      eventManager.emit(
+        'AssetsRestore',
+        [timelineAssetFactory.build({ isTrashed: false })].map((asset) => deriveLocalDateTimeFromFileCreatedAt(asset)),
+      );
+
+      expect(timelineManager.assetCount).toEqual(0);
+    });
+  });
+
   describe('private mode', () => {
     let timelineManager: TimelineManager;
 
