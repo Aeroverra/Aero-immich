@@ -76,6 +76,12 @@ class AssetApiRepository extends ApiRepository {
     return response.originalMimeType.orElse(null);
   }
 
+  /// Whether video playback serves a transcoded copy instead of the original. Null when the server does not say.
+  Future<bool?> hasEncodedVideo(String assetId) async {
+    final response = await checkNull(_api.getAssetInfo(assetId));
+    return response.hasEncodedVideo.orElse(null);
+  }
+
   Future<void> updateDescription(String assetId, String description) {
     return _api.updateAsset(assetId, UpdateAssetDto(description: Optional.present(description)));
   }
