@@ -197,7 +197,7 @@ export const getSearchMediaTitle = (mediaType: MediaType, minDuration?: number, 
   }
 };
 
-export const getPeople = async (selected: SvelteSet<string>): Promise<PersonResponseDto[]> => {
+export const getPeople = async (selected: ReadonlySet<string>): Promise<PersonResponseDto[]> => {
   const $t = get(t);
   try {
     const res = await getAllPeople({ withHidden: false });
@@ -209,7 +209,7 @@ export const getPeople = async (selected: SvelteSet<string>): Promise<PersonResp
   return [];
 };
 
-export const getSearchPeopleTitle = (people: PersonResponseDto[], selected: SvelteSet<string>) => {
+export const getSearchPeopleTitle = (people: PersonResponseDto[], selected: ReadonlySet<string>) => {
   if (selected.size === 0) {
     return;
   }
@@ -224,9 +224,19 @@ export const getSearchPeopleTitle = (people: PersonResponseDto[], selected: Svel
   return $t('people_count', { values: { count: selected.size } });
 };
 
-/** The People filter title: [names] from {@link getSearchPeopleTitle}, with the face options */
+/** "Without [name]" for the people whose photos are left out */
+export const getSearchExcludedPeopleTitle = (people: PersonResponseDto[], excluded: ReadonlySet<string>) => {
+  const names = getSearchPeopleTitle(people, excluded);
+  return names ? get(t)('search_without_person', { values: { name: names } }) : undefined;
+};
+
+/**
+ * The People filter title: [names] from {@link getSearchPeopleTitle} and [without] from
+ * {@link getSearchExcludedPeopleTitle}, with the face options
+ */
 export const getSearchPeopleFilterTitle = (
   names: string | undefined,
+  without: string | undefined,
   {
     onlyPersonIds,
     hasPeople,
@@ -258,7 +268,8 @@ export const getSearchPeopleFilterTitle = (
     hasUnnamedFaces === undefined
       ? undefined
       : $t(hasUnnamedFaces ? 'search_filter_with_unnamed_faces' : 'search_filter_no_unnamed_faces');
-  const parts = [people, unnamed].filter(Boolean);
+  // nobody named shows none of the left out people either
+  const parts = [people, hasNamedFaces === false ? undefined : without, unnamed].filter(Boolean);
   // anyone at all is implied by every other option
   if (parts.length === 0 && hasPeople) {
     return $t('search_filter_with_people');

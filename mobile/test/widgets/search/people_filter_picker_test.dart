@@ -38,18 +38,20 @@ void main() {
     await db.close();
   });
 
-  Future<List<(Set<Person>, PeopleFilterOptions)>> pump(
+  Future<List<(Set<Person>, Set<Person>, PeopleFilterOptions)>> pump(
     WidgetTester tester, {
     Set<Person> initialPeople = const {},
+    Set<Person> initialExcludedPeople = const {},
     PeopleFilterOptions initialOptions = _none,
   }) async {
-    final changes = <(Set<Person>, PeopleFilterOptions)>[];
+    final changes = <(Set<Person>, Set<Person>, PeopleFilterOptions)>[];
     await tester.pumpConsumerWidget(
       Scaffold(
         body: PeopleFilterPicker(
           initialPeople: initialPeople,
+          initialExcludedPeople: initialExcludedPeople,
           initialOptions: initialOptions,
-          onChanged: (people, options) => changes.add((people, options)),
+          onChanged: (people, excludedPeople, options) => changes.add((people, excludedPeople, options)),
         ),
       ),
       overrides: [
@@ -77,7 +79,7 @@ void main() {
     await tap(tester, 'people-filter-only-true');
 
     expect(changes.last.$1, {_ann});
-    expect(changes.last.$2.onlyPeople, isTrue);
+    expect(changes.last.$3.onlyPeople, isTrue);
     expect(
       find.text('Leaves out photos and videos with anyone else in them, faces without a name included'),
       findsOneWidget,
@@ -85,9 +87,9 @@ void main() {
 
     // the other side replaces it, the picked side again clears it
     await tap(tester, 'people-filter-only-false');
-    expect(changes.last.$2.onlyPeople, isFalse);
+    expect(changes.last.$3.onlyPeople, isFalse);
     await tap(tester, 'people-filter-only-false');
-    expect(changes.last.$2.onlyPeople, isNull);
+    expect(changes.last.$3.onlyPeople, isNull);
   });
 
   testWidgets('no people sets the people and the other options aside', (tester) async {
@@ -95,7 +97,7 @@ void main() {
 
     await tap(tester, 'people-filter-any-false');
 
-    expect(changes.last.$2.hasPeople, isFalse);
+    expect(changes.last.$3.hasPeople, isFalse);
     expect(chip(tester, 'people-filter-only-true').onSelected, isNull);
     expect(chip(tester, 'people-filter-named-true').onSelected, isNull);
     expect(chip(tester, 'people-filter-unnamed-false').onSelected, isNull);
@@ -108,7 +110,7 @@ void main() {
     await tap(tester, 'people-filter-any-true');
     await tap(tester, 'people-filter-unnamed-true');
     expect(changes.last.$1, {_ann});
-    expect(changes.last.$2, (onlyPeople: null, hasPeople: true, hasNamedFaces: null, hasUnnamedFaces: true));
+    expect(changes.last.$3, (onlyPeople: null, hasPeople: true, hasNamedFaces: null, hasUnnamedFaces: true));
   });
 
   testWidgets('no named people sets the people aside but keeps the face options', (tester) async {
@@ -116,9 +118,60 @@ void main() {
 
     await tap(tester, 'people-filter-named-false');
 
-    expect(changes.last.$2.hasNamedFaces, isFalse);
+    expect(changes.last.$3.hasNamedFaces, isFalse);
     expect(chip(tester, 'people-filter-only-true').onSelected, isNull);
     expect(chip(tester, 'people-filter-unnamed-true').onSelected, isNotNull);
+  });
+
+  Future<void> tapText(WidgetTester tester, String text) async {
+    await tester.tap(find.text(text));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('leaves out the people picked in the Without list', (tester) async {
+    final changes = await pump(tester);
+
+    await tapText(tester, 'Without these people');
+    await tapText(tester, 'Bob');
+    expect(changes.last.$1, isEmpty);
+    expect(changes.last.$2, {_bob});
+
+    // each list keeps its own people
+    await tapText(tester, 'With these people');
+    await tapText(tester, 'Ann');
+    expect(changes.last.$1, {_ann});
+    expect(changes.last.$2, {_bob});
+
+    // a person is in one list at most: picking it in the other list moves it
+    await tapText(tester, 'Without these people');
+    await tapText(tester, 'Ann');
+    expect(changes.last.$1, isEmpty);
+    expect(changes.last.$2, {_ann, _bob});
+
+    // picking a person again takes them off the list
+    await tapText(tester, 'Bob');
+    expect(changes.last.$2, {_ann});
+  });
+
+  testWidgets('opens on the Without list when only that one has people', (tester) async {
+    final changes = await pump(tester, initialExcludedPeople: {_bob});
+
+    final mode = tester.widget<SegmentedButton<bool>>(find.byKey(const Key('people-filter-mode')));
+    expect(mode.selected, {true});
+
+    await tapText(tester, 'Bob');
+    expect(changes.last.$2, isEmpty);
+  });
+
+  testWidgets('no people sets the Without list aside too', (tester) async {
+    final changes = await pump(tester, initialExcludedPeople: {_bob});
+
+    await tap(tester, 'people-filter-any-false');
+    await tester.tap(find.text('Ann'), warnIfMissed: false);
+    await tester.pumpAndSettle();
+
+    expect(changes.last.$2, {_bob});
+    expect(changes.last.$3.hasPeople, isFalse);
   });
 
   testWidgets('labels the People chip', (tester) async {
@@ -138,5 +191,13 @@ void main() {
     expect(peopleFilterLabel(context, {}, options(named: true)), 'With named people');
     expect(peopleFilterLabel(context, {}, options(any: true)), 'With people');
     expect(peopleFilterLabel(context, {_ann}, options(only: true, any: false, unnamed: true)), 'No people');
+    expect(peopleFilterLabel(context, {}, _none, excludedPeople: {_bob}), 'Without Bob');
+    expect(
+      peopleFilterLabel(context, {_ann}, options(only: false, unnamed: false), excludedPeople: {_bob}),
+      'Ann with others · Without Bob · No unnamed faces',
+    );
+    // nobody named, or nobody at all, shows none of the left out people either
+    expect(peopleFilterLabel(context, {}, options(named: false), excludedPeople: {_bob}), 'No named people');
+    expect(peopleFilterLabel(context, {}, options(any: false), excludedPeople: {_bob}), 'No people');
   });
 }

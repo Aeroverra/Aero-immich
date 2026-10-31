@@ -13,10 +13,19 @@ import 'package:immich_mobile/utils/image_url_builder.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
 
 class PeoplePicker extends HookConsumerWidget {
-  const PeoplePicker({super.key, required this.onSelect, this.initialSelection});
+  const PeoplePicker({
+    super.key,
+    required this.onSelect,
+    this.initialSelection,
+    this.selectedTileColor,
+    this.selectedTextColor,
+  });
 
   final Function(Set<Person>) onSelect;
   final Set<Person>? initialSelection;
+  // the picked people's tile and name colors, the primary colors by default
+  final Color? selectedTileColor;
+  final Color? selectedTextColor;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -69,7 +78,9 @@ class PeoplePicker extends HookConsumerWidget {
                         style: context.textTheme.bodyLarge?.copyWith(
                           fontSize: 20,
                           fontWeight: FontWeight.w500,
-                          color: isSelected ? context.colorScheme.onPrimary : context.colorScheme.onSurface,
+                          color: isSelected
+                              ? selectedTextColor ?? context.colorScheme.onPrimary
+                              : context.colorScheme.onSurface,
                         ),
                       ),
                       leading: SizedBox(
@@ -98,7 +109,7 @@ class PeoplePicker extends HookConsumerWidget {
                         onSelect(newSelected);
                       },
                       selected: isSelected,
-                      selectedTileColor: context.primaryColor,
+                      selectedTileColor: selectedTileColor ?? context.primaryColor,
                       tileColor: context.primaryColor.withAlpha(25),
                     ),
                   );
