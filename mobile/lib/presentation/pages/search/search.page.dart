@@ -18,6 +18,7 @@ import 'package:immich_mobile/presentation/pages/search/paginated_search.provide
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/general_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/search/quick_date_picker.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
+import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
@@ -26,7 +27,6 @@ import 'package:immich_mobile/providers/server_info.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/widgets/common/feature_check.dart';
 import 'package:immich_mobile/widgets/common/search_field.dart';
-import 'package:immich_mobile/widgets/common/tag_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/camera_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/display_option_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/filter_bottom_sheet_scaffold.dart';
@@ -37,6 +37,7 @@ import 'package:immich_mobile/widgets/search/search_filter/private_picker.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_chip.dart';
 import 'package:immich_mobile/widgets/search/search_filter/search_filter_utils.dart';
 import 'package:immich_mobile/widgets/search/search_filter/star_rating_picker.dart';
+import 'package:immich_mobile/widgets/search/search_filter/tag_filter_picker.dart';
 
 @RoutePage()
 class SearchPage extends HookConsumerWidget {
@@ -178,21 +179,28 @@ class SearchPage extends HookConsumerWidget {
 
     void showTagPicker() {
       var tagIds = filter.value.tagIds ?? [];
-      String tagLabel = '';
+      var excludeTagIds = filter.value.excludeTagIds ?? [];
 
-      void handleOnSelect(Iterable<Tag> tags) {
-        tagIds = tags.map((t) => t.id).toList();
-        tagLabel = tags.map((t) => t.value).join(', ');
+      void handleOnChanged(Set<String> included, Set<String> excluded) {
+        tagIds = included.toList();
+        excludeTagIds = excluded.toList();
       }
 
       void handleClear() {
         tagCurrentFilterWidget.value = null;
-        search(filter.value.copyWith(tagIds: []));
+        search(filter.value.copyWith(tagIds: [], excludeTagIds: []));
       }
 
       void handleApply() {
+        final names = {for (final tag in ref.read(tagProvider).valueOrNull ?? const <Tag>{}) tag.id: tag.value};
+        final included = tagIds.map((id) => names[id]).nonNulls.join(', ');
+        final excluded = excludeTagIds.map((id) => names[id]).nonNulls.join(', ');
+        final tagLabel = [
+          if (included.isNotEmpty) included,
+          if (excluded.isNotEmpty) context.t.search_without_tag(tag: excluded),
+        ].join(' · ');
         tagCurrentFilterWidget.value = tagLabel.isNotEmpty ? Text(tagLabel, style: context.textTheme.labelLarge) : null;
-        search(filter.value.copyWith(tagIds: tagIds));
+        search(filter.value.copyWith(tagIds: tagIds, excludeTagIds: excludeTagIds));
       }
 
       unawaited(
@@ -206,9 +214,10 @@ class SearchPage extends HookConsumerWidget {
               expanded: true,
               onSearch: handleApply,
               onClear: handleClear,
-              child: TagPicker(
-                onSelectExistingTag: handleOnSelect,
-                initialSelection: (filter.value.tagIds ?? []).toSet(),
+              child: TagFilterPicker(
+                initialIncluded: (filter.value.tagIds ?? []).toSet(),
+                initialExcluded: (filter.value.excludeTagIds ?? []).toSet(),
+                onChanged: handleOnChanged,
               ),
             ),
           ),

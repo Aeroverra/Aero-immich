@@ -218,6 +218,7 @@
       lensModel: $t('lens_model'),
       personIds: $t('people'),
       tagIds: $t('tags'),
+      excludeTagIds: $t('search_exclude_tags'),
       originalFileName: $t('file_name_text'),
       originalPath: $t('full_path_or_folder'),
       description: $t('description'),
@@ -310,7 +311,7 @@
                 {#await getPersonName(value) then personName}
                   {personName}
                 {/await}
-              {:else if searchKey === 'tagIds' && (Array.isArray(value) || value === null)}
+              {:else if (searchKey === 'tagIds' || searchKey === 'excludeTagIds') && (Array.isArray(value) || value === null)}
                 {#await getTagNames(value) then tagNames}
                   {tagNames}
                 {/await}

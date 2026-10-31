@@ -88,3 +88,31 @@ describe('SearchManager private filter', () => {
     expect(searchManager.filter.isPrivate).toBe(false);
   });
 });
+
+describe('SearchManager excluded tags', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    searchManager.reset();
+  });
+
+  afterEach(() => {
+    searchManager.reset();
+  });
+
+  it('reads excluded tags from a query and submits them with the included tags', async () => {
+    searchManager.setQuery({ tagIds: ['work'], excludeTagIds: ['holiday'] });
+
+    expect([...searchManager.filter.excludeTagIds]).toEqual(['holiday']);
+    await searchManager.submit();
+    expect(submittedQuery()).toMatchObject({ tagIds: ['work'], excludeTagIds: ['holiday'] });
+  });
+
+  it('drops excluded tags while searching for untagged assets', async () => {
+    searchManager.setQuery({ tagIds: null, excludeTagIds: ['holiday'] });
+
+    await searchManager.submit();
+
+    expect(submittedQuery()).toMatchObject({ tagIds: null });
+    expect(submittedQuery()).not.toHaveProperty('excludeTagIds');
+  });
+});
