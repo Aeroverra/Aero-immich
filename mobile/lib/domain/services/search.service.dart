@@ -33,7 +33,14 @@ class SearchService {
     return [];
   }
 
-  Future<SearchResult?> search(SearchFilter filter, int page) async {
+  /// A page of results. A stack shows once, like in the timeline: an asset is left out when [shownStackIds] or an
+  /// earlier result already holds its stack, for manual stacks always and automatic ones while [groupAutoStacks].
+  Future<SearchResult?> search(
+    SearchFilter filter,
+    int page, {
+    Set<String> shownStackIds = const {},
+    bool groupAutoStacks = true,
+  }) async {
     try {
       final response = await _searchApiRepository.search(filter, page);
 
@@ -41,10 +48,16 @@ class SearchService {
         return null;
       }
 
-      return SearchResult(
-        assets: response.assets.items.map((e) => e.toDto()).toList(),
-        nextPage: response.assets.nextPage?.toInt(),
-      );
+      final stackIds = {...shownStackIds};
+      final items = response.assets.items.where((item) {
+        final stack = item.stack.orElse(null);
+        if (stack == null || (stack.source_ == StackSource.auto && !groupAutoStacks)) {
+          return true;
+        }
+        return stackIds.add(stack.id);
+      });
+
+      return SearchResult(assets: items.map((e) => e.toDto()).toList(), nextPage: response.assets.nextPage?.toInt());
     } catch (error, stackTrace) {
       _log.severe("Failed to search for assets", error, stackTrace);
     }

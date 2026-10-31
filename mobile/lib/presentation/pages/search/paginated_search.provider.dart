@@ -5,6 +5,7 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/services/search.service.dart';
 import 'package:immich_mobile/models/search/search_filter.model.dart';
 import 'package:immich_mobile/providers/infrastructure/search.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
 
 final searchPreFilterProvider = NotifierProvider<SearchFilterProvider, SearchFilter?>(SearchFilterProvider.new);
 
@@ -32,14 +33,21 @@ class SearchState {
 }
 
 final paginatedSearchProvider = StateNotifierProvider<PaginatedSearchNotifier, SearchState>(
-  (ref) => PaginatedSearchNotifier(ref.watch(searchServiceProvider)),
+  (ref) => PaginatedSearchNotifier(
+    ref.watch(searchServiceProvider),
+    groupAutoStacks: () => ref.read(groupAutoStacksProvider),
+  ),
 );
 
 class PaginatedSearchNotifier extends StateNotifier<SearchState> {
   final SearchService _searchService;
+  final bool Function() _groupAutoStacks;
   final _assetCountController = StreamController<int>.broadcast();
 
-  PaginatedSearchNotifier(this._searchService) : super(const SearchState());
+  /// [groupAutoStacks] says whether automatic stacks show once too; without it they do, like the default preference
+  PaginatedSearchNotifier(this._searchService, {bool Function()? groupAutoStacks})
+    : _groupAutoStacks = groupAutoStacks ?? (() => true),
+      super(const SearchState());
 
   Stream<int> get assetCount => _assetCountController.stream;
 
@@ -50,7 +58,15 @@ class PaginatedSearchNotifier extends StateNotifier<SearchState> {
 
     state = SearchState(assets: state.assets, nextPage: state.nextPage, isLoading: true);
 
-    final result = await _searchService.search(filter, state.nextPage!);
+    final result = await _searchService.search(
+      filter,
+      state.nextPage!,
+      shownStackIds: {
+        for (final asset in state.assets)
+          if (asset case RemoteAsset(:final stackId?)) stackId,
+      },
+      groupAutoStacks: _groupAutoStacks(),
+    );
 
     if (result == null) {
       state = SearchState(assets: state.assets, nextPage: state.nextPage);
