@@ -15,6 +15,7 @@ import { SearchService } from 'src/services/search.service';
 import { newMediumService } from 'test/medium.factory';
 import { factory } from 'test/small.factory';
 import { getKyselyDB } from 'test/utils';
+import { vi } from 'vitest';
 
 let defaultDatabase: Kysely<DB>;
 
@@ -1268,6 +1269,108 @@ describe(SearchService.name, () => {
       const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
       const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
       expect(result.items).toEqual([]);
+    });
+
+    describe('frames combined', () => {
+      // image embeddings share a component that text embeddings do not have (index 100 here)
+      const image = (values: Record<number, number>) => {
+        const norm = Math.hypot(...Object.values(values));
+        return vector({
+          100: 0.7,
+          ...Object.fromEntries(Object.entries(values).map(([index, value]) => [index, (0.71 * value) / norm])),
+        });
+      };
+      const scope = (userId: string) => ({ userIds: [userId], lockedOwnerId: userId, privateOwnerId: null });
+
+      const newLibrary = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: string) => {
+        const searchRepository = ctx.get(SearchRepository);
+        // the average image of such a library and the typical distance of an image from it
+        vi.spyOn(searchRepository as any, 'getImageCentroid').mockReturnValue({
+          vector: vector({ 100: 0.7 }),
+          spread: 0.71,
+          dimension: 512,
+          expiresAt: Infinity,
+        });
+
+        // a cake at one moment, a truck at another
+        const { asset: video } = await ctx.newAsset({ ownerId, type: AssetType.Video });
+        await searchRepository.upsert(video.id, image({ 3: 1 }));
+        await searchRepository.replaceFrames(video.id, [
+          { frameTimestamp: 1000, embedding: image({ 0: 1 }) },
+          { frameTimestamp: 5000, embedding: image({ 1: 1 }) },
+          { frameTimestamp: 9000, embedding: image({ 2: 1 }) },
+        ]);
+        // a photo of a cake with a bit of truck
+        const { asset: photo } = await ctx.newAsset({ ownerId });
+        await searchRepository.upsert(photo.id, image({ 0: 1, 1: 0.2 }));
+        return { searchRepository, video, photo };
+      };
+
+      it('should rank a video by its frames together when they show different parts of the query', async () => {
+        const { ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { searchRepository, video, photo } = await newLibrary(ctx, user.id);
+
+        const cakeAndTruck = vector({ 0: Math.SQRT1_2, 1: Math.SQRT1_2 });
+        const result = await searchRepository.searchSmartV3(
+          { take: 10 },
+          { filter: {}, embedding: cakeAndTruck },
+          scope(user.id),
+        );
+
+        expect(result.items.map(({ id }) => id)).toEqual([video.id, photo.id]);
+        expect([1000, 5000]).toContain(result.frameTimestamps.get(video.id));
+      });
+
+      it('should not lift a video above a better photo for a query about one thing', async () => {
+        const { ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { searchRepository, video, photo } = await newLibrary(ctx, user.id);
+        // a truck photo that matches a truck query better than any frame of the video
+        const { asset: truck } = await ctx.newAsset({ ownerId: user.id });
+        await searchRepository.upsert(truck.id, vector({ 100: 0.5, 1: 0.86 }));
+
+        const result = await searchRepository.searchSmartV3(
+          { take: 10 },
+          { filter: {}, embedding: unitVector(1) },
+          scope(user.id),
+        );
+
+        expect(result.items.map(({ id }) => id)).toEqual([truck.id, video.id, photo.id]);
+        expect(result.frameTimestamps.get(video.id)).toBe(5000);
+      });
+
+      it('should compute the library centroid in the background', async () => {
+        const { ctx } = setup();
+        const { user } = await ctx.newUser();
+        const searchRepository = ctx.get(SearchRepository);
+        const { asset } = await ctx.newAsset({ ownerId: user.id });
+        await searchRepository.upsert(asset.id, image({ 0: 1 }));
+        const repository = searchRepository as any;
+
+        expect(repository.getImageCentroid(unitVector(0))).toBeUndefined();
+        await repository.imageCentroidRefresh;
+
+        expect(repository.getImageCentroid(unitVector(0))).toEqual(
+          expect.objectContaining({ dimension: 512, spread: expect.any(Number), vector: expect.any(String) }),
+        );
+      });
+
+      it('should leave the ranking alone without a library centroid', async () => {
+        const { ctx } = setup();
+        const { user } = await ctx.newUser();
+        const { searchRepository, video, photo } = await newLibrary(ctx, user.id);
+        vi.spyOn(searchRepository as any, 'getImageCentroid').mockReturnValue(undefined);
+
+        const cakeAndTruck = vector({ 0: Math.SQRT1_2, 1: Math.SQRT1_2 });
+        const result = await searchRepository.searchSmartV3(
+          { take: 10 },
+          { filter: {}, embedding: cakeAndTruck },
+          scope(user.id),
+        );
+
+        expect(result.items.map(({ id }) => id)).toEqual([photo.id, video.id]);
+      });
     });
 
     it('should replace the frames of a video', async () => {
