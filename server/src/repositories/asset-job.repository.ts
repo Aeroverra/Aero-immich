@@ -500,6 +500,50 @@ export class AssetJobRepository {
   }
 
   @GenerateSql({ params: [], stream: true })
+  streamForVideoTranscription(force?: boolean) {
+    return this.db
+      .selectFrom('asset')
+      .select(['asset.id'])
+      .where('asset.type', '=', sql.lit(AssetType.Video))
+      .where('asset.visibility', '!=', AssetVisibility.Hidden)
+      .where('asset.deletedAt', 'is', null)
+      .$if(!force, (qb) =>
+        qb.where((eb) =>
+          eb.not(
+            eb.exists(
+              eb
+                .selectFrom('asset_transcript')
+                .select('asset_transcript.assetId')
+                .whereRef('asset_transcript.assetId', '=', 'asset.id'),
+            ),
+          ),
+        ),
+      )
+      .orderBy('asset.fileCreatedAt', 'desc')
+      .stream();
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getForVideoTranscription(id: string) {
+    return this.db
+      .selectFrom('asset')
+      .leftJoin('asset_exif', 'asset.id', 'asset_exif.assetId')
+      .leftJoin('asset_audio', 'asset_audio.assetId', 'asset.id')
+      .leftJoin('asset_video', 'asset_video.assetId', 'asset.id')
+      .select([
+        'asset.id',
+        'asset.type',
+        'asset.visibility',
+        'asset.deletedAt',
+        'asset.originalPath',
+        'asset_video.assetId as videoStreamAssetId',
+      ])
+      .select((eb) => withAudioStream(eb).as('audioStream'))
+      .where('asset.id', '=', id)
+      .executeTakeFirst();
+  }
+
+  @GenerateSql({ params: [], stream: true })
   streamForOcrJob(force?: boolean) {
     return this.db
       .selectFrom('asset')

@@ -69,6 +69,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
   'AdminConfigJobDto': {
     'faceAttributes': AdminConfigJobSettingsDto(concurrency: 2).toJson(),
     'videoFrameAnalysis': AdminConfigJobSettingsDto(concurrency: 1).toJson(),
+    'videoTranscription': AdminConfigJobSettingsDto(concurrency: 1).toJson(),
   },
   'AdminConfigMachineLearningDto': {
     'faceAttributes': AdminConfigFaceAttributesDto(enabled: false, modelName: 'face_landmarker').toJson(),
@@ -91,6 +92,12 @@ final Map<String, Map<String, Object?>> openApiPatches = {
       maxFrames: 30,
       minFrameInterval: 2,
     ).toJson(),
+    'videoTranscription': AdminConfigVideoTranscriptionDto(
+      computeType: TranscriptionComputeType.auto,
+      enabled: false,
+      language: '',
+      modelName: 'large-v3-turbo',
+    ).toJson(),
   },
   'AdminConfigNightlyTasksDto': {'autoStack': false},
   // the takeout read settings of a server without them are its built-in defaults
@@ -104,6 +111,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'faceAttributes': _emptyQueue,
     'autoStack': _emptyQueue,
     'videoFrameAnalysis': _emptyQueue,
+    'videoTranscription': _emptyQueue,
     'takeout': _emptyQueue,
   },
   'WorkflowResponseDto': {'logging': false},

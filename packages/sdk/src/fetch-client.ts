@@ -180,6 +180,7 @@ export type AdminConfigJobDto = {
     thumbnailGeneration: AdminConfigJobSettingsDto;
     videoConversion: AdminConfigJobSettingsDto;
     videoFrameAnalysis: AdminConfigJobSettingsDto;
+    videoTranscription: AdminConfigJobSettingsDto;
     workflow: AdminConfigJobSettingsDto;
 };
 export type AdminConfigLibraryScanDto = {
@@ -283,6 +284,15 @@ export type AdminConfigVideoFrameAnalysisDto = {
     /** Minimum number of seconds between two sampled frames */
     minFrameInterval: number;
 };
+export type AdminConfigVideoTranscriptionDto = {
+    computeType: TranscriptionComputeType;
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Language code of the speech (for example en), empty to detect the language of every video */
+    language: string;
+    /** Name of the model to use */
+    modelName: string;
+};
 export type AdminConfigMachineLearningDto = {
     autoStack: AdminConfigAutoStackDto;
     availabilityChecks: AdminConfigMachineLearningAvailabilityChecksDto;
@@ -296,6 +306,7 @@ export type AdminConfigMachineLearningDto = {
     /** ML service URLs */
     urls: string[];
     videoFrameAnalysis: AdminConfigVideoFrameAnalysisDto;
+    videoTranscription: AdminConfigVideoTranscriptionDto;
 };
 export type AdminConfigMapDto = {
     /** Dark map style URL */
@@ -1564,6 +1575,22 @@ export type AssetOcrResponseDto = {
     /** Normalized y coordinate of box corner 4 (0-1) */
     y4: number;
 };
+export type AssetTranscriptSegmentResponseDto = {
+    /** Position in milliseconds where the line ends */
+    endTime: number;
+    /** Position in milliseconds where the line starts */
+    startTime: number;
+    /** What was said */
+    text: string;
+};
+export type AssetTranscriptResponseDto = {
+    /** Video asset ID */
+    assetId: string;
+    /** Language code of the speech, null when no speech was found */
+    language: string | null;
+    /** Lines of speech in playback order, empty when the video was not transcribed or has no speech */
+    segments: AssetTranscriptSegmentResponseDto[];
+};
 export type SignUpDto = {
     /** User email */
     email: string;
@@ -1936,6 +1963,7 @@ export type QueuesResponseLegacyDto = {
     thumbnailGeneration: QueueResponseLegacyDto;
     videoConversion: QueueResponseLegacyDto;
     videoFrameAnalysis: QueueResponseLegacyDto;
+    videoTranscription: QueueResponseLegacyDto;
     workflow: QueueResponseLegacyDto;
 };
 export type JobCreateDto = {
@@ -2463,6 +2491,7 @@ export type SearchFilterBranch = {
     state?: StringFilterNullable;
     tagIds?: IdsFilter;
     takenAt?: DateFilter;
+    transcript?: StringSimilarityFilter;
     trashedAt?: DateFilterNullable;
     "type"?: EnumFilterAssetType;
     updatedAt?: DateFilter;
@@ -2499,6 +2528,7 @@ export type SearchFilter = {
     state?: StringFilterNullable;
     tagIds?: IdsFilter;
     takenAt?: DateFilter;
+    transcript?: StringSimilarityFilter;
     trashedAt?: DateFilterNullable;
     "type"?: EnumFilterAssetType;
     updatedAt?: DateFilter;
@@ -2597,6 +2627,8 @@ export type MetadataSearchDto = {
     takenBefore?: string;
     /** Filter by thumbnail file path */
     thumbnailPath?: string;
+    /** Filter videos by words said in them (video transcription) */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2645,6 +2677,16 @@ export type SearchMatchedFrameResponseDto = {
     /** Position in milliseconds of the sampled video frame that matched best */
     frameTimestamp: number;
 };
+export type SearchMatchedTranscriptResponseDto = {
+    /** Video asset ID */
+    assetId: string;
+    /** Position in milliseconds where the matching line of speech ends */
+    endTime: number;
+    /** Position in milliseconds where the matching line of speech starts */
+    startTime: number;
+    /** The line of speech that matched */
+    text: string;
+};
 export type SearchAssetResponseDto = {
     /** Number of assets in this page */
     count: number;
@@ -2652,6 +2694,8 @@ export type SearchAssetResponseDto = {
     items: AssetResponseDto[];
     /** Smart search only: the videos of this page that matched on a sampled frame, with its position */
     matchedFrames?: SearchMatchedFrameResponseDto[];
+    /** Spoken words search only: the videos of this page whose speech matched, with the line that matched */
+    matchedTranscripts?: SearchMatchedTranscriptResponseDto[];
     /** Cursor for the next page of results */
     nextCursor: string | null;
     /** Next page token */
@@ -2741,6 +2785,8 @@ export type RandomSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter videos by words said in them (video transcription) */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2838,6 +2884,8 @@ export type SmartSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter videos by words said in them (video transcription) */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -2923,6 +2971,8 @@ export type StatisticsSearchDto = {
     takenAfter?: string;
     /** Filter by taken date (before) */
     takenBefore?: string;
+    /** Filter videos by words said in them (video transcription) */
+    transcript?: string;
     /** Filter by trash date (after) */
     trashedAfter?: string;
     /** Filter by trash date (before) */
@@ -3065,6 +3115,8 @@ export type ServerFeaturesDto = {
     trash: boolean;
     /** Whether enhanced video analysis of sampled frames is enabled */
     videoFrameAnalysis: boolean;
+    /** Whether speech in videos is transcribed (transcripts, captions and spoken word search). Absent on servers without it. */
+    videoTranscription?: boolean;
 };
 export type LicenseKeyDto = {
     /** Activation key */
@@ -5999,6 +6051,19 @@ export function viewAsset({ edited, id, key, size, slug }: {
     }));
 }
 /**
+ * Retrieve the transcript of a video
+ */
+export function getAssetTranscript({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetTranscriptResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/transcript`, {
+        ...opts
+    }));
+}
+/**
  * Play asset video
  */
 export function playAssetVideo({ id, key, slug }: {
@@ -7512,7 +7577,7 @@ export function getExploreData(opts?: Oazapfts.RequestOpts) {
 /**
  * Search large assets
  */
-export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludePersonIds, excludeTagIds, hasNamedFaces, hasPeople, hasUnnamedFaces, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, onlyPersonIds, personIds, rating, size, state, tagIds, takenAfter, takenBefore, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
+export function searchLargeAssets({ albumIds, city, country, createdAfter, createdBefore, excludeAlbumIds, excludePersonIds, excludeTagIds, hasNamedFaces, hasPeople, hasUnnamedFaces, isEncoded, isFavorite, isMotion, isNotInAlbum, isOffline, isPrivate, lensModel, libraryId, make, maxDuration, minDuration, minFileSize, model, ocr, onlyPersonIds, personIds, rating, size, state, tagIds, takenAfter, takenBefore, transcript, trashedAfter, trashedBefore, $type, updatedAfter, updatedBefore, uploadedAfter, uploadedBefore, visibility, withDeleted, withExif }: {
     albumIds?: string[];
     city?: string | null;
     country?: string | null;
@@ -7546,6 +7611,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
     tagIds?: string[] | null;
     takenAfter?: string;
     takenBefore?: string;
+    transcript?: string;
     trashedAfter?: string;
     trashedBefore?: string;
     $type?: AssetTypeEnum;
@@ -7594,6 +7660,7 @@ export function searchLargeAssets({ albumIds, city, country, createdAfter, creat
         tagIds,
         takenAfter,
         takenBefore,
+        transcript,
         trashedAfter,
         trashedBefore,
         "type": $type,
@@ -9526,6 +9593,13 @@ export enum LogLevel {
     Error = "error",
     Fatal = "fatal"
 }
+export enum TranscriptionComputeType {
+    Auto = "auto",
+    Int8 = "int8",
+    Int8Float16 = "int8_float16",
+    Float16 = "float16",
+    Float32 = "float32"
+}
 export enum ReleaseChannel {
     Stable = "stable",
     ReleaseCandidate = "releaseCandidate"
@@ -9894,6 +9968,7 @@ export enum QueueName {
     IntegrityCheck = "integrityCheck",
     Editor = "editor",
     VideoFrameAnalysis = "videoFrameAnalysis",
+    VideoTranscription = "videoTranscription",
     Takeout = "takeout"
 }
 export enum QueueCommand {
@@ -9992,6 +10067,8 @@ export enum JobName {
     VersionCheck = "VersionCheck",
     AssetAnalyzeVideoFramesQueueAll = "AssetAnalyzeVideoFramesQueueAll",
     AssetAnalyzeVideoFrames = "AssetAnalyzeVideoFrames",
+    AssetTranscribeVideoQueueAll = "AssetTranscribeVideoQueueAll",
+    AssetTranscribeVideo = "AssetTranscribeVideo",
     OcrQueueAll = "OcrQueueAll",
     Ocr = "Ocr",
     WorkflowAssetTrigger = "WorkflowAssetTrigger",

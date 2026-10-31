@@ -155,6 +155,40 @@ describe(JobService.name, () => {
       expect(mocks.job.queue).toHaveBeenCalledWith({ name: JobName.AutoStack, data: { id: 'asset-1', refresh: true } });
     });
 
+    it('should transcribe an uploaded video when video transcription is enabled', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoTranscription: { enabled: true } } });
+      mocks.asset.getByIdsWithAllRelationsButStacks.mockResolvedValue([
+        AssetFactory.create({ id: 'asset-1', type: AssetType.Video }),
+      ] as never);
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.ThumbnailGeneration, {
+        name: JobName.AssetGenerateThumbnails,
+        data: { id: 'asset-1', source: 'upload' },
+      });
+
+      expect(mocks.job.queueAll).toHaveBeenCalledWith(
+        expect.arrayContaining([{ name: JobName.AssetTranscribeVideo, data: { id: 'asset-1' } }]),
+      );
+    });
+
+    it('should not transcribe a video whose thumbnails were regenerated', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoTranscription: { enabled: true } } });
+      mocks.asset.getByIdsWithAllRelationsButStacks.mockResolvedValue([
+        AssetFactory.create({ id: 'asset-1', type: AssetType.Video }),
+      ] as never);
+      mocks.job.run.mockResolvedValue(JobStatus.Success);
+
+      await sut.onJobRun(QueueName.ThumbnailGeneration, {
+        name: JobName.AssetGenerateThumbnails,
+        data: { id: 'asset-1', notify: true },
+      });
+
+      expect(mocks.job.queueAll).not.toHaveBeenCalledWith(
+        expect.arrayContaining([expect.objectContaining({ name: JobName.AssetTranscribeVideo })]),
+      );
+    });
+
     it('should not analyze video frames of an uploaded photo', async () => {
       mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoFrameAnalysis: { enabled: true } } });
       mocks.asset.getByIds.mockResolvedValue([AssetFactory.create({ id: 'asset-1' })]);

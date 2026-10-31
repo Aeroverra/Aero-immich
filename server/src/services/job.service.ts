@@ -8,7 +8,7 @@ import { BaseService } from 'src/services/base.service';
 import { JobItem } from 'src/types';
 import { AUTO_STACK_UPLOAD_DELAY } from 'src/utils/auto-stack';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
-import { isVideoFrameAnalysisEnabled } from 'src/utils/misc';
+import { isVideoFrameAnalysisEnabled, isVideoTranscriptionEnabled } from 'src/utils/misc';
 
 const asJobItem = (dto: JobCreateDto): JobItem => {
   switch (dto.name) {
@@ -186,6 +186,11 @@ export class JobService extends BaseService {
 
         if (asset.type === AssetType.Video) {
           jobs.push({ name: JobName.AssetEncodeVideo, data: item.data });
+
+          const { machineLearning } = await this.getConfig({ withCache: true });
+          if (item.data.source === 'upload' && isVideoTranscriptionEnabled(machineLearning)) {
+            jobs.push({ name: JobName.AssetTranscribeVideo, data: { id: item.data.id } });
+          }
         }
 
         await this.jobRepository.queueAll(jobs);

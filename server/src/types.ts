@@ -471,6 +471,10 @@ export type JobItem =
   | { name: JobName.AssetAnalyzeVideoFramesQueueAll; data: IBaseJob }
   | { name: JobName.AssetAnalyzeVideoFrames; data: IEntityJob }
 
+  // Video transcription
+  | { name: JobName.AssetTranscribeVideoQueueAll; data: IBaseJob }
+  | { name: JobName.AssetTranscribeVideo; data: IEntityJob }
+
   // OCR
   | { name: JobName.OcrQueueAll; data: IBaseJob }
   | { name: JobName.Ocr; data: IEntityJob }

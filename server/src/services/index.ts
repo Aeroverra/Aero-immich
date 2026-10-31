@@ -50,12 +50,13 @@ import { TakeoutService } from 'src/services/takeout.service';
 import { TelemetryService } from 'src/services/telemetry.service';
 import { TimelineService } from 'src/services/timeline.service';
 import { TranscodingService } from 'src/services/transcoding.service';
+import { TranscriptService } from 'src/services/transcript.service';
 import { TrashService } from 'src/services/trash.service';
 import { UserAdminService } from 'src/services/user-admin.service';
 import { UserService } from 'src/services/user.service';
 import { VersionService } from 'src/services/version.service';
-import { VideoFrameAnalysisService } from 'src/services/video-frame-analysis.service';
 import { VideoBookmarkService } from 'src/services/video-bookmark.service';
+import { VideoFrameAnalysisService } from 'src/services/video-frame-analysis.service';
 import { ViewService } from 'src/services/view.service';
 import { WorkflowExecutionService } from 'src/services/workflow-execution.service';
 import { WorkflowService } from 'src/services/workflow.service';
@@ -118,6 +119,7 @@ export const services = [
   UserService,
   VersionService,
   VideoFrameAnalysisService,
+  TranscriptService,
   VideoBookmarkService,
   ViewService,
   WorkflowExecutionService,

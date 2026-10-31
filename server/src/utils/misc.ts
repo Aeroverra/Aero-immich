@@ -112,6 +112,8 @@ export const isVideoFrameAnalysisEnabled = (machineLearning: SystemConfig['machi
   isMachineLearningEnabled(machineLearning) &&
   machineLearning.videoFrameAnalysis.enabled &&
   (isSmartSearchEnabled(machineLearning) || isVideoFrameFaceDetectionEnabled(machineLearning));
+export const isVideoTranscriptionEnabled = (machineLearning: SystemConfig['machineLearning']) =>
+  isMachineLearningEnabled(machineLearning) && machineLearning.videoTranscription.enabled;
 export const isFaceImportEnabled = (metadata: SystemConfig['metadata']) => metadata.faces.import;
 
 export const isConnectionAborted = (error: Error | any) => error.code === 'ECONNABORTED';

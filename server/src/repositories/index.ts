@@ -51,11 +51,12 @@ import { SystemMetadataRepository } from 'src/repositories/system-metadata.repos
 import { TagRepository } from 'src/repositories/tag.repository';
 import { TakeoutRepository } from 'src/repositories/takeout.repository';
 import { TelemetryRepository } from 'src/repositories/telemetry.repository';
+import { TranscriptRepository } from 'src/repositories/transcript.repository';
 import { TrashRepository } from 'src/repositories/trash.repository';
 import { UserRepository } from 'src/repositories/user.repository';
 import { VersionHistoryRepository } from 'src/repositories/version-history.repository';
-import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { VideoBookmarkRepository } from 'src/repositories/video-bookmark.repository';
+import { VideoStreamRepository } from 'src/repositories/video-stream.repository';
 import { ViewRepository } from 'src/repositories/view-repository';
 import { WebsocketRepository } from 'src/repositories/websocket.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -114,6 +115,7 @@ export const repositories = [
   TagRepository,
   TakeoutRepository,
   TelemetryRepository,
+  TranscriptRepository,
   TrashRepository,
   UserRepository,
   VideoBookmarkRepository,

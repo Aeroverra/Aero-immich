@@ -25,6 +25,8 @@ import {
   TranscodeHardwareAccelerationSchema,
   TranscodePolicy,
   TranscodePolicySchema,
+  TranscriptionComputeType,
+  TranscriptionComputeTypeSchema,
   VideoCodec,
   VideoCodecSchema,
   VideoContainer,
@@ -216,6 +218,7 @@ const AdminConfigSchemaWithVisibility = z
         editor: AdminConfigJobSettingsSchema,
         integrityCheck: AdminConfigJobSettingsSchema,
         videoFrameAnalysis: AdminConfigJobSettingsSchema,
+        videoTranscription: AdminConfigJobSettingsSchema,
       })
       .meta({ id: 'AdminConfigJobDto' }),
     logging: z
@@ -341,6 +344,17 @@ const AdminConfigSchemaWithVisibility = z
           detectFaces: z.boolean().describe('Whether to detect faces in the sampled frames'),
           createPeople: z.boolean().describe('Whether faces found only in video frames may create new people'),
         }).meta({ id: 'AdminConfigVideoFrameAnalysisDto' }),
+        // admin only: clients learn whether videos are transcribed from the videoTranscription server feature
+        videoTranscription: z.object({
+          enabled: z.boolean().describe('Whether the task is enabled'),
+          modelName: z.string().describe('Name of the model to use'),
+          language: z
+            .string()
+            .trim()
+            .max(16)
+            .describe('Language code of the speech (for example en), empty to detect the language of every video'),
+          computeType: TranscriptionComputeTypeSchema,
+        }).meta({ id: 'AdminConfigVideoTranscriptionDto' }),
       })
       .meta({ id: 'AdminConfigMachineLearningDto' }),
     map: z
@@ -709,6 +723,7 @@ export const defaults = Object.freeze<SystemConfig>({
     editor: { concurrency: 2 },
     integrityCheck: { concurrency: 1 },
     videoFrameAnalysis: { concurrency: 1 },
+    videoTranscription: { concurrency: 1 },
   },
   logging: {
     enabled: true,
@@ -766,6 +781,12 @@ export const defaults = Object.freeze<SystemConfig>({
       maxFrames: 30,
       detectFaces: true,
       createPeople: false,
+    },
+    videoTranscription: {
+      enabled: false,
+      modelName: 'large-v3-turbo',
+      language: '',
+      computeType: TranscriptionComputeType.Auto,
     },
   },
   map: {

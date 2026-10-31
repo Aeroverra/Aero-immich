@@ -17,6 +17,7 @@ export enum ModelTask {
   IMAGE_QUALITY = 'image-quality',
   SEARCH = 'clip',
   OCR = 'ocr',
+  SPEECH_TO_TEXT = 'speech-to-text',
 }
 
 export enum ModelType {
@@ -26,11 +27,12 @@ export enum ModelType {
   QUALITY = 'quality',
   RECOGNITION = 'recognition',
   TEXTUAL = 'textual',
+  TRANSCRIPTION = 'transcription',
   VISUAL = 'visual',
   OCR = 'ocr',
 }
 
-export type ModelPayload = { imagePath: string } | { image: Buffer } | { text: string };
+export type ModelPayload = { imagePath: string } | { image: Buffer } | { text: string } | { audio: Buffer };
 
 type ModelOptions = { modelName: string };
 
@@ -108,6 +110,38 @@ export type FaceAttributesResponse = {
   [ModelTask.IMAGE_QUALITY]: ImageQuality;
 } & VisualResponse;
 
+export type TranscriptionOptions = ModelOptions & {
+  /** language code of the speech, empty to detect it */
+  language: string;
+  computeType: string;
+};
+
+export type TranscriptionRequest = {
+  [ModelTask.SPEECH_TO_TEXT]: {
+    [ModelType.TRANSCRIPTION]: ModelOptions & {
+      options: { language: string | null; computeType: string; vadFilter: boolean };
+    };
+  };
+};
+
+export type TranscriptionSegment = {
+  /** seconds */
+  start: number;
+  /** seconds */
+  end: number;
+  text: string;
+};
+
+export type Transcription = {
+  language: string | null;
+  languageProbability: number | null;
+  /** seconds of audio */
+  duration: number;
+  segments: TranscriptionSegment[];
+};
+
+export type TranscriptionResponse = { [ModelTask.SPEECH_TO_TEXT]: Transcription };
+
 export type ImageAnalysisRequest = Partial<ClipVisualRequest & FacialRecognitionRequest>;
 export type ImageAnalysisResponse = Partial<
   { [ModelTask.SEARCH]: string } & { [ModelTask.FACIAL_RECOGNITION]: Face[] }
@@ -120,6 +154,7 @@ export type MachineLearningRequest =
   | FacialRecognitionRequest
   | FaceAttributesRequest
   | OcrRequest
+  | TranscriptionRequest
   | ImageAnalysisRequest;
 export type TextEncodingOptions = ModelOptions & { language?: string };
 
@@ -316,6 +351,20 @@ export class MachineLearningRepository {
     return response[ModelTask.OCR];
   }
 
+  /** turns speech into timed text lines, `audio` is any audio file the machine learning service can decode */
+  async transcribe(audio: Buffer, { modelName, language, computeType }: TranscriptionOptions) {
+    const request = {
+      [ModelTask.SPEECH_TO_TEXT]: {
+        [ModelType.TRANSCRIPTION]: {
+          modelName,
+          options: { language: language || null, computeType, vadFilter: true },
+        },
+      },
+    };
+    const response = await this.predict<TranscriptionResponse>({ audio }, request);
+    return response[ModelTask.SPEECH_TO_TEXT];
+  }
+
   private async getFormData(payload: ModelPayload, config: MachineLearningRequest): Promise<FormData> {
     const formData = new FormData();
     formData.append('entries', JSON.stringify(config));
@@ -327,6 +376,8 @@ export class MachineLearningRepository {
       formData.append('image', new Blob([new Uint8Array(payload.image)]));
     } else if ('text' in payload) {
       formData.append('text', payload.text);
+    } else if ('audio' in payload) {
+      formData.append('audio', new Blob([new Uint8Array(payload.audio)]));
     } else {
       throw new Error('Invalid input');
     }

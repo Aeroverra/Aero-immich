@@ -956,6 +956,61 @@ from
 where
   "asset"."id" = $1
 
+-- AssetJobRepository.streamForVideoTranscription
+select
+  "asset"."id"
+from
+  "asset"
+where
+  "asset"."type" = 'VIDEO'
+  and "asset"."visibility" != $1
+  and "asset"."deletedAt" is null
+  and not exists (
+    select
+      "asset_transcript"."assetId"
+    from
+      "asset_transcript"
+    where
+      "asset_transcript"."assetId" = "asset"."id"
+  )
+order by
+  "asset"."fileCreatedAt" desc
+
+-- AssetJobRepository.getForVideoTranscription
+select
+  "asset"."id",
+  "asset"."type",
+  "asset"."visibility",
+  "asset"."deletedAt",
+  "asset"."originalPath",
+  "asset_video"."assetId" as "videoStreamAssetId",
+  (
+    select
+      to_json(obj)
+    from
+      (
+        select
+          "asset_audio"."index",
+          "asset_audio"."codecName",
+          "asset_audio"."profile",
+          "asset_audio"."bitrate"
+        from
+          (
+            select
+              1
+          ) as "dummy"
+        where
+          "asset_audio"."assetId" is not null
+      ) as obj
+  ) as "audioStream"
+from
+  "asset"
+  left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
+  left join "asset_audio" on "asset_audio"."assetId" = "asset"."id"
+  left join "asset_video" on "asset_video"."assetId" = "asset"."id"
+where
+  "asset"."id" = $1
+
 -- AssetJobRepository.streamForOcrJob
 select
   "asset"."id"

@@ -22,7 +22,7 @@ import {
   SmartSearchDto,
   StatisticsSearchDto,
 } from 'src/dtos/search.dto';
-import { AssetOrder, AssetVisibility, Permission } from 'src/enum';
+import { AssetOrder, AssetType, AssetVisibility, Permission } from 'src/enum';
 import { AssetSearchScope } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
 import {
@@ -123,7 +123,13 @@ export class SearchService extends BaseService {
       },
     );
 
-    return this.mapResponse(items, { auth }, { nextPage: hasNextPage ? (page + 1).toString() : null });
+    return this.mapResponse(
+      items,
+      { auth },
+      { nextPage: hasNextPage ? (page + 1).toString() : null },
+      undefined,
+      dto.transcript,
+    );
   }
 
   async searchStatistics(auth: AuthDto, dto: StatisticsSearchDto): Promise<SearchStatisticsResponseDto> {
@@ -230,7 +236,13 @@ export class SearchService extends BaseService {
       },
     );
 
-    return this.mapResponse(items, { auth }, { nextPage: hasNextPage ? (page + 1).toString() : null }, frameTimestamps);
+    return this.mapResponse(
+      items,
+      { auth },
+      { nextPage: hasNextPage ? (page + 1).toString() : null },
+      frameTimestamps,
+      dto.transcript,
+    );
   }
 
   async getAssetsByCity(auth: AuthDto): Promise<AssetResponseDto[]> {
@@ -295,7 +307,13 @@ export class SearchService extends BaseService {
       scope,
     );
 
-    return this.mapResponse(items, { auth }, { nextCursor: hasNextPage ? encodeSearchCursor(offset + size) : null });
+    return this.mapResponse(
+      items,
+      { auth },
+      { nextCursor: hasNextPage ? encodeSearchCursor(offset + size) : null },
+      undefined,
+      filter.transcript?.matches,
+    );
   }
 
   private async searchStatisticsV3(auth: AuthDto, dto: StatisticsSearchDto): Promise<SearchStatisticsResponseDto> {
@@ -336,7 +354,7 @@ export class SearchService extends BaseService {
       scope,
     );
 
-    return this.mapResponse(items, { auth }, {}, frameTimestamps);
+    return this.mapResponse(items, { auth }, {}, frameTimestamps, filter.transcript?.matches);
   }
 
   private async resolveSearchScopeV3(
@@ -479,14 +497,26 @@ export class SearchService extends BaseService {
     });
   }
 
-  /** `frameTimestamps` are the positions of the frames that smart search matched in videos, by asset ID */
+  /**
+   * `frameTimestamps` are the positions of the frames that smart search matched in videos, by asset ID.
+   * `transcript` is the spoken words filter: the line of each video that matched it is returned with the page.
+   */
   private async mapResponse(
     assets: MapAsset[],
     options: AssetMapOptions,
     page: { nextPage?: string | null; nextCursor?: string | null } = {},
     frameTimestamps?: Map<string, number>,
+    transcript?: string,
   ): Promise<SearchResponseDto> {
-    const items = await this.withStacks(assets);
+    const [items, transcriptMatches] = await Promise.all([
+      this.withStacks(assets),
+      transcript
+        ? this.transcriptRepository.getBestMatches(
+            assets.filter(({ type }) => type === AssetType.Video).map(({ id }) => id),
+            transcript,
+          )
+        : undefined,
+    ]);
     return {
       albums: { total: 0, count: 0, items: [], facets: [] },
       assets: {
@@ -502,6 +532,7 @@ export class SearchService extends BaseService {
             return frameTimestamp === undefined ? [] : [{ assetId: id, frameTimestamp }];
           }),
         }),
+        ...(transcriptMatches && { matchedTranscripts: transcriptMatches }),
       },
     };
   }
