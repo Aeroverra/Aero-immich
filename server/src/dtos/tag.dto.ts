@@ -27,6 +27,10 @@ export const TagUpdateSchema = z
       .regex(/^[^/]*$/, `Tag name cannot contain slash characters ("/")`)
       .optional()
       .describe('Tag name'),
+    parentId: z
+      .uuidv4()
+      .nullish()
+      .describe('Move the tag, with its children, under this parent tag, or to the top level with null'),
     color: hexColor.nullable().optional().describe('Tag color (hex)'),
     isHidden: z
       .boolean()
