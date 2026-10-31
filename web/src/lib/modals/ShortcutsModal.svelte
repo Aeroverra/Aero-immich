@@ -44,6 +44,8 @@
         { key: ['⇧', 'a'], action: $t('archive_or_unarchive_photo') },
         { key: ['⇧', 'd'], action: $t('download') },
         { key: ['Space'], action: $t('play_or_pause_video') },
+        { key: ['b'], action: $t('add_video_bookmark') },
+        { key: ['[', ']'], action: $t('previous_or_next_video_bookmark') },
         { key: ['Del'], action: $t('trash_delete_asset'), info: $t('shift_to_permanent_delete') },
         ...(authManager.authenticated && authManager.preferences.ratings.enabled
           ? [{ key: ['1-5'], action: $t('rate_asset'), info: $t('zero_to_clear_rating') }]

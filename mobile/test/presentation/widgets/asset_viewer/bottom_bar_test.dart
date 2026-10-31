@@ -16,6 +16,7 @@ import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/routes.provider.dart';
 import 'package:immich_mobile/services/gcast.service.dart';
 import 'package:immich_mobile/utils/asset_filter.dart';
+import 'package:immich_mobile/widgets/asset_viewer/animated_play_pause.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:native_video_player/native_video_player.dart';
 
@@ -71,7 +72,7 @@ void main() {
     ref.read(videoPlayerProvider(searchCopy.id).notifier).attachController(controller);
     updates.add(mergedCopy);
     await tester.pump();
-    await tester.tap(find.byType(IconButton));
+    await tester.tap(find.ancestor(of: find.byType(AnimatedPlayPause), matching: find.byType(IconButton)));
     await tester.pump();
 
     verify(controller.play).called(1);

@@ -4,19 +4,26 @@ import 'package:async/async.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/constants/colors.dart';
+import 'package:immich_mobile/domain/models/video_bookmark.model.dart';
 import 'package:immich_mobile/extensions/duration_extensions.dart';
+import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/cast/cast_manager_state.dart';
 import 'package:immich_mobile/providers/asset_viewer/asset_viewer.provider.dart';
 import 'package:immich_mobile/providers/asset_viewer/video_player_provider.dart';
 import 'package:immich_mobile/providers/cast.provider.dart';
+import 'package:immich_mobile/providers/infrastructure/video_bookmark.provider.dart';
 import 'package:immich_mobile/widgets/asset_viewer/animated_play_pause.dart';
+import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class VideoControls extends ConsumerStatefulWidget {
   final String videoPlayerName;
 
+  /// Remote id of the video, to show and add bookmarks. Null for videos that are only on this device.
+  final String? bookmarkAssetId;
+
   static const List<Shadow> _controlShadows = [Shadow(color: Colors.black87, blurRadius: 6, offset: Offset(0, 1))];
 
-  const VideoControls({super.key, required this.videoPlayerName});
+  const VideoControls({super.key, required this.videoPlayerName, this.bookmarkAssetId});
 
   @override
   ConsumerState<VideoControls> createState() => _VideoControlsState();
@@ -77,6 +84,22 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
     ref.read(_provider.notifier).seekTo(seekTo);
   }
 
+  Future<void> _addBookmark(String assetId, Duration position) async {
+    _hideTimer.reset();
+    final bookmark = await ref.read(videoBookmarksProvider(assetId).notifier).add(position);
+    if (!mounted) {
+      return;
+    }
+
+    ImmichToast.show(
+      context: context,
+      msg: bookmark == null
+          ? context.t.errors.unable_to_add_video_bookmark
+          : context.t.video_bookmark_added(time: bookmark.position.format()),
+      toastType: bookmark == null ? ToastType.error : ToastType.success,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cast = ref.watch(castProvider);
@@ -101,6 +124,10 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
 
     final notifier = ref.watch(_provider.notifier);
     final isLoaded = duration != Duration.zero;
+    final bookmarkAssetId = widget.bookmarkAssetId;
+    final bookmarks = bookmarkAssetId == null
+        ? const <VideoBookmark>[]
+        : ref.watch(videoBookmarksProvider(bookmarkAssetId)).valueOrNull ?? const <VideoBookmark>[];
 
     return Padding(
       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
@@ -122,6 +149,19 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
                       ),
                 onPressed: () => _toggle(isCasting),
               ),
+              if (bookmarkAssetId != null)
+                IconButton(
+                  iconSize: 26,
+                  padding: const EdgeInsets.all(12),
+                  constraints: const BoxConstraints(),
+                  tooltip: context.t.add_video_bookmark,
+                  icon: const Icon(
+                    Icons.bookmark_add_outlined,
+                    color: Colors.white,
+                    shadows: VideoControls._controlShadows,
+                  ),
+                  onPressed: isLoaded ? () => _addBookmark(bookmarkAssetId, position) : null,
+                ),
               const Spacer(),
               IgnorePointer(
                 child: Text(
@@ -137,20 +177,74 @@ class _VideoControlsState extends ConsumerState<VideoControls> {
               const SizedBox(width: 12),
             ],
           ),
-          Slider(
-            value: min(position.inMicroseconds.toDouble(), duration.inMicroseconds.toDouble()),
-            min: 0,
-            max: max(duration.inMicroseconds.toDouble(), 1),
-            thumbColor: Colors.white,
-            activeColor: Colors.white,
-            inactiveColor: whiteOpacity75,
-            padding: EdgeInsets.zero,
-            onChangeStart: (_) => notifier.hold(),
-            onChangeEnd: (_) => notifier.release(),
-            onChanged: isLoaded ? (value) => _onSeek(isCasting, value) : null,
+          Stack(
+            alignment: Alignment.center,
+            children: [
+              Slider(
+                value: min(position.inMicroseconds.toDouble(), duration.inMicroseconds.toDouble()),
+                min: 0,
+                max: max(duration.inMicroseconds.toDouble(), 1),
+                thumbColor: Colors.white,
+                activeColor: Colors.white,
+                inactiveColor: whiteOpacity75,
+                padding: EdgeInsets.zero,
+                onChangeStart: (_) => notifier.hold(),
+                onChangeEnd: (_) => notifier.release(),
+                onChanged: isLoaded ? (value) => _onSeek(isCasting, value) : null,
+              ),
+              if (isLoaded && bookmarks.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: VideoBookmarkMarkers(bookmarks: bookmarks, duration: duration),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Short ticks over the seek bar at the bookmarked moments. The bar has no padding, so the track spans the full width.
+class VideoBookmarkMarkers extends StatelessWidget {
+  final List<VideoBookmark> bookmarks;
+  final Duration duration;
+
+  static const markerColor = Color(0xFFFACC15);
+  static const _width = 3.0;
+  static const _height = 10.0;
+
+  const VideoBookmarkMarkers({super.key, required this.bookmarks, required this.duration});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final total = duration.inMilliseconds;
+        return Stack(
+          children: [
+            for (final bookmark in bookmarks)
+              Positioned(
+                key: ValueKey(bookmark.id),
+                left: (constraints.maxWidth * (bookmark.time / total).clamp(0.0, 1.0) - _width / 2).clamp(
+                  0.0,
+                  max(0.0, constraints.maxWidth - _width),
+                ),
+                top: (constraints.maxHeight - _height) / 2,
+                child: Container(
+                  width: _width,
+                  height: _height,
+                  decoration: BoxDecoration(
+                    color: markerColor,
+                    borderRadius: BorderRadius.circular(1),
+                    boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 2)],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }
