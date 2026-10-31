@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -10,12 +11,19 @@ part 'video_player_provider.freezed.dart';
 
 enum VideoPlaybackStatus { paused, playing, buffering, completed }
 
+/// The file the player plays, shown next to the video controls.
+enum VideoPlaybackSource { device, original, transcoded }
+
 @freezed
 abstract class VideoPlayerState with _$VideoPlayerState {
   const factory VideoPlayerState({
     required Duration position,
     required Duration duration,
     required VideoPlaybackStatus status,
+    VideoPlaybackSource? source,
+
+    /// Short side of the video frame in pixels, the way resolutions are named (720 for 720p).
+    int? resolution,
   }) = _VideoPlayerState;
 }
 
@@ -54,6 +62,14 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
 
   void attachController(NativeVideoPlayerController controller) {
     _controller = controller;
+  }
+
+  void setSource(VideoPlaybackSource? source) {
+    if (!mounted) {
+      return;
+    }
+
+    state = state.copyWith(source: source);
   }
 
   Future<void> load(VideoSource source) async {
@@ -198,6 +214,7 @@ class VideoPlayerNotifier extends StateNotifier<VideoPlayerState> {
       position: Duration(milliseconds: playbackInfo.position),
       duration: Duration(milliseconds: videoInfo.duration),
       status: _mapStatus(playbackInfo.status),
+      resolution: videoInfo.width > 0 && videoInfo.height > 0 ? min(videoInfo.width, videoInfo.height) : null,
     );
   }
 

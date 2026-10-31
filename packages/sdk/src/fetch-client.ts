@@ -1415,6 +1415,8 @@ export type AssetResponseDto = {
     fileCreatedAt: string;
     /** The UTC timestamp when the file was last modified on the filesystem. This reflects the last time the physical file was changed, which may be different from when the photo was originally taken. */
     fileModifiedAt: string;
+    /** Whether a transcoded copy of the video exists. Video playback serves it instead of the original file. */
+    hasEncodedVideo?: boolean;
     /** Whether asset has metadata */
     hasMetadata: boolean;
     /** Asset height */
