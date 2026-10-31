@@ -19,10 +19,7 @@ import {
 import { AssetDownloadOriginalDto } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
-  AlbumUserRole,
   AssetFileType,
-  AssetMetadataKey,
-  AssetStatus,
   AssetVisibility,
   CacheControl,
   ChecksumAlgorithm,
@@ -30,7 +27,6 @@ import {
   JobName,
   Permission,
   StorageFolder,
-  UserMetadataKey,
 } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
 import { BaseService } from 'src/services/base.service';
@@ -38,17 +34,22 @@ import { UploadFile, UploadRequest } from 'src/types';
 import { requireUploadAccess } from 'src/utils/access';
 import { asUploadRequest, onBeforeLink } from 'src/utils/asset.util';
 import { isAssetChecksumConstraint } from 'src/utils/database';
+import {
+  checkDeletedReimport,
+  DeletedReimport,
+  DeletedReimportRepositories,
+  onDeletedReimport,
+} from 'src/utils/deleted-reimport';
 import { getFilenameExtension, getFileNameWithoutExtension, ImmichFileResponse } from 'src/utils/file';
 import { mimeTypes } from 'src/utils/mime-types';
-import { getPreferences, getPreferencesPartial } from 'src/utils/preferences';
+import { getPreferences } from 'src/utils/preferences';
 import { fromChecksum } from 'src/utils/request';
+
+export { DELETED_REIMPORT_ALBUM_NAME } from 'src/utils/deleted-reimport';
 
 export interface AssetMediaRedirectResponse {
   targetSize: AssetMediaSize | 'original';
 }
-
-/** The name of the album re-uploads of previously deleted files are collected in (DeletedReimportMode.Album) */
-export const DELETED_REIMPORT_ALBUM_NAME = 'Previously deleted';
 
 @Injectable()
 export class AssetMediaService extends BaseService {
@@ -150,24 +151,22 @@ export class AssetMediaService extends BaseService {
 
       // an upload of a file the user permanently deleted before is handled according to their preference;
       // motion parts of live photos are never checked, they follow their photo
-      let deletedReimport: DeletedReimportMode | undefined;
+      let deletedReimport: DeletedReimport | undefined;
       if (dto.visibility !== AssetVisibility.Hidden) {
-        const remembered = await this.assetDeletedChecksumRepository.get(auth.user.id, file.checksum);
-        if (remembered) {
-          const preferences = getPreferences(await this.userRepository.getMetadata(auth.user.id));
-          deletedReimport = preferences.deletedReimport.mode;
+        deletedReimport = await checkDeletedReimport(this.deletedReimportRepositories, {
+          userId: auth.user.id,
+          checksum: file.checksum,
+        });
 
-          if (deletedReimport === DeletedReimportMode.Skip) {
-            await this.jobRepository.queue({
-              name: JobName.FileDelete,
-              data: { files: [file.originalPath, sidecarFile?.originalPath] },
-            });
-            await this.assetDeletedChecksumRepository.markReimported(auth.user.id, file.checksum, deletedReimport);
-            await this.eventRepository.emit('AssetDeletedReimport', { userId: auth.user.id });
+        if (deletedReimport?.skip) {
+          await this.jobRepository.queue({
+            name: JobName.FileDelete,
+            data: { files: [file.originalPath, sidecarFile?.originalPath] },
+          });
+          await onDeletedReimport(this.deletedReimportRepositories, deletedReimport);
 
-            this.logger.debug(`Upload of previously deleted file skipped: ${remembered.originalFileName}`);
-            return { status: AssetMediaStatus.DUPLICATE, id: remembered.assetId };
-          }
+          this.logger.debug(`Upload of previously deleted file skipped: ${deletedReimport.originalFileName}`);
+          return { status: AssetMediaStatus.DUPLICATE, id: deletedReimport.assetId };
         }
       }
 
@@ -225,7 +224,9 @@ export class AssetMediaService extends BaseService {
       await this.eventRepository.emit('AssetCreate', { asset, file });
 
       if (deletedReimport) {
-        await this.handleDeletedReimport(auth, asset, deletedReimport);
+        // trash the upload or collect it in the "Previously deleted" album, then tell the owner
+        await onDeletedReimport(this.deletedReimportRepositories, deletedReimport, asset);
+        this.logger.debug(`Upload of previously deleted file ${asset.id} handled with mode ${deletedReimport.mode}`);
       }
 
       return { id: asset.id, status: AssetMediaStatus.CREATED };
@@ -392,58 +393,14 @@ export class AssetMediaService extends BaseService {
     };
   }
 
-  /** Trash the upload or collect it in the "Previously deleted" album, then tell the owner (coalesced by the notification job) */
-  private async handleDeletedReimport(auth: AuthDto, asset: Asset, mode: DeletedReimportMode) {
-    await this.assetRepository.upsertMetadata(asset.id, [
-      { key: AssetMetadataKey.DeletedReimport, value: { mode, reimportedAt: new Date().toISOString() } },
-    ]);
-
-    if (mode === DeletedReimportMode.Trash) {
-      await this.assetRepository.updateAll([asset.id], { deletedAt: new Date(), status: AssetStatus.Trashed });
-      await this.eventRepository.emit('AssetTrashAll', { assetIds: [asset.id], userId: auth.user.id });
-    }
-
-    if (mode === DeletedReimportMode.Album) {
-      const albumId = await this.getDeletedReimportAlbum(auth.user.id);
-      await this.albumRepository.addAssetIds(albumId, [asset.id]);
-      await this.eventRepository.emit('AlbumUpdate', { id: albumId, userIds: [auth.user.id], recipientIds: [] });
-    }
-
-    await this.assetDeletedChecksumRepository.markReimported(auth.user.id, asset.checksum, mode);
-    await this.eventRepository.emit('AssetDeletedReimport', { userId: auth.user.id });
-
-    this.logger.debug(`Upload of previously deleted file ${asset.id} handled with mode ${mode}`);
-  }
-
-  /** The owner's "Previously deleted" album, created when it does not exist (yet or anymore) */
-  private async getDeletedReimportAlbum(userId: string) {
-    const preferences = getPreferences(await this.userRepository.getMetadata(userId));
-    if (preferences.deletedReimport.albumId) {
-      const album = await this.albumRepository.getById(preferences.deletedReimport.albumId, { withAssets: false });
-      const isOwner = album?.albumUsers.some(({ user, role }) => user.id === userId && role === AlbumUserRole.Owner);
-      if (album && isOwner) {
-        return album.id;
-      }
-    }
-
-    const album = await this.albumRepository.create(
-      {
-        albumName: DELETED_REIMPORT_ALBUM_NAME,
-        description: 'Files that were uploaded again after they had been permanently deleted',
-        order: preferences.albums.defaultAssetOrder,
-      },
-      [],
-      [{ userId, role: AlbumUserRole.Owner }],
-      userId,
-    );
-
-    preferences.deletedReimport.albumId = album.id;
-    await this.userRepository.upsertMetadata(userId, {
-      key: UserMetadataKey.Preferences,
-      value: getPreferencesPartial(preferences),
-    });
-
-    return album.id;
+  private get deletedReimportRepositories(): DeletedReimportRepositories {
+    return {
+      album: this.albumRepository,
+      asset: this.assetRepository,
+      assetDeletedChecksum: this.assetDeletedChecksumRepository,
+      event: this.eventRepository,
+      user: this.userRepository,
+    };
   }
 
   private async addToSharedLink(sharedLink: AuthSharedLink, assetId: string) {
