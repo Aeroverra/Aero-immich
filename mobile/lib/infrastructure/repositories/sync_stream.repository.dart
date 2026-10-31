@@ -26,14 +26,17 @@ import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/domain/models/asset_edit.model.dart';
 import 'package:immich_mobile/domain/models/memory.model.dart';
+import 'package:immich_mobile/domain/models/stack.model.dart';
 import 'package:immich_mobile/domain/models/user.model.dart';
 import 'package:immich_mobile/domain/models/user_metadata.model.dart';
 import 'package:immich_mobile/extensions/string_extensions.dart';
 import 'package:immich_mobile/infrastructure/repositories/sync_stream.repository.drift.dart';
 import 'package:immich_mobile/infrastructure/utils/exif.converter.dart';
 import 'package:logging/logging.dart';
-import 'package:openapi/api.dart' as api show AlbumUserRole, AssetEditAction, AssetVisibility, UserMetadataKey;
-import 'package:openapi/api.dart' hide AlbumUserRole, AssetEditAction, AssetVisibility, UserMetadataKey;
+import 'package:openapi/api.dart'
+    as api
+    show AlbumUserRole, AssetEditAction, AssetVisibility, StackSource, UserMetadataKey;
+import 'package:openapi/api.dart' hide AlbumUserRole, AssetEditAction, AssetVisibility, StackSource, UserMetadataKey;
 
 @DriftAccessor()
 class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepositoryMixin {
@@ -691,6 +694,31 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
     }
   }
 
+  Future<void> updateStacksV2(Iterable<SyncStackV2> data, {String debugLabel = 'user'}) async {
+    try {
+      await _db.batch((batch) {
+        for (final stack in data) {
+          final companion = StackEntityCompanion(
+            createdAt: Value(stack.createdAt),
+            updatedAt: Value(stack.updatedAt),
+            ownerId: Value(stack.ownerId),
+            primaryAssetId: Value(stack.primaryAssetId),
+            source: Value(stack.source_.toStackSource()),
+          );
+
+          batch.insert(
+            _db.stackEntity,
+            companion.copyWith(id: Value(stack.id)),
+            onConflict: DoUpdate((_) => companion),
+          );
+        }
+      });
+    } catch (error, stack) {
+      _logger.severe('Error: updateStacksV2 - $debugLabel', error, stack);
+      rethrow;
+    }
+  }
+
   Future<void> deleteStacksV1(Iterable<SyncStackDeleteV1> data, {String debugLabel = 'user'}) async {
     try {
       await _db.batch((batch) {
@@ -974,6 +1002,13 @@ extension on api.AssetVisibility {
     api.AssetVisibility.hidden => AssetVisibility.hidden,
     api.AssetVisibility.archive => AssetVisibility.archive,
     api.AssetVisibility.locked => AssetVisibility.locked,
+  };
+}
+
+extension on api.StackSource {
+  StackSource toStackSource() => switch (this) {
+    api.StackSource.manual => StackSource.manual,
+    api.StackSource.auto => StackSource.auto,
   };
 }
 

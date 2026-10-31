@@ -31,6 +31,7 @@ import {
   JobStatus,
   Permission,
   QueueName,
+  StackUserEditAction,
 } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
@@ -271,7 +272,7 @@ export class AssetService extends BaseService {
     }
 
     if (stack) {
-      await this.copyStack({ sourceAsset, targetAsset });
+      await this.copyStack(auth, { sourceAsset, targetAsset });
     }
 
     if (favorite) {
@@ -289,20 +290,34 @@ export class AssetService extends BaseService {
     }
   }
 
-  private async copyStack({
-    sourceAsset,
-    targetAsset,
-  }: {
-    sourceAsset: { id: string; stackId: string | null };
-    targetAsset: { id: string; stackId: string | null };
-  }) {
+  private async copyStack(
+    auth: AuthDto,
+    {
+      sourceAsset,
+      targetAsset,
+    }: {
+      sourceAsset: { id: string; stackId: string | null };
+      targetAsset: { id: string; stackId: string | null };
+    },
+  ) {
     if (!sourceAsset.stackId) {
       return;
     }
 
     if (targetAsset.stackId) {
+      const stacks = await this.stackRepository.getForUserEdit({ stackIds: [sourceAsset.stackId] });
       await this.stackRepository.merge({ sourceId: sourceAsset.stackId, targetId: targetAsset.stackId });
       await this.stackRepository.delete(sourceAsset.stackId);
+      for (const stack of stacks) {
+        await this.eventRepository.emit('StackUserEdit', {
+          userId: auth.user.id,
+          stackId: stack.id,
+          source: stack.source,
+          action: StackUserEditAction.Merge,
+          assetIds: stack.assets.map(({ id }) => id),
+          targetStackId: targetAsset.stackId,
+        });
+      }
     } else {
       await this.assetRepository.update({ id: targetAsset.id, stackId: sourceAsset.stackId });
     }

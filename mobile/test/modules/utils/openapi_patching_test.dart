@@ -25,6 +25,44 @@ void main() {
       expect(value['download']['includeEmbeddedVideos'], false);
     });
 
+    test('reads preferences and stacks from servers without the stack source', () {
+      // preferences as sent by a server that predates the stacks block
+      final preferences = UserPreferencesResponseDto.fromJson(
+        jsonDecode("""
+{
+  "albums": {"defaultAssetOrder": "desc"},
+  "folders": {"enabled": false, "sidebarWeb": false},
+  "memories": {"enabled": true, "duration": 5, "sidebarWeb": false},
+  "people": {"enabled": true, "sidebarWeb": false, "minimumFaces": 3},
+  "sharedLinks": {"enabled": true, "sidebarWeb": false},
+  "ratings": {"enabled": false},
+  "tags": {"enabled": false, "sidebarWeb": false},
+  "emailNotifications": {"enabled": true, "albumInvite": true, "albumUpdate": true},
+  "download": {"archiveSize": 4294967296, "includeEmbeddedVideos": false},
+  "purchase": {"showSupportBadge": true, "hideBuyButtonUntil": "2022-02-12T00:00:00.000Z"},
+  "cast": {"gCastEnabled": false},
+  "recentlyAdded": {"sidebarWeb": false},
+  "privateMode": {"timeoutMinutes": 30, "sidebarWeb": true, "includeInMemories": false},
+  "deletedReimport": {"mode": "trash", "albumId": null}
+}
+"""),
+      );
+      expect(preferences, isNotNull);
+      expect(preferences!.stacks.groupAuto, isTrue);
+
+      final stack = StackResponseDto.fromJson(
+        jsonDecode('{"id": "stack-1", "primaryAssetId": "asset-1", "assets": []}'),
+      );
+      expect(stack, isNotNull);
+      expect(stack!.source_, StackSource.manual);
+
+      final assetStack = AssetStackResponseDto.fromJson(
+        jsonDecode('{"id": "stack-1", "primaryAssetId": "asset-1", "assetCount": 2}'),
+      );
+      expect(assetStack, isNotNull);
+      expect(assetStack!.source_, StackSource.manual);
+    });
+
     test('addDefault', () {
       final dynamic value = jsonDecode("""
 {

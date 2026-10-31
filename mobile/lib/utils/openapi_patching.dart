@@ -27,6 +27,7 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'cast': CastResponse(gCastEnabled: false).toJson(),
     'albums': {'defaultAssetOrder': 'desc'},
     'recentlyAdded': RecentlyAddedResponse(sidebarWeb: false).toJson(),
+    'stacks': StacksResponse(groupAuto: true).toJson(),
   },
   'ServerConfigDto': {
     'mapLightStyleUrl': 'https://tiles.immich.cloud/v1/style/light.json',
@@ -41,6 +42,8 @@ final Map<String, Map<String, Object?>> openApiPatches = {
   'SyncAssetV1': {'isEdited': false},
   'ServerFeaturesDto': {'ocr': false, 'realtimeTranscoding': false},
   'SearchAssetResponseDto': {'nextCursor': null},
+  'StackResponseDto': {'source': 'manual'},
+  'AssetStackResponseDto': {'source': 'manual'},
   'MemoriesResponse': {'duration': 5, 'sidebarWeb': false},
   'WorkflowResponseDto': {'logging': false},
 };
