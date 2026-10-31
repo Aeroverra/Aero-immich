@@ -28,6 +28,10 @@ class SearchApiRepository extends ApiRepository {
         : filter.tagIds == null
         ? const Optional.absent()
         : Optional.present(filter.tagIds);
+    // untagged assets carry no tag to leave out
+    final Optional<List<String>?> excludeTagIds = filter.display.hasNoTags || (filter.excludeTagIds ?? []).isEmpty
+        ? const Optional.absent()
+        : Optional.present(filter.excludeTagIds);
 
     if ((filter.context != null && filter.context!.isNotEmpty) ||
         (filter.assetId != null && filter.assetId!.isNotEmpty)) {
@@ -56,6 +60,7 @@ class SearchApiRepository extends ApiRepository {
           isPrivate: isPrivate,
           personIds: Optional.present(filter.people.map((e) => e.id).toList()),
           tagIds: tagIds,
+          excludeTagIds: excludeTagIds,
           type: type == null ? const Optional.absent() : Optional.present(type),
           page: Optional.present(page),
           size: const Optional.present(100),
@@ -88,6 +93,7 @@ class SearchApiRepository extends ApiRepository {
         isPrivate: isPrivate,
         personIds: Optional.present(filter.people.map((e) => e.id).toList()),
         tagIds: tagIds,
+        excludeTagIds: excludeTagIds,
         type: type == null ? const Optional.absent() : Optional.present(type),
         page: Optional.present(page),
         size: const Optional.present(1000),
