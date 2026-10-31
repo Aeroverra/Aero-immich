@@ -24355,6 +24355,72 @@
         ],
         "type": "string"
       },
+      "CameraGroupsResponse": {
+        "properties": {
+          "copyTags": {
+            "description": "Whether the files of one shot get the same tags when they are stacked",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether files a camera saved from one shot are stacked when they are uploaded",
+            "type": "boolean"
+          },
+          "keepTags": {
+            "description": "Tags that stay on one file of a shot, such as where it came from; * matches anything",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reviewTags": {
+            "description": "Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "copyTags",
+          "enabled",
+          "keepTags",
+          "reviewTags"
+        ],
+        "type": "object"
+      },
+      "CameraGroupsUpdate": {
+        "properties": {
+          "copyTags": {
+            "description": "Whether the files of one shot get the same tags when they are stacked",
+            "type": "boolean"
+          },
+          "enabled": {
+            "description": "Whether files a camera saved from one shot are stacked when they are uploaded",
+            "type": "boolean"
+          },
+          "keepTags": {
+            "description": "Tags that stay on one file of a shot, such as where it came from; * matches anything",
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "reviewTags": {
+            "description": "Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything",
+            "items": {
+              "maxLength": 255,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "CastResponse": {
         "properties": {
           "gCastEnabled": {
@@ -25782,6 +25848,7 @@
           "AssetGenerateThumbnails",
           "AutoStackQueueAll",
           "AutoStack",
+          "StackCameraGroup",
           "AuditTableCleanup",
           "DatabaseBackup",
           "FacialRecognitionQueueAll",
@@ -39949,6 +40016,9 @@
           "autoStack": {
             "$ref": "#/components/schemas/AutoStackResponse"
           },
+          "cameraGroups": {
+            "$ref": "#/components/schemas/CameraGroupsResponse"
+          },
           "cast": {
             "$ref": "#/components/schemas/CastResponse"
           },
@@ -40001,6 +40071,7 @@
         "required": [
           "albums",
           "autoStack",
+          "cameraGroups",
           "cast",
           "customViews",
           "deletedReimport",
@@ -40030,6 +40101,9 @@
           },
           "avatar": {
             "$ref": "#/components/schemas/AvatarUpdate"
+          },
+          "cameraGroups": {
+            "$ref": "#/components/schemas/CameraGroupsUpdate"
           },
           "cast": {
             "$ref": "#/components/schemas/CastUpdate"
