@@ -11,6 +11,7 @@ import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/repositories/custom_view_api.repository.dart';
+import 'package:immich_mobile/utils/option.dart';
 import 'package:openapi/api.dart' show TagResponseDto;
 
 /// How many recently used tags the tag sheet offers
@@ -18,6 +19,13 @@ const kRecentTagCount = 8;
 
 /// A tag in a tree listing with its depth below the root
 typedef TagTreeEntry = ({TagEntry tag, int depth});
+
+/// The parts of a tag path the user typed, without stray slashes or spaces around them
+List<String> parseTagPath(String path) =>
+    path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).toList();
+
+/// Whether [path] is [tag] itself or one of its children, where the tag cannot move
+bool isInTagSubtree(TagEntry tag, String path) => path == tag.value || path.startsWith('${tag.value}/');
 
 /// [tags] ordered as a tree (every parent directly before its children, siblings by name) with their depth. Tags whose
 /// parent is not in [tags] are listed as roots.
@@ -89,7 +97,7 @@ class TaggingService {
 
   /// Creates the tag [path] ("Parent/Child" creates the missing parents too) and returns the tag at the end of it
   Future<TagEntry> createTag(String path) async {
-    final value = path.split('/').map((part) => part.trim()).where((part) => part.isNotEmpty).join('/');
+    final value = parseTagPath(path).join('/');
     final dtos = await _api.upsertTags([value]);
     final tags = (dtos ?? const <TagResponseDto>[]).map(_toEntry).toList();
     for (final tag in tags) {
@@ -122,12 +130,31 @@ class TaggingService {
     _onTagsChanged();
   }
 
-  /// Renames the last part of the tag path to [name]; child tags follow
-  Future<TagEntry> renameTag(TagEntry tag, String name) async {
-    final dto = await _api.updateTag(tag.id, name: name);
+  /// Renames or moves the tag to the full [path], child tags follow: another parent path moves it under that parent,
+  /// creating the parent tags that do not exist yet, and a plain name moves it to the top level
+  Future<TagEntry> updateTagPath(TagEntry tag, String path) async {
+    final parts = parseTagPath(path);
+    if (parts.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'A tag needs a name');
+    }
+    final parentPath = parts.sublist(0, parts.length - 1).join('/');
+    if (isInTagSubtree(tag, parentPath)) {
+      throw ArgumentError.value(path, 'path', 'A tag cannot move into itself or one of its children');
+    }
+
+    final slash = tag.value.lastIndexOf('/');
+    final currentParentPath = slash < 0 ? '' : tag.value.substring(0, slash);
+    final parentId = parentPath == currentParentPath
+        ? const Option<String?>.none()
+        : Option<String?>.some(parentPath.isEmpty ? null : (await createTag(parentPath)).id);
+
+    final dto = await _api.updateTag(tag.id, name: parts.last, parentId: parentId);
+    // the values first: it replaces the old value as the prefix of the child tags
     await _repository.renameTag(tag.id, dto.value);
+    final entry = _toEntry(dto);
+    await _repository.upsertTag(entry);
     _onTagsChanged();
-    return _toEntry(dto);
+    return entry;
   }
 
   /// How many photos and videos carry the tag or one of its child tags, and how many child tags it has

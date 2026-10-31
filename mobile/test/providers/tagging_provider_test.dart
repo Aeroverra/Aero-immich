@@ -12,6 +12,7 @@ import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/tagging.provider.dart';
 import 'package:immich_mobile/repositories/custom_view_api.repository.dart';
+import 'package:immich_mobile/utils/option.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:openapi/api.dart' hide ViewAccess;
 
@@ -121,6 +122,46 @@ void main() {
     final tags = await db.customViewRepository.getTags(_me);
     expect({for (final tag in tags) tag.id: tag.parentId}, {'gym': null, 'progress': 'gym'});
     expect(invalidations, 1);
+  });
+
+  test('a new path moves the tag with its children, a plain name to the top level', () async {
+    const gym = TagEntry(id: 'gym', ownerId: _me, value: 'Gym');
+    const progress = TagEntry(id: 'progress', ownerId: _me, value: 'Gym/Progress', parentId: 'gym');
+    const legs = TagEntry(id: 'legs', ownerId: _me, value: 'Gym/Progress/Legs', parentId: 'progress');
+    for (final tag in [gym, progress, legs]) {
+      await db.customViewRepository.upsertTag(tag);
+    }
+    Future<Map<String, (String, String?)>> local() async => {
+      for (final tag in await db.customViewRepository.getTags(_me)) tag.id: (tag.value, tag.parentId),
+    };
+
+    when(() => api.upsertTags(['Sports'])).thenAnswer((_) async => [_dto('sports', 'Sports')]);
+    when(
+      () => api.updateTag('progress', name: 'Progress', parentId: const Option.some('sports')),
+    ).thenAnswer((_) async => _dto('progress', 'Sports/Progress', parentId: 'sports'));
+    final moved = await service.updateTagPath(progress, 'Sports / Progress');
+    expect(moved.value, 'Sports/Progress');
+    expect(await local(), {
+      'gym': ('Gym', null),
+      'sports': ('Sports', null),
+      'progress': ('Sports/Progress', 'sports'),
+      'legs': ('Sports/Progress/Legs', 'progress'),
+    });
+
+    when(
+      () => api.updateTag('progress', name: 'Progress', parentId: const Option<String?>.some(null)),
+    ).thenAnswer((_) async => _dto('progress', 'Progress'));
+    await service.updateTagPath(moved, 'Progress');
+    expect((await local())['legs'], ('Progress/Legs', 'progress'));
+    expect((await local())['progress'], ('Progress', null));
+
+    // same parent: a plain rename that leaves the parent alone
+    when(() => api.updateTag('legs', name: 'Squats')).thenAnswer((_) async => _dto('legs', 'Progress/Squats'));
+    await service.updateTagPath(const TagEntry(id: 'legs', ownerId: _me, value: 'Progress/Legs'), 'Progress/Squats');
+    verify(() => api.updateTag('legs', name: 'Squats')).called(1);
+
+    await expectLater(service.updateTagPath(gym, 'Gym/Inside/Gym'), throwsArgumentError);
+    await expectLater(service.updateTagPath(gym, ' / '), throwsArgumentError);
   });
 
   test('hiding and deleting a tag follow the server', () async {

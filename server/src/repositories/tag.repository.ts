@@ -67,11 +67,11 @@ export class TagRepository {
   @GenerateSql({ params: [DummyValue.UUID, { value: DummyValue.STRING, color: DummyValue.STRING }] })
   async update(id: string, dto: Updateable<TagTable>) {
     return this.db.transaction().execute(async (tx) => {
-      // Get previous tag value for reference if the current update contains a new value
+      // Get previous tag value for reference if the current update contains a new value or parent
       const previousTag =
-        dto.value === undefined
+        dto.value === undefined && dto.parentId === undefined
           ? undefined
-          : await tx.selectFrom('tag').select('value').where('id', '=', id).executeTakeFirst();
+          : await tx.selectFrom('tag').select(['value', 'parentId']).where('id', '=', id).executeTakeFirst();
 
       // Perform main tag update
       const updated = await tx
@@ -124,8 +124,85 @@ export class TagRepository {
           .whereRef('tag.id', '=', 'descendants.id')
           .execute();
       }
+
+      // A new parent: the tag and its descendants leave the ancestors above the tag and join the new parent's
+      if (previousTag && dto.parentId !== undefined && dto.parentId !== previousTag.parentId) {
+        const subtree = tx
+          .selectFrom('tag_closure as own')
+          .select('own.id_descendant')
+          .where('own.id_ancestor', '=', id);
+        await tx
+          .deleteFrom('tag_closure')
+          .where('id_descendant', 'in', subtree)
+          .where('id_ancestor', 'not in', subtree)
+          .execute();
+
+        if (dto.parentId) {
+          await tx
+            .insertInto('tag_closure')
+            .columns(['id_ancestor', 'id_descendant'])
+            .expression((eb) =>
+              eb
+                .selectFrom('tag_closure as above')
+                .crossJoin('tag_closure as below')
+                .select(['above.id_ancestor', 'below.id_descendant'])
+                .where('above.id_descendant', '=', dto.parentId!)
+                .where('below.id_ancestor', '=', id),
+            )
+            .onConflict((oc) => oc.doNothing())
+            .execute();
+        }
+      }
+
       return updated;
     });
+  }
+
+  /** Whether [id] is [ancestorId] itself or one of its descendants */
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
+  async isInSubtree(ancestorId: string, id: string) {
+    const row = await this.db
+      .selectFrom('tag_closure')
+      .select('id_descendant')
+      .where('id_ancestor', '=', ancestorId)
+      .where('id_descendant', '=', id)
+      .executeTakeFirst();
+    return !!row;
+  }
+
+  /** The assets tagged with [tagId] or one of its descendants */
+  @GenerateSql({ params: [DummyValue.UUID] })
+  async getSubtreeAssetIds(tagId: string) {
+    const rows = await this.db
+      .selectFrom('tag_asset')
+      .innerJoin('tag_closure', 'tag_closure.id_descendant', 'tag_asset.tagId')
+      .select('tag_asset.assetId')
+      .distinct()
+      .where('tag_closure.id_ancestor', '=', tagId)
+      .execute();
+    return rows.map(({ assetId }) => assetId);
+  }
+
+  /** Rewrites the tag values stored with the assets' metadata (what the sidecar write puts in the file) */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @Chunked()
+  async refreshAssetTagValues(assetIds: string[]) {
+    if (assetIds.length === 0) {
+      return;
+    }
+
+    await this.db
+      .updateTable('asset_exif')
+      .set((eb) => ({
+        tags: eb
+          .selectFrom('tag_asset')
+          .innerJoin('tag', 'tag.id', 'tag_asset.tagId')
+          // every asset here still carries at least the renamed or moved tag, so the array is never empty
+          .select((eb) => eb.fn.agg<string[]>('array_agg', ['tag.value']).as('tags'))
+          .whereRef('tag_asset.assetId', '=', 'asset_exif.assetId'),
+      }))
+      .where('asset_exif.assetId', 'in', assetIds)
+      .execute();
   }
 
   @GenerateSql({ params: [DummyValue.UUID] })
