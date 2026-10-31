@@ -781,6 +781,15 @@ export class PersonRepository {
     await this.db.insertInto('asset_face').values(face).execute();
   }
 
+  @Chunked({ chunkSize: 1000 })
+  async createAssetFaces(faces: Insertable<AssetFaceTable>[]): Promise<void> {
+    if (faces.length === 0) {
+      return;
+    }
+
+    await this.db.insertInto('asset_face').values(faces).execute();
+  }
+
   @GenerateSql({ params: [DummyValue.UUID] })
   async deleteAssetFace(id: string): Promise<void> {
     await this.db.deleteFrom('asset_face').where('asset_face.id', '=', id).execute();
