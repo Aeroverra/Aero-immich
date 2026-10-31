@@ -179,6 +179,7 @@ export type AdminConfigJobDto = {
     smartSearch: AdminConfigJobSettingsDto;
     thumbnailGeneration: AdminConfigJobSettingsDto;
     videoConversion: AdminConfigJobSettingsDto;
+    videoFrameAnalysis: AdminConfigJobSettingsDto;
     workflow: AdminConfigJobSettingsDto;
 };
 export type AdminConfigLibraryScanDto = {
@@ -268,6 +269,20 @@ export type AdminConfigOcrDto = {
     /** Name of the model to use */
     modelName: string;
 };
+export type AdminConfigVideoFrameAnalysisDto = {
+    /** Whether faces found only in video frames may create new people */
+    createPeople: boolean;
+    /** Whether to detect faces in the sampled frames */
+    detectFaces: boolean;
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Frames sampled per video, multiplied by the square root of the duration in seconds */
+    frameDensity: number;
+    /** Maximum number of frames sampled per video */
+    maxFrames: number;
+    /** Minimum number of seconds between two sampled frames */
+    minFrameInterval: number;
+};
 export type AdminConfigMachineLearningDto = {
     autoStack: AdminConfigAutoStackDto;
     availabilityChecks: AdminConfigMachineLearningAvailabilityChecksDto;
@@ -280,6 +295,7 @@ export type AdminConfigMachineLearningDto = {
     ocr: AdminConfigOcrDto;
     /** ML service URLs */
     urls: string[];
+    videoFrameAnalysis: AdminConfigVideoFrameAnalysisDto;
 };
 export type AdminConfigMapDto = {
     /** Dark map style URL */
@@ -1675,6 +1691,10 @@ export type UserConfigOcrDto = {
     /** Whether the task is enabled */
     enabled: boolean;
 };
+export type UserConfigVideoFrameAnalysisDto = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+};
 export type UserConfigMachineLearningDto = {
     autoStack: UserConfigAutoStackDto;
     clip: UserConfigClipDto;
@@ -1684,6 +1704,7 @@ export type UserConfigMachineLearningDto = {
     faceAttributes: UserConfigFaceAttributesDto;
     facialRecognition: UserConfigFacialRecognitionDto;
     ocr: UserConfigOcrDto;
+    videoFrameAnalysis: UserConfigVideoFrameAnalysisDto;
 };
 export type UserConfigMapDto = {
     /** Dark map style URL */
@@ -1802,6 +1823,8 @@ export type AssetFaceResponseDto = {
     boundingBoxY1: number;
     /** Bounding box Y2 coordinate */
     boundingBoxY2: number;
+    /** Position in milliseconds of the video frame the face was detected in, if it was not the thumbnail */
+    frameTimestamp?: number | null;
     /** Face ID */
     id: string;
     /** Image height in pixels */
@@ -1882,6 +1905,7 @@ export type QueuesResponseLegacyDto = {
     storageTemplateMigration: QueueResponseLegacyDto;
     thumbnailGeneration: QueueResponseLegacyDto;
     videoConversion: QueueResponseLegacyDto;
+    videoFrameAnalysis: QueueResponseLegacyDto;
     workflow: QueueResponseLegacyDto;
 };
 export type JobCreateDto = {
@@ -2899,6 +2923,8 @@ export type ServerFeaturesDto = {
     stackSource?: boolean;
     /** Whether trash feature is enabled */
     trash: boolean;
+    /** Whether enhanced video analysis of sampled frames is enabled */
+    videoFrameAnalysis: boolean;
 };
 export type LicenseKeyDto = {
     /** Activation key */
@@ -8416,7 +8442,8 @@ export enum QueueName {
     FaceAttributes = "faceAttributes",
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
-    Editor = "editor"
+    Editor = "editor",
+    VideoFrameAnalysis = "videoFrameAnalysis"
 }
 export enum QueueCommand {
     Start = "start",
@@ -8512,6 +8539,8 @@ export enum JobName {
     StorageTemplateMigrationSingle = "StorageTemplateMigrationSingle",
     TagCleanup = "TagCleanup",
     VersionCheck = "VersionCheck",
+    AssetAnalyzeVideoFramesQueueAll = "AssetAnalyzeVideoFramesQueueAll",
+    AssetAnalyzeVideoFrames = "AssetAnalyzeVideoFrames",
     OcrQueueAll = "OcrQueueAll",
     Ocr = "Ocr",
     WorkflowAssetTrigger = "WorkflowAssetTrigger",

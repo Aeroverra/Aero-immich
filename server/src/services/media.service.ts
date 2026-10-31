@@ -40,7 +40,7 @@ import {
 } from 'src/types';
 import { getAssetFile, getDimensions } from 'src/utils/asset.util';
 import { checkFaceVisibility, checkOcrVisibility } from 'src/utils/editor';
-import { BaseConfig, ThumbnailConfig } from 'src/utils/media';
+import { BaseConfig, ThumbnailConfig, VideoFrameConfig } from 'src/utils/media';
 import { mimeTypes } from 'src/utils/mime-types';
 import { batched, clamp } from 'src/utils/misc';
 import { getOutputDimensions } from 'src/utils/transform';
@@ -394,7 +394,7 @@ export class MediaService extends BaseService {
     ownerId,
     personGroupId,
   }: JobOf<JobName.PersonGenerateThumbnail>): Promise<JobStatus> {
-    const { image } = await this.getConfig({ withCache: true });
+    const { image, ffmpeg } = await this.getConfig({ withCache: true });
     const data = await this.personRepository.getDataForThumbnailGenerationJob({ ownerId, personGroupId });
     if (!data) {
       this.logger.error(`Could not generate person thumbnail for ${personGroupId}: missing data`);
@@ -403,7 +403,14 @@ export class MediaService extends BaseService {
 
     const { x1, y1, x2, y2, oldWidth, oldHeight, exifOrientation, previewPath, originalPath } = data;
     let inputImage: string | Buffer;
-    if (data.type === AssetType.Video) {
+    if (data.type === AssetType.Video && data.frameTimestamp !== null && data.videoStream) {
+      // the face was found in another frame than the preview, so crop it from that frame
+      const frameConfig = VideoFrameConfig.create({ ...ffmpeg, targetResolution: image.preview.size.toString() });
+      inputImage = await this.mediaRepository.extractVideoFrame(
+        originalPath,
+        frameConfig.getFrameCommand(data.frameTimestamp, data.videoStream),
+      );
+    } else if (data.type === AssetType.Video) {
       if (!previewPath) {
         this.logger.error(`Could not generate person thumbnail for video ${personGroupId}: missing preview path`);
         return JobStatus.Failed;

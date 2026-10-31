@@ -108,6 +108,7 @@ describe('/server', () => {
         passwordLogin: true,
         realtimeTranscoding: false,
         stackSource: true,
+        videoFrameAnalysis: false,
         search: true,
         sidecar: true,
         trash: true,
