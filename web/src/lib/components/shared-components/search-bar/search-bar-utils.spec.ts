@@ -1,8 +1,12 @@
+import { DateTime } from 'luxon';
 import {
   formatVideoLength,
+  getSearchAlbumsTitle,
+  getSearchDateFilterTitle,
   isPopoverContent,
   parseVideoLength,
 } from '$lib/components/shared-components/search-bar/search-bar-utils';
+import { albumFactory } from '@test-data/factories/album-factory';
 
 describe('isPopoverContent', () => {
   const focusOutEventTo = (relatedTarget: EventTarget | null) => new FocusEvent('focusout', { relatedTarget });
@@ -56,5 +60,48 @@ describe('video length', () => {
     expect(formatVideoLength(5000)).toBe('0:05');
     expect(formatVideoLength(90_000)).toBe('1:30');
     expect(formatVideoLength(3_723_000)).toBe('1:02:03');
+  });
+});
+
+// i18n is not loaded here: translated parts come back as their keys
+describe('getSearchAlbumsTitle', () => {
+  const albums = [
+    albumFactory.build({ id: 'trip', albumName: 'Trip' }),
+    albumFactory.build({ id: 'party', albumName: 'Party' }),
+  ];
+
+  it('names a single searched album', () => {
+    expect(getSearchAlbumsTitle(albums, new Set(['trip']))).toBe('Trip');
+  });
+
+  it('adds the left out albums after the searched ones', () => {
+    expect(getSearchAlbumsTitle(albums, new Set(['trip']), new Set(['party']))).toBe('Trip · search_not_in_album');
+  });
+
+  it('counts further albums and has no title without albums', () => {
+    expect(getSearchAlbumsTitle(albums, new Set(['trip', 'party']))).toBe('search_album_plus_more_albums');
+    expect(getSearchAlbumsTitle(albums, new Set())).toBeUndefined();
+    expect(getSearchAlbumsTitle([], new Set(['trip']))).toBeUndefined();
+  });
+});
+
+describe('getSearchDateFilterTitle', () => {
+  it('has no title without dates', () => {
+    expect(getSearchDateFilterTitle({})).toBeUndefined();
+  });
+
+  it('names the taken range, then the upload range', () => {
+    const title = getSearchDateFilterTitle({
+      takenAfter: DateTime.utc().startOf('year'),
+      takenBefore: DateTime.utc().endOf('year'),
+      uploadedAfter: DateTime.utc(2019, 3, 1),
+      uploadedBefore: DateTime.utc(2019, 3, 31),
+    });
+
+    expect(title).toBe('search_filter_date_this_year · search_uploaded_range');
+  });
+
+  it('names an upload range alone', () => {
+    expect(getSearchDateFilterTitle({ uploadedAfter: DateTime.utc(2019, 3, 1) })).toBe('search_uploaded_range');
   });
 });

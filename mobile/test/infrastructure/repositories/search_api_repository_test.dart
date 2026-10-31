@@ -107,6 +107,92 @@ void main() {
     });
   });
 
+  group('albums', () {
+    test('sends the albums to search in and the ones to leave out, for both searches', () async {
+      final albums = filter.copyWith(albumIds: ['trip'], excludeAlbumIds: ['work', 'receipts']);
+
+      await repo.search(albums, 1);
+      await repo.search(albums.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.albumIds.value, ['trip']);
+      expect(metadata.excludeAlbumIds.value, ['work', 'receipts']);
+      final smart = sentSmart();
+      expect(smart.albumIds.value, ['trip']);
+      expect(smart.excludeAlbumIds.value, ['work', 'receipts']);
+    });
+
+    test('leaves both out when no album is picked, never sending null', () async {
+      await repo.search(filter.copyWith(albumIds: [], excludeAlbumIds: []), 1);
+      await repo.search(filter.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.albumIds.isPresent, isFalse);
+      expect(metadata.excludeAlbumIds.isPresent, isFalse);
+      final smart = sentSmart();
+      expect(smart.albumIds.isPresent, isFalse);
+      expect(smart.excludeAlbumIds.isPresent, isFalse);
+    });
+
+    test('leaves the albums out while searching for assets outside every album', () async {
+      final notInAlbum = filter.copyWith(
+        albumIds: ['trip'],
+        excludeAlbumIds: ['work'],
+        display: filter.display.copyWith(isNotInAlbum: true),
+      );
+
+      await repo.search(notInAlbum, 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.isNotInAlbum, const Optional<bool?>.present(true));
+      expect(metadata.albumIds.isPresent, isFalse);
+      expect(metadata.excludeAlbumIds.isPresent, isFalse);
+    });
+  });
+
+  group('upload date', () {
+    final after = DateTime(2024, 3, 1);
+    final before = DateTime(2024, 3, 31, 23, 59, 59, 999);
+
+    test('sends the upload date bounds next to the taken date, for both searches', () async {
+      final uploaded = filter.copyWith(
+        date: SearchDateFilter(takenAfter: DateTime(2020)),
+        uploaded: SearchUploadDateFilter(uploadedAfter: after, uploadedBefore: before),
+      );
+
+      await repo.search(uploaded, 1);
+      await repo.search(uploaded.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.uploadedAfter.value, after);
+      expect(metadata.uploadedBefore.value, before);
+      expect(metadata.takenAfter.value, DateTime(2020));
+      final smart = sentSmart();
+      expect(smart.uploadedAfter.value, after);
+      expect(smart.uploadedBefore.value, before);
+    });
+
+    test('sends only the bound that is set', () async {
+      await repo.search(filter.copyWith(uploaded: SearchUploadDateFilter(uploadedAfter: after)), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.uploadedAfter.value, after);
+      expect(metadata.uploadedBefore.isPresent, isFalse);
+    });
+
+    test('leaves the upload date out when it is not set', () async {
+      await repo.search(filter, 1);
+      await repo.search(filter.copyWith(context: 'sunset'), 1);
+
+      final metadata = sentMetadata();
+      expect(metadata.uploadedAfter.isPresent, isFalse);
+      expect(metadata.uploadedBefore.isPresent, isFalse);
+      final smart = sentSmart();
+      expect(smart.uploadedAfter.isPresent, isFalse);
+      expect(smart.uploadedBefore.isPresent, isFalse);
+    });
+  });
+
   group('smart search', () {
     final smartFilter = filter.copyWith(context: 'sunset');
 

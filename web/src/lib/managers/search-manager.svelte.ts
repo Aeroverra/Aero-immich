@@ -1,5 +1,5 @@
 import { AssetTypeEnum, AssetVisibility, type MetadataSearchDto, type SmartSearchDto } from '@immich/sdk';
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { SvelteSet } from 'svelte/reactivity';
 import { goto } from '$app/navigation';
 import { MediaType, QueryType, validQueryTypes } from '$lib/constants';
@@ -76,6 +76,8 @@ class SearchManager {
             : new SvelteSet(searchQuery.tagIds)
           : new SvelteSet(),
       excludeTagIds: new SvelteSet('excludeTagIds' in searchQuery ? searchQuery.excludeTagIds : []),
+      albumIds: new SvelteSet('albumIds' in searchQuery ? searchQuery.albumIds : []),
+      excludeAlbumIds: new SvelteSet('excludeAlbumIds' in searchQuery ? searchQuery.excludeAlbumIds : []),
       location: {
         country: this.#withNullAsEmptyString(searchQuery.country),
         state: this.#withNullAsEmptyString(searchQuery.state),
@@ -89,6 +91,8 @@ class SearchManager {
       date: {
         takenAfter: searchQuery.takenAfter ? this.#toStartOfDayDate(searchQuery.takenAfter) : undefined,
         takenBefore: searchQuery.takenBefore ? this.#toStartOfDayDate(searchQuery.takenBefore) : undefined,
+        uploadedAfter: searchQuery.uploadedAfter ? this.#fromLocalDayISO(searchQuery.uploadedAfter) : undefined,
+        uploadedBefore: searchQuery.uploadedBefore ? this.#fromLocalDayISO(searchQuery.uploadedBefore) : undefined,
       },
       display: {
         isArchive: searchQuery.visibility === AssetVisibility.Archive,
@@ -137,9 +141,22 @@ class SearchManager {
       takenBefore: this.filter.date.takenBefore
         ? asLocalTimeISO(this.filter.date.takenBefore.endOf('day') as DateTime<true>)
         : undefined,
+      uploadedAfter: this.filter.date.uploadedAfter
+        ? this.#toLocalDayISO(this.filter.date.uploadedAfter, 'start')
+        : undefined,
+      uploadedBefore: this.filter.date.uploadedBefore
+        ? this.#toLocalDayISO(this.filter.date.uploadedBefore, 'end')
+        : undefined,
       visibility: this.filter.display.isArchive ? AssetVisibility.Archive : undefined,
       isFavorite: this.filter.display.isFavorite || undefined,
       isNotInAlbum: this.filter.display.isNotInAlbum || undefined,
+      // assets outside every album are in none of these albums
+      albumIds:
+        !this.filter.display.isNotInAlbum && this.filter.albumIds.size > 0 ? [...this.filter.albumIds] : undefined,
+      excludeAlbumIds:
+        !this.filter.display.isNotInAlbum && this.filter.excludeAlbumIds.size > 0
+          ? [...this.filter.excludeAlbumIds]
+          : undefined,
       personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
       tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
       minDuration: this.filter.minDuration,
@@ -163,6 +180,18 @@ class SearchManager {
 
   #toStartOfDayDate(dateString: string) {
     return parseUtcDate(dateString)?.startOf('day') || undefined;
+  }
+
+  // an upload date is a real moment, so a picked day runs from local midnight to local midnight
+  #toLocalDayISO(date: DateTime, edge: 'start' | 'end') {
+    const day = DateTime.local(date.year, date.month, date.day);
+    return (edge === 'start' ? day.startOf('day') : day.endOf('day')).toUTC().toISO() ?? undefined;
+  }
+
+  // back to the picked day, in the UTC form the date pickers use
+  #fromLocalDayISO(dateString: string) {
+    const local = DateTime.fromISO(dateString).toLocal();
+    return local.isValid ? DateTime.utc(local.year, local.month, local.day) : undefined;
   }
 
   #defaultQueryType(): QueryType {

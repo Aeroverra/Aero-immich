@@ -10,6 +10,10 @@ import 'package:maplibre_gl/maplibre_gl.dart';
 import 'package:openapi/api.dart' as api show AssetVisibility;
 import 'package:openapi/api.dart' hide AssetVisibility;
 
+/// When an asset was uploaded (the Google Photos upload time for assets imported from Google Photos) and when it reached
+/// Immich
+typedef AssetUploadDates = ({DateTime uploadedAt, DateTime createdAt});
+
 final assetApiRepositoryProvider = Provider(
   (ref) => AssetApiRepository(
     ref.watch(apiServiceProvider).assetsApi,
@@ -80,6 +84,12 @@ class AssetApiRepository extends ApiRepository {
   Future<bool?> hasEncodedVideo(String assetId) async {
     final response = await checkNull(_api.getAssetInfo(assetId));
     return response.hasEncodedVideo.orElse(null);
+  }
+
+  /// Servers without the upload date give the Immich upload time for both
+  Future<AssetUploadDates> uploadDates(String assetId) async {
+    final response = await checkNull(_api.getAssetInfo(assetId));
+    return (uploadedAt: response.uploadedAt.orElse(null) ?? response.createdAt, createdAt: response.createdAt);
   }
 
   Future<void> updateDescription(String assetId, String description) {

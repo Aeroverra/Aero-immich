@@ -39,6 +39,20 @@ class SearchApiRepository extends ApiRepository {
     final Optional<List<String>?> excludeTagIds = filter.display.hasNoTags || (filter.excludeTagIds ?? []).isEmpty
         ? const Optional.absent()
         : Optional.present(filter.excludeTagIds);
+    // with albums the server searches everything in them, whoever added it; assets outside every album are in none
+    final Optional<List<String>?> albumIds = filter.display.isNotInAlbum || (filter.albumIds ?? []).isEmpty
+        ? const Optional.absent()
+        : Optional.present(filter.albumIds);
+    final Optional<List<String>?> excludeAlbumIds =
+        filter.display.isNotInAlbum || (filter.excludeAlbumIds ?? []).isEmpty
+        ? const Optional.absent()
+        : Optional.present(filter.excludeAlbumIds);
+    final Optional<DateTime?> uploadedAfter = filter.uploaded.uploadedAfter == null
+        ? const Optional.absent()
+        : Optional.present(filter.uploaded.uploadedAfter);
+    final Optional<DateTime?> uploadedBefore = filter.uploaded.uploadedBefore == null
+        ? const Optional.absent()
+        : Optional.present(filter.uploaded.uploadedBefore);
 
     if ((filter.context != null && filter.context!.isNotEmpty) ||
         (filter.assetId != null && filter.assetId!.isNotEmpty)) {
@@ -60,6 +74,8 @@ class SearchApiRepository extends ApiRepository {
           takenBefore: filter.date.takenBefore == null
               ? const Optional.absent()
               : Optional.present(filter.date.takenBefore),
+          uploadedAfter: uploadedAfter,
+          uploadedBefore: uploadedBefore,
           visibility: Optional.present(filter.display.isArchive ? AssetVisibility.archive : AssetVisibility.timeline),
           rating: filter.rating.rating.toOptional(),
           isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
@@ -68,6 +84,8 @@ class SearchApiRepository extends ApiRepository {
           personIds: Optional.present(filter.people.map((e) => e.id).toList()),
           tagIds: tagIds,
           excludeTagIds: excludeTagIds,
+          albumIds: albumIds,
+          excludeAlbumIds: excludeAlbumIds,
           minDuration: minDuration,
           maxDuration: maxDuration,
           type: type == null ? const Optional.absent() : Optional.present(type),
@@ -95,6 +113,8 @@ class SearchApiRepository extends ApiRepository {
         takenBefore: filter.date.takenBefore == null
             ? const Optional.absent()
             : Optional.present(filter.date.takenBefore),
+        uploadedAfter: uploadedAfter,
+        uploadedBefore: uploadedBefore,
         visibility: Optional.present(filter.display.isArchive ? AssetVisibility.archive : AssetVisibility.timeline),
         rating: filter.rating.rating.toOptional(),
         isFavorite: filter.display.isFavorite ? const Optional.present(true) : const Optional.absent(),
@@ -103,6 +123,8 @@ class SearchApiRepository extends ApiRepository {
         personIds: Optional.present(filter.people.map((e) => e.id).toList()),
         tagIds: tagIds,
         excludeTagIds: excludeTagIds,
+        albumIds: albumIds,
+        excludeAlbumIds: excludeAlbumIds,
         minDuration: minDuration,
         maxDuration: maxDuration,
         type: type == null ? const Optional.absent() : Optional.present(type),
