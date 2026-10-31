@@ -20,6 +20,10 @@ class ViewerShowDetailsEvent extends Event {
   const ViewerShowDetailsEvent();
 }
 
+class ViewerHideDetailsEvent extends Event {
+  const ViewerHideDetailsEvent();
+}
+
 class ViewerReloadAssetEvent extends Event {
   const ViewerReloadAssetEvent();
 }

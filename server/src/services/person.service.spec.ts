@@ -14,6 +14,7 @@ import { authStub } from 'test/fixtures/auth.stub';
 import { systemConfigStub } from 'test/fixtures/system-config.stub';
 import {
   getAsDetectedFace,
+  getDehydrated,
   getForAsset,
   getForAssetFace,
   getForDetectedFaces,
@@ -968,6 +969,55 @@ describe(PersonService.name, () => {
       expect(mocks.person.reassignFaces).not.toHaveBeenCalled();
     });
 
+    it('should keep faces found in other frames of a video', async () => {
+      const asset = AssetFactory.from().file({ type: AssetFileType.Preview }).exif().build();
+      const frameFace = AssetFaceFactory.create({ assetId: asset.id, frameTimestamp: 5000 });
+      mocks.machineLearning.detectFaces.mockResolvedValue({ faces: [], imageHeight: 500, imageWidth: 400 });
+      mocks.assetJob.getForDetectFacesJob.mockResolvedValue({
+        ...getForDetectedFaces(asset),
+        faces: [getDehydrated(frameFace)],
+      });
+
+      await sut.handleDetectFaces({ id: asset.id });
+
+      expect(mocks.person.refreshFaces).not.toHaveBeenCalled();
+    });
+
+    it('should not match a detected face to a face found in another frame', async () => {
+      const asset = AssetFactory.from().file({ type: AssetFileType.Preview }).exif().build();
+      const frameFace = AssetFaceFactory.create({ assetId: asset.id, frameTimestamp: 5000 });
+      const newFace = AssetFaceFactory.create({ assetId: asset.id });
+      mocks.crypto.randomUUID.mockReturnValue(newFace.id);
+      mocks.machineLearning.detectFaces.mockResolvedValue(getAsDetectedFace(frameFace));
+      mocks.assetJob.getForDetectFacesJob.mockResolvedValue({
+        ...getForDetectedFaces(asset),
+        faces: [getDehydrated(frameFace)],
+      });
+
+      await sut.handleDetectFaces({ id: asset.id });
+
+      expect(mocks.person.refreshFaces).toHaveBeenCalledWith(
+        [expect.objectContaining({ id: newFace.id, assetId: asset.id })],
+        [],
+        [{ faceId: newFace.id, embedding: '[1, 2, 3, 4]' }],
+      );
+    });
+
+    it('should queue the video frame analysis again after removing all faces', async () => {
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { videoFrameAnalysis: { enabled: true } } });
+      mocks.assetJob.streamForDetectFacesJob.mockReturnValue(makeStream([]));
+      mocks.person.getAllWithoutFaces.mockResolvedValue([]);
+      mocks.person.deleteEmptyGroups.mockResolvedValue(0);
+      mocks.person.deleteOrphanedClusterGroups.mockResolvedValue(0);
+
+      await sut.handleQueueDetectFaces({ force: true });
+
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetAnalyzeVideoFramesQueueAll,
+        data: { force: true },
+      });
+    });
+
     it('should delete an existing face not among the new detected faces', async () => {
       const asset = AssetFactory.from().face().file({ type: AssetFileType.Preview }).exif().build();
       mocks.machineLearning.detectFaces.mockResolvedValue({ faces: [], imageHeight: 500, imageWidth: 400 });
@@ -1211,6 +1261,40 @@ describe(PersonService.name, () => {
       });
     });
 
+    it('should not create a person for a face found only in video frames', async () => {
+      const asset = AssetFactory.create();
+      const frameFace = AssetFaceFactory.create({ assetId: asset.id, frameTimestamp: 5000 });
+      const other = AssetFaceFactory.create();
+
+      mocks.systemMetadata.get.mockResolvedValue({ machineLearning: { facialRecognition: { minFaces: 1 } } });
+      mocks.search.searchFaces.mockResolvedValue([getForFaceSearch(frameFace, 0), getForFaceSearch(other, 0.3)]);
+      mocks.person.getFaceForFacialRecognitionJob.mockResolvedValue(getForFacialRecognitionJob(frameFace, asset));
+
+      await sut.handleRecognizeFaces({ id: frameFace.id });
+
+      expect(mocks.person.createGroup).not.toHaveBeenCalled();
+      expect(mocks.person.reassignFaces).not.toHaveBeenCalled();
+    });
+
+    it('should create a person for a face found only in video frames when allowed', async () => {
+      const asset = AssetFactory.create();
+      const frameFace = AssetFaceFactory.create({ assetId: asset.id, frameTimestamp: 5000 });
+      const other = AssetFaceFactory.create();
+      const person = PersonFactory.create();
+
+      mocks.systemMetadata.get.mockResolvedValue({
+        machineLearning: { facialRecognition: { minFaces: 1 }, videoFrameAnalysis: { createPeople: true } },
+      });
+      mocks.search.searchFaces.mockResolvedValue([getForFaceSearch(frameFace, 0), getForFaceSearch(other, 0.3)]);
+      mocks.person.getFaceForFacialRecognitionJob.mockResolvedValue(getForFacialRecognitionJob(frameFace, asset));
+      mocks.person.createGroup.mockResolvedValue(PersonGroupFactory.create({ id: person.personGroupId }));
+      mocks.person.create.mockResolvedValue(person);
+
+      await sut.handleRecognizeFaces({ id: frameFace.id });
+
+      expect(mocks.person.createGroup).toHaveBeenCalledWith(asset.ownerId);
+    });
+
     it('should create a person in the matched group when the match belongs to another user', async () => {
       const asset = AssetFactory.create();
       const [noPerson, otherOwnerFace] = [
@@ -1344,6 +1428,7 @@ describe(PersonService.name, () => {
         imageHeight: 500,
         imageWidth: 400,
         sourceType: SourceType.MachineLearning,
+        frameTimestamp: null,
         person: mapPerson(person),
       });
     });

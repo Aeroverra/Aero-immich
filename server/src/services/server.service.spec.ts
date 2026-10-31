@@ -152,6 +152,7 @@ describe(ServerService.name, () => {
         email: false,
         realtimeTranscoding: false,
         stackSource: true,
+        videoFrameAnalysis: false,
       });
       expect(mocks.systemMetadata.get).toHaveBeenCalled();
     });

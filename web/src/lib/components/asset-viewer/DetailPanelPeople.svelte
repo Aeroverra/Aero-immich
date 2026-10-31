@@ -6,7 +6,8 @@
   import { faceManager } from '$lib/stores/face.svelte';
   import { locale } from '$lib/stores/preferences.store';
   import { getPeopleThumbnailUrl } from '$lib/utils';
-  import { type AssetResponseDto } from '@immich/sdk';
+  import { formatVideoPosition, getFramePositions } from '$lib/utils/people-utils';
+  import { AssetTypeEnum, type AssetResponseDto } from '@immich/sdk';
   import { IconButton, Text } from '@immich/ui';
   import { mdiEye, mdiEyeOff, mdiPencil, mdiPlus } from '@mdi/js';
   import { DateTime } from 'luxon';
@@ -105,32 +106,51 @@
       {#each visiblePeople as person (person.id)}
         {@const personFaces = faceManager.facesByPersonId.get(person.id) ?? []}
         {@const isHighlighted = personFaces.some((f) => assetViewerManager.highlightedFaces.some((b) => b.id === f.id))}
-        <a
-          class="group outline-none"
-          href={Route.viewPerson(person, { previousRoute })}
-          onfocus={() => assetViewerManager.setHighlightedFaces(personFaces)}
-          onblur={() => assetViewerManager.clearHighlightedFaces()}
-          onpointerenter={() => assetViewerManager.setHighlightedFaces(personFaces)}
-          onpointerleave={() => assetViewerManager.clearHighlightedFaces()}
-        >
-          <ImageThumbnail
-            curve
-            shadow
-            url={getPeopleThumbnailUrl(person)}
-            altText={person.name}
-            title={person.name}
-            widthStyle="100%"
-            hidden={person.isHidden}
-            highlighted={isHighlighted}
-            class="outline-offset-2 outline-immich-primary group-focus-visible:outline-2 dark:outline-immich-dark-primary"
-          />
-          <p class="mt-1 truncate font-medium" title={person.name}>{person.name}</p>
-          {#if person.birthDate && person.formattedAge}
-            <p class="font-light {visiblePeople.length > 6 ? 'text-xs' : ''}" title={person.formattedBirthDate!}>
-              {person.formattedAge}
-            </p>
+        {@const framePositions = asset.type === AssetTypeEnum.Video ? getFramePositions(personFaces) : []}
+        <div class="min-w-0">
+          <a
+            class="group outline-none"
+            href={Route.viewPerson(person, { previousRoute })}
+            onfocus={() => assetViewerManager.setHighlightedFaces(personFaces)}
+            onblur={() => assetViewerManager.clearHighlightedFaces()}
+            onpointerenter={() => assetViewerManager.setHighlightedFaces(personFaces)}
+            onpointerleave={() => assetViewerManager.clearHighlightedFaces()}
+          >
+            <ImageThumbnail
+              curve
+              shadow
+              url={getPeopleThumbnailUrl(person)}
+              altText={person.name}
+              title={person.name}
+              widthStyle="100%"
+              hidden={person.isHidden}
+              highlighted={isHighlighted}
+              class="outline-offset-2 outline-immich-primary group-focus-visible:outline-2 dark:outline-immich-dark-primary"
+            />
+            <p class="mt-1 truncate font-medium" title={person.name}>{person.name}</p>
+            {#if person.birthDate && person.formattedAge}
+              <p class="font-light {visiblePeople.length > 6 ? 'text-xs' : ''}" title={person.formattedBirthDate!}>
+                {person.formattedAge}
+              </p>
+            {/if}
+          </a>
+          {#if framePositions.length > 0}
+            <div class="mt-1 flex flex-wrap gap-1">
+              {#each framePositions as position (position)}
+                {@const time = formatVideoPosition(position)}
+                <button
+                  type="button"
+                  class="rounded-full bg-immich-primary/15 px-2 py-0.5 text-xs font-medium text-immich-primary hover:bg-immich-primary/25 dark:bg-immich-dark-primary/15 dark:text-immich-dark-primary"
+                  title={$t('jump_to_time', { values: { time } })}
+                  aria-label={$t('jump_to_time', { values: { time } })}
+                  onclick={() => assetViewerManager.emit('VideoSeek', position)}
+                >
+                  {time}
+                </button>
+              {/each}
+            </div>
           {/if}
-        </a>
+        </div>
       {/each}
     </div>
   </section>

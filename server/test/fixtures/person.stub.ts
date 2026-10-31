@@ -15,6 +15,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.jpg',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   newThumbnailMiddle: Object.freeze({
     ownerId: userStub.admin.id,
@@ -28,6 +30,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.jpg',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   newThumbnailEnd: Object.freeze({
     ownerId: userStub.admin.id,
@@ -41,6 +45,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.jpg',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   rawEmbeddedThumbnail: Object.freeze({
     ownerId: userStub.admin.id,
@@ -54,6 +60,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.dng',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   negativeCoordinate: Object.freeze({
     ownerId: userStub.admin.id,
@@ -67,6 +75,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.jpg',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   overflowingCoordinate: Object.freeze({
     ownerId: userStub.admin.id,
@@ -80,6 +90,8 @@ export const personThumbnailStub = {
     originalPath: '/original/path.jpg',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
   videoThumbnail: Object.freeze({
     ownerId: userStub.admin.id,
@@ -93,5 +105,7 @@ export const personThumbnailStub = {
     originalPath: '/original/path.mp4',
     exifOrientation: '1',
     previewPath: AssetFileFactory.create({ type: AssetFileType.Preview }).path,
+    frameTimestamp: null,
+    videoStream: null,
   }),
 };

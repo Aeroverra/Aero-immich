@@ -269,6 +269,7 @@ describe(DatabaseService.name, () => {
         expect(mocks.database.reindexVectorsIfNeeded).toHaveBeenCalledExactlyOnceWith([
           VectorIndex.Clip,
           VectorIndex.Face,
+          VectorIndex.ClipFrame,
         ]);
         expect(mocks.database.reindexVectorsIfNeeded).toHaveBeenCalledTimes(1);
         expect(mocks.database.runMigrations).toHaveBeenCalledTimes(1);
@@ -283,6 +284,7 @@ describe(DatabaseService.name, () => {
         expect(mocks.database.reindexVectorsIfNeeded).toHaveBeenCalledExactlyOnceWith([
           VectorIndex.Clip,
           VectorIndex.Face,
+          VectorIndex.ClipFrame,
         ]);
         expect(mocks.database.runMigrations).not.toHaveBeenCalled();
         expect(mocks.logger.fatal).not.toHaveBeenCalled();
