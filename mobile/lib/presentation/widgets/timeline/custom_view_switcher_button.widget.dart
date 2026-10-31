@@ -15,9 +15,12 @@ final _log = Logger('CustomViewSwitcher');
 
 /// Top bar button that switches the library between the user's custom views. Lists the default view, open and locked
 /// views, and views with private access while private mode is unlocked. Hidden when the server does not know views or
-/// the user has none.
+/// the user has none. Bars drawn over a cover image pass their own [color] and [shadows].
 class CustomViewSwitcherButton extends ConsumerWidget {
-  const CustomViewSwitcherButton({super.key});
+  final Color? color;
+  final List<Shadow>? shadows;
+
+  const CustomViewSwitcherButton({super.key, this.color, this.shadows});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -35,8 +38,8 @@ class CustomViewSwitcherButton extends ConsumerWidget {
       tooltip: context.t.custom_view_switcher_title(name: applied?.name ?? context.t.custom_view_all_photos),
       isSelected: isSwitched,
       onPressed: () => unawaited(showCustomViewSwitcher(context)),
-      icon: const Icon(Icons.filter_alt_outlined),
-      selectedIcon: Icon(Icons.filter_alt, color: context.primaryColor),
+      icon: Icon(Icons.filter_alt_outlined, color: color, shadows: shadows),
+      selectedIcon: Icon(Icons.filter_alt, color: context.primaryColor, shadows: shadows),
     );
   }
 }

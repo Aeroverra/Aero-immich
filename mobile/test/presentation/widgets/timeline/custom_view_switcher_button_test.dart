@@ -61,6 +61,7 @@ void main() {
     bool supported = true,
     List<CustomView> views = const [_default, _open, _locked, _private],
     bool privateMode = false,
+    Widget button = const CustomViewSwitcherButton(),
   }) {
     final userService = _MockUserService();
     when(
@@ -69,7 +70,7 @@ void main() {
     when(() => userService.watchMyUser()).thenAnswer((_) => const Stream.empty());
 
     return tester.pumpConsumerWidget(
-      const CustomViewSwitcherButton(),
+      button,
       overrides: [
         customViewsSupportedProvider.overrideWithValue(supported),
         currentUserProvider.overrideWith((ref) => CurrentUserProvider(userService)),
@@ -177,5 +178,18 @@ void main() {
 
     expect(find.byType(PinVerificationForm), findsNothing);
     verify(() => api.setActive('locked', pinCode: '123456')).called(1);
+  });
+
+  testWidgets('takes the colour and shadows of a bar drawn over a cover image', (tester) async {
+    const shadows = [Shadow(blurRadius: 5)];
+    await pump(
+      tester,
+      button: const CustomViewSwitcherButton(color: Colors.white, shadows: shadows),
+    );
+    await tester.pumpAndSettle();
+
+    final icon = tester.widget<Icon>(find.byIcon(Icons.filter_alt_outlined));
+    expect(icon.color, Colors.white);
+    expect(icon.shadows, shadows);
   });
 }

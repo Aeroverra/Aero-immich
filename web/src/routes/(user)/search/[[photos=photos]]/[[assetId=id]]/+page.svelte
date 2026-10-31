@@ -20,6 +20,7 @@
   import TagAction from '$lib/components/timeline/actions/TagAction.svelte';
   import AddPeopleAction from '$lib/components/timeline/actions/AddPeopleAction.svelte';
   import AssetSelectControlBar from '$lib/components/timeline/AssetSelectControlBar.svelte';
+  import ViewSwitcherButton from '$lib/components/timeline/ViewSwitcherButton.svelte';
   import { QueryParameter } from '$lib/constants';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
@@ -441,6 +442,9 @@
           <div class="mx-auto w-full max-w-2xl pe-2">
             <SearchBar grayTheme={false} />
           </div>
+          {#snippet trailing()}
+            <ViewSwitcherButton />
+          {/snippet}
         </ControlAppBar>
       </div>
     {/if}
