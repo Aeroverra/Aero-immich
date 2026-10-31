@@ -49,7 +49,7 @@ import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
 import ProfileImageCropperModal from '$lib/modals/ProfileImageCropperModal.svelte';
 import SharedLinkCreateModal from '$lib/modals/SharedLinkCreateModal.svelte';
 import { Route } from '$lib/route';
-import { resolveStackSelection } from '$lib/services/stack-selection.service';
+import { resolveAssetStackIds, resolveStackSelection } from '$lib/services/stack-selection.service';
 import { SlideshowState, slideshowStore } from '$lib/stores/slideshow.store';
 import { getAssetMediaUrl, getSharedLink, sleep } from '$lib/utils';
 import { downloadUrl } from '$lib/utils';
@@ -189,7 +189,11 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     icon: mdiPlus,
     shortcuts: [{ key: 'l' }],
     $if: () => asset.visibility !== AssetVisibility.Locked && !asset.isTrashed,
-    onAction: () => modalManager.show(AssetAddToAlbumModal, { assetIds: [asset.id], hasPrivate: asset.isPrivate }),
+    onAction: async () =>
+      modalManager.show(AssetAddToAlbumModal, {
+        assetIds: await resolveAssetStackIds(asset),
+        hasPrivate: asset.isPrivate,
+      }),
   };
 
   const Offline: ActionItem = {
@@ -233,7 +237,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     title: $t('add_tag'),
     icon: mdiTagPlusOutline,
     $if: () => authManager.authenticated && authManager.preferences.tags.enabled,
-    onAction: () => modalManager.show(AssetTagModal, { assetIds: [asset.id] }),
+    onAction: async () => modalManager.show(AssetTagModal, { assetIds: await resolveAssetStackIds(asset) }),
     shortcuts: { key: 't' },
   };
 
