@@ -1,6 +1,7 @@
 <script lang="ts">
   import MenuOption from '$lib/components/shared-components/context-menu/MenuOption.svelte';
   import { assetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
+  import { resolveStackSelection } from '$lib/services/stack-selection.service';
   import type { OnSetVisibility } from '$lib/utils/actions';
   import { handleError } from '$lib/utils/handle-error';
   import { AssetVisibility, updateAssets } from '@immich/sdk';
@@ -18,6 +19,11 @@
   let loading = $state(false);
 
   const setLockedVisibility = async () => {
+    const assetIds = await resolveStackSelection(assetMultiSelectManager.assets);
+    if (!assetIds) {
+      return;
+    }
+
     const isConfirmed = await modalManager.showDialog({
       title: unlock ? $t('remove_from_locked_folder') : $t('move_to_locked_folder'),
       prompt: unlock ? $t('remove_from_locked_folder_confirmation') : $t('move_to_locked_folder_confirmation'),
@@ -32,7 +38,6 @@
 
     try {
       loading = true;
-      const assetIds = assetMultiSelectManager.assets.map(({ id }) => id);
 
       await updateAssets({
         assetBulkUpdateDto: {

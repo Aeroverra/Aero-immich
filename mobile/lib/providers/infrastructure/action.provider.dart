@@ -100,14 +100,20 @@ class ActionNotifier extends Notifier<void> {
 
   /// [confirmPrivate] acknowledges that private assets in the selection become visible to everyone
   /// [album] is shared with. Without it the server's refusal is rethrown so the caller can ask.
-  Future<ActionResult> addToAlbum(ActionSource source, RemoteAlbum album, {bool confirmPrivate = false}) async {
+  /// [stackedAssetIds] are the assets stacked below the selected ones, added along with them.
+  Future<ActionResult> addToAlbum(
+    ActionSource source,
+    RemoteAlbum album, {
+    bool confirmPrivate = false,
+    List<String> stackedAssetIds = const [],
+  }) async {
     final selected = _getAssets(source).toList(growable: false);
     if (selected.isEmpty) {
       return const ActionResult(count: 0, success: true);
     }
 
     final candidates = RemoteAlbumService.categorizeCandidates(selected);
-    final remoteIds = candidates.remoteAssetIds;
+    final remoteIds = [...candidates.remoteAssetIds, ...stackedAssetIds];
     final localAssets = candidates.localAssetsToUpload;
     final albumNotifier = ref.read(remoteAlbumProvider.notifier);
 
