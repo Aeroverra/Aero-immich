@@ -4,6 +4,7 @@ import 'package:immich_mobile/domain/services/timeline.service.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.state.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 
 final timelineArgsProvider = Provider.autoDispose<TimelineArgs>(
@@ -26,6 +27,7 @@ final timelineFactoryProvider = Provider<TimelineFactory>(
   (ref) => TimelineFactory(
     timelineRepository: ref.watch(driftProvider).timelineRepository,
     settingsRepository: ref.watch(settingsProvider),
+    privateFilter: ref.watch(privateModeFilterProvider),
   ),
 );
 

@@ -369,7 +369,12 @@
   };
 </script>
 
-<OnEvents onAssetsDelete={onAssetsChanged} onAssetsArchive={onAssetsChanged} onAssetsUnarchive={onAssetsChanged} />
+<OnEvents
+  onAssetsDelete={onAssetsChanged}
+  onAssetsArchive={onAssetsChanged}
+  onAssetsUnarchive={onAssetsChanged}
+  onPrivateModeChange={onAssetsChanged}
+/>
 <svelte:boundary>
   <!--  We handle style loading ourselves so we set style blank here -->
   <MapLibre

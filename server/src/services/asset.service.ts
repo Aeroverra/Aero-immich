@@ -34,7 +34,7 @@ import {
 } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
 import { JobItem, JobOf } from 'src/types';
-import { requireElevatedPermission } from 'src/utils/access';
+import { requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import {
   getAssetFiles,
   getDimensions,
@@ -43,7 +43,7 @@ import {
   onBeforeLink,
   onBeforeUnlink,
 } from 'src/utils/asset.util';
-import { updateLockedColumns } from 'src/utils/database';
+import { type PrivateScope, updateLockedColumns } from 'src/utils/database';
 import { extractTimeZone } from 'src/utils/date';
 import { batched, findOrFail } from 'src/utils/misc';
 import { transformOcrBoundingBox } from 'src/utils/transform';
@@ -55,21 +55,36 @@ export class AssetService extends BaseService {
       requireElevatedPermission(auth);
     }
 
-    const stats = await this.assetRepository.getStatistics(auth.user.id, dto);
+    if (dto.isPrivate) {
+      requirePrivateMode(auth);
+    }
+
+    const stats = await this.assetRepository.getStatistics(auth.user.id, dto, toPrivateScope(auth));
     return mapStats(stats);
   }
 
   async get(auth: AuthDto, id: string): Promise<AssetResponseDto | SanitizedAssetResponseDto> {
     await this.requireAccess({ auth, permission: Permission.AssetRead, ids: [id] });
+    return this.getResponse(auth, id, toPrivateScope(auth));
+  }
 
-    const asset = await this.assetRepository.getById(id, {
-      exifInfo: true,
-      owner: true,
-      faces: { person: true, viewingUserId: auth.user.id },
-      stack: { assets: true },
-      edits: true,
-      tags: true,
-    });
+  private async getResponse(
+    auth: AuthDto,
+    id: string,
+    scope: PrivateScope,
+  ): Promise<AssetResponseDto | SanitizedAssetResponseDto> {
+    const asset = await this.assetRepository.getById(
+      id,
+      {
+        exifInfo: true,
+        owner: true,
+        faces: { person: true, viewingUserId: auth.user.id },
+        stack: { assets: true },
+        edits: true,
+        tags: true,
+      },
+      scope,
+    );
 
     if (!asset) {
       throw new BadRequestException('Asset not found');
@@ -97,6 +112,8 @@ export class AssetService extends BaseService {
 
     const { description, dateTimeOriginal, latitude, longitude, rating, ...rest } = dto;
     const repos = { asset: this.assetRepository, event: this.eventRepository };
+    const stackMemberIds =
+      rest.isPrivate === undefined ? [] : await this.getStackMembersToFlag(auth, [id], rest.isPrivate);
 
     let previousMotion: { id: string } | null = null;
     if (rest.livePhotoVideoId) {
@@ -112,6 +129,14 @@ export class AssetService extends BaseService {
 
     const asset = await this.assetRepository.update({ id, ...rest });
 
+    if (rest.isPrivate !== undefined) {
+      await this.assetRepository.updateAll(stackMemberIds, { isPrivate: rest.isPrivate });
+      await this.eventRepository.emit('AssetPrivateUpdateAll', {
+        assetIds: [id, ...stackMemberIds],
+        userId: auth.user.id,
+      });
+    }
+
     if (previousMotion && asset) {
       await onAfterUnlink(repos, {
         userId: auth.user.id,
@@ -124,13 +149,17 @@ export class AssetService extends BaseService {
       throw new BadRequestException('Asset not found');
     }
 
-    return this.get(auth, id) as Promise<AssetResponseDto>;
+    // marking the asset private hides it from a session without private mode, but the
+    // update itself was allowed, so the caller still gets the updated asset back once
+    const scope = rest.isPrivate ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
+    return this.getResponse(auth, id, scope) as Promise<AssetResponseDto>;
   }
 
   async updateAll(auth: AuthDto, dto: AssetBulkUpdateDto): Promise<void> {
     const {
       ids,
       isFavorite,
+      isPrivate,
       visibility,
       dateTimeOriginal,
       latitude,
@@ -141,9 +170,11 @@ export class AssetService extends BaseService {
       dateTimeRelative,
       timeZone,
     } = dto;
-    await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids });
 
-    const assetDto = _.omitBy({ isFavorite, visibility, duplicateId }, _.isUndefined);
+    await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids });
+    const stackMemberIds = isPrivate === undefined ? [] : await this.getStackMembersToFlag(auth, ids, isPrivate);
+
+    const assetDto = _.omitBy({ isFavorite, isPrivate, visibility, duplicateId }, _.isUndefined);
     const exifDto = _.omitBy(
       {
         latitude,
@@ -173,11 +204,34 @@ export class AssetService extends BaseService {
       await this.assetRepository.updateAll(ids, assetDto);
     }
 
+    if (isPrivate !== undefined) {
+      await this.assetRepository.updateAll(stackMemberIds, { isPrivate });
+      await this.eventRepository.emit('AssetPrivateUpdateAll', {
+        assetIds: [...ids, ...stackMemberIds],
+        userId: auth.user.id,
+      });
+    }
+
     if (visibility === AssetVisibility.Locked) {
       await this.albumRepository.removeAssetsFromAll(ids);
     }
 
-    await this.jobRepository.queueAll(ids.map((id) => ({ name: JobName.SidecarWrite, data: { id } })));
+    await this.jobRepository.queueAll(
+      [...ids, ...stackMemberIds].map((id) => ({ name: JobName.SidecarWrite, data: { id } })),
+    );
+  }
+
+  /**
+   * A stack is never half private: the private flag applies to every member of every stack the
+   * targeted assets belong to. Returns the members that still need the flag, access-checked.
+   */
+  private async getStackMembersToFlag(auth: AuthDto, ids: string[], isPrivate: boolean) {
+    const members = await this.assetRepository.getStackMembers(auth.user.id, ids);
+    const memberIds = members
+      .filter((member) => member.isPrivate !== isPrivate && !ids.includes(member.id))
+      .map(({ id }) => id);
+    await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: memberIds });
+    return memberIds;
   }
 
   async copy(
@@ -217,7 +271,13 @@ export class AssetService extends BaseService {
     }
 
     if (favorite) {
-      await this.assetRepository.update({ id: targetId, isFavorite: sourceAsset.isFavorite });
+      // getForCopy does not carry isPrivate, so read it from the full row
+      const [source] = (await this.assetRepository.getByIds([sourceId])) ?? [];
+      await this.assetRepository.update({
+        id: targetId,
+        isFavorite: sourceAsset.isFavorite,
+        isPrivate: source?.isPrivate,
+      });
     }
 
     if (sidecar) {
@@ -312,10 +372,14 @@ export class AssetService extends BaseService {
         await this.stackRepository.delete(asset.stack.id);
       } else if (asset.stack.primaryAssetId === id) {
         // the primary is being deleted but others remain: promote a new primary
-        await this.stackRepository.update(asset.stack.id, {
-          id: asset.stack.id,
-          primaryAssetId: remainingStackAssetIds[0],
-        });
+        await this.stackRepository.update(
+          asset.stack.id,
+          {
+            id: asset.stack.id,
+            primaryAssetId: remainingStackAssetIds[0],
+          },
+          { privateMode: true, userId: asset.ownerId },
+        );
       }
     }
 

@@ -15,6 +15,7 @@ import 'package:immich_mobile/presentation/actions/delete.action.dart';
 import 'package:immich_mobile/presentation/actions/download.action.dart';
 import 'package:immich_mobile/presentation/actions/lock.action.dart';
 import 'package:immich_mobile/presentation/actions/open_in_browser.action.dart';
+import 'package:immich_mobile/presentation/actions/private.action.dart';
 import 'package:immich_mobile/presentation/actions/remove_from_album.action.dart';
 import 'package:immich_mobile/presentation/actions/restore.action.dart';
 import 'package:immich_mobile/presentation/actions/set_album_cover.action.dart';
@@ -42,6 +43,8 @@ class ActionButtonContext {
   final bool isCasting;
   final TimelineOrigin timelineOrigin;
   final int selectedCount;
+  final bool isInPrivateView;
+  final bool isPrivateMode;
 
   const ActionButtonContext({
     required this.asset,
@@ -56,7 +59,11 @@ class ActionButtonContext {
     this.isCasting = false,
     this.timelineOrigin = TimelineOrigin.main,
     this.selectedCount = 1,
+    this.isInPrivateView = false,
+    this.isPrivateMode = false,
   });
+
+  bool get isPrivate => asset is RemoteAsset && (asset as RemoteAsset).isPrivate;
 }
 
 enum ActionButtonType {
@@ -78,6 +85,8 @@ enum ActionButtonType {
   unarchive,
   moveToLockFolder,
   removeFromLockFolder,
+  markPrivate,
+  unmarkPrivate,
   removeFromAlbum,
   restoreTrash,
   deleteLocal,
@@ -119,6 +128,20 @@ enum ActionButtonType {
         context.isOwner && //
             context.isInLockedView && //
             context.asset.hasRemote,
+      // Marking works in any session state, like moving to the locked folder. Unmarking needs the
+      // session's private mode on, which is also the only time a private asset is listed at all.
+      ActionButtonType.markPrivate =>
+        context.isOwner && //
+            !context.isInLockedView && //
+            !context.isInPrivateView && //
+            context.asset.hasRemote && //
+            !context.isPrivate,
+      ActionButtonType.unmarkPrivate =>
+        context.isOwner && //
+            context.isPrivateMode && //
+            !context.isInLockedView && //
+            context.asset.hasRemote && //
+            context.isPrivate,
       ActionButtonType.deleteLocal =>
         !context.isInLockedView && //
             context.asset.isMerged,
@@ -183,6 +206,8 @@ enum ActionButtonType {
       ActionButtonType.delete => ActionMenuItem(action: DeleteAction(source: context.source)),
       ActionButtonType.moveToLockFolder ||
       ActionButtonType.removeFromLockFolder => ActionMenuItem(action: LockAction(source: context.source)),
+      ActionButtonType.markPrivate => ActionMenuItem(action: MarkPrivateAction(source: context.source)),
+      ActionButtonType.unmarkPrivate => ActionMenuItem(action: UnmarkPrivateAction(source: context.source)),
       ActionButtonType.deleteLocal => ActionMenuItem(action: CleanupLocalAction(source: context.source)),
       ActionButtonType.upload => ActionMenuItem(
         action: UploadAction(source: context.source, showProgress: context.source == ActionSource.viewer),
@@ -237,6 +262,8 @@ enum ActionButtonType {
     ActionButtonType.archive => 10,
     ActionButtonType.unarchive => 10,
     ActionButtonType.moveToLockFolder => 10,
+    ActionButtonType.markPrivate => 10,
+    ActionButtonType.unmarkPrivate => 10,
     ActionButtonType.deleteLocal => 10,
     ActionButtonType.delete => 10,
     ActionButtonType.restoreTrash => 10,

@@ -9,6 +9,7 @@
   import type { AssetMultiSelectManager } from '$lib/managers/asset-multi-select-manager.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import type { TimelineAsset, Viewport } from '$lib/managers/timeline-manager/types';
   import AssetDeleteConfirmModal from '$lib/modals/AssetDeleteConfirmModal.svelte';
   import ShortcutsModal from '$lib/modals/ShortcutsModal.svelte';
@@ -289,7 +290,12 @@
     switch (action.type) {
       case AssetAction.ARCHIVE:
       case AssetAction.DELETE:
-      case AssetAction.TRASH: {
+      case AssetAction.TRASH:
+      case AssetAction.SET_PRIVATE: {
+        // a freshly marked asset only disappears while private mode is off
+        if (action.type === AssetAction.SET_PRIVATE && privateModeManager.enabled) {
+          break;
+        }
         const nextAsset = assetCursor.nextAsset ?? assetCursor.previousAsset;
         assets.splice(
           assets.findIndex((currentAsset) => currentAsset.id === action.asset.id),

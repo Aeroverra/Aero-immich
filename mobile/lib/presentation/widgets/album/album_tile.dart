@@ -20,11 +20,22 @@ class AlbumTile extends ConsumerWidget {
     final albumThumbnailAsset = ref.watch(assetServiceProvider).getRemoteAsset(album.thumbnailAssetId ?? "");
 
     return LargeLeadingTile(
-      title: Text(
-        album.name,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+      title: Row(
+        children: [
+          if (album.isPrivate)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Icon(Icons.lock_person_outlined, size: 18, color: context.colorScheme.onSurfaceSecondary),
+            ),
+          Expanded(
+            child: Text(
+              album.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: context.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
       subtitle: Text(
         '${context.t.items_count(count: album.assetCount)} • ${isOwner ? context.t.owned : context.t.shared_by_user(user: album.ownerName)}',

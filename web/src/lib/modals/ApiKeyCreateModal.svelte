@@ -2,6 +2,7 @@
   import ApiKeyPermissionsPicker from '$lib/components/ApiKeyPermissionsPicker.svelte';
   import ApiKeySecretModal from '$lib/modals/ApiKeySecretModal.svelte';
   import { handleCreateApiKey } from '$lib/services/api-key.service';
+  import { toApiKeyPermissions } from '$lib/utils/api-key-permissions';
   import { Permission } from '@immich/sdk';
   import { Field, FormModal, Input, modalManager } from '@immich/ui';
   import { mdiKeyVariant } from '@mdi/js';
@@ -13,10 +14,9 @@
 
   let name = $state('API Key');
   let selectedPermissions = $state<Permission[]>([]);
-  const isAllPermissions = $derived(selectedPermissions.length === Object.keys(Permission).length - 1);
 
   const onSubmit = async () => {
-    const permissions = isAllPermissions ? [Permission.All] : selectedPermissions;
+    const permissions = toApiKeyPermissions(selectedPermissions);
     const response = await handleCreateApiKey({ name, permissions });
     if (response) {
       await modalManager.show(ApiKeySecretModal, { secret: response.secret });

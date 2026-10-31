@@ -87,7 +87,7 @@ describe(SyncEntityType.MemoryV1, () => {
     ]);
 
     await ctx.syncAckAll(auth, response);
-    await memoryRepo.update(memory.id, { seenAt: new Date() });
+    await memoryRepo.update(memory.id, { seenAt: new Date() }, { privateMode: true, userId: user.id });
     const newResponse = await ctx.syncStream(auth, [SyncRequestType.MemoriesV1]);
     expect(newResponse).toEqual([
       {

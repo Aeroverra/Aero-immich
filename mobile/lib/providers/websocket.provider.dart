@@ -97,6 +97,7 @@ class WebsocketNotifier extends StateNotifier<WebsocketState> {
         socket.on('on_asset_trash', _handleRemoteChange);
         socket.on('on_asset_restore', _handleRemoteChange);
         socket.on('on_asset_hidden', _handleRemoteChange);
+        socket.on('on_asset_private_update', _handleRemoteChange);
         socket.on('on_asset_update', _handleRemoteChange);
         socket.on('on_config_update', _refreshServerInfo);
         socket.on('on_new_release', _handleReleaseUpdates);

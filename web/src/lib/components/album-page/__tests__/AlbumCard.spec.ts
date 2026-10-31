@@ -77,6 +77,22 @@ describe('AlbumCard component', () => {
     expect(albumDetailsElement).toHaveTextContent('0 item');
   });
 
+  it('shows a private indicator for private albums', () => {
+    const album = albumFactory.build({ isPrivate: true, shared: false, assetCount: 3 });
+    sut = render(AlbumCard, { album, showItemCount: true });
+
+    const privateElement = sut.getByTestId('album-private');
+    expect(privateElement).toHaveTextContent('Private');
+    expect(sut.getByTestId('album-details')).toHaveTextContent(/3 items . Private/);
+  });
+
+  it('does not show a private indicator for regular albums', () => {
+    const album = albumFactory.build({ isPrivate: false });
+    sut = render(AlbumCard, { album, showItemCount: true });
+
+    expect(sut.queryByTestId('album-private')).not.toBeInTheDocument();
+  });
+
   it('hides context menu when "onShowContextMenu" is undefined', () => {
     const album = Object.freeze(albumFactory.build({ albumThumbnailAssetId: null }));
     sut = render(AlbumCard, { album });

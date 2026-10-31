@@ -598,6 +598,11 @@ export type UserPreferences = {
   recentlyAdded: {
     sidebarWeb: boolean;
   };
+  privateMode: {
+    timeoutMinutes: number;
+    sidebarWeb: boolean;
+    includeInMemories: boolean;
+  };
 };
 
 export type UserMetadataItem<T extends keyof UserMetadata = UserMetadataKey> = {

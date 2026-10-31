@@ -9,6 +9,7 @@ import z from 'zod';
 const UpdateAssetBaseSchema = z
   .object({
     isFavorite: z.boolean().optional().describe('Mark as favorite'),
+    isPrivate: z.boolean().optional().describe('Mark as private (requires private mode)'),
     visibility: AssetVisibilitySchema.optional(),
     dateTimeOriginal: z.string().optional().describe('Original date and time'),
     latitude: latitudeSchema.optional().describe('Latitude coordinate'),
@@ -80,6 +81,7 @@ const AssetStatsSchema = z
   .object({
     visibility: AssetVisibilitySchema.optional(),
     isFavorite: stringToBool.optional().describe('Filter by favorite status'),
+    isPrivate: stringToBool.optional().describe('Only private assets'),
     isTrashed: stringToBool.optional().describe('Filter by trash status'),
   })
   .meta({ id: 'AssetStatsDto' });

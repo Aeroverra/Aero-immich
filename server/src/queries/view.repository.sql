@@ -9,6 +9,7 @@ where
   "ownerId" = $2::uuid
   and "visibility" = $3
   and "deletedAt" is null
+  and "asset"."isPrivate" = $4
   and "fileCreatedAt" is not null
   and "fileModifiedAt" is not null
   and "localDateTime" is not null
@@ -26,10 +27,11 @@ where
   "ownerId" = $1::uuid
   and "visibility" = $2
   and "deletedAt" is null
+  and "asset"."isPrivate" = $3
   and "fileCreatedAt" is not null
   and "fileModifiedAt" is not null
   and "localDateTime" is not null
-  and "originalPath" like $3
-  and "originalPath" not like $4
+  and "originalPath" like $4
+  and "originalPath" not like $5
 order by
-  regexp_replace("asset"."originalPath", $5, $6) asc
+  regexp_replace("asset"."originalPath", $6, $7) asc
