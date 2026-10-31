@@ -35,14 +35,22 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
         .map((users) => users..add(userId));
   }
 
+  /// [groupAutoStacks] false lists the assets of automatic stacks individually, manual stacks stay collapsed
   TimelineQuery main(
     List<String> userIds,
     GroupAssetsBy groupBy, {
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) => (
-    bucketSource: () => _watchMainBucket(userIds, groupBy: groupBy, privateFilter: privateFilter),
-    assetSource: (offset, count) =>
-        _getMainBucketAssets(userIds, offset: offset, count: count, privateFilter: privateFilter),
+    bucketSource: () =>
+        _watchMainBucket(userIds, groupBy: groupBy, privateFilter: privateFilter, groupAutoStacks: groupAutoStacks),
+    assetSource: (offset, count) => _getMainBucketAssets(
+      userIds,
+      offset: offset,
+      count: count,
+      privateFilter: privateFilter,
+      groupAutoStacks: groupAutoStacks,
+    ),
     origin: TimelineOrigin.main,
   );
 
@@ -50,6 +58,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     List<String> userIds, {
     GroupAssetsBy groupBy = GroupAssetsBy.day,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
     if (groupBy == GroupAssetsBy.none) {
       throw UnsupportedError("GroupAssetsBy.none is not supported for watchMainBucket");
@@ -61,6 +70,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
           groupBy: groupBy.index,
           privateMode: privateFilter.showsOwnPrivate,
           currentUserId: privateFilter.userId ?? '',
+          groupAutoStacks: groupAutoStacks,
         )
         .map((row) {
           final date = row.bucketDate.truncateDate(groupBy);
@@ -74,6 +84,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
     required int offset,
     required int count,
     PrivateModeFilter privateFilter = PrivateModeFilter.off,
+    bool groupAutoStacks = true,
   }) {
     return _db.mergedAssetDrift
         .mergedAsset(
@@ -81,6 +92,7 @@ class TimelineRepository extends DatabaseAccessor<Drift> with $TimelineRepositor
           limit: (_) => Limit(count, offset),
           privateMode: privateFilter.showsOwnPrivate,
           currentUserId: privateFilter.userId ?? '',
+          groupAutoStacks: groupAutoStacks,
         )
         .map(
           (row) => row.remoteId != null && row.ownerId != null

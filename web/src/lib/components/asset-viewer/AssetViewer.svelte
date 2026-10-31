@@ -22,7 +22,7 @@
   import { SlideshowNavigation, SlideshowState, slideshowStore } from '$lib/stores/slideshow.store';
   import { getSharedLink, handlePromiseError } from '$lib/utils';
   import type { OnUndoDelete } from '$lib/utils/actions';
-  import { navigateToAsset } from '$lib/utils/asset-utils';
+  import { isStackGrouped, navigateToAsset } from '$lib/utils/asset-utils';
   import { handleError } from '$lib/utils/handle-error';
   import { navigate } from '$lib/utils/navigation';
   import { InvocationTracker } from '$lib/utils/invocationTracker';
@@ -125,7 +125,8 @@
       return;
     }
 
-    if (asset.stack) {
+    // the assets of an automatic stack are shown one by one while the user does not group them
+    if (asset.stack && isStackGrouped(asset.stack)) {
       stack = await getStack({ id: asset.stack.id });
     }
 

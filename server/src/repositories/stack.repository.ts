@@ -155,12 +155,37 @@ export class StackRepository {
       .executeTakeFirst();
   }
 
+  /**
+   * The stacks a user is about to change by hand, selected by stack id or by the ids of their members, with every
+   * member (trashed and hidden ones included) so that the change can be reported in full
+   */
+  @GenerateSql({ params: [{ stackIds: [DummyValue.UUID] }] })
+  getForUserEdit({ stackIds, assetIds }: { stackIds?: string[]; assetIds?: string[] }) {
+    return this.db
+      .selectFrom('stack')
+      .select(['stack.id', 'stack.primaryAssetId', 'stack.source'])
+      .select((eb) =>
+        jsonArrayFrom(eb.selectFrom('asset').select('asset.id').whereRef('asset.stackId', '=', 'stack.id')).as(
+          'assets',
+        ),
+      )
+      .$if(!!stackIds, (qb) => qb.where('stack.id', 'in', stackIds!))
+      .$if(!!assetIds, (qb) =>
+        qb.where((eb) =>
+          eb.exists(
+            eb.selectFrom('asset').whereRef('asset.stackId', '=', 'stack.id').where('asset.id', 'in', assetIds!),
+          ),
+        ),
+      )
+      .execute();
+  }
+
   @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID] })
   getForAssetRemoval(assetId: string) {
     return this.db
       .selectFrom('asset')
       .leftJoin('stack', 'stack.id', 'asset.stackId')
-      .select(['stackId as id', 'stack.primaryAssetId'])
+      .select(['stackId as id', 'stack.primaryAssetId', 'stack.source'])
       .where('asset.id', '=', assetId)
       .executeTakeFirst();
   }

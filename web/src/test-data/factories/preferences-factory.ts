@@ -53,6 +53,9 @@ export const preferencesFactory = Sync.makeFactory<UserPreferencesResponseDto>({
   recentlyAdded: {
     sidebarWeb: false,
   },
+  stacks: {
+    groupAuto: true,
+  },
   deletedReimport: {
     mode: DeletedReimportMode.Trash,
     albumId: null,

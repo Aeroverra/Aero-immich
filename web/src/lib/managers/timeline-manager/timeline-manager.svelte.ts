@@ -22,6 +22,7 @@ import { WebsocketSupport } from '$lib/managers/timeline-manager/internal/websoc
 import { userPreferencesManager } from '$lib/managers/user-preferences-manager.svelte';
 import { CancellableTask } from '$lib/utils/cancellable-task';
 import {
+  fromTimelinePlainDateTime,
   getOrderingDate,
   isAssetResponseDto,
   setDifference,
@@ -55,10 +56,29 @@ type ScrollAnchor = {
   // Where the viewport top intersects the month (0 = month top, 1 = month bottom)
   viewportTopRatioInMonth: number;
   // First asset intersecting the viewport top, when the month was loaded
-  assetId?: string;
+  asset?: TimelineAsset;
+  // Its position among the assets of the month, to break ties between assets taken at the same time
+  indexInMonth?: number;
   // Asset top relative to the viewport top (negative when partially scrolled past)
   assetOffset?: number;
 };
+
+/**
+ * Options that only filter or group the same timeline. When nothing else changes, the user stays where they are
+ * instead of starting over at the top.
+ */
+const REFILTER_OPTIONS = new Set<string>(['withStacked', 'withAutoStacked', 'withPartners', 'withCoordinates']);
+
+const isRefilter = (previous: TimelineManagerOptions, next: TimelineManagerOptions) => {
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)]) as Set<keyof TimelineManagerOptions>;
+  for (const key of keys) {
+    if (!REFILTER_OPTIONS.has(key) && !isEqual(previous[key], next[key])) {
+      return false;
+    }
+  }
+  return true;
+};
+
 export class TimelineManager extends VirtualScrollManager {
   override bottomSectionHeight = $state(60);
 
@@ -289,11 +309,16 @@ export class TimelineManager extends VirtualScrollManager {
     if (options.deferInit) {
       return;
     }
-    if (this.#options !== TimelineManager.#INIT_OPTIONS && isEqual(this.#options, options)) {
+    if (this.#options === TimelineManager.#INIT_OPTIONS) {
+      await this.#reload(options);
+      return;
+    }
+    if (isEqual(this.#options, options)) {
       return;
     }
 
-    await this.#reload(options);
+    // a different album, person, tag or view starts at the top; grouping stacks or showing partners keeps the place
+    await this.#reload(options, { keepScrollPosition: isRefilter(this.#options, options) });
   }
 
   /**
@@ -333,7 +358,7 @@ export class TimelineManager extends VirtualScrollManager {
 
   /**
    * Remember what is at the top of the viewport before the months are thrown away: the first asset that
-   * intersects the viewport top in the top-most visible month (plus its offset from the viewport top),
+   * intersects the viewport top in the top-most visible month (plus its offset from the viewport top and its stack),
    * and, as a fallback, how far down that month the viewport top sits.
    */
   #captureScrollAnchor(): ScrollAnchor | undefined {
@@ -359,19 +384,18 @@ export class TimelineManager extends VirtualScrollManager {
       return anchor;
     }
 
+    let indexInMonth = 0;
     for (const day of month.timelineDays) {
       for (const viewerAsset of day.viewerAssets) {
         const position = viewerAsset.position;
-        if (!position) {
-          continue;
-        }
         // same arithmetic as TimelineMonth.findAssetAbsolutePosition
-        const assetTop = month.top + day.top + position.top + this.headerHeight;
-        if (assetTop + position.height > viewportTop) {
-          anchor.assetId = viewerAsset.id;
-          anchor.assetOffset = assetTop - viewportTop;
+        if (position && month.top + day.top + position.top + this.headerHeight + position.height > viewportTop) {
+          anchor.asset = viewerAsset.asset;
+          anchor.indexInMonth = indexInMonth;
+          anchor.assetOffset = month.top + day.top + position.top + this.headerHeight - viewportTop;
           return anchor;
         }
+        indexInMonth++;
       }
     }
 
@@ -379,8 +403,9 @@ export class TimelineManager extends VirtualScrollManager {
   }
 
   /**
-   * Put the anchored asset back at the same offset from the viewport top. When the asset is gone
-   * (for example it just became hidden), land on the nearest month by date at the same relative position.
+   * Put the anchored asset back at the same offset from the viewport top. When the asset is not shown any more, the
+   * asset standing in for it takes its place (see #findAnchorReplacement). When its month is gone, land on the nearest
+   * month by date at the same relative position.
    * Months above the anchor that are still estimates are compensated later by TimelineMonth.height,
    * which shifts the scroll position whenever a month above the viewport changes height.
    */
@@ -394,11 +419,12 @@ export class TimelineManager extends VirtualScrollManager {
     // avoid deferred layouts so the positions below are real, see Timeline.scrollAndLoadAsset
     this.isScrollingOnLoad = true;
     try {
-      if (anchor.assetId !== undefined && anchor.assetOffset !== undefined) {
+      if (anchor.asset && anchor.assetOffset !== undefined) {
         await this.loadTimelineMonth(month.yearMonth, { cancelable: false });
+        const assetId = await this.#findAnchorReplacement(month, anchor.asset, anchor.indexInMonth ?? 0);
         // let the DOM pick up the new total height before scrolling, otherwise the browser clamps the target
         await tick();
-        const position = month.findAssetAbsolutePosition(anchor.assetId);
+        const position = assetId ? month.findAssetAbsolutePosition(assetId) : undefined;
         if (position) {
           this.scrollTo(position.top - anchor.assetOffset);
           return;
@@ -410,6 +436,55 @@ export class TimelineManager extends VirtualScrollManager {
     } finally {
       this.isScrollingOnLoad = false;
     }
+  }
+
+  /**
+   * The asset to put where the anchored asset was:
+   * 1. the asset itself
+   * 2. the asset shown for its stack (grouping stacks hid the member, or the cover changed)
+   * 3. the asset of the month closest in time, ties going to the one that took its place
+   */
+  async #findAnchorReplacement(month: TimelineMonth, asset: TimelineAsset, indexInMonth: number) {
+    if (month.findAssetById(asset)) {
+      return asset.id;
+    }
+
+    let stack: { id: string; primaryAssetId: string } | null | undefined = asset.stack;
+    // a stack member shown on its own does not carry its stack in the time bucket, so ask for it; skipped when the
+    // asset is private and the mode was just turned off, it is simply hidden then
+    if (!stack && (!asset.isPrivate || privateModeManager.enabled)) {
+      try {
+        const info = await getAssetInfo({ ...authManager.params, id: asset.id });
+        stack = info.stack;
+      } catch {
+        stack = undefined;
+      }
+    }
+    if (stack) {
+      for (const candidate of month.assetsIterator()) {
+        if (candidate.id === stack.primaryAssetId || candidate.stack?.id === stack.id) {
+          return candidate.id;
+        }
+      }
+    }
+
+    const orderBy = this.#options.orderBy || AssetOrderBy.TakenAt;
+    const target = fromTimelinePlainDateTime(getOrderingDate(asset, orderBy)).toMillis();
+    let closest: string | undefined;
+    let closestDiff = Infinity;
+    let closestDistance = Infinity;
+    let index = 0;
+    for (const candidate of month.assetsIterator()) {
+      const diff = Math.abs(fromTimelinePlainDateTime(getOrderingDate(candidate, orderBy)).toMillis() - target);
+      const distance = Math.abs(index - indexInMonth);
+      if (diff < closestDiff || (diff === closestDiff && distance < closestDistance)) {
+        closest = candidate.id;
+        closestDiff = diff;
+        closestDistance = distance;
+      }
+      index++;
+    }
+    return closest;
   }
 
   async #init(options: TimelineManagerOptions) {

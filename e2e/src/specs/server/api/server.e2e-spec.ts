@@ -106,6 +106,7 @@ describe('/server', () => {
         ocr: false,
         passwordLogin: true,
         realtimeTranscoding: false,
+        stackSource: true,
         search: true,
         sidecar: true,
         trash: true,

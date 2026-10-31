@@ -8,6 +8,7 @@ import 'package:immich_mobile/providers/app_settings.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/settings.provider.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_group_settings.dart';
 import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_layout_settings.dart';
+import 'package:immich_mobile/widgets/settings/asset_list_settings/asset_list_stack_settings.dart';
 import 'package:immich_mobile/widgets/settings/settings_sub_page_scaffold.dart';
 import 'package:immich_mobile/widgets/settings/settings_switch_list_tile.dart';
 
@@ -28,6 +29,7 @@ class AssetListSettings extends HookConsumerWidget {
           ref.invalidate(settingsProvider);
         },
       ),
+      const StackSettings(),
       const LayoutSettings(),
       const GroupSettings(),
     ];
