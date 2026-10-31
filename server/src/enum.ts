@@ -361,6 +361,11 @@ export enum Permission {
   UserProfileImageUpdate = 'userProfileImage.update',
   UserProfileImageDelete = 'userProfileImage.delete',
 
+  VideoBookmarkCreate = 'videoBookmark.create',
+  VideoBookmarkRead = 'videoBookmark.read',
+  VideoBookmarkUpdate = 'videoBookmark.update',
+  VideoBookmarkDelete = 'videoBookmark.delete',
+
   ViewCreate = 'view.create',
   ViewRead = 'view.read',
   ViewUpdate = 'view.update',
@@ -1410,6 +1415,7 @@ export enum ApiTag {
   Trash = 'Trash',
   UsersAdmin = 'Users (admin)',
   Users = 'Users',
+  VideoBookmarks = 'Video bookmarks',
   Views = 'Views',
   Workflows = 'Workflows',
 }

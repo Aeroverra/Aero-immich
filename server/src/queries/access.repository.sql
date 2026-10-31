@@ -323,6 +323,15 @@ where
   "partner"."sharedById" in ($1)
   and "partner"."sharedWithId" = $2
 
+-- AccessRepository.videoBookmark.checkOwnerAccess
+select
+  "video_bookmark"."id"
+from
+  "video_bookmark"
+where
+  "video_bookmark"."id" in ($1)
+  and "video_bookmark"."userId" = $2
+
 -- AccessRepository.view.checkOwnerAccess
 select
   "view"."id"
