@@ -1,6 +1,11 @@
 import { AssetEditAction, AssetEditActionItem, MirrorAxis } from 'src/dtos/editing.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
-import { transformFaceBoundingBox, transformOcrBoundingBox } from 'src/utils/transform';
+import {
+  getOutputDimensions,
+  transformEditedFaceToOriginal,
+  transformFaceBoundingBox,
+  transformOcrBoundingBox,
+} from 'src/utils/transform';
 import { describe, expect, it } from 'vitest';
 
 describe('transformFaceBoundingBox', () => {
@@ -182,6 +187,100 @@ describe('transformFaceBoundingBox', () => {
         boundingBoxY2: 49,
       });
     });
+  });
+});
+
+describe('transformEditedFaceToOriginal', () => {
+  const original = { width: 2580, height: 3220 };
+
+  it('should map a face found on a rotated preview back to the unedited image', () => {
+    const edits: AssetEditActionItem[] = [{ action: AssetEditAction.Rotate, parameters: { angle: 270 } }];
+
+    const result = transformEditedFaceToOriginal({ x1: 1291, y1: 309, x2: 1416, y2: 485 }, edits, {
+      source: { width: 1797, height: 1440 },
+      edited: getOutputDimensions(edits, original),
+      original,
+    });
+
+    expect(result).toEqual({
+      boundingBoxX1: 1711,
+      boundingBoxY1: 2313,
+      boundingBoxX2: 2026,
+      boundingBoxY2: 2537,
+      imageWidth: 2580,
+      imageHeight: 3220,
+    });
+  });
+
+  it('should map a face found on a cropped preview back to the unedited image', () => {
+    const edits: AssetEditActionItem[] = [
+      { action: AssetEditAction.Crop, parameters: { x: 100, y: 200, width: 1000, height: 500 } },
+    ];
+
+    const result = transformEditedFaceToOriginal({ x1: 50, y1: 25, x2: 100, y2: 75 }, edits, {
+      source: { width: 500, height: 250 },
+      edited: getOutputDimensions(edits, original),
+      original,
+    });
+
+    expect(result).toEqual({
+      boundingBoxX1: 200,
+      boundingBoxY1: 250,
+      boundingBoxX2: 300,
+      boundingBoxY2: 350,
+      imageWidth: 2580,
+      imageHeight: 3220,
+    });
+  });
+
+  it('should use the inverse transform dimensions when the unedited dimensions are unknown', () => {
+    const edits: AssetEditActionItem[] = [{ action: AssetEditAction.Rotate, parameters: { angle: 90 } }];
+
+    const result = transformEditedFaceToOriginal({ x1: 10, y1: 20, x2: 30, y2: 40 }, edits, {
+      source: { width: 400, height: 300 },
+      edited: { width: 400, height: 300 },
+    });
+
+    expect(result).toEqual({
+      boundingBoxX1: 20,
+      boundingBoxY1: 370,
+      boundingBoxX2: 40,
+      boundingBoxY2: 390,
+      imageWidth: 300,
+      imageHeight: 400,
+    });
+  });
+
+  const cases: [string, AssetEditActionItem[]][] = [
+    ['rotate 90', [{ action: AssetEditAction.Rotate, parameters: { angle: 90 } }]],
+    ['rotate 180', [{ action: AssetEditAction.Rotate, parameters: { angle: 180 } }]],
+    ['rotate 270', [{ action: AssetEditAction.Rotate, parameters: { angle: 270 } }]],
+    ['mirror', [{ action: AssetEditAction.Mirror, parameters: { axis: MirrorAxis.Horizontal } }]],
+    [
+      'crop, rotate and mirror',
+      [
+        { action: AssetEditAction.Crop, parameters: { x: 300, y: 400, width: 1800, height: 2000 } },
+        { action: AssetEditAction.Rotate, parameters: { angle: 90 } },
+        { action: AssetEditAction.Mirror, parameters: { axis: MirrorAxis.Vertical } },
+      ],
+    ],
+  ];
+
+  it.each(cases)('should return the same box when the stored face is shown again (%s)', (_, edits) => {
+    const edited = getOutputDimensions(edits, original);
+    const scale = 1440 / Math.max(edited.width, edited.height);
+    const source = { width: Math.round(edited.width * scale), height: Math.round(edited.height * scale) };
+    const box = { x1: 300, y1: 200, x2: 420, y2: 360 };
+
+    const stored = transformEditedFaceToOriginal(box, edits, { source, edited, original });
+    const shown = transformFaceBoundingBox(stored, edits, original);
+
+    expect(shown.imageWidth).toBe(edited.width);
+    expect(shown.imageHeight).toBe(edited.height);
+    expect(shown.boundingBoxX1 * (source.width / edited.width)).toBeCloseTo(box.x1, -0.5);
+    expect(shown.boundingBoxY1 * (source.height / edited.height)).toBeCloseTo(box.y1, -0.5);
+    expect(shown.boundingBoxX2 * (source.width / edited.width)).toBeCloseTo(box.x2, -0.5);
+    expect(shown.boundingBoxY2 * (source.height / edited.height)).toBeCloseTo(box.y2, -0.5);
   });
 });
 
