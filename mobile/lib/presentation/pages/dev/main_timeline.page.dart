@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:immich_mobile/presentation/widgets/feature_message/feature_message_dialog.widget.dart';
 import 'package:immich_mobile/presentation/widgets/memory/memory_lane.widget.dart';
-import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/group_auto_stacks_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
 import 'package:immich_mobile/providers/feature_message.provider.dart';
@@ -56,7 +55,7 @@ class _MainTimelinePageState extends ConsumerState<MainTimelinePage> {
         floating: true,
         pinned: false,
         snap: false,
-        actions: const [CustomViewSwitcherButton(), GroupAutoStacksButton()],
+        actions: const [GroupAutoStacksButton()],
         leading: widget.scrollToDate == null ? null : const BackButton(),
       ),
       topSliverWidget: const SliverToBoxAdapter(child: MemoryLane()),
