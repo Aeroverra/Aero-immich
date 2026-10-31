@@ -222,7 +222,7 @@ export class SearchService extends BaseService {
     ]);
     const page = dto.page ?? 1;
     const size = dto.size;
-    const { hasNextPage, items } = await this.searchRepository.searchSmart(
+    const { hasNextPage, items, frameTimestamps } = await this.searchRepository.searchSmart(
       { page, size },
       {
         ...dto,
@@ -234,7 +234,7 @@ export class SearchService extends BaseService {
       },
     );
 
-    return this.mapResponse(items, { auth }, { nextPage: hasNextPage ? (page + 1).toString() : null });
+    return this.mapResponse(items, { auth }, { nextPage: hasNextPage ? (page + 1).toString() : null }, frameTimestamps);
   }
 
   async getAssetsByCity(auth: AuthDto): Promise<AssetResponseDto[]> {
@@ -334,13 +334,13 @@ export class SearchService extends BaseService {
     ]);
 
     // no cursor until a rank-aware pagination strategy for smart search is decided
-    const { items } = await this.searchRepository.searchSmartV3(
+    const { items, frameTimestamps } = await this.searchRepository.searchSmartV3(
       { take: dto.size },
       { filter, withExif: dto.withExif, embedding },
       scope,
     );
 
-    return this.mapResponse(items, { auth });
+    return this.mapResponse(items, { auth }, {}, frameTimestamps);
   }
 
   private async resolveSearchScopeV3(
@@ -483,10 +483,12 @@ export class SearchService extends BaseService {
     });
   }
 
+  /** `frameTimestamps` are the positions of the frames that smart search matched in videos, by asset ID */
   private async mapResponse(
     assets: MapAsset[],
     options: AssetMapOptions,
     page: { nextPage?: string | null; nextCursor?: string | null } = {},
+    frameTimestamps?: Map<string, number>,
   ): Promise<SearchResponseDto> {
     const items = await this.withStacks(assets);
     return {
@@ -498,6 +500,12 @@ export class SearchService extends BaseService {
         facets: [],
         nextPage: page.nextPage ?? null,
         nextCursor: page.nextCursor ?? null,
+        ...(frameTimestamps && {
+          matchedFrames: assets.flatMap(({ id }) => {
+            const frameTimestamp = frameTimestamps.get(id);
+            return frameTimestamp === undefined ? [] : [{ assetId: id, frameTimestamp }];
+          }),
+        }),
       },
     };
   }

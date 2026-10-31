@@ -47,16 +47,18 @@ AssetResponseDto _asset(String id, {String? stackId, StackSource source = StackS
       : Optional.present(AssetStackResponseDto(assetCount: 2, id: stackId, primaryAssetId: id, source_: source)),
 );
 
-SearchResponseDto _page(List<AssetResponseDto> items) => SearchResponseDto(
-  albums: SearchAlbumResponseDto(count: 0, total: 0),
-  assets: SearchAssetResponseDto(
-    count: items.length,
-    items: items,
-    nextCursor: null,
-    nextPage: '2',
-    total: items.length,
-  ),
-);
+SearchResponseDto _page(List<AssetResponseDto> items, {List<SearchMatchedFrameResponseDto>? matchedFrames}) =>
+    SearchResponseDto(
+      albums: SearchAlbumResponseDto(count: 0, total: 0),
+      assets: SearchAssetResponseDto(
+        count: items.length,
+        items: items,
+        nextCursor: null,
+        nextPage: '2',
+        total: items.length,
+        matchedFrames: matchedFrames == null ? const Optional.absent() : Optional.present(matchedFrames),
+      ),
+    );
 
 void main() {
   late _MockSearchApiRepository api;
@@ -97,5 +99,26 @@ void main() {
 
     expect(await search(items, groupAuto: false), ['burst-1', 'burst-2', 'video']);
     expect(await search(items), ['burst-1', 'video']);
+  });
+
+  test('keeps where smart search matched in the videos that matched on a frame', () async {
+    when(() => api.search(any(), any())).thenAnswer(
+      (_) async => _page(
+        [_asset('video'), _asset('plain')],
+        matchedFrames: [SearchMatchedFrameResponseDto(assetId: 'video', frameTimestamp: 83000)],
+      ),
+    );
+
+    final result = await service.search(_filter, 1);
+
+    expect(result!.matchedFrames, {'video': 83000});
+  });
+
+  test('has no matched frames when the server does not send them', () async {
+    when(() => api.search(any(), any())).thenAnswer((_) async => _page([_asset('video')]));
+
+    final result = await service.search(_filter, 1);
+
+    expect(result!.matchedFrames, isEmpty);
   });
 }
