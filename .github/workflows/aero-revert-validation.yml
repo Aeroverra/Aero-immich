@@ -1,0 +1,121 @@
+name: Aero revert validation
+
+# Fork-only workflow. It lives ONLY on the `main` branch (see docs-aero/README.md).
+#
+# Proves that scripts/aero/revert-to-immich.sql takes a database migrated by a
+# fork server image back to a state the matching UPSTREAM image boots on with
+# nothing to migrate and no schema drift. Two parts:
+#
+#   coverage   every fork migration file (server/src/schema/migrations-aero)
+#              must be deleted from kysely_migrations by the script, nothing
+#              upstream ships may be, and upstream's own folder must match the
+#              upstream tag exactly (scripts/aero/revert-coverage-check.sh)
+#   runtime    fresh postgres + valkey, boot the fork image (migrates), stop,
+#              run the script (refused without the token, applied with it,
+#              idempotent), boot ghcr.io/immich-app/immich-server:<tag> and
+#              assert "Finished running migrations" with nothing executed,
+#              "No schema drift detected", a clean `immich-admin schema-check`
+#              and no fork column left (scripts/aero/revert-validate.sh)
+#
+# Called by aero-release.yml for every release candidate (a broken revert
+# blocks the release), and by hand from the Actions tab for any image/tag pair.
+
+on:
+  workflow_call:
+    inputs:
+      fork_image:
+        description: 'Fork server image to migrate with, for example ghcr.io/aeroverra/immich-server:v3.2.0-aero-rc-abc1234'
+        type: string
+        required: true
+      upstream_tag:
+        description: 'Upstream release tag the fork image was built from, for example v3.2.0'
+        type: string
+        required: true
+      ref:
+        description: 'Commit of main whose scripts/aero and migrations are validated (default: the calling ref)'
+        type: string
+        required: false
+        default: ''
+  workflow_dispatch:
+    inputs:
+      fork_image:
+        description: 'Fork server image to migrate with'
+        type: string
+        required: true
+        default: 'ghcr.io/aeroverra/immich-server:aero'
+      upstream_tag:
+        description: 'Upstream release tag the fork image was built from, for example v3.2.0'
+        type: string
+        required: true
+      ref:
+        description: 'Commit or branch of the fork to take the scripts from (default: main)'
+        type: string
+        required: false
+        default: ''
+
+permissions: {}
+
+env:
+  UPSTREAM_REPO: https://github.com/immich-app/immich.git
+
+jobs:
+  validate:
+    name: Revert ${{ inputs.fork_image }} to upstream ${{ inputs.upstream_tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read
+    env:
+      FORK_IMAGE: ${{ inputs.fork_image }}
+      TAG: ${{ inputs.upstream_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+
+      - name: Fetch the upstream tag
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected upstream tag format: $TAG"; exit 1; }
+          git fetch --no-tags --depth=1 "$UPSTREAM_REPO" "+refs/tags/$TAG:refs/tags/$TAG"
+
+      - name: Migration coverage of revert-to-immich.sql
+        run: bash scripts/aero/revert-coverage-check.sh "$TAG"
+
+      - name: Login to GitHub Container Registry
+        # the rc image may be private until the package is made public
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Migrate with the fork image, revert, boot upstream
+        env:
+          KEEP_LOGS_DIR: ${{ runner.temp }}/aero-revert-logs
+          AERO_REVERT_ID: gh${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          docker pull "$FORK_IMAGE"
+          docker pull "ghcr.io/immich-app/immich-server:$TAG"
+          bash scripts/aero/revert-validate.sh "$FORK_IMAGE" "$TAG" 2>&1 | tee "$RUNNER_TEMP/revert-validate.log"
+          {
+            echo "## Revert validation: \`$FORK_IMAGE\` -> upstream \`$TAG\`"
+            echo
+            echo "revert-to-immich.sql applied on a database migrated by the fork image; upstream \`$TAG\` then booted with nothing to migrate and no schema drift."
+            echo
+            echo '```'
+            grep -E '^\[revert-validate\]|Migration "|Finished running migrations|schema drift|Migrations are up to date' "$RUNNER_TEMP/revert-validate.log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive container logs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: aero-revert-validation-logs
+          path: ${{ runner.temp }}/aero-revert-logs
+          if-no-files-found: ignore
