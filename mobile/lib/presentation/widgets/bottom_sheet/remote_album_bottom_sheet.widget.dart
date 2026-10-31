@@ -4,7 +4,6 @@ import 'package:immich_mobile/constants/enums.dart';
 import 'package:immich_mobile/domain/models/album/album.model.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/presentation/actions/action.widget.dart';
-import 'package:immich_mobile/presentation/actions/add_people.action.dart';
 import 'package:immich_mobile/presentation/actions/archive.action.dart';
 import 'package:immich_mobile/presentation/actions/asset_debug.action.dart';
 import 'package:immich_mobile/presentation/actions/delete.action.dart';
@@ -13,6 +12,7 @@ import 'package:immich_mobile/presentation/actions/edit_datetime.action.dart';
 import 'package:immich_mobile/presentation/actions/edit_location.action.dart';
 import 'package:immich_mobile/presentation/actions/favorite.action.dart';
 import 'package:immich_mobile/presentation/actions/lock.action.dart';
+import 'package:immich_mobile/presentation/actions/people.action.dart';
 import 'package:immich_mobile/presentation/actions/private.action.dart';
 import 'package:immich_mobile/presentation/actions/remove_from_album.action.dart';
 import 'package:immich_mobile/presentation/actions/set_album_cover.action.dart';
@@ -115,7 +115,7 @@ class _RemoteAlbumBottomSheetState extends ConsumerState<RemoteAlbumBottomSheet>
         const .new(action: DownloadAction(source: .timeline)),
         // tags only apply to the user's own assets, the action leaves the others out
         const .new(action: TagAction(source: .timeline)),
-        const .new(action: AddPeopleAction(source: .timeline)),
+        const .new(action: PeopleAction(source: .timeline)),
         if (ownsAlbum) ...const [
           .new(action: DeleteAction(source: .timeline)),
           .new(action: EditDateTimeAction(source: .timeline)),

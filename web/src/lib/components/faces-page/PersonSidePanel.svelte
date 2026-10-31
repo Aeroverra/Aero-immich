@@ -19,7 +19,15 @@
     type PersonResponseDto,
   } from '@immich/sdk';
   import { Icon, IconButton, LoadingSpinner, modalManager, toastManager } from '@immich/ui';
-  import { mdiAccountOff, mdiArrowLeftThin, mdiArrowRightThin, mdiPencil, mdiRestart, mdiTrashCan } from '@mdi/js';
+  import {
+    mdiAccountOff,
+    mdiArrowLeftThin,
+    mdiArrowRightThin,
+    mdiCropFree,
+    mdiPencil,
+    mdiRestart,
+    mdiTrashCan,
+  } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
   import { linear } from 'svelte/easing';
@@ -312,6 +320,16 @@
                       heightStyle="90px"
                     />
                   {/await}
+                {/if}
+                {#if face.isWholeAsset}
+                  <span
+                    class="absolute inset-s-1 bottom-1 flex size-6 items-center justify-center rounded-full bg-black/70 text-white"
+                    title={$t('face_whole_asset')}
+                    aria-label={$t('face_whole_asset')}
+                    data-testid="face-whole-asset"
+                  >
+                    <Icon icon={mdiCropFree} size="16" />
+                  </span>
                 {/if}
                 {#if typeof face.frameTimestamp === 'number'}
                   {@const time = formatVideoPosition(face.frameTimestamp)}

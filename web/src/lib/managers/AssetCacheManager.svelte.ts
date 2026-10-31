@@ -53,7 +53,7 @@ class AssetCacheManager {
           this.invalidateAsset(id);
         }
       },
-      PersonAssetsAdd: (assetIds) => {
+      AssetsPeopleUpdate: (assetIds) => {
         for (const id of assetIds) {
           this.invalidateAsset(id);
         }
