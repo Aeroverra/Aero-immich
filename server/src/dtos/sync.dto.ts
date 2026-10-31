@@ -523,6 +523,12 @@ const SyncStreamSchema = z
   .object({
     types: z.array(SyncRequestTypeSchema).describe('Sync request types'),
     reset: z.boolean().optional().describe('Reset sync state'),
+    includePrivate: z
+      .boolean()
+      .optional()
+      .describe(
+        'Include assets marked private. Without it, private assets are left out of the stream and a delete is emitted when an asset becomes private.',
+      ),
   })
   .meta({ id: 'SyncStreamDto' });
 

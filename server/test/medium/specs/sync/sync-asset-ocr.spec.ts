@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { OcrRepository } from 'src/repositories/ocr.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
@@ -16,6 +17,23 @@ const setup = async (db?: Kysely<DB>) => {
 
 beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
+});
+
+/** one visible OCR box on the given asset */
+const ocrBox = (assetId: string) => ({
+  assetId,
+  x1: 0.1,
+  y1: 0.2,
+  x2: 0.9,
+  y2: 0.2,
+  x3: 0.9,
+  y3: 0.8,
+  x4: 0.1,
+  y4: 0.8,
+  boxScore: 0.95,
+  textScore: 0.92,
+  text: 'Hello World',
+  isVisible: true,
 });
 
 describe(SyncEntityType.AssetOcrV1, () => {
@@ -431,5 +449,45 @@ describe(SyncEntityType.AssetOcrDeleteV1, () => {
       },
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold the ocr of a private asset and send it again once it is public and touched', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.get(OcrRepository).upsert(asset.id, [ocrBox(asset.id)], 'Hello World');
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AssetOcrV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AssetOcrV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetOcrV1]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AssetOcrV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetOcrV1,
+          data: expect.objectContaining({ assetId: asset.id, text: 'Hello World' }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetOcrV1]);
+    });
+
+    it('should carry the ocr of a private asset for a client that opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await ctx.get(OcrRepository).upsert(asset.id, [ocrBox(asset.id)], 'Hello World');
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetOcrV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetOcrV1,
+          data: expect.objectContaining({ assetId: asset.id, text: 'Hello World' }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });
