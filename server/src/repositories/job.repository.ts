@@ -210,8 +210,8 @@ export class JobRepository {
         options: this.getJobOptions(item) || undefined,
       } as JobItem & { data: any; options: JobsOptions | undefined };
 
-      if (job.options?.jobId || job.options?.deduplication) {
-        // need to use add() instead of addBulk() for jobId/deduplication to take effect
+      if (job.options?.jobId || job.options?.deduplication || job.options?.lifo) {
+        // need to use add() instead of addBulk() for jobId/deduplication/lifo to take effect
         promises.push(this.getQueue(queueName).add(item.name, item.data, job.options));
       } else {
         itemsByQueue[queueName] ||= [];
@@ -281,6 +281,10 @@ export class JobRepository {
       }
       case JobName.PersonGenerateThumbnail: {
         return { priority: 1 };
+      }
+      case JobName.AssetTranscribeVideo: {
+        // a video someone asked for goes to the front of the queue instead of waiting behind a backfill
+        return item.data.next ? { lifo: true } : null;
       }
       case JobName.FacialRecognitionQueueAll: {
         return { deduplication: { id: JobName.FacialRecognitionQueueAll } };

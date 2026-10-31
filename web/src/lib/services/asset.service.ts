@@ -33,6 +33,7 @@ import {
   mdiPlus,
   mdiPresentationPlay,
   mdiShareVariantOutline,
+  mdiSubtitlesOutline,
   mdiTagPlusOutline,
   mdiTune,
 } from '@mdi/js';
@@ -46,6 +47,7 @@ import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
 import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+import { videoTranscriptManager } from '$lib/managers/video-transcript-manager.svelte';
 import AssetAddToAlbumModal from '$lib/modals/AssetAddToAlbumModal.svelte';
 import AssetTagModal from '$lib/modals/AssetTagModal.svelte';
 import ProfileImageCropperModal from '$lib/modals/ProfileImageCropperModal.svelte';
@@ -109,7 +111,21 @@ export const getAssetBulkActions = ($t: MessageFormatter) => {
     $if: () => ownedAssets.every((asset) => asset.isVideo),
   };
 
-  return { AddToAlbum, RefreshFacesJob, RefreshMetadataJob, RegenerateThumbnailJob, TranscodeVideoJob };
+  const TranscribeVideoJob: ActionItem = {
+    title: $t('transcribe_videos'),
+    icon: mdiSubtitlesOutline,
+    onAction: () => onAction(AssetJobName.TranscribeVideo),
+    $if: () => !!featureFlagsManager.value.videoTranscription && ownedAssets.every((asset) => asset.isVideo),
+  };
+
+  return {
+    AddToAlbum,
+    RefreshFacesJob,
+    RefreshMetadataJob,
+    RegenerateThumbnailJob,
+    TranscodeVideoJob,
+    TranscribeVideoJob,
+  };
 };
 
 export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & { stackPrimaryAssetId?: string }) => {
@@ -329,6 +345,14 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     $if: () => asset.type === AssetTypeEnum.Video,
   };
 
+  const hasTranscript = videoTranscriptManager.assetId === asset.id && videoTranscriptManager.segments.length > 0;
+  const TranscribeVideoJob: ActionItem = {
+    title: hasTranscript ? $t('refresh_transcript') : $t('transcribe_video'),
+    icon: mdiSubtitlesOutline,
+    onAction: () => handleRunAssetJob({ name: AssetJobName.TranscribeVideo, assetIds: [asset.id] }),
+    $if: () => !!featureFlagsManager.value.videoTranscription && asset.type === AssetTypeEnum.Video,
+  };
+
   return {
     Share,
     Download,
@@ -355,6 +379,7 @@ export const getAssetActions = ($t: MessageFormatter, asset: AssetResponseDto & 
     RefreshMetadataJob,
     RegenerateThumbnailJob,
     TranscodeVideoJob,
+    TranscribeVideoJob,
   };
 };
 
@@ -438,6 +463,7 @@ const getAssetJobMessage = ($t: MessageFormatter, job: AssetJobName) => {
     [AssetJobName.RefreshMetadata]: $t('refreshing_metadata'),
     [AssetJobName.RegenerateThumbnail]: $t('regenerating_thumbnails'),
     [AssetJobName.TranscodeVideo]: $t('refreshing_encoded_video'),
+    [AssetJobName.TranscribeVideo]: $t('transcription_queued'),
   };
 
   return messages[job];

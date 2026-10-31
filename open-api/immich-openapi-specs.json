@@ -24323,7 +24323,8 @@
           "refresh-faces",
           "refresh-metadata",
           "regenerate-thumbnail",
-          "transcode-video"
+          "transcode-video",
+          "transcribe-video"
         ],
         "type": "string"
       },

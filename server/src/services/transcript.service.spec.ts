@@ -16,6 +16,7 @@ const makeAsset = (overrides: Partial<TranscriptionAsset> = {}): TranscriptionAs
   deletedAt: null,
   originalPath: '/original/video.mp4',
   videoStreamAssetId: 'asset-id',
+  transcriptAssetId: null,
   audioStream: { index: 1, codecName: 'aac', profile: null, bitrate: 128_000 },
   ...overrides,
 });
@@ -86,8 +87,8 @@ describe(TranscriptService.name, () => {
 
       expect(mocks.assetJob.streamForVideoTranscription).toHaveBeenCalledWith(false);
       expect(mocks.job.queueAll).toHaveBeenCalledWith([
-        { name: JobName.AssetTranscribeVideo, data: { id: 'video-1' } },
-        { name: JobName.AssetTranscribeVideo, data: { id: 'video-2' } },
+        { name: JobName.AssetTranscribeVideo, data: { id: 'video-1', force: false } },
+        { name: JobName.AssetTranscribeVideo, data: { id: 'video-2', force: false } },
       ]);
     });
 
@@ -97,6 +98,9 @@ describe(TranscriptService.name, () => {
       await sut.handleQueueTranscribeVideos({ force: true });
 
       expect(mocks.assetJob.streamForVideoTranscription).toHaveBeenCalledWith(true);
+      expect(mocks.job.queueAll).toHaveBeenCalledWith([
+        { name: JobName.AssetTranscribeVideo, data: { id: 'video-1', force: true } },
+      ]);
     });
   });
 
@@ -126,6 +130,24 @@ describe(TranscriptService.name, () => {
 
       expect(mocks.media.extractAudio).not.toHaveBeenCalled();
       expect(mocks.transcript.replace).not.toHaveBeenCalled();
+    });
+
+    it('should skip a video transcribed since it was queued', async () => {
+      mocks.assetJob.getForVideoTranscription.mockResolvedValue(makeAsset({ transcriptAssetId: 'asset-id' }));
+
+      await expect(sut.handleTranscribeVideo({ id: 'asset-id' })).resolves.toBe(JobStatus.Skipped);
+
+      expect(mocks.media.extractAudio).not.toHaveBeenCalled();
+      expect(mocks.machineLearning.transcribe).not.toHaveBeenCalled();
+    });
+
+    it('should transcribe a video again when forced', async () => {
+      mocks.assetJob.getForVideoTranscription.mockResolvedValue(makeAsset({ transcriptAssetId: 'asset-id' }));
+
+      await expect(sut.handleTranscribeVideo({ id: 'asset-id', force: true })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.machineLearning.transcribe).toHaveBeenCalled();
+      expect(mocks.transcript.replace).toHaveBeenCalled();
     });
 
     it('should transcribe the audio stream and store the lines', async () => {
