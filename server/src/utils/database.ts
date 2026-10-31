@@ -540,6 +540,13 @@ export function withOnlyPeople<O>(qb: SelectQueryBuilder<DB, 'asset', O>, person
   });
 }
 
+/** Leaves out the assets that show any of [personGroupIds] */
+export function withoutPeople<O>(qb: SelectQueryBuilder<DB, 'asset', O>, personGroupIds: string[]) {
+  return qb.where((eb) =>
+    eb.not(eb.exists(visibleAssetFaces(eb).where('asset_face.personGroupId', '=', anyUuid(personGroupIds)))),
+  );
+}
+
 /** The searching user's version of a face's person (else the asset owner's), like the faces the search returns */
 const faceOwnPerson = (eb: ExpressionBuilder<DB, 'asset' | 'asset_face'>, viewingUserId?: string) =>
   eb
@@ -795,6 +802,9 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
       )
       .$if(!!options.excludeTagIds && options.excludeTagIds.length > 0, (qb) => withoutTags(qb, options.excludeTagIds!))
       .$if(!!options.personIds && options.personIds.length > 0, (qb) => hasPeople(qb, options.personIds!))
+      .$if(!!options.excludePersonIds && options.excludePersonIds.length > 0, (qb) =>
+        withoutPeople(qb, options.excludePersonIds!),
+      )
       .$if(options.onlyPersonIds !== undefined && !!options.personIds && options.personIds.length > 0, (qb) =>
         withOnlyPeople(qb, options.personIds!, options.onlyPersonIds!),
       )

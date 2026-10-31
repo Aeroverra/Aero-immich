@@ -69,6 +69,7 @@ class SearchManager {
       queryType,
       queryAssetId: 'queryAssetId' in searchQuery ? searchQuery.queryAssetId : undefined,
       personIds: new SvelteSet('personIds' in searchQuery ? searchQuery.personIds : []),
+      excludePersonIds: new SvelteSet('excludePersonIds' in searchQuery ? searchQuery.excludePersonIds : []),
       onlyPersonIds: searchQuery.onlyPersonIds,
       hasPeople: searchQuery.hasPeople,
       hasNamedFaces: searchQuery.hasNamedFaces,
@@ -164,6 +165,8 @@ class SearchManager {
       // an asset without faces, or without anyone named, shows none of the picked people
       personIds: this.#withPickedPeople() ? [...this.filter.personIds] : undefined,
       onlyPersonIds: this.#withPickedPeople() ? this.filter.onlyPersonIds : undefined,
+      excludePersonIds:
+        this.#peopleApply() && this.filter.excludePersonIds.size > 0 ? [...this.filter.excludePersonIds] : undefined,
       hasPeople: this.filter.hasPeople,
       // an asset without any face has no named and no unnamed face either
       hasNamedFaces: this.filter.hasPeople === false ? undefined : this.filter.hasNamedFaces,
@@ -181,7 +184,11 @@ class SearchManager {
   }
 
   #withPickedPeople() {
-    return this.filter.hasPeople !== false && this.filter.hasNamedFaces !== false && this.filter.personIds.size > 0;
+    return this.#peopleApply() && this.filter.personIds.size > 0;
+  }
+
+  #peopleApply() {
+    return this.filter.hasPeople !== false && this.filter.hasNamedFaces !== false;
   }
 
   #withNullAsEmptyString<T>(value: T | null) {
