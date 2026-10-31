@@ -27,6 +27,20 @@ void main() {
     });
   });
 
+  group('SearchFilter albums and upload date', () {
+    test('an album to search in or to leave out makes the filter non-empty', () {
+      expect(emptyFilter.copyWith(albumIds: ['trip']).isEmpty, isFalse);
+      expect(emptyFilter.copyWith(excludeAlbumIds: ['work']).isEmpty, isFalse);
+      expect(emptyFilter.copyWith(albumIds: [], excludeAlbumIds: []).isEmpty, isTrue);
+    });
+
+    test('an upload date bound makes the filter non-empty', () {
+      expect(emptyFilter.uploaded, const SearchUploadDateFilter());
+      expect(emptyFilter.copyWith(uploaded: SearchUploadDateFilter(uploadedAfter: DateTime(2024))).isEmpty, isFalse);
+      expect(emptyFilter.copyWith(uploaded: SearchUploadDateFilter(uploadedBefore: DateTime(2024))).isEmpty, isFalse);
+    });
+  });
+
   group('SearchFilter.private', () {
     test('defaults to all', () {
       expect(emptyFilter.private, SearchPrivateFilter.all);
