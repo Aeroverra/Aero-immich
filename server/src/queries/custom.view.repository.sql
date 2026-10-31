@@ -134,6 +134,109 @@ where
   "view"."ownerId" = $1::uuid
   and "view"."isDefault" = $2
 
+-- CustomViewRepository.isAssetInView
+select
+  "asset"."id"
+from
+  "asset"
+where
+  "asset"."id" = $1::uuid
+  and (
+    (
+      (
+        not exists (
+          select
+          from
+            "tag_asset"
+            inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+          where
+            "tag_asset"."assetId" = "asset"."id"
+            and "tag"."userId" = $2
+        )
+        and (
+          "asset"."visibility" != 'hidden'
+          or not exists (
+            select
+            from
+              "asset" as "live_photo_still"
+            where
+              "live_photo_still"."livePhotoVideoId" = "asset"."id"
+              and exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "live_photo_still"."id"
+                  and "tag"."userId" = $3
+              )
+          )
+        )
+      )
+      or (
+        exists (
+          select
+          from
+            "tag_asset"
+            inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+          where
+            "tag_asset"."assetId" = "asset"."id"
+            and "tag_closure"."id_ancestor" = any ($4::uuid[])
+        )
+        or (
+          "asset"."visibility" = 'hidden'
+          and exists (
+            select
+            from
+              "asset" as "live_photo_still"
+            where
+              "live_photo_still"."livePhotoVideoId" = "asset"."id"
+              and exists (
+                select
+                from
+                  "tag_asset"
+                  inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+                where
+                  "tag_asset"."assetId" = "live_photo_still"."id"
+                  and "tag_closure"."id_ancestor" = any ($5::uuid[])
+              )
+          )
+        )
+      )
+    )
+    and (
+      not exists (
+        select
+        from
+          "tag_asset"
+          inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+        where
+          "tag_asset"."assetId" = "asset"."id"
+          and "tag_closure"."id_ancestor" = any ($6::uuid[])
+      )
+      and (
+        "asset"."visibility" != 'hidden'
+        or not exists (
+          select
+          from
+            "asset" as "live_photo_still"
+          where
+            "live_photo_still"."livePhotoVideoId" = "asset"."id"
+            and exists (
+              select
+              from
+                "tag_asset"
+                inner join "tag_closure" on "tag_closure"."id_descendant" = "tag_asset"."tagId"
+              where
+                "tag_asset"."assetId" = "live_photo_still"."id"
+                and "tag_closure"."id_ancestor" = any ($7::uuid[])
+            )
+        )
+      )
+    )
+    and "asset"."isPrivate" = $8
+  )
+
 -- CustomViewRepository.delete
 delete from "view"
 where

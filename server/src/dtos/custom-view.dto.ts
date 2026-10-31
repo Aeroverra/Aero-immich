@@ -10,6 +10,12 @@ const CustomViewSearchSchema = z
       .uuidv4()
       .optional()
       .describe('Only views with a rule on this tag or on one of its descendants (the views a tag deletion affects)'),
+    assetId: z
+      .uuidv4()
+      .optional()
+      .describe(
+        'Only views that show this asset (the views to offer when the active view hides it). The asset must be readable apart from the active view',
+      ),
   })
   .meta({ id: 'CustomViewSearchDto' });
 
