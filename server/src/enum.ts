@@ -389,6 +389,7 @@ export enum Permission {
   WorkflowUpdate = 'workflow.update',
   WorkflowDelete = 'workflow.delete',
   WorkflowLogs = 'workflow.logs',
+  WorkflowRun = 'workflow.run',
 
   AdminUserCreate = 'adminUser.create',
   AdminUserRead = 'adminUser.read',
@@ -1052,6 +1053,7 @@ export enum JobName {
 
   // Workflow
   WorkflowAssetTrigger = 'WorkflowAssetTrigger',
+  WorkflowRunQueueAll = 'WorkflowRunQueueAll',
 
   // Integrity
   IntegrityUntrackedFilesQueueAll = 'IntegrityUntrackedFilesQueueAll',

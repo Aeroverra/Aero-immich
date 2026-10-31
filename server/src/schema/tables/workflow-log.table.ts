@@ -33,4 +33,8 @@ export class WorkflowLogTable {
 
   @Column({ type: 'uuid' })
   runId!: string;
+
+  /** the run was started by hand on existing assets instead of by the workflow trigger */
+  @Column({ type: 'boolean', default: false })
+  isManual!: Generated<boolean>;
 }

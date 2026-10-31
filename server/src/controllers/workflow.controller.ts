@@ -6,6 +6,8 @@ import {
   WorkflowCreateDto,
   WorkflowGetLogsDto,
   WorkflowLogEntryDto,
+  WorkflowPreviewDto,
+  WorkflowPreviewResponseDto,
   WorkflowResponseDto,
   WorkflowSearchDto,
   WorkflowShareResponseDto,
@@ -114,6 +116,35 @@ export class WorkflowController {
   })
   deleteWorkflow(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
     return this.service.delete(auth, id);
+  }
+
+  @Get(':id/preview')
+  @Authenticated({ permission: Permission.WorkflowRead })
+  @Endpoint({
+    summary: 'Preview a workflow run',
+    description:
+      'Check the filters at the start of a workflow against the assets a manual run goes through, newest first, without changing anything. Returns how many match and the first matching asset IDs. Large libraries are checked for a limited time.',
+    history: new HistoryBuilder().added('v3.2.2'),
+  })
+  previewWorkflow(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @Query() dto: WorkflowPreviewDto,
+  ): Promise<WorkflowPreviewResponseDto> {
+    return this.service.preview(auth, id, dto);
+  }
+
+  @Post(':id/run')
+  @Authenticated({ permission: Permission.WorkflowRun })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Endpoint({
+    summary: 'Run a workflow on existing assets',
+    description:
+      'Queue a run of the workflow on every existing asset of its owner, also when the workflow is disabled. Each matching asset is processed in the background and logged with a shared run ID.',
+    history: new HistoryBuilder().added('v3.2.2'),
+  })
+  runWorkflow(@Auth() auth: AuthDto, @Param() { id }: UUIDParamDto): Promise<void> {
+    return this.service.run(auth, id);
   }
 
   @Get(':id/logs')

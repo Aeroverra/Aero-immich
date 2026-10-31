@@ -7,6 +7,7 @@ export const triggerMap: Record<WorkflowTrigger, WorkflowType[]> = {
   // [WorkflowTrigger.PersonRecognized]: [WorkflowType.AssetPersonV1],
   [WorkflowTrigger.AssetMetadataExtraction]: [WorkflowType.AssetV1],
   [WorkflowTrigger.AssetTagged]: [WorkflowType.AssetV1],
+  [WorkflowTrigger.AssetOcr]: [WorkflowType.AssetV1],
 };
 
 export const getWorkflowTriggers = () =>
