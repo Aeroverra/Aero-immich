@@ -31,6 +31,7 @@ class ModelTask(StrEnum):
     IMAGE_QUALITY = "image-quality"
     SEARCH = "clip"
     OCR = "ocr"
+    SPEECH_TO_TEXT = "speech-to-text"
 
 
 class ModelType(StrEnum):
@@ -39,6 +40,7 @@ class ModelType(StrEnum):
     QUALITY = "quality"
     RECOGNITION = "recognition"
     TEXTUAL = "textual"
+    TRANSCRIPTION = "transcription"
     VISUAL = "visual"
 
 
@@ -55,6 +57,7 @@ class ModelSource(StrEnum):
     OPENCLIP = "openclip"
     OPENCV = "opencv"
     PADDLE = "paddle"
+    WHISPER = "whisper"
 
 
 class ModelPrecision(StrEnum):
@@ -136,6 +139,19 @@ class ImageQualityOutput(TypedDict):
     sharpness: float
     exposureClipped: float
     brightness: float
+
+
+class TranscriptionSegment(TypedDict):
+    start: float
+    end: float
+    text: str
+
+
+class TranscriptionOutput(TypedDict):
+    language: str
+    languageProbability: float
+    duration: float
+    segments: list[TranscriptionSegment]
 
 
 class PipelineEntry(TypedDict):

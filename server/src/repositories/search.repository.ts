@@ -109,6 +109,11 @@ export interface SearchOcrOptions {
   ocr?: string;
 }
 
+export interface SearchTranscriptOptions {
+  /** words said in the video */
+  transcript?: string;
+}
+
 export interface SearchPeopleOptions {
   personIds?: string[];
   /** leaves out the assets that show any of these people */
@@ -158,6 +163,7 @@ type BaseAssetSearchOptions = SearchDateOptions &
   SearchTagOptions &
   SearchAlbumOptions &
   SearchOcrOptions &
+  SearchTranscriptOptions &
   SearchPrivateScopeOptions;
 
 export type AssetSearchOptions = Omit<BaseAssetSearchOptions, 'visibility'> &
@@ -195,6 +201,7 @@ export type SmartSearchOptions = SearchDateOptions &
   SearchTagOptions &
   SearchAlbumOptions &
   SearchOcrOptions &
+  SearchTranscriptOptions &
   SearchPrivateScopeOptions & { visibility?: AssetVisibility | 'not-locked'; viewingUserId?: string };
 
 export type LargeAssetSearchOptions = AssetSearchOptions & { minFileSize?: number };

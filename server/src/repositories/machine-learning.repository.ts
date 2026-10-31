@@ -1,8 +1,49 @@
 import { Injectable } from '@nestjs/common';
 import { Duration } from 'luxon';
 import { readFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { MachineLearningConfig } from 'src/dtos/config.dto';
 import { LoggingRepository } from 'src/repositories/logging.repository';
+
+/** the longest a long machine learning request may take */
+const LONG_REQUEST_TIMEOUT = Duration.fromObject({ hours: 6 }).as('milliseconds');
+
+/** POSTs form data like fetch, but without its 300 s header and body timeouts, aborting only after `timeout` ms */
+const postWithoutTimeout = async (url: URL, formData: FormData, timeout: number): Promise<Response> => {
+  // encodes the form the same way fetch does
+  const encoded = new Request(url, { method: 'POST', body: formData });
+  const body = Buffer.from(await encoded.arrayBuffer());
+  const send = url.protocol === 'https:' ? httpsRequest : httpRequest;
+
+  return new Promise((resolve, reject) => {
+    const request = send(
+      url,
+      {
+        method: 'POST',
+        headers: { 'content-type': encoded.headers.get('content-type') ?? '', 'content-length': body.length },
+        signal: AbortSignal.timeout(timeout),
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => {
+          chunks.push(chunk);
+        });
+        response.on('error', reject);
+        response.on('end', () =>
+          resolve(
+            new Response(new Uint8Array(Buffer.concat(chunks)), {
+              status: response.statusCode,
+              statusText: response.statusMessage,
+            }),
+          ),
+        );
+      },
+    );
+    request.on('error', reject);
+    request.end(body);
+  });
+};
 
 export interface BoundingBox {
   x1: number;
@@ -17,6 +58,7 @@ export enum ModelTask {
   IMAGE_QUALITY = 'image-quality',
   SEARCH = 'clip',
   OCR = 'ocr',
+  SPEECH_TO_TEXT = 'speech-to-text',
 }
 
 export enum ModelType {
@@ -26,11 +68,12 @@ export enum ModelType {
   QUALITY = 'quality',
   RECOGNITION = 'recognition',
   TEXTUAL = 'textual',
+  TRANSCRIPTION = 'transcription',
   VISUAL = 'visual',
   OCR = 'ocr',
 }
 
-export type ModelPayload = { imagePath: string } | { image: Buffer } | { text: string };
+export type ModelPayload = { imagePath: string } | { image: Buffer } | { text: string } | { audio: Buffer };
 
 type ModelOptions = { modelName: string };
 
@@ -108,6 +151,38 @@ export type FaceAttributesResponse = {
   [ModelTask.IMAGE_QUALITY]: ImageQuality;
 } & VisualResponse;
 
+export type TranscriptionOptions = ModelOptions & {
+  /** language code of the speech, empty to detect it */
+  language: string;
+  computeType: string;
+};
+
+export type TranscriptionRequest = {
+  [ModelTask.SPEECH_TO_TEXT]: {
+    [ModelType.TRANSCRIPTION]: ModelOptions & {
+      options: { language: string | null; computeType: string; vadFilter: boolean };
+    };
+  };
+};
+
+export type TranscriptionSegment = {
+  /** seconds */
+  start: number;
+  /** seconds */
+  end: number;
+  text: string;
+};
+
+export type Transcription = {
+  language: string | null;
+  languageProbability: number | null;
+  /** seconds of audio */
+  duration: number;
+  segments: TranscriptionSegment[];
+};
+
+export type TranscriptionResponse = { [ModelTask.SPEECH_TO_TEXT]: Transcription };
+
 export type ImageAnalysisRequest = Partial<ClipVisualRequest & FacialRecognitionRequest>;
 export type ImageAnalysisResponse = Partial<
   { [ModelTask.SEARCH]: string } & { [ModelTask.FACIAL_RECOGNITION]: Face[] }
@@ -120,6 +195,7 @@ export type MachineLearningRequest =
   | FacialRecognitionRequest
   | FaceAttributesRequest
   | OcrRequest
+  | TranscriptionRequest
   | ImageAnalysisRequest;
 export type TextEncodingOptions = ModelOptions & { language?: string };
 
@@ -207,7 +283,15 @@ export class MachineLearningRepository {
     return this.healthyMap[url];
   }
 
-  private async predict<T>(payload: ModelPayload, config: MachineLearningRequest): Promise<T> {
+  /**
+   * `long` requests take about as long as their input (speech to text on a CPU can take an hour), so they are sent
+   * without the 300 s header timeout of fetch and a failure does not mark the server unhealthy.
+   */
+  private async predict<T>(
+    payload: ModelPayload,
+    config: MachineLearningRequest,
+    { long = false }: { long?: boolean } = {},
+  ): Promise<T> {
     const formData = await this.getFormData(payload, config);
 
     for (const url of [
@@ -216,7 +300,9 @@ export class MachineLearningRepository {
       ...this.config.urls.filter((url) => !this.isHealthy(url)),
     ]) {
       try {
-        const response = await fetch(new URL('predict', url), { method: 'POST', body: formData });
+        const response = long
+          ? await postWithoutTimeout(new URL('predict', url), formData, LONG_REQUEST_TIMEOUT)
+          : await fetch(new URL('predict', url), { method: 'POST', body: formData });
         if (response.ok) {
           this.setHealthy(url, true);
           return response.json();
@@ -229,7 +315,9 @@ export class MachineLearningRepository {
         this.logger.warn(`Machine learning request to "${url}" failed`, error);
       }
 
-      this.setHealthy(url, false);
+      if (!long) {
+        this.setHealthy(url, false);
+      }
     }
 
     throw new Error(`Machine learning request '${JSON.stringify(config)}' failed for all URLs`);
@@ -316,6 +404,20 @@ export class MachineLearningRepository {
     return response[ModelTask.OCR];
   }
 
+  /** turns speech into timed text lines, `audio` is any audio file the machine learning service can decode */
+  async transcribe(audio: Buffer, { modelName, language, computeType }: TranscriptionOptions) {
+    const request = {
+      [ModelTask.SPEECH_TO_TEXT]: {
+        [ModelType.TRANSCRIPTION]: {
+          modelName,
+          options: { language: language || null, computeType, vadFilter: true },
+        },
+      },
+    };
+    const response = await this.predict<TranscriptionResponse>({ audio }, request, { long: true });
+    return response[ModelTask.SPEECH_TO_TEXT];
+  }
+
   private async getFormData(payload: ModelPayload, config: MachineLearningRequest): Promise<FormData> {
     const formData = new FormData();
     formData.append('entries', JSON.stringify(config));
@@ -327,6 +429,8 @@ export class MachineLearningRepository {
       formData.append('image', new Blob([new Uint8Array(payload.image)]));
     } else if ('text' in payload) {
       formData.append('text', payload.text);
+    } else if ('audio' in payload) {
+      formData.append('audio', new Blob([new Uint8Array(payload.audio)]));
     } else {
       throw new Error('Invalid input');
     }

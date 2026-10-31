@@ -8,6 +8,7 @@
   import FormatMessage from '$lib/elements/FormatMessage.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { systemConfigManager } from '$lib/managers/system-config-manager.svelte';
+  import { TranscriptionComputeType } from '@immich/sdk';
   import { Button, IconButton } from '@immich/ui';
   import { mdiPlus, mdiTrashCanOutline } from '@mdi/js';
   import { isEqual } from 'lodash-es';
@@ -575,6 +576,70 @@
               !configToEdit.machineLearning.videoFrameAnalysis.enabled ||
               !configToEdit.machineLearning.facialRecognition.enabled ||
               !configToEdit.machineLearning.videoFrameAnalysis.detectFaces}
+          />
+        </div>
+      </SettingAccordion>
+
+      <SettingAccordion
+        key="video-transcription"
+        title={$t('admin.machine_learning_video_transcription')}
+        subtitle={$t('admin.machine_learning_video_transcription_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_video_transcription_enabled')}
+            subtitle={$t('admin.machine_learning_video_transcription_enabled_description')}
+            bind:checked={configToEdit.machineLearning.videoTranscription.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.TEXT}
+            label={$t('admin.machine_learning_video_transcription_model')}
+            description={$t('admin.machine_learning_video_transcription_model_description')}
+            bind:value={configToEdit.machineLearning.videoTranscription.modelName}
+            required={true}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoTranscription.enabled}
+            isEdited={configToEdit.machineLearning.videoTranscription.modelName !==
+              config.machineLearning.videoTranscription.modelName}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.TEXT}
+            label={$t('admin.machine_learning_video_transcription_language')}
+            description={$t('admin.machine_learning_video_transcription_language_description')}
+            bind:value={configToEdit.machineLearning.videoTranscription.language}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoTranscription.enabled}
+            isEdited={configToEdit.machineLearning.videoTranscription.language !==
+              config.machineLearning.videoTranscription.language}
+          />
+
+          <SettingSelect
+            label={$t('admin.machine_learning_video_transcription_compute_type')}
+            desc={$t('admin.machine_learning_video_transcription_compute_type_description')}
+            bind:value={configToEdit.machineLearning.videoTranscription.computeType}
+            options={[
+              {
+                value: TranscriptionComputeType.Auto,
+                text: $t('admin.machine_learning_video_transcription_compute_type_auto'),
+              },
+              { value: TranscriptionComputeType.Int8, text: 'int8' },
+              { value: TranscriptionComputeType.Int8Float16, text: 'int8_float16' },
+              { value: TranscriptionComputeType.Float16, text: 'float16' },
+              { value: TranscriptionComputeType.Float32, text: 'float32' },
+            ]}
+            name="transcription-compute-type"
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoTranscription.enabled}
+            isEdited={configToEdit.machineLearning.videoTranscription.computeType !==
+              config.machineLearning.videoTranscription.computeType}
           />
         </div>
       </SettingAccordion>

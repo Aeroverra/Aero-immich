@@ -63,6 +63,7 @@ import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
 import { AssetOcrAuditTable } from 'src/schema/tables/asset-ocr-audit.table';
 import { AssetOcrTable } from 'src/schema/tables/asset-ocr.table';
 import { AssetQualityTable } from 'src/schema/tables/asset-quality.table';
+import { AssetTranscriptSegmentTable, AssetTranscriptTable } from 'src/schema/tables/asset-transcript.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
 import { ClusterGroupRequestTable } from 'src/schema/tables/cluster-group-request.table';
 import { ClusterGroupTable } from 'src/schema/tables/cluster-group.table';
@@ -184,6 +185,8 @@ export class ImmichDatabase {
     SharedLinkTable,
     SmartSearchTable,
     SmartSearchFrameTable,
+    AssetTranscriptTable,
+    AssetTranscriptSegmentTable,
     StackTable,
     StackAuditTable,
     StackAutoExclusionTable,
@@ -344,6 +347,9 @@ export interface DB {
 
   smart_search: SmartSearchTable;
   smart_search_frame: SmartSearchFrameTable;
+
+  asset_transcript: AssetTranscriptTable;
+  asset_transcript_segment: AssetTranscriptSegmentTable;
 
   stack: StackTable;
   stack_audit: StackAuditTable;

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import wave
 from io import BytesIO
 from pathlib import Path
 from random import randint
@@ -32,6 +33,7 @@ from immich_ml.models.facial_recognition.recognition import FaceRecognizer
 from immich_ml.models.image_quality.laplacian import LaplacianImageQuality
 from immich_ml.models.ocr.detection import TextDetector
 from immich_ml.models.ocr.recognition import TextRecognizer
+from immich_ml.models.speech_to_text.whisper import WhisperTranscriber
 from immich_ml.schemas import ModelFormat, ModelPrecision, ModelTask, ModelType
 from immich_ml.sessions.ann import AnnSession
 from immich_ml.sessions.ort import OrtSession
@@ -1417,6 +1419,228 @@ class TestFaceAttributesEndpoint:
         assert actual["image-quality"]["exposureClipped"] == pytest.approx(1)
 
 
+def make_wav(seconds: float = 1.0, sample_rate: int = 16000) -> bytes:
+    samples = np.sin(np.linspace(0, 440 * 2 * np.pi * seconds, int(sample_rate * seconds))) * 2**14
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as file:
+        file.setnchannels(1)
+        file.setsampwidth(2)
+        file.setframerate(sample_rate)
+        file.writeframes(samples.astype(np.int16).tobytes())
+    return buffer.getvalue()
+
+
+def make_transcription(segments: list[tuple[float, float, str]]) -> tuple[Any, Any]:
+    info = SimpleNamespace(language="en", language_probability=0.98, duration=1080.504)
+    return (SimpleNamespace(start=start, end=end, text=text) for start, end, text in segments), info
+
+
+@pytest.fixture
+def cpu_only(mocker: MockerFixture) -> None:
+    mocker.patch("immich_ml.models.speech_to_text.whisper.ort.get_available_providers", return_value=["CPU"])
+
+
+class TestSpeechToText:
+    @pytest.mark.parametrize("model_name", ["large-v3-turbo", "turbo", "tiny.en", "distil-large-v3.5", "base"])
+    def test_resolves_model_class(self, model_name: str) -> None:
+        model_class = get_model_class(model_name, ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT)
+
+        assert model_class is WhisperTranscriber
+
+    def test_rejects_unknown_model_name(self) -> None:
+        with pytest.raises(ValueError):
+            get_model_class("large-v9", ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT)
+
+    def test_sets_default_cache_dir(self, cpu_only: None) -> None:
+        model = WhisperTranscriber("large-v3-turbo")
+
+        assert model.cache_dir == settings.cache_folder / "speech-to-text" / "large-v3-turbo"
+        assert model.model_path == model.cache_dir / "transcription" / "model.bin"
+
+    def test_uses_cuda_if_available(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "immich_ml.models.speech_to_text.whisper.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        mocker.patch("ctranslate2.get_cuda_device_count", return_value=1)
+
+        model = WhisperTranscriber("large-v3-turbo")
+
+        assert model.device == "cuda"
+        assert model.compute_type == "int8_float16"
+
+    def test_uses_cpu_without_gpu(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "immich_ml.models.speech_to_text.whisper.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        mocker.patch("ctranslate2.get_cuda_device_count", return_value=0)
+
+        model = WhisperTranscriber("large-v3-turbo")
+
+        assert model.device == "cpu"
+        assert model.compute_type == "int8"
+
+    def test_uses_cpu_without_cuda_onnxruntime(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "immich_ml.models.speech_to_text.whisper.ort.get_available_providers",
+            return_value=["OpenVINOExecutionProvider", "CPUExecutionProvider"],
+        )
+        mocker.patch("ctranslate2.get_cuda_device_count", return_value=1)
+
+        assert WhisperTranscriber("large-v3-turbo").device == "cpu"
+
+    def test_caps_cpu_threads_separately(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
+        mocker.patch.object(settings, "transcription_threads", 2)
+        mocker.patch.object(settings, "model_intra_op_threads", 8)
+        whisper_model = mocker.patch("faster_whisper.WhisperModel")
+        model = WhisperTranscriber("small", cache_dir=tmp_path)
+        model.model_path.parent.mkdir(parents=True)
+        model.model_path.write_bytes(b"model")
+
+        model.load()
+
+        assert whisper_model.call_args.kwargs["cpu_threads"] == 2
+
+    @pytest.mark.parametrize("compute_type", ["int8", "int8_float16", "int8_float32", "float16", "float32"])
+    def test_sets_compute_type_kwarg(self, compute_type: str, cpu_only: None) -> None:
+        assert WhisperTranscriber("large-v3-turbo", computeType=compute_type).compute_type == compute_type
+
+    def test_rejects_unsupported_compute_type(self, cpu_only: None) -> None:
+        with pytest.raises(ValueError, match="Unsupported compute type"):
+            WhisperTranscriber("large-v3-turbo", computeType="bfloat16")
+
+    def test_downloads_model_to_cache_dir(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
+        snapshot_download = mocker.patch("immich_ml.models.speech_to_text.whisper.snapshot_download")
+        model = WhisperTranscriber("tiny.en", cache_dir=tmp_path)
+
+        model.download()
+
+        snapshot_download.assert_called_once_with(
+            "Systran/faster-whisper-tiny.en",
+            cache_dir=tmp_path,
+            local_dir=tmp_path / "transcription",
+            allow_patterns=["config.json", "preprocessor_config.json", "model.bin", "tokenizer.json", "vocabulary.*"],
+        )
+
+    def test_loads_model_from_cache_dir(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
+        whisper_model = mocker.patch("faster_whisper.WhisperModel")
+        model = WhisperTranscriber("large-v3-turbo", cache_dir=tmp_path, computeType="float32")
+        model.model_path.parent.mkdir(parents=True)
+        model.model_path.write_bytes(b"model")
+
+        model.load()
+
+        whisper_model.assert_called_once_with(
+            (tmp_path / "transcription").as_posix(), device="cpu", device_index=0, compute_type="float32", cpu_threads=4
+        )
+        assert model.session is whisper_model.return_value
+
+    def test_reloads_model_if_compute_type_changes(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
+        whisper_model = mocker.patch("faster_whisper.WhisperModel")
+        whisper_model.return_value.transcribe.side_effect = lambda *args, **kwargs: make_transcription([])
+        model = WhisperTranscriber("large-v3-turbo", cache_dir=tmp_path, computeType="int8")
+        mocker.patch.object(model, "download")
+        audio = np.zeros(16000, dtype=np.float32)
+
+        model.predict(audio, computeType="int8")
+        model.predict(audio, computeType="auto")
+        model.predict(audio, computeType="float32")
+
+        assert [call.kwargs["compute_type"] for call in whisper_model.call_args_list] == ["int8", "float32"]
+        assert model.compute_type == "float32"
+
+    def test_transcribes_with_options(self, cpu_only: None) -> None:
+        session = mock.Mock()
+        session.transcribe.return_value = make_transcription(
+            [(0.111, 4.494, " I'm going to do the best I can. "), (5.0, 6.0, "  "), (6.789, 14.851, "Thank you.")]
+        )
+        model = WhisperTranscriber("large-v3-turbo", session=session)
+        audio = np.zeros(16000, dtype=np.float32)
+
+        output = model.predict(audio, language="es", vadFilter=False, beamSize=1)
+
+        session.transcribe.assert_called_once_with(audio, language="es", vad_filter=False, beam_size=1)
+        assert output == {
+            "language": "en",
+            "languageProbability": 0.98,
+            "duration": 1080.5,
+            "segments": [
+                {"start": 0.11, "end": 4.49, "text": "I'm going to do the best I can."},
+                {"start": 6.79, "end": 14.85, "text": "Thank you."},
+            ],
+        }
+
+    def test_detects_language_by_default(self, cpu_only: None) -> None:
+        session = mock.Mock()
+        session.transcribe.side_effect = lambda *args, **kwargs: make_transcription([])
+        model = WhisperTranscriber("large-v3-turbo", session=session)
+        audio = np.zeros(16000, dtype=np.float32)
+
+        model.predict(audio)
+        model.predict(audio, language=None)
+
+        assert session.transcribe.call_args_list == [
+            mock.call(audio, language=None, vad_filter=True, beam_size=5),
+            mock.call(audio, language=None, vad_filter=True, beam_size=5),
+        ]
+
+
+class TestSpeechToTextEndpoint:
+    def test_transcribes_audio(self, cpu_only: None, deployed_app: TestClient, mocker: MockerFixture) -> None:
+        mocker.patch.object(WhisperTranscriber, "download")
+        whisper_model = mocker.patch("faster_whisper.WhisperModel")
+        whisper_model.return_value.transcribe.return_value = make_transcription([(0.11, 4.49, " Hello there.")])
+        entries = {
+            "speech-to-text": {
+                "transcription": {
+                    "modelName": "small.en",
+                    "options": {"language": None, "computeType": "auto", "vadFilter": True},
+                }
+            }
+        }
+
+        response = deployed_app.post(
+            "http://localhost:3003/predict",
+            data={"entries": json.dumps(entries)},
+            files={"audio": make_wav()},
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "speech-to-text": {
+                "language": "en",
+                "languageProbability": 0.98,
+                "duration": 1080.5,
+                "segments": [{"start": 0.11, "end": 4.49, "text": "Hello there."}],
+            }
+        }
+        whisper_model.assert_called_once()
+        assert whisper_model.call_args.kwargs["compute_type"] == "int8"
+        transcribe = whisper_model.return_value.transcribe
+        audio = transcribe.call_args.args[0]
+        assert audio.dtype == np.float32
+        assert audio.shape == (16000,)
+        assert transcribe.call_args.kwargs == {"language": None, "vad_filter": True, "beam_size": 5}
+
+    @pytest.mark.parametrize("image_audio", [False, True])
+    def test_rejects_invalid_audio(self, image_audio: bool, pil_image: Image.Image, deployed_app: TestClient) -> None:
+        entries = {"speech-to-text": {"transcription": {"modelName": "small.en"}}}
+        audio = b"not audio"
+        if image_audio:
+            byte_image = BytesIO()
+            pil_image.save(byte_image, format="jpeg")
+            audio = byte_image.getvalue()
+
+        response = deployed_app.post(
+            "http://localhost:3003/predict",
+            data={"entries": json.dumps(entries)},
+            files={"audio": audio},
+        )
+
+        assert response.status_code == 400
+
+
 @pytest.mark.asyncio
 class TestCache:
     async def test_caches(self, mock_get_model: mock.Mock) -> None:
@@ -1551,6 +1775,21 @@ class TestCache:
                 mock.call("PP-OCRv5_mobile", ModelType.RECOGNITION, ModelTask.OCR),
             ],
             any_order=True,
+        )
+
+    async def test_preloads_speech_to_text_models(self, monkeypatch: MonkeyPatch, mock_get_model: mock.Mock) -> None:
+        monkeypatch.setenv("MACHINE_LEARNING_PRELOAD__SPEECH_TO_TEXT__TRANSCRIPTION", "large-v3-turbo")
+
+        settings = Settings()
+        assert settings.preload is not None
+        assert settings.preload.speech_to_text.transcription == "large-v3-turbo"
+
+        model_cache = ModelCache()
+        monkeypatch.setattr("immich_ml.main.model_cache", model_cache)
+
+        await preload_models(settings.preload)
+        mock_get_model.assert_has_calls(
+            [mock.call("large-v3-turbo", ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT)],
         )
 
     async def test_preloads_all_models(self, monkeypatch: MonkeyPatch, mock_get_model: mock.Mock) -> None:

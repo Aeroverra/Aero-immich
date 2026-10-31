@@ -13,6 +13,7 @@ import {
   ToneMapping,
   TranscodeHardwareAcceleration,
   TranscodePolicy,
+  TranscriptionComputeType,
   VideoCodec,
   VideoContainer,
 } from 'src/enum';
@@ -47,6 +48,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     [QueueName.IntegrityCheck]: { concurrency: 1 },
     [QueueName.Editor]: { concurrency: 2 },
     [QueueName.VideoFrameAnalysis]: { concurrency: 1 },
+    [QueueName.VideoTranscription]: { concurrency: 1 },
   },
   backup: {
     database: {
@@ -164,6 +166,12 @@ const updatedConfig = Object.freeze<SystemConfig>({
       maxFrames: 30,
       detectFaces: true,
       createPeople: false,
+    },
+    videoTranscription: {
+      enabled: false,
+      modelName: 'large-v3-turbo',
+      language: '',
+      computeType: TranscriptionComputeType.Auto,
     },
   },
   map: {

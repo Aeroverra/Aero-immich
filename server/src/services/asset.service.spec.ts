@@ -1159,4 +1159,39 @@ describe(AssetService.name, () => {
       expect(mocks.assetDeletedChecksum.upsert).not.toHaveBeenCalled();
     });
   });
+
+  describe('getTranscript', () => {
+    it('should require asset read access', async () => {
+      await expect(sut.getTranscript(authStub.admin, 'asset-1')).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(mocks.transcript.getByAssetId).not.toHaveBeenCalled();
+    });
+
+    it('should return the lines of the transcript', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+      mocks.transcript.getByAssetId.mockResolvedValue({
+        assetId: 'asset-1',
+        language: 'en',
+        modelName: 'large-v3-turbo',
+        segments: [{ startTime: 110, endTime: 4490, text: 'Hello' }],
+      });
+
+      await expect(sut.getTranscript(authStub.admin, 'asset-1')).resolves.toEqual({
+        assetId: 'asset-1',
+        language: 'en',
+        segments: [{ startTime: 110, endTime: 4490, text: 'Hello' }],
+      });
+    });
+
+    it('should return no lines for a video that was not transcribed', async () => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+      mocks.transcript.getByAssetId.mockResolvedValue(void 0);
+
+      await expect(sut.getTranscript(authStub.admin, 'asset-1')).resolves.toEqual({
+        assetId: 'asset-1',
+        language: null,
+        segments: [],
+      });
+    });
+  });
 });

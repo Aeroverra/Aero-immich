@@ -31,10 +31,15 @@ class OcrSettings(BaseModel):
     detection: str | None = None
 
 
+class SpeechToTextSettings(BaseModel):
+    transcription: str | None = None
+
+
 class PreloadModelData(BaseModel):
     clip: ClipSettings = ClipSettings()
     facial_recognition: FacialRecognitionSettings = FacialRecognitionSettings()
     ocr: OcrSettings = OcrSettings()
+    speech_to_text: SpeechToTextSettings = SpeechToTextSettings()
 
 
 class MaxBatchSize(BaseModel):
@@ -70,6 +75,7 @@ class Settings(BaseSettings):
     ann_tuning_level: int = 2
     rknn: bool = True
     rknn_threads: int = 1
+    transcription_threads: int = 4
     preload: PreloadModelData | None = None
     max_batch_size: MaxBatchSize | None = None
     openvino_precision: ModelPrecision = ModelPrecision.FP32

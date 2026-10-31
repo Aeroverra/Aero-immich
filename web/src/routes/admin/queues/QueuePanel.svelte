@@ -90,6 +90,11 @@
       missingText: $t('missing'),
       disabled: !featureFlags.videoFrameAnalysis,
     },
+    [QueueName.VideoTranscription]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+      disabled: !featureFlags.videoTranscription,
+    },
     [QueueName.VideoConversion]: {
       allText: $t('all'),
       missingText: $t('missing'),
