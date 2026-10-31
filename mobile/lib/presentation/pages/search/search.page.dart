@@ -17,7 +17,9 @@ import 'package:immich_mobile/models/search/search_filter.model.dart';
 import 'package:immich_mobile/presentation/pages/search/paginated_search.provider.dart';
 import 'package:immich_mobile/presentation/widgets/bottom_sheet/general_bottom_sheet.widget.dart';
 import 'package:immich_mobile/presentation/widgets/search/quick_date_picker.dart';
+import 'package:immich_mobile/presentation/widgets/timeline/custom_view_switcher_button.widget.dart';
 import 'package:immich_mobile/presentation/widgets/timeline/timeline.widget.dart';
+import 'package:immich_mobile/providers/custom_view.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/tag.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/user_metadata.provider.dart';
@@ -108,6 +110,15 @@ class SearchPage extends HookConsumerWidget {
       }
       privateCurrentFilterWidget.value = null;
       search(filter.value.copyWith(private: SearchPrivateFilter.all));
+    });
+
+    // The server answers a search for the view the session is in, so the results follow a view switch
+    ref.listen(appliedViewProvider.select((view) => view?.id), (previous, next) {
+      if (previous == next || filter.value.isEmpty) {
+        return;
+      }
+      ref.read(paginatedSearchProvider.notifier).clear();
+      unawaited(ref.read(paginatedSearchProvider.notifier).search(filter.value));
     });
 
     // TODO: Use ref.listen with `fireImmediately` in the new riverpod version.
@@ -600,6 +611,7 @@ class SearchPage extends HookConsumerWidget {
       appBar: AppBar(
         automaticallyImplyLeading: true,
         actions: [
+          const CustomViewSwitcherButton(),
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: MenuAnchor(
