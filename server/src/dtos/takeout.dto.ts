@@ -211,6 +211,7 @@ const TakeoutResultCountersSchema = z
     rotationsQueued: z.int(),
     rotationsApplied: z.int(),
     zoneAssumed: z.int(),
+    datesFromGoogle: z.int(),
     errors: z.int(),
   })
   .meta({ id: 'TakeoutResultCountersDto' });

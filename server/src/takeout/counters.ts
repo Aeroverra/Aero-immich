@@ -44,11 +44,15 @@ export function emptyCounters(): TakeoutCounters {
       rotationsQueued: 0,
       rotationsApplied: 0,
       zoneAssumed: 0,
+      datesFromGoogle: 0,
       errors: 0,
     },
     bytes: { total: 0, done: 0 },
   };
 }
+
+// Actions of a media file that ends up as (or on) an asset.
+const IMPORTED_ACTIONS = new Set(['upload', 'serverDuplicate', 'betterOnServer']);
 
 // Derives every counter from grouped report rows (section 2.9). B never computes counters itself.
 export function countersFromRows(rows: CounterRow[], bytes: { total: number; done: number }): TakeoutCounters {
@@ -185,6 +189,16 @@ export function countersFromRows(rows: CounterRow[], bytes: { total: number; don
       // no default
     }
 
+    // A media file without Google JSON that is imported anyway (includeUnmatched) has no Google date: it is dated from
+    // the file alone, so it counts as missing metadata like the skipped ones instead of vanishing from the report.
+    if (
+      row.matcher === null &&
+      (row.fileKind === 'image' || row.fileKind === 'video') &&
+      IMPORTED_ACTIONS.has(row.action)
+    ) {
+      c.matched.missingMetadata += n;
+    }
+
     switch (row.matcher) {
       case 'fastTrack': {
         c.matched.fastTrack += n;
@@ -228,6 +242,11 @@ export function countersFromRows(rows: CounterRow[], bytes: { total: number; don
         }
         case 'albumAdded': {
           c.result.albumAdds += n;
+
+          break;
+        }
+        case 'dateFromGoogle': {
+          c.result.datesFromGoogle += n;
 
           break;
         }
