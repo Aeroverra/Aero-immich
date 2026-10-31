@@ -259,7 +259,7 @@
     "machine_learning_video_transcription_language": "Language",
     "machine_learning_video_transcription_language_description": "Language code of the speech, for example en or es. Leave empty to detect the language of each video.",
     "machine_learning_video_transcription_model": "Speech to text model",
-    "machine_learning_video_transcription_model_description": "Name of a faster-whisper model. large-v3-turbo is accurate and fast on a GPU; small or base use much less memory. Changing the model only applies to videos transcribed afterwards, run All to redo the others.",
+    "machine_learning_video_transcription_model_description": "Name of a faster-whisper model, or auto: large-v3-turbo on a GPU (accurate and fast), small on a CPU (about 4 times faster there, less accurate). Changing the model only applies to videos transcribed afterwards, run All to redo the others.",
     "maintenance_backup_management": "Backup management",
     "maintenance_delete_backup": "Delete Backup",
     "maintenance_delete_backup_description": "This file will be irrevocably deleted.",

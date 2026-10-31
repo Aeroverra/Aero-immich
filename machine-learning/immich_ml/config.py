@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     ann_tuning_level: int = 2
     rknn: bool = True
     rknn_threads: int = 1
+    transcription_threads: int = 4
     preload: PreloadModelData | None = None
     max_batch_size: MaxBatchSize | None = None
     openvino_precision: ModelPrecision = ModelPrecision.FP32

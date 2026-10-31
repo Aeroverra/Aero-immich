@@ -784,7 +784,7 @@ export const defaults = Object.freeze<SystemConfig>({
     },
     videoTranscription: {
       enabled: false,
-      modelName: 'large-v3-turbo',
+      modelName: 'auto',
       language: '',
       computeType: TranscriptionComputeType.Auto,
     },

@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from immich_ml.config import log, settings
 from immich_ml.models.base import InferenceModel
-from immich_ml.models.constants import WHISPER_REPOS
+from immich_ml.models.constants import WHISPER_AUTO, WHISPER_AUTO_MODELS, WHISPER_REPOS
 from immich_ml.schemas import ModelTask, ModelType, TranscriptionOutput, TranscriptionSegment
 
 if TYPE_CHECKING:
@@ -34,8 +34,13 @@ class WhisperTranscriber(InferenceModel):
     identity = (ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT)
 
     def __init__(self, model_name: str, computeType: str = "auto", **model_kwargs: Any) -> None:
+        device = self._device_default
+        if model_name == WHISPER_AUTO:
+            model_name = WHISPER_AUTO_MODELS[device]
         super().__init__(model_name, **model_kwargs)
-        self.device = self._device_default
+        # the name as given, the cleaned model_name loses its dots
+        self.display_name = model_name
+        self.device = device
         self.compute_type = self._resolve_compute_type(computeType)
         self.reload_lock = threading.Lock()
 
@@ -56,7 +61,8 @@ class WhisperTranscriber(InferenceModel):
             device=self.device,
             device_index=int(settings.device_id) if self.device == "cuda" else 0,
             compute_type=self.compute_type,
-            cpu_threads=settings.model_intra_op_threads,
+            # its own cap, so one long transcription on a CPU leaves the other cores to the other models
+            cpu_threads=settings.transcription_threads,
         )
 
     def configure(self, computeType: str | None = None, **kwargs: Any) -> None:
@@ -96,6 +102,7 @@ class WhisperTranscriber(InferenceModel):
             if (text := segment.text.strip())
         ]
         return {
+            "modelName": self.display_name,
             "language": info.language,
             "languageProbability": info.language_probability,
             "duration": round(info.duration, 2),

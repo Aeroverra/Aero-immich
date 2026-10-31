@@ -1490,6 +1490,39 @@ class TestSpeechToText:
 
         assert WhisperTranscriber("large-v3-turbo").device == "cpu"
 
+    def test_auto_is_a_whisper_model_name(self) -> None:
+        assert get_model_class("auto", ModelType.TRANSCRIPTION, ModelTask.SPEECH_TO_TEXT) is WhisperTranscriber
+
+    def test_auto_picks_turbo_on_gpu(self, mocker: MockerFixture) -> None:
+        mocker.patch(
+            "immich_ml.models.speech_to_text.whisper.ort.get_available_providers",
+            return_value=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        )
+        mocker.patch("ctranslate2.get_cuda_device_count", return_value=1)
+
+        model = WhisperTranscriber("auto")
+
+        assert model.model_name == "large-v3-turbo"
+        assert model.cache_dir == settings.cache_folder / "speech-to-text" / "large-v3-turbo"
+
+    def test_auto_picks_small_on_cpu(self, cpu_only: None) -> None:
+        model = WhisperTranscriber("auto")
+
+        assert model.model_name == "small"
+        assert model.cache_dir == settings.cache_folder / "speech-to-text" / "small"
+
+    def test_caps_cpu_threads_separately(self, tmp_path: Path, cpu_only: None, mocker: MockerFixture) -> None:
+        mocker.patch.object(settings, "transcription_threads", 2)
+        mocker.patch.object(settings, "model_intra_op_threads", 8)
+        whisper_model = mocker.patch("faster_whisper.WhisperModel")
+        model = WhisperTranscriber("small", cache_dir=tmp_path)
+        model.model_path.parent.mkdir(parents=True)
+        model.model_path.write_bytes(b"model")
+
+        model.load()
+
+        assert whisper_model.call_args.kwargs["cpu_threads"] == 2
+
     @pytest.mark.parametrize("compute_type", ["int8", "int8_float16", "int8_float32", "float16", "float32"])
     def test_sets_compute_type_kwarg(self, compute_type: str, cpu_only: None) -> None:
         assert WhisperTranscriber("large-v3-turbo", computeType=compute_type).compute_type == compute_type
@@ -1520,7 +1553,7 @@ class TestSpeechToText:
         model.load()
 
         whisper_model.assert_called_once_with(
-            (tmp_path / "transcription").as_posix(), device="cpu", device_index=0, compute_type="float32", cpu_threads=0
+            (tmp_path / "transcription").as_posix(), device="cpu", device_index=0, compute_type="float32", cpu_threads=4
         )
         assert model.session is whisper_model.return_value
 
@@ -1550,6 +1583,7 @@ class TestSpeechToText:
 
         session.transcribe.assert_called_once_with(audio, language="es", vad_filter=False, beam_size=1)
         assert output == {
+            "modelName": "large-v3-turbo",
             "language": "en",
             "languageProbability": 0.98,
             "duration": 1080.5,
@@ -1597,6 +1631,7 @@ class TestSpeechToTextEndpoint:
         assert response.status_code == 200
         assert response.json() == {
             "speech-to-text": {
+                "modelName": "small.en",
                 "language": "en",
                 "languageProbability": 0.98,
                 "duration": 1080.5,
