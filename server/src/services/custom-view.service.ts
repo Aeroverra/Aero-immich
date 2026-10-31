@@ -36,9 +36,26 @@ export class CustomViewService extends BaseService {
       await this.requireAccess({ auth, permission: Permission.TagRead, ids: [dto.tagId] });
     }
 
+    if (dto.assetId) {
+      // only the active view is left out of the check, so an asset private mode hides stays hidden
+      const withoutView = { ...auth, session: auth.session && { ...auth.session, view: null } };
+      await this.requireAccess({ auth: withoutView, permission: Permission.AssetRead, ids: [dto.assetId] });
+    }
+
     const views = await this.customViewRepository.getAll(auth.user.id, { tagId: dto.tagId });
     // private-mode-only views do not exist while private mode is locked
-    return views.filter((view) => this.isListed(auth, view)).map((view) => mapCustomView(view));
+    const listed = views.filter((view) => this.isListed(auth, view));
+    if (!dto.assetId) {
+      return listed.map((view) => mapCustomView(view));
+    }
+
+    const showing: CustomView[] = [];
+    for (const view of listed) {
+      if (await this.customViewRepository.isAssetInView(dto.assetId, view)) {
+        showing.push(view);
+      }
+    }
+    return showing.map((view) => mapCustomView(view));
   }
 
   async get(auth: AuthDto, id: string): Promise<CustomViewResponseDto> {

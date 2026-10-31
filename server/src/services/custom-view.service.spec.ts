@@ -90,6 +90,39 @@ describe(CustomViewService.name, () => {
       const unlocked = factory.auth({ session: { privateMode: true } });
       await expect(sut.getAll(unlocked, {})).resolves.toEqual([mapCustomView(open), mapCustomView(hidden)]);
     });
+
+    it('should only return the listed views that show the asset, checking access apart from the active view', async () => {
+      const auth = factory.auth({ session: {} });
+      const active = newView({ name: 'Active', includeAll: false });
+      auth.session!.view = toFilter(active);
+      const showing = newView({ name: 'Showing' });
+      const hiding = newView({ name: 'Hiding' });
+      const hidden = newView({ name: 'Hidden', access: ViewAccess.Private });
+      const assetId = newUuid();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([assetId]));
+      mocks.customView.getAll.mockResolvedValue([active, showing, hiding, hidden]);
+      mocks.customView.isAssetInView.mockImplementation((_, view) => Promise.resolve(view.id === showing.id));
+
+      await expect(sut.getAll(auth, { assetId })).resolves.toEqual([mapCustomView(showing)]);
+      expect(mocks.access.asset.checkOwnerAccess).toHaveBeenCalledWith(auth.user.id, new Set([assetId]), {
+        hasElevatedPermission: false,
+        privateMode: false,
+      });
+      expect(mocks.customView.isAssetInView).toHaveBeenCalledTimes(3);
+      expect(mocks.customView.isAssetInView).not.toHaveBeenCalledWith(assetId, hidden);
+    });
+
+    it('should not list views for an asset the session cannot read', async () => {
+      const auth = factory.auth({ session: {} });
+      const assetId = newUuid();
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set());
+      mocks.access.asset.checkAlbumAccess.mockResolvedValue(new Set());
+      mocks.access.asset.checkPartnerAccess.mockResolvedValue(new Set());
+
+      await expect(sut.getAll(auth, { assetId })).rejects.toBeInstanceOf(BadRequestException);
+      expect(mocks.customView.getAll).not.toHaveBeenCalled();
+      expect(mocks.customView.isAssetInView).not.toHaveBeenCalled();
+    });
   });
 
   describe('create', () => {

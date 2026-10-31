@@ -326,6 +326,47 @@ describe(CustomViewService.name, () => {
       await expect(context.sut.setActive(locked, { viewId: hidden.id })).rejects.toThrow('View not found');
     });
 
+    it('should list the views that show an asset the active view hides', async () => {
+      const context = setup();
+      const { login, assets, tags } = await newLibrary(context);
+      const unlocked = await unlock(context, login);
+      const { sut } = context;
+      await sut.create(unlocked, {
+        name: 'Default',
+        isDefault: true,
+        includeAll: true,
+        excludeTagIds: [tags.gym.id],
+        privateAssets: ViewPrivateAssets.Hide,
+      });
+      await sut.create(unlocked, { name: 'Gym', includeTagIds: [tags.gym.id] });
+      await sut.create(unlocked, { name: 'All', access: ViewAccess.Private, includeAll: true });
+      await sut.create(unlocked, {
+        name: 'Private',
+        access: ViewAccess.Private,
+        includeAll: true,
+        privateAssets: ViewPrivateAssets.Only,
+      });
+      await context.auth.disablePrivateMode(unlocked);
+
+      const names = async (auth: AuthDto, assetId: string) => {
+        const views = await sut.getAll(auth, { assetId });
+        return views.map(({ name }) => name);
+      };
+
+      // locked: private views are not offered and a private asset stays not found
+      const locked = await login();
+      await expect(context.assets.get(locked, assets.gym.id)).rejects.toBeInstanceOf(BadRequestException);
+      expect(await names(locked, assets.gym.id)).toEqual(['Gym']);
+      await expect(names(locked, assets.private.id)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(names(locked, factory.uuid())).rejects.toBeInstanceOf(BadRequestException);
+
+      // unlocked, still on the default view that hides private assets
+      const open = await unlock(context, login);
+      await expect(context.assets.get(open, assets.private.id)).rejects.toBeInstanceOf(BadRequestException);
+      expect(await names(open, assets.private.id)).toEqual(['All', 'Private']);
+      expect(await names(open, assets.gym.id)).toEqual(['Gym', 'All']);
+    });
+
     it('should require private mode to edit views', async () => {
       const context = setup();
       const { login } = await newLibrary(context);
