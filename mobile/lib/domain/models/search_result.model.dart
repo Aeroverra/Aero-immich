@@ -7,7 +7,13 @@ part 'search_result.model.freezed.dart';
 abstract class SearchResult with _$SearchResult {
   const SearchResult._();
 
-  const factory SearchResult({required List<BaseAsset> assets, int? nextPage}) = _SearchResult;
+  /// [matchedFrames] says where smart search matched in the videos that matched on a sampled frame rather than their
+  /// thumbnail: the position of that frame in milliseconds, by the remote id of the video.
+  const factory SearchResult({
+    required List<BaseAsset> assets,
+    int? nextPage,
+    @Default({}) Map<String, int> matchedFrames,
+  }) = _SearchResult;
 
   // Explicitly don't log results, only attributes
   @override

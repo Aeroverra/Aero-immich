@@ -355,20 +355,21 @@ export class SearchRepository {
 
     return this.db.transaction().execute(async (trx) => {
       const skip = (pagination.page - 1) * pagination.size;
-      const items = await this.searchSmartWithFrames(
+      const { items, frameTimestamps } = await this.searchSmartWithFrames(
         () => searchAssetBuilderLegacy(trx, options),
         trx,
         options.embedding,
         skip + pagination.size + 1,
       );
-      return paginationHelper(items.slice(skip), pagination.size);
+      return { ...paginationHelper(items.slice(skip), pagination.size), frameTimestamps };
     });
   }
 
   /**
    * Ranks assets by their best match: the thumbnail embedding or, for analyzed videos, the closest
    * sampled frame. Both lookups use their vector index with the same filters, then the lists are
-   * merged so every asset appears once. The result is the exact top `limit` of the merged ranking.
+   * merged so every asset appears once. The result is the exact top `limit` of the merged ranking,
+   * with the position of the matching frame for every video that ranked by a frame.
    */
   private async searchSmartWithFrames(
     // both search builders fit here, their result types only differ in joined tables
@@ -376,7 +377,7 @@ export class SearchRepository {
     trx: Kysely<DB>,
     embedding: string,
     limit: number,
-  ): Promise<MapAsset[]> {
+  ): Promise<{ items: MapAsset[]; frameTimestamps: Map<string, number> }> {
     await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.Clip])}`.execute(trx);
     const thumbnailMatches = await getBuilder()
       .innerJoin('smart_search', 'asset.id', 'smart_search.assetId')
@@ -389,41 +390,49 @@ export class SearchRepository {
       .execute();
 
     await sql`set local vchordrq.probes = ${sql.lit(probes[VectorIndex.ClipFrame])}`.execute(trx);
-    const frameDistances = new Map<string, number>();
+    // the closest frame of each video
+    const bestFrames = new Map<string, { distance: number; frameTimestamp: number }>();
     // several frames of one video can match, so fetch more rows until enough distinct assets are found
     for (let frameLimit = limit * 4, attempt = 0; attempt < 4; frameLimit *= 4, attempt++) {
       const frameMatches = await getBuilder()
         .innerJoin('smart_search_frame', 'asset.id', 'smart_search_frame.assetId')
-        .select(['asset.id', sql<number>`smart_search_frame.embedding <=> ${embedding}`.as('distance')])
+        .select([
+          'asset.id',
+          'smart_search_frame.frameTimestamp',
+          sql<number>`smart_search_frame.embedding <=> ${embedding}`.as('distance'),
+        ])
         .orderBy(sql`smart_search_frame.embedding <=> ${embedding}`)
         .limit(frameLimit)
-        .$castTo<{ id: string; distance: number }>()
+        .$castTo<{ id: string; frameTimestamp: number; distance: number }>()
         .execute();
 
-      frameDistances.clear();
-      for (const { id, distance } of frameMatches) {
+      bestFrames.clear();
+      for (const { id, distance, frameTimestamp } of frameMatches) {
         // the index returns rows in nearly exact order, so the first row of a video is not always its closest frame
-        if (distance < (frameDistances.get(id) ?? Infinity)) {
-          frameDistances.set(id, distance);
+        if (distance < (bestFrames.get(id)?.distance ?? Infinity)) {
+          bestFrames.set(id, { distance, frameTimestamp });
         }
       }
 
-      if (frameMatches.length < frameLimit || frameDistances.size >= limit) {
+      if (frameMatches.length < frameLimit || bestFrames.size >= limit) {
         break;
       }
     }
 
-    if (frameDistances.size === 0) {
-      return thumbnailMatches.map(({ distance: _, ...asset }) => asset);
+    if (bestFrames.size === 0) {
+      return { items: thumbnailMatches.map(({ distance: _, ...asset }) => asset), frameTimestamps: new Map() };
     }
 
-    const ranked = thumbnailMatches.map(({ distance, ...asset }) => ({
-      asset,
-      distance: Math.min(distance, frameDistances.get(asset.id) ?? Infinity),
-    }));
+    // a video ranks by its frame only when that frame is closer than its thumbnail
+    const ranked: { asset: MapAsset; distance: number; frameTimestamp?: number }[] = thumbnailMatches.map(
+      ({ distance, ...asset }) => {
+        const frame = bestFrames.get(asset.id);
+        return frame && frame.distance < distance ? { asset, ...frame } : { asset, distance };
+      },
+    );
 
     const thumbnailIds = new Set(thumbnailMatches.map(({ id }) => id));
-    const frameOnlyIds = frameDistances
+    const frameOnlyIds = bestFrames
       .keys()
       .filter((id) => !thumbnailIds.has(id))
       .toArray();
@@ -434,14 +443,19 @@ export class SearchRepository {
         .$castTo<MapAsset>()
         .execute();
       for (const asset of frameOnlyAssets) {
-        ranked.push({ asset, distance: frameDistances.get(asset.id)! });
+        ranked.push({ asset, ...bestFrames.get(asset.id)! });
       }
     }
 
-    return ranked
+    const top = ranked
       .toSorted((a, b) => a.distance - b.distance || a.asset.id.localeCompare(b.asset.id))
-      .slice(0, limit)
-      .map(({ asset }) => asset);
+      .slice(0, limit);
+    return {
+      items: top.map(({ asset }) => asset),
+      frameTimestamps: new Map(
+        top.flatMap(({ asset, frameTimestamp }) => (frameTimestamp === undefined ? [] : [[asset.id, frameTimestamp]])),
+      ),
+    };
   }
 
   @GenerateSql({
@@ -761,13 +775,13 @@ export class SearchRepository {
   ) {
     return this.db.transaction().execute(async (trx) => {
       const skip = pagination.skip ?? 0;
-      const items = await this.searchSmartWithFrames(
+      const { items, frameTimestamps } = await this.searchSmartWithFrames(
         () => searchAssetBuilder(trx, options, scope),
         trx,
         options.embedding,
         skip + pagination.take + 1,
       );
-      return paginationHelper(items.slice(skip), pagination.take);
+      return { ...paginationHelper(items.slice(skip), pagination.take), frameTimestamps };
     });
   }
 
