@@ -872,101 +872,107 @@ class SearchPage extends HookConsumerWidget {
           ),
         ),
       ),
-      body: CustomScrollView(
-        slivers: [
-          SliverPadding(
+      // the filter chips stay above the results: inside the scroll view a stray vertical drag on them scrolled them
+      // away, and the result grid takes every drag after that, so they never came back
+      body: Column(
+        children: [
+          Padding(
             padding: const EdgeInsets.only(top: 12.0, bottom: 4.0),
-            sliver: SliverToBoxAdapter(
-              child: SizedBox(
-                height: 50,
-                child: ListView(
-                  key: const Key('search_filter_chip_list'),
-                  shrinkWrap: true,
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  children: [
+            child: SizedBox(
+              height: 50,
+              child: ListView(
+                key: const Key('search_filter_chip_list'),
+                shrinkWrap: true,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: [
+                  SearchFilterChip(
+                    icon: Icons.people_alt_outlined,
+                    onTap: showPeoplePicker,
+                    label: context.t.people,
+                    currentFilter: peopleCurrentFilterWidget.value,
+                  ),
+                  SearchFilterChip(
+                    icon: Icons.location_on_outlined,
+                    onTap: showLocationPicker,
+                    label: context.t.search_filter_location,
+                    currentFilter: locationCurrentFilterWidget.value,
+                  ),
+                  if (userPreferences.valueOrNull?.tagsEnabled ?? false)
                     SearchFilterChip(
-                      icon: Icons.people_alt_outlined,
-                      onTap: showPeoplePicker,
-                      label: context.t.people,
-                      currentFilter: peopleCurrentFilterWidget.value,
+                      icon: Icons.sell_outlined,
+                      onTap: showTagPicker,
+                      label: context.t.tags,
+                      currentFilter: tagCurrentFilterWidget.value,
                     ),
+                  SearchFilterChip(
+                    key: const Key('album_chip'),
+                    icon: Icons.photo_album_outlined,
+                    onTap: showAlbumPicker,
+                    label: context.t.albums,
+                    currentFilter: albumCurrentFilterWidget.value,
+                  ),
+                  SearchFilterChip(
+                    icon: Icons.camera_alt_outlined,
+                    onTap: showCameraPicker,
+                    label: context.t.camera,
+                    currentFilter: cameraCurrentFilterWidget.value,
+                  ),
+                  SearchFilterChip(
+                    icon: Icons.date_range_outlined,
+                    onTap: showQuickDatePicker,
+                    label: context.t.search_filter_date,
+                    currentFilter: dateRangeCurrentFilterWidget.value,
+                  ),
+                  SearchFilterChip(
+                    key: const Key('uploaded_chip'),
+                    icon: Icons.cloud_upload_outlined,
+                    onTap: () => showQuickDatePicker(uploaded: true),
+                    label: context.t.search_filter_date_uploaded,
+                    currentFilter: uploadedCurrentFilterWidget.value,
+                  ),
+                  SearchFilterChip(
+                    key: const Key('media_type_chip'),
+                    icon: Icons.video_collection_outlined,
+                    onTap: showMediaTypePicker,
+                    label: context.t.search_filter_media_type,
+                    currentFilter: mediaTypeCurrentFilterWidget.value,
+                  ),
+                  if (userPreferences.valueOrNull?.ratingsEnabled ?? false)
                     SearchFilterChip(
-                      icon: Icons.location_on_outlined,
-                      onTap: showLocationPicker,
-                      label: context.t.search_filter_location,
-                      currentFilter: locationCurrentFilterWidget.value,
+                      icon: Icons.star_outline_rounded,
+                      onTap: showStarRatingPicker,
+                      label: context.t.search_filter_star_rating,
+                      currentFilter: ratingCurrentFilterWidget.value,
                     ),
-                    if (userPreferences.valueOrNull?.tagsEnabled ?? false)
-                      SearchFilterChip(
-                        icon: Icons.sell_outlined,
-                        onTap: showTagPicker,
-                        label: context.t.tags,
-                        currentFilter: tagCurrentFilterWidget.value,
-                      ),
+                  SearchFilterChip(
+                    icon: Icons.display_settings_outlined,
+                    onTap: showDisplayOptionPicker,
+                    label: context.t.search_filter_display_options,
+                    currentFilter: displayOptionCurrentFilterWidget.value,
+                  ),
+                  if (isPrivateMode)
                     SearchFilterChip(
-                      key: const Key('album_chip'),
-                      icon: Icons.photo_album_outlined,
-                      onTap: showAlbumPicker,
-                      label: context.t.albums,
-                      currentFilter: albumCurrentFilterWidget.value,
+                      key: const Key('private_chip'),
+                      icon: Icons.lock_outline_rounded,
+                      onTap: showPrivatePicker,
+                      label: context.t.search_private_filter,
+                      currentFilter: privateCurrentFilterWidget.value,
                     ),
-                    SearchFilterChip(
-                      icon: Icons.camera_alt_outlined,
-                      onTap: showCameraPicker,
-                      label: context.t.camera,
-                      currentFilter: cameraCurrentFilterWidget.value,
-                    ),
-                    SearchFilterChip(
-                      icon: Icons.date_range_outlined,
-                      onTap: showQuickDatePicker,
-                      label: context.t.search_filter_date,
-                      currentFilter: dateRangeCurrentFilterWidget.value,
-                    ),
-                    SearchFilterChip(
-                      key: const Key('uploaded_chip'),
-                      icon: Icons.cloud_upload_outlined,
-                      onTap: () => showQuickDatePicker(uploaded: true),
-                      label: context.t.search_filter_date_uploaded,
-                      currentFilter: uploadedCurrentFilterWidget.value,
-                    ),
-                    SearchFilterChip(
-                      key: const Key('media_type_chip'),
-                      icon: Icons.video_collection_outlined,
-                      onTap: showMediaTypePicker,
-                      label: context.t.search_filter_media_type,
-                      currentFilter: mediaTypeCurrentFilterWidget.value,
-                    ),
-                    if (userPreferences.valueOrNull?.ratingsEnabled ?? false)
-                      SearchFilterChip(
-                        icon: Icons.star_outline_rounded,
-                        onTap: showStarRatingPicker,
-                        label: context.t.search_filter_star_rating,
-                        currentFilter: ratingCurrentFilterWidget.value,
-                      ),
-                    SearchFilterChip(
-                      icon: Icons.display_settings_outlined,
-                      onTap: showDisplayOptionPicker,
-                      label: context.t.search_filter_display_options,
-                      currentFilter: displayOptionCurrentFilterWidget.value,
-                    ),
-                    if (isPrivateMode)
-                      SearchFilterChip(
-                        key: const Key('private_chip'),
-                        icon: Icons.lock_outline_rounded,
-                        onTap: showPrivatePicker,
-                        label: context.t.search_private_filter,
-                        currentFilter: privateCurrentFilterWidget.value,
-                      ),
-                  ],
-                ),
+                ],
               ),
             ),
           ),
-          if (filter.value.isEmpty)
-            const _SearchSuggestions()
-          else
-            _SearchResultGrid(onScrollEnd: () => loadMoreSearchResults()),
+          Expanded(
+            child: CustomScrollView(
+              slivers: [
+                if (filter.value.isEmpty)
+                  const _SearchSuggestions()
+                else
+                  _SearchResultGrid(onScrollEnd: () => loadMoreSearchResults()),
+              ],
+            ),
+          ),
         ],
       ),
     );
