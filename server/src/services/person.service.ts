@@ -763,7 +763,20 @@ export class PersonService extends BaseService {
       throw new NotFoundException('Asset not found');
     }
 
-    const edits = asset.edits || [];
+    const { frameTimestamp } = dto;
+    if (frameTimestamp !== undefined) {
+      if (asset.type !== AssetType.Video) {
+        throw new BadRequestException('A frame timestamp can only be set for a video');
+      }
+
+      if (asset.duration && frameTimestamp > asset.duration) {
+        throw new BadRequestException('Frame timestamp is past the end of the video');
+      }
+    }
+
+    // a frame face is stored in the space of the frame decoded from the original video, like the faces the video
+    // frame analysis finds, so edits are not undone for it
+    const edits = frameTimestamp === undefined ? asset.edits || [] : [];
 
     let topLeft: Point = { x: dto.x, y: dto.y };
     let bottomRight: Point = { x: dto.x + dto.width, y: dto.y + dto.height };
@@ -803,7 +816,7 @@ export class PersonService extends BaseService {
       dto.imageHeight = originalDimensions.height;
     }
 
-    await this.personRepository.createAssetFace({
+    const face = {
       personGroupId: person.personGroupId,
       assetId: dto.assetId,
       imageHeight: dto.imageHeight,
@@ -813,7 +826,20 @@ export class PersonService extends BaseService {
       boundingBoxY1: Math.round(topLeft.y),
       boundingBoxY2: Math.round(bottomRight.y),
       sourceType: SourceType.Manual,
-    });
+      frameTimestamp,
+    };
+
+    if (dto.embedding) {
+      // with an embedding, other faces of the person can be recognized by this one
+      const faceId = this.cryptoRepository.randomUUID();
+      await this.personRepository.refreshFaces(
+        [{ id: faceId, ...face }],
+        [],
+        [{ faceId, embedding: JSON.stringify(dto.embedding) }],
+      );
+    } else {
+      await this.personRepository.createAssetFace(face);
+    }
 
     if (!person.faceAssetId) {
       await this.createNewFeaturePhoto([person]);
