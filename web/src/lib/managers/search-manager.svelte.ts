@@ -75,6 +75,7 @@ class SearchManager {
             ? null
             : new SvelteSet(searchQuery.tagIds)
           : new SvelteSet(),
+      excludeTagIds: new SvelteSet('excludeTagIds' in searchQuery ? searchQuery.excludeTagIds : []),
       location: {
         country: this.#withNullAsEmptyString(searchQuery.country),
         state: this.#withNullAsEmptyString(searchQuery.state),
@@ -139,6 +140,9 @@ class SearchManager {
       isNotInAlbum: this.filter.display.isNotInAlbum || undefined,
       personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
       tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
+      // untagged assets carry no tag to leave out
+      excludeTagIds:
+        this.filter.tagIds !== null && this.filter.excludeTagIds.size > 0 ? [...this.filter.excludeTagIds] : undefined,
       type,
       rating: this.filter.rating,
       isPrivate: privateModeManager.enabled ? this.filter.isPrivate : undefined,
