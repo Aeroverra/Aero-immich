@@ -1,5 +1,6 @@
 import { FaceController } from 'src/controllers/face.controller';
 import { LoggingRepository } from 'src/repositories/logging.repository';
+import { PersonSuggestionService } from 'src/services/person-suggestion.service';
 import { PersonService } from 'src/services/person.service';
 import request from 'supertest';
 import { errorDto } from 'test/medium/responses';
@@ -20,10 +21,12 @@ const face = () => ({
 describe(FaceController.name, () => {
   let ctx: ControllerContext;
   const service = mockBaseService(PersonService);
+  const suggestionService = mockBaseService(PersonSuggestionService);
 
   beforeAll(async () => {
     ctx = await controllerSetup(FaceController, [
       { provide: PersonService, useValue: service },
+      { provide: PersonSuggestionService, useValue: suggestionService },
       { provide: LoggingRepository, useValue: automock(LoggingRepository, { strict: false }) },
     ]);
     return () => ctx.close();
@@ -31,6 +34,7 @@ describe(FaceController.name, () => {
 
   beforeEach(() => {
     service.resetAllMocks();
+    suggestionService.resetAllMocks();
     ctx.reset();
   });
 
@@ -77,6 +81,27 @@ describe(FaceController.name, () => {
         errorDto.validationError([{ path: ['embedding'], message: 'Embedding must not be all zeros' }]),
       );
       expect(service.createFace).not.toHaveBeenCalled();
+    });
+  });
+  describe('GET /faces/:id/thumbnail', () => {
+    it('should require a uuid', async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .get('/faces/invalid/thumbnail')
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+      expect(suggestionService.getFaceThumbnail).not.toHaveBeenCalled();
+    });
+
+    it('should send the face as a jpeg, revalidated when it is on a private asset', async () => {
+      const id = factory.uuid();
+      suggestionService.getFaceThumbnail.mockResolvedValue({ data: Buffer.from('jpeg'), isPrivate: true });
+      const { status, headers } = await request(ctx.getHttpServer())
+        .get(`/faces/${id}/thumbnail`)
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(200);
+      expect(headers['content-type']).toBe('image/jpeg');
+      expect(headers['cache-control']).toBe('private, no-cache, no-transform');
+      expect(suggestionService.getFaceThumbnail).toHaveBeenCalledWith(undefined, id);
     });
   });
 });

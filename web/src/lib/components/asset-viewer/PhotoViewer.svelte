@@ -5,6 +5,8 @@
   import FaceEditor from '$lib/components/asset-viewer/face-editor/FaceEditor.svelte';
   import OcrBoundingBox from '$lib/components/asset-viewer/OcrBoundingBox.svelte';
   import AssetViewerEvents from '$lib/components/AssetViewerEvents.svelte';
+  import { page } from '$app/state';
+  import { QueryParameter } from '$lib/constants';
   import Thumbhash from '$lib/components/Thumbhash.svelte';
   import { assetViewerManager, type Faces } from '$lib/managers/asset-viewer-manager.svelte';
   import { castManager } from '$lib/managers/cast-manager.svelte';
@@ -75,13 +77,22 @@
     return scaleToFit(getNaturalSize(assetViewerManager.imgRef), { width: containerWidth, height: containerHeight });
   });
 
+  // a face picked elsewhere (a face of a Same person? question) stays pointed out while this photo is shown
+  const pinnedFace = $derived.by(() => {
+    const faceId = page.url.searchParams.get(QueryParameter.FACE);
+    return faceId ? faceManager.data.find((face) => face.id === faceId && !face.isWholeAsset) : undefined;
+  });
+  const pinnedBoxes = $derived(pinnedFace ? getBoundingBox([pinnedFace], overlaySize) : []);
+
   const highlightedBoxes = $derived(getBoundingBox(assetViewerManager.highlightedFaces, overlaySize));
-  const isHighlighting = $derived(highlightedBoxes.length > 0);
+  // hovering a face takes the focus; otherwise the pinned face keeps it
+  const focusBoxes = $derived(highlightedBoxes.length > 0 ? highlightedBoxes : pinnedBoxes);
+  const isHighlighting = $derived(focusBoxes.length > 0);
 
   let visibleBoxes = $state<BoundingBox[]>([]);
   $effect(() => {
     if (isHighlighting) {
-      visibleBoxes = highlightedBoxes;
+      visibleBoxes = focusBoxes;
     }
   });
 
@@ -284,6 +295,14 @@
             </div>
           {/if}
         </div>
+      {/each}
+
+      {#each pinnedBoxes as box (box.id)}
+        <div
+          class="pointer-events-none absolute rounded-lg border-4 border-amber-400 shadow-[0_0_0_2px_rgba(0,0,0,0.6)]"
+          style="top: {box.top}px; left: {box.left}px; height: {box.height}px; width: {box.width}px;"
+          data-testid="pinned-face"
+        ></div>
       {/each}
 
       {#each ocrBoxes as ocrBox (ocrBox.id)}

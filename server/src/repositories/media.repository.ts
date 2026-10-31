@@ -184,6 +184,17 @@ export class MediaRepository {
       .toFile(output);
   }
 
+  /** Like generateThumbnail, but returns the encoded image instead of writing a file */
+  async generateThumbnailBuffer(input: string | Buffer, options: GenerateThumbnailOptions): Promise<Buffer> {
+    return this.getImageDecodingPipeline(input, options)
+      .toFormat(options.format, {
+        quality: options.quality,
+        chromaSubsampling: options.quality >= 80 ? '4:4:4' : '4:2:0',
+        progressive: options.progressive,
+      })
+      .toBuffer();
+  }
+
   private getImageDecodingPipeline(input: string | Buffer, options: DecodeToBufferOptions) {
     let pipeline = sharp(input, {
       // some invalid images can still be processed by sharp, but we want to fail on them by default to avoid crashes
