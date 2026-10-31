@@ -172,6 +172,25 @@ describe(VideoFrameAnalysisService.name, () => {
       });
     });
 
+    it('should keep frames of one scene that differ a little', async () => {
+      mocks.assetJob.getForVideoFrameAnalysis.mockResolvedValue(makeAsset({ thumbnailEmbedding: '[0, 0, 1]' }));
+      mocks.machineLearning.analyzeImage
+        .mockResolvedValueOnce({ imageWidth: 1920, imageHeight: 1080, clip: '[1, 0, 0]', faces: [] })
+        // about 0.02 away from the previous frame
+        .mockResolvedValueOnce({ imageWidth: 1920, imageHeight: 1080, clip: '[1, 0.2, 0]', faces: [] })
+        // about 0.005 away from the previous frame
+        .mockResolvedValueOnce({ imageWidth: 1920, imageHeight: 1080, clip: '[1, 0.3, 0]', faces: [] })
+        .mockResolvedValueOnce({ imageWidth: 1920, imageHeight: 1080, clip: '[0, 1, 0]', faces: [] });
+
+      await expect(sut.handleAnalyzeVideoFrames({ id: 'asset-id' })).resolves.toBe(JobStatus.Success);
+
+      expect(mocks.search.replaceFrames).toHaveBeenCalledWith('asset-id', [
+        { frameTimestamp: 1250, embedding: '[1, 0, 0]' },
+        { frameTimestamp: 3750, embedding: '[1, 0.2, 0]' },
+        { frameTimestamp: 8750, embedding: '[0, 1, 0]' },
+      ]);
+    });
+
     it('should only detect faces when smart search is disabled', async () => {
       mocks.systemMetadata.get.mockResolvedValue({
         machineLearning: { clip: { enabled: false }, videoFrameAnalysis: { enabled: true } },
