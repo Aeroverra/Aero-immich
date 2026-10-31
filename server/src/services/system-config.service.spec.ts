@@ -123,6 +123,17 @@ const updatedConfig = Object.freeze<SystemConfig>({
       enabled: true,
       maxDistance: 0.01,
     },
+    autoStack: {
+      enabled: true,
+      maxGapSeconds: 5,
+      maxSpanSeconds: 30,
+      maxAssets: 100,
+      maxDistance: 0.06,
+      maxFaceShift: 0.1,
+      maxFaceSizeChange: 0.25,
+      maxYawChange: 15,
+      maxSmileChange: 0.4,
+    },
     facialRecognition: {
       enabled: true,
       modelName: 'buffalo_l',
@@ -154,6 +165,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     missingThumbnails: true,
     generateMemories: true,
     syncQuotaUsage: true,
+    autoStack: true,
   },
   reverseGeocoding: {
     enabled: true,

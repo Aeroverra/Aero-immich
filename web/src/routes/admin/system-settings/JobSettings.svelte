@@ -37,6 +37,7 @@
     [QueueName.Sidecar]: $t('admin.sidecar_job'),
     [QueueName.SmartSearch]: $t('admin.machine_learning_smart_search'),
     [QueueName.DuplicateDetection]: $t('admin.machine_learning_duplicate_detection'),
+    [QueueName.AutoStack]: $t('admin.machine_learning_auto_stack'),
     [QueueName.FaceDetection]: $t('admin.face_detection'),
     [QueueName.FacialRecognition]: $t('admin.machine_learning_facial_recognition'),
     [QueueName.VideoConversion]: $t('admin.video_conversion_job'),
