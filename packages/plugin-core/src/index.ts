@@ -65,7 +65,27 @@ const parseAspectRatio = (value: string | undefined) => {
   return width > 0 && height > 0 ? width / height : undefined;
 };
 
-const methods = wrapper<Manifest>({
+type Handlers = Parameters<typeof wrapper<Manifest>>[0];
+
+type FilterGroupStep = { method?: string; config?: Record<string, unknown> | null };
+
+const PLUGIN_NAME = 'immich-plugin-core';
+
+/** the methods a filter group can hold: the filters of this plugin, including other groups */
+const groupFilterNames = new Set<string>([
+  'assetFileFilter',
+  'assetLocationFilter',
+  'assetExifFilter',
+  'assetOcrFilter',
+  'assetDimensionFilter',
+  'assetDateFilter',
+  'assetMissingTimeZoneFilter',
+  'assetTagFilter',
+  'assetTypeFilter',
+  'assetFilterGroup',
+] satisfies Array<keyof Handlers>);
+
+const handlers: Handlers = {
   assetAddTags: ({ config, data, functions }) => {
     if (config.tags.length === 0) {
       if (!config.tagName) {
@@ -237,6 +257,44 @@ const methods = wrapper<Manifest>({
     return { workflow: { continue: matched !== !!config.inverse } };
   },
 
+  assetFilterGroup: (payload) => {
+    const filters = (payload.config.filters ?? []) as FilterGroupStep[];
+    const passes = ({ method = '', config }: FilterGroupStep) => {
+      const [pluginName, methodName] = method.split('#');
+      if (pluginName !== PLUGIN_NAME || !groupFilterNames.has(methodName)) {
+        throw new Error(`A filter group can only hold filters of ${PLUGIN_NAME}, not "${method}"`);
+      }
+
+      const handler = handlers[methodName as keyof Handlers] as (
+        input: typeof payload,
+      ) => ReturnType<Handlers['assetFilterGroup']>;
+      const response = handler({ ...payload, config: (config ?? {}) as typeof payload.config });
+      return response?.workflow?.continue !== false;
+    };
+
+    // like a workflow without filters, a group without filters lets every asset through
+    let matched = true;
+    if (filters.length > 0) {
+      switch (payload.config.mode ?? 'any') {
+        case 'all': {
+          matched = filters.every((filter) => passes(filter));
+          break;
+        }
+
+        case 'none': {
+          matched = !filters.some((filter) => passes(filter));
+          break;
+        }
+
+        default: {
+          matched = filters.some((filter) => passes(filter));
+        }
+      }
+    }
+
+    return { workflow: { continue: matched } };
+  },
+
   assetDateFilter: ({ config, data }) => {
     const assetDate = new Date(data.asset.localDateTime);
     let startDate = new Date(config.startDate.year, config.startDate.month - 1, config.startDate.day);
@@ -323,7 +381,9 @@ const methods = wrapper<Manifest>({
 
     return {};
   },
-});
+};
+
+const methods = wrapper<Manifest>(handlers);
 
 const {
   assetAddTags,
@@ -335,6 +395,7 @@ const {
   assetExifFilter,
   assetOcrFilter,
   assetDimensionFilter,
+  assetFilterGroup,
   assetDateFilter,
   assetLock,
   assetMissingTimeZoneFilter,
@@ -357,6 +418,7 @@ export {
   assetExifFilter,
   assetOcrFilter,
   assetDimensionFilter,
+  assetFilterGroup,
   assetDateFilter,
   assetLock,
   assetMissingTimeZoneFilter,

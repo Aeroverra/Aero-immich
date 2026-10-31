@@ -4,16 +4,24 @@
   import { t } from 'svelte-i18n';
 
   type Props = {
-    trigger: WorkflowTrigger;
+    trigger?: WorkflowTrigger;
     selectedKey?: string;
+    title?: string;
+    /** only offer some of the methods, for example the filters a filter group can hold */
+    filter?: (method: PluginMethodResponseDto) => boolean;
     onClose: (method?: PluginMethodResponseDto) => void;
   };
 
-  const { trigger, selectedKey, onClose }: Props = $props();
+  const { trigger, selectedKey, title, filter, onClose }: Props = $props();
+
+  const loadMethods = async () => {
+    const methods = await searchPluginMethods({ trigger });
+    return filter ? methods.filter((method) => filter(method)) : methods;
+  };
 </script>
 
-<BasicModal title={$t('add_step')} onClose={() => onClose()} size="medium">
-  {#await searchPluginMethods({ trigger })}
+<BasicModal title={title ?? $t('add_step')} onClose={() => onClose()} size="medium">
+  {#await loadMethods()}
     <div class="flex w-full place-content-center place-items-center">
       <LoadingSpinner />
     </div>
