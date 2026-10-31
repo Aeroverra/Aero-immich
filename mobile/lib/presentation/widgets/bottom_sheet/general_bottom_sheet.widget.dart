@@ -23,6 +23,7 @@ import 'package:immich_mobile/presentation/widgets/bottom_sheet/base_bottom_shee
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
 import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/utils/private_share.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 
 class GeneralBottomSheet extends ConsumerStatefulWidget {
@@ -50,11 +51,23 @@ class _GeneralBottomSheetState extends ConsumerState<GeneralBottomSheet> {
   @override
   Widget build(BuildContext context) {
     Future<void> addToAlbum(RemoteAlbum album) async {
+      final selectedAssets = ref.read(multiSelectProvider).selectedAssets;
+      final stacked = await resolveStackedAssets(context, ref, ActionSource.timeline, selectedAssets);
+      if (stacked == null || !context.mounted) {
+        return;
+      }
+
       final result = await addWithPrivateShareConfirmation(
         context,
-        warning: privateAddWarning(context, album, ref.read(multiSelectProvider).selectedAssets),
-        add: ({required confirmPrivate}) =>
-            ref.read(actionProvider.notifier).addToAlbum(ActionSource.timeline, album, confirmPrivate: confirmPrivate),
+        warning: privateAddWarning(context, album, selectedAssets),
+        add: ({required confirmPrivate}) => ref
+            .read(actionProvider.notifier)
+            .addToAlbum(
+              ActionSource.timeline,
+              album,
+              confirmPrivate: confirmPrivate,
+              stackedAssetIds: stacked.map((asset) => asset.id).toList(growable: false),
+            ),
       );
 
       if (result == null || !context.mounted) {

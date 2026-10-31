@@ -13,6 +13,7 @@ import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/services/cleanup.service.dart';
 import 'package:immich_mobile/services/toast.service.dart';
 import 'package:immich_mobile/utils/error_handler.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/confirm_dialog.dart';
 
 typedef _State = ({List<String> localIds, List<String> remoteIds, bool trash});
@@ -67,7 +68,16 @@ class DeleteAction extends AssetActionBuilder {
       return;
     }
 
-    final (:localIds, :remoteIds, :trash) = state;
+    final (:localIds, remoteIds: selectedIds, :trash) = state;
+    final selected = ref.read(ownedAssetsActionProvider(source)).where((asset) => selectedIds.contains(asset.id));
+    final stacked = await resolveStackedAssets(context, ref, source, selected);
+    if (stacked == null || !context.mounted) {
+      return;
+    }
+
+    // the device copies of stacked assets are left alone, only their server assets go
+    final remoteIds = [...selectedIds, ...stacked.map((asset) => asset.id)];
+
     final assetService = ref.read(assetServiceProvider);
     final toastService = ref.read(toastServiceProvider);
     final clearSelection = ref.read(clearSelectionProvider(source));
