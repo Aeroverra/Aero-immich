@@ -419,6 +419,44 @@ describe(SearchService.name, () => {
     });
   });
 
+  describe('video length', () => {
+    it('should keep to videos within the length bounds', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: short } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 5000 });
+      const { asset: minute } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 60_000 });
+      const { asset: long } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 600_000 });
+      await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      const auth = factory.auth({ user: { id: user.id } });
+
+      const atLeast = await sut.searchMetadata(auth, { size: 250, minDuration: 10_000 });
+      const atMost = await sut.searchMetadata(auth, { size: 250, maxDuration: 60_000 });
+      const between = await sut.searchMetadata(auth, { size: 250, minDuration: 10_000, maxDuration: 60_000 });
+
+      expect(ids(atLeast.assets.items)).toEqual(ids([minute, long]));
+      // photos have no length, so a bound alone keeps to videos
+      expect(ids(atMost.assets.items)).toEqual(ids([short, minute]));
+      expect(ids(between.assets.items)).toEqual(ids([minute]));
+    });
+
+    it('should apply the length bounds to smart search', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: short } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 5000 });
+      const { asset: long } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, duration: 600_000 });
+      const searchRepository = ctx.get(SearchRepository);
+      await searchRepository.upsert(short.id, unitVector(0));
+      await searchRepository.upsert(long.id, unitVector(1));
+
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), userIds: [user.id], minDuration: 60_000 },
+      );
+
+      expect(ids(items)).toEqual(ids([long]));
+    });
+  });
+
   describe('getSearchSuggestions', () => {
     it('should filter out empty search suggestions', async () => {
       const { sut, ctx } = setup();

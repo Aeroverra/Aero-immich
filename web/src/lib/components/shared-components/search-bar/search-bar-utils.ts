@@ -122,8 +122,50 @@ export const getSearchTypePlaceholder = (type: string) => {
 export const getSearchPlacesTitle = (city?: string, state?: string, country?: string) =>
   [city, state, country].filter(Boolean).join(', ') || undefined;
 
-export const getSearchMediaTitle = (mediaType: MediaType) => {
+/** A video length typed as seconds, m:ss or h:mm:ss, in milliseconds; undefined when empty, null when not a length */
+export const parseVideoLength = (text: string): number | null | undefined => {
+  const value = text.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (!/^\d+(:\d{1,2}){0,2}$/.test(value)) {
+    return null;
+  }
+  const seconds = value.split(':').reduce((total, part) => total * 60 + Number(part), 0);
+  return seconds * 1000;
+};
+
+/** A video length in milliseconds as m:ss, or h:mm:ss from an hour on */
+export const formatVideoLength = (milliseconds: number) => {
+  const total = Math.round(milliseconds / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = String(total % 60).padStart(2, '0');
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
+};
+
+/** "0:30 to 5:00", "0:30 or longer" or "Up to 5:00"; undefined without bounds */
+export const getVideoLengthTitle = (minDuration?: number, maxDuration?: number) => {
   const $t = get(t);
+  if (minDuration !== undefined && maxDuration !== undefined) {
+    return $t('search_video_length_range', {
+      values: { shortest: formatVideoLength(minDuration), longest: formatVideoLength(maxDuration) },
+    });
+  }
+  if (minDuration !== undefined) {
+    return $t('search_video_length_at_least', { values: { duration: formatVideoLength(minDuration) } });
+  }
+  if (maxDuration !== undefined) {
+    return $t('search_video_length_at_most', { values: { duration: formatVideoLength(maxDuration) } });
+  }
+};
+
+export const getSearchMediaTitle = (mediaType: MediaType, minDuration?: number, maxDuration?: number) => {
+  const $t = get(t);
+  const length = getVideoLengthTitle(minDuration, maxDuration);
+  if (length) {
+    return `${$t('video')} ${length}`;
+  }
   switch (mediaType) {
     case MediaType.Image: {
       return $t('image');
