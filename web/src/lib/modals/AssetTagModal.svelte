@@ -1,9 +1,8 @@
 <script lang="ts">
   import TagGroups from '$lib/components/tags/TagGroups.svelte';
   import TagTreePicker from '$lib/components/tags/TagTreePicker.svelte';
-  import { rememberRecentTags } from '$lib/components/tags/tag-picker.svelte';
   import { eventManager } from '$lib/managers/event-manager.svelte';
-  import { removeTag, tagAssets } from '$lib/utils/asset-utils';
+  import { handleTagAssetsChanges } from '$lib/services/tag.service';
   import { handleError } from '$lib/utils/handle-error';
   import { getAllTags, getTagAssetCounts, upsertTags, type TagResponseDto } from '@immich/sdk';
   import { FormModal, Text } from '@immich/ui';
@@ -77,20 +76,14 @@
       return;
     }
 
-    try {
-      const addIds = added.map(({ id }) => id);
-      const removeIds = removed.map(({ id }) => id);
-      if (addIds.length > 0) {
-        await tagAssets({ tagIds: addIds, assetIds });
-        rememberRecentTags(addIds);
-      }
-      if (removeIds.length > 0) {
-        await removeTag({ tagIds: removeIds, assetIds });
-      }
-      eventManager.emit('AssetsTag', assetIds);
+    const saved = await handleTagAssetsChanges({
+      assetIds,
+      addIds: added.map(({ id }) => id),
+      removeIds: removed.map(({ id }) => id),
+      tags: allTags,
+    });
+    if (saved) {
       onClose(true);
-    } catch (error) {
-      handleError(error, $t('errors.failed_to_tag_assets'));
     }
   };
 </script>
