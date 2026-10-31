@@ -31,6 +31,7 @@
   import { lang, locale } from '$lib/stores/preferences.store';
   import { handlePromiseError } from '$lib/utils';
   import { withoutShownStacks } from '$lib/utils/asset-utils';
+  import { formatVideoLength } from '$lib/components/shared-components/search-bar/search-bar-utils';
   import { parseUtcDate } from '$lib/utils/date-time';
   import { handleError } from '$lib/utils/handle-error';
   import { isAlbumsRoute, isPeopleRoute } from '$lib/utils/navigation';
@@ -219,6 +220,8 @@
       personIds: $t('people'),
       tagIds: $t('tags'),
       excludeTagIds: $t('search_exclude_tags'),
+      minDuration: $t('search_videos_at_least'),
+      maxDuration: $t('search_videos_at_most'),
       originalFileName: $t('file_name_text'),
       originalPath: $t('full_path_or_folder'),
       description: $t('description'),
@@ -315,6 +318,8 @@
                 {#await getTagNames(value) then tagNames}
                   {tagNames}
                 {/await}
+              {:else if (searchKey === 'minDuration' || searchKey === 'maxDuration') && typeof value === 'number'}
+                {formatVideoLength(value)}
               {:else if searchKey === 'rating'}
                 {$t('rating_count', { values: { count: value ?? 0 } })}
               {:else if value === null || value === ''}

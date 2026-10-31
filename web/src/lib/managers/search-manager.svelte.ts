@@ -101,6 +101,8 @@ class SearchManager {
           : searchQuery.type === AssetTypeEnum.Video
             ? MediaType.Video
             : MediaType.All,
+      minDuration: 'minDuration' in searchQuery ? searchQuery.minDuration : undefined,
+      maxDuration: 'maxDuration' in searchQuery ? searchQuery.maxDuration : undefined,
       rating: searchQuery.rating,
       isPrivate: privateModeManager.enabled ? searchQuery.isPrivate : undefined,
     };
@@ -140,6 +142,8 @@ class SearchManager {
       isNotInAlbum: this.filter.display.isNotInAlbum || undefined,
       personIds: this.filter.personIds.size > 0 ? [...this.filter.personIds] : undefined,
       tagIds: this.filter.tagIds === null ? null : this.filter.tagIds.size > 0 ? [...this.filter.tagIds] : undefined,
+      minDuration: this.filter.minDuration,
+      maxDuration: this.filter.maxDuration,
       // untagged assets carry no tag to leave out
       excludeTagIds:
         this.filter.tagIds !== null && this.filter.excludeTagIds.size > 0 ? [...this.filter.excludeTagIds] : undefined,
