@@ -1,5 +1,15 @@
-import { AssetVisibility, updateAsset, type AssetResponseDto } from '@immich/sdk';
-import { canCopyImageToClipboard, getAssetFilename, getFilenameExtension, toggleArchive } from './asset-utils';
+import { AssetVisibility, StackSource, updateAsset, type AssetResponseDto } from '@immich/sdk';
+import { authManager } from '$lib/managers/auth-manager.svelte';
+import { preferencesFactory } from '@test-data/factories/preferences-factory';
+import { userAdminFactory } from '@test-data/factories/user-factory';
+import {
+  canCopyImageToClipboard,
+  getAssetFilename,
+  getFilenameExtension,
+  isGroupingAutoStacks,
+  isStackGrouped,
+  toggleArchive,
+} from './asset-utils';
 
 vi.mock('@immich/sdk', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@immich/sdk')>();
@@ -102,5 +112,37 @@ describe('toggleArchive', () => {
 
     expect(asset.isArchived).toBe(false);
     expect(asset.visibility).toBe(AssetVisibility.Timeline);
+  });
+});
+
+describe('automatic stack grouping', () => {
+  afterEach(() => {
+    authManager.reset();
+  });
+
+  const signIn = (groupAuto: boolean) => {
+    authManager.setUser(userAdminFactory.build());
+    authManager.setPreferences(preferencesFactory.build({ stacks: { groupAuto } }));
+  };
+
+  it('groups automatic stacks when nobody is signed in', () => {
+    expect(isGroupingAutoStacks()).toBe(true);
+    expect(isStackGrouped({ source: StackSource.Auto })).toBe(true);
+  });
+
+  it('follows the preference for automatic stacks only', () => {
+    signIn(false);
+
+    expect(isGroupingAutoStacks()).toBe(false);
+    expect(isStackGrouped({ source: StackSource.Auto })).toBe(false);
+    expect(isStackGrouped({ source: StackSource.Manual })).toBe(true);
+    expect(isStackGrouped({})).toBe(true);
+  });
+
+  it('groups every stack while the preference is on', () => {
+    signIn(true);
+
+    expect(isStackGrouped({ source: StackSource.Auto })).toBe(true);
+    expect(isStackGrouped({ source: StackSource.Manual })).toBe(true);
   });
 });

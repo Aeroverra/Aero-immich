@@ -28,7 +28,7 @@
     mdiMenu,
     mdiTrayArrowUp,
   } from '@mdi/js';
-  import { onMount } from 'svelte';
+  import { onMount, type Snippet } from 'svelte';
   import { t } from 'svelte-i18n';
   import ThemeButton from '../ThemeButton.svelte';
   import UserAvatar from '../UserAvatar.svelte';
@@ -36,11 +36,13 @@
 
   type Props = {
     onUploadClick?: () => void;
+    /** page specific buttons shown before the private mode toggle */
+    buttons?: Snippet;
     // TODO: remove once this is only used in <AppShellHeader>
     noBorder?: boolean;
   };
 
-  let { onUploadClick, noBorder = false }: Props = $props();
+  let { onUploadClick, buttons, noBorder = false }: Props = $props();
 
   let shouldShowAccountInfoPanel = $state(false);
   let shouldShowNotificationPanel = $state(false);
@@ -148,6 +150,8 @@
             class="lg:hidden"
           />
         {/if}
+
+        {@render buttons?.()}
 
         {#if !authManager.isSharedLink}
           <IconButton
