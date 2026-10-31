@@ -145,18 +145,81 @@ where
   "id" = $1
 
 -- TagRepository.addAssetIds
+begin
+select
+  "assetId"
+from
+  "asset_exif"
+where
+  "assetId" in ($1)
+order by
+  "assetId"
+for update
 insert into
   "tag_asset" ("tagId", "assetId")
 values
   ($1, $2)
+rollback
 
 -- TagRepository.removeAssetIds
+begin
+select
+  "assetId"
+from
+  "asset_exif"
+where
+  "assetId" in ($1)
+order by
+  "assetId"
+for update
 delete from "tag_asset"
 where
   "tagId" = $1
   and "assetId" in ($2)
+insert into
+  "asset_exif" ("assetId", "tags", "lockedProperties")
+select
+  "asset"."id",
+  array(
+    (
+      select
+        "tag"."value"
+      from
+        "tag_asset"
+        inner join "tag" on "tag"."id" = "tag_asset"."tagId"
+      where
+        "tag_asset"."assetId" = "asset"."id"
+      order by
+        "tag"."value"
+    )
+  ) as "tags",
+  array['tags']::character varying[] as "lockedProperties"
+from
+  "asset"
+where
+  "asset"."id" in ($1)
+on conflict ("assetId") do update
+set
+  "tags" = "excluded"."tags",
+  "lockedProperties" = array(
+    select distinct
+      unnest(
+        "asset_exif"."lockedProperties" || array['tags']::character varying[]
+      )
+  )
+commit
 
 -- TagRepository.upsertAssetIds
+begin
+select
+  "assetId"
+from
+  "asset_exif"
+where
+  "assetId" in ($1)
+order by
+  "assetId"
+for update
 insert into
   "tag_asset" ("assetId", "tagIds")
 values
@@ -164,6 +227,7 @@ values
 on conflict do nothing
 returning
   *
+rollback
 
 -- TagRepository.replaceAssetTags
 begin
