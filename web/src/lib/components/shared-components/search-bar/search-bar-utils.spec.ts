@@ -3,6 +3,7 @@ import {
   formatVideoLength,
   getSearchAlbumsTitle,
   getSearchDateFilterTitle,
+  getSearchPeopleFilterTitle,
   isPopoverContent,
   parseVideoLength,
 } from '$lib/components/shared-components/search-bar/search-bar-utils';
@@ -82,6 +83,43 @@ describe('getSearchAlbumsTitle', () => {
     expect(getSearchAlbumsTitle(albums, new Set(['trip', 'party']))).toBe('search_album_plus_more_albums');
     expect(getSearchAlbumsTitle(albums, new Set())).toBeUndefined();
     expect(getSearchAlbumsTitle([], new Set(['trip']))).toBeUndefined();
+  });
+});
+
+describe('getSearchPeopleFilterTitle', () => {
+  it('names the people and the side of each face option', () => {
+    expect(getSearchPeopleFilterTitle('Ann', {})).toBe('Ann');
+    expect(getSearchPeopleFilterTitle('Ann', { onlyPersonIds: true })).toBe('search_filter_only_people_title');
+    expect(getSearchPeopleFilterTitle('Ann', { onlyPersonIds: false })).toBe('search_filter_with_others_title');
+    expect(getSearchPeopleFilterTitle('Ann', { hasUnnamedFaces: true })).toBe('Ann · search_filter_with_unnamed_faces');
+    expect(getSearchPeopleFilterTitle(undefined, { hasUnnamedFaces: false })).toBe('search_filter_no_unnamed_faces');
+    expect(getSearchPeopleFilterTitle(undefined, { hasNamedFaces: true })).toBe('search_filter_with_named_people');
+  });
+
+  it('says no people over everything else', () => {
+    expect(
+      getSearchPeopleFilterTitle('Ann', {
+        onlyPersonIds: true,
+        hasPeople: false,
+        hasNamedFaces: false,
+        hasUnnamedFaces: true,
+      }),
+    ).toBe('search_filter_no_people');
+  });
+
+  it('says no named people instead of the picked people', () => {
+    expect(
+      getSearchPeopleFilterTitle('Ann', { onlyPersonIds: true, hasNamedFaces: false, hasUnnamedFaces: true }),
+    ).toBe('search_filter_no_named_people · search_filter_with_unnamed_faces');
+  });
+
+  it('says with people only when nothing else is set', () => {
+    expect(getSearchPeopleFilterTitle(undefined, { hasPeople: true })).toBe('search_filter_with_people');
+    expect(getSearchPeopleFilterTitle('Ann', { hasPeople: true })).toBe('Ann');
+  });
+
+  it('has no title without people or options', () => {
+    expect(getSearchPeopleFilterTitle(undefined, { onlyPersonIds: true })).toBeUndefined();
   });
 });
 
