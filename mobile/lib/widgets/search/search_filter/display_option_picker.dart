@@ -3,13 +3,14 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:immich_mobile/generated/translations.g.dart';
 import 'package:immich_mobile/models/search/search_filter.model.dart';
 
-enum DisplayOption { notInAlbum, favorite, archive }
+enum DisplayOption { notInAlbum, favorite, archive, noTags }
 
 class DisplayOptionPicker extends HookWidget {
-  const DisplayOptionPicker({super.key, required this.onSelect, this.filter});
+  const DisplayOptionPicker({super.key, required this.onSelect, this.filter, this.tagsEnabled = false});
 
   final Function(Map<DisplayOption, bool>) onSelect;
   final SearchDisplayFilters? filter;
+  final bool tagsEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +18,7 @@ class DisplayOptionPicker extends HookWidget {
       DisplayOption.notInAlbum: filter?.isNotInAlbum ?? false,
       DisplayOption.favorite: filter?.isFavorite ?? false,
       DisplayOption.archive: filter?.isArchive ?? false,
+      DisplayOption.noTags: filter?.hasNoTags ?? false,
     });
 
     return ListView(
@@ -46,6 +48,15 @@ class DisplayOptionPicker extends HookWidget {
             onSelect(options.value);
           },
         ),
+        if (tagsEnabled)
+          CheckboxListTile(
+            title: Text(context.t.search_filter_display_option_no_tags),
+            value: options.value[DisplayOption.noTags],
+            onChanged: (value) {
+              options.value = {...options.value, DisplayOption.noTags: value!};
+              onSelect(options.value);
+            },
+          ),
       ],
     );
   }

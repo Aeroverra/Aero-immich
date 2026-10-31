@@ -64,7 +64,7 @@ void main() {
         location: SearchLocationFilter(),
         camera: SearchCameraFilter(),
         date: SearchDateFilter(),
-        display: SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false),
+        display: SearchDisplayFilters(isNotInAlbum: false, isArchive: false, isFavorite: false, hasNoTags: false),
         rating: SearchRatingFilter(),
         mediaType: AssetType.other,
       ),
