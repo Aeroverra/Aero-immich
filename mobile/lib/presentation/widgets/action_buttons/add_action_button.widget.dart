@@ -18,6 +18,7 @@ import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/album.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 import 'package:immich_mobile/utils/private_share.dart';
+import 'package:immich_mobile/utils/stack_selection.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_ui/immich_ui.dart';
 
@@ -113,11 +114,25 @@ class _AddActionButtonState extends ConsumerState<AddActionButton> {
       return;
     }
 
+    // a manual stack is one item, so the album gets all of it
+    final stacked = await resolveStackedAssets(context, ref, ActionSource.viewer, [
+      latest,
+    ], wholeManualStackInViewer: true);
+    if (stacked == null || !mounted) {
+      return;
+    }
+
     final result = await addWithPrivateShareConfirmation(
       context,
-      warning: privateAddWarning(context, album, [latest]),
-      add: ({required confirmPrivate}) =>
-          ref.read(actionProvider.notifier).addToAlbum(ActionSource.viewer, album, confirmPrivate: confirmPrivate),
+      warning: privateAddWarning(context, album, [latest, ...stacked]),
+      add: ({required confirmPrivate}) => ref
+          .read(actionProvider.notifier)
+          .addToAlbum(
+            ActionSource.viewer,
+            album,
+            confirmPrivate: confirmPrivate,
+            stackedAssetIds: stacked.map((asset) => asset.id).toList(),
+          ),
     );
 
     if (result == null || !mounted) {

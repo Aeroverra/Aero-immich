@@ -50,7 +50,7 @@ class TagAction extends AssetActionBuilder {
       final selectedAssets = ref
           .read(ownedAssetsActionProvider(source))
           .where((asset) => selectedIds.contains(asset.id));
-      final stacked = await resolveStackedAssets(context, ref, source, selectedAssets);
+      final stacked = await resolveStackedAssets(context, ref, source, selectedAssets, wholeManualStackInViewer: true);
       if (stacked == null || !context.mounted) {
         return;
       }
