@@ -1,7 +1,9 @@
 import { WorkflowTrigger } from '@immich/plugin-sdk';
 import { Kysely } from 'kysely';
-import { WorkflowType } from 'src/enum';
+import { JobName, WorkflowType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
+import { JobRepository } from 'src/repositories/job.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { PluginRepository } from 'src/repositories/plugin.repository';
 import { WorkflowRepository } from 'src/repositories/workflow.repository';
@@ -16,8 +18,8 @@ let defaultDatabase: Kysely<DB>;
 const setup = (db?: Kysely<DB>) => {
   return newMediumService(WorkflowService, {
     database: db || defaultDatabase,
-    real: [WorkflowRepository, PluginRepository, AccessRepository],
-    mock: [LoggingRepository],
+    real: [WorkflowRepository, PluginRepository, AccessRepository, CryptoRepository],
+    mock: [LoggingRepository, JobRepository],
   });
 };
 
@@ -154,6 +156,34 @@ describe(WorkflowService.name, () => {
       const user2Workflows = await sut.search(auth2, {});
 
       expect(user2Workflows).toEqual([]);
+    });
+  });
+
+  describe('run', () => {
+    it('should queue a run of the workflow', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const workflow = await sut.create(auth, { trigger: WorkflowTrigger.AssetOcr, enabled: false });
+      ctx.getMock(JobRepository).queue.mockResolvedValue();
+
+      await sut.run(auth, workflow.id);
+
+      expect(ctx.getMock(JobRepository).queue).toHaveBeenCalledWith({
+        name: JobName.WorkflowRunQueueAll,
+        data: { workflowId: workflow.id, runId: expect.any(String) },
+      });
+    });
+
+    it('should not run the workflow of another user', async () => {
+      const { sut, ctx } = setup();
+      const { user: owner } = await ctx.newUser();
+      const { user: other } = await ctx.newUser();
+      const workflow = await sut.create(factory.auth({ user: owner }), { trigger: WorkflowTrigger.AssetCreate });
+
+      await expect(sut.run(factory.auth({ user: other }), workflow.id)).rejects.toThrow();
+      await expect(sut.preview(factory.auth({ user: other }), workflow.id, { limit: 12 })).rejects.toThrow();
+      expect(ctx.getMock(JobRepository).queue).not.toHaveBeenCalled();
     });
   });
 });

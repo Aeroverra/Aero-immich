@@ -1,4 +1,6 @@
-import { getWorkflowDefaultConfig } from '$lib/utils/workflow';
+import { WorkflowTrigger } from '@immich/sdk';
+import type { MessageFormatter } from 'svelte-i18n';
+import { getTriggerDescription, getTriggerName, getWorkflowDefaultConfig } from '$lib/utils/workflow';
 
 describe(getWorkflowDefaultConfig.name, () => {
   describe('required properties', () => {
@@ -108,5 +110,21 @@ describe(getWorkflowDefaultConfig.name, () => {
         }),
       ).toEqual({ parent: { test: [] } });
     });
+  });
+});
+
+describe(getTriggerName.name, () => {
+  const $t = ((key: string) => key) as MessageFormatter;
+
+  it('should name every trigger', () => {
+    for (const trigger of Object.values(WorkflowTrigger)) {
+      expect(getTriggerName($t, trigger)).not.toEqual(trigger);
+      expect(getTriggerDescription($t, trigger)).not.toEqual(trigger);
+    }
+  });
+
+  it('should name the text recognized trigger', () => {
+    expect(getTriggerName($t, WorkflowTrigger.AssetOcr)).toEqual('trigger_asset_ocr');
+    expect(getTriggerDescription($t, WorkflowTrigger.AssetOcr)).toEqual('trigger_asset_ocr_description');
   });
 });

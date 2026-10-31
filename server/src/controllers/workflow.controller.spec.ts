@@ -4,6 +4,7 @@ import { LoggingRepository } from 'src/repositories/logging.repository';
 import { WorkflowService } from 'src/services/workflow.service';
 import request from 'supertest';
 import { errorDto } from 'test/medium/responses';
+import { factory } from 'test/small.factory';
 import { automock, ControllerContext, controllerSetup, mockBaseService } from 'test/utils';
 
 describe(WorkflowController.name, () => {
@@ -87,6 +88,53 @@ describe(WorkflowController.name, () => {
         .send({});
       expect(status).toBe(400);
       expect(body).toEqual(errorDto.validationError([{ path: ['id'], message: 'Invalid UUID' }]));
+    });
+  });
+
+  describe('GET /workflows/:id/preview', () => {
+    it(`should require id to be a uuid`, async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .get(`/workflows/invalid/preview`)
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.validationError([{ path: ['id'], message: 'Invalid UUID' }]));
+    });
+
+    it(`should reject a limit above 100`, async () => {
+      const { status } = await request(ctx.getHttpServer())
+        .get(`/workflows/${factory.uuid()}/preview`)
+        .query({ limit: 101 })
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+      expect(service.preview).not.toHaveBeenCalled();
+    });
+
+    it(`should default the limit`, async () => {
+      const id = factory.uuid();
+      const { status } = await request(ctx.getHttpServer())
+        .get(`/workflows/${id}/preview`)
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(200);
+      expect(service.preview).toHaveBeenCalledWith(undefined, id, { limit: 12 });
+    });
+  });
+
+  describe('POST /workflows/:id/run', () => {
+    it(`should require id to be a uuid`, async () => {
+      const { status, body } = await request(ctx.getHttpServer())
+        .post(`/workflows/invalid/run`)
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(400);
+      expect(body).toEqual(errorDto.validationError([{ path: ['id'], message: 'Invalid UUID' }]));
+    });
+
+    it(`should queue a run`, async () => {
+      const id = factory.uuid();
+      const { status } = await request(ctx.getHttpServer())
+        .post(`/workflows/${id}/run`)
+        .set('Authorization', `Bearer token`);
+      expect(status).toBe(204);
+      expect(service.run).toHaveBeenCalledWith(undefined, id);
     });
   });
 });
