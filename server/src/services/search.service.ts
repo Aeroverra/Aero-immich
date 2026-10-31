@@ -214,15 +214,19 @@ export class SearchService extends BaseService {
       throw new BadRequestException('Smart search is not enabled');
     }
 
-    const userIds = this.getUserIdsToSearchIn(auth, dto);
-    const embedding = await this.resolveEmbedding(auth, dto, machineLearning);
+    // both at once, so a refused filter (for example a hidden tag) rejects here instead of as an unhandled rejection
+    // while the query is still being encoded, which would take the whole API worker down
+    const [userIds, embedding] = await Promise.all([
+      this.getUserIdsToSearchIn(auth, dto),
+      this.resolveEmbedding(auth, dto, machineLearning),
+    ]);
     const page = dto.page ?? 1;
     const size = dto.size;
     const { hasNextPage, items } = await this.searchRepository.searchSmart(
       { page, size },
       {
         ...dto,
-        userIds: await userIds,
+        userIds,
         viewingUserId: auth.user.id,
         privateScope: toPrivateScope(auth),
         embedding,
