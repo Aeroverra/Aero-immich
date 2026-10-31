@@ -24,8 +24,12 @@ import {
   VideoFrameFace,
 } from 'src/utils/video-frame';
 
-/** frames closer than this to the previous kept frame or the thumbnail add nothing to search */
-const DUPLICATE_FRAME_MAX_DISTANCE = 0.03;
+/**
+ * frames closer than this to the previous kept frame or the thumbnail add nothing to search. Large CLIP models put
+ * visibly different moments of one scene only a few hundredths apart, and text queries still rank those frames
+ * differently, so only near-identical frames are dropped
+ */
+const DUPLICATE_FRAME_MAX_DISTANCE = 0.01;
 /** faces of one video closer than this are treated as the same person */
 const FACE_GROUP_MAX_DISTANCE = 0.4;
 /** a person seen in only one sampled frame needs a clearer detection than usual */
