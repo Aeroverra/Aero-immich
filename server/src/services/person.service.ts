@@ -1,6 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Insertable, Selectable, Updateable } from 'kysely';
 import _ from 'lodash';
+import { join } from 'node:path';
+import { FACE_THUMBNAIL_SIZE } from 'src/constants';
+import { StorageCore } from 'src/cores/storage.core';
 import { Person } from 'src/database';
 import { Chunked, OnJob } from 'src/decorators';
 import { BulkIdErrorReason, BulkIdResponseDto, BulkIdsDto } from 'src/dtos/asset-ids.response.dto';
@@ -22,12 +25,14 @@ import {
   PersonResponseDto,
   PersonSearchDto,
   PersonStatisticsResponseDto,
+  PersonThumbnailDto,
   PersonUpdateDto,
 } from 'src/dtos/person.dto';
 import {
   AssetType,
   AssetVisibility,
   CacheControl,
+  ImageFormat,
   JobName,
   JobStatus,
   Permission,
@@ -44,6 +49,7 @@ import { AssetFaceTable } from 'src/schema/tables/asset-face.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { PersonTable } from 'src/schema/tables/person.table';
 import { BaseService } from 'src/services/base.service';
+import { generateFaceThumbnail } from 'src/services/media.service';
 import type { JobItem, JobOf } from 'src/types';
 import { getActiveView, isPrivateMode, toPrivateScope } from 'src/utils/access';
 import { getDimensions } from 'src/utils/asset.util';
@@ -54,6 +60,9 @@ import { batched, findOrFail, isFacialRecognitionEnabled, isVideoFrameAnalysisEn
 import { getOutputDimensions, Point, transformEditedFaceToOriginal, transformPoints } from 'src/utils/transform';
 
 const personKey = ({ ownerId, personGroupId }: PersonId) => `${ownerId}/${personGroupId}`;
+
+/** stand-in person thumbnails being cut on demand, shared by every request this server handles */
+const fallbackCuts = { running: 0, waiting: [] as (() => void)[], inFlight: new Map<string, Promise<boolean>>() };
 
 /**
  * The frame a whole-asset face covers: the oriented original for a photo (the space faces drawn on an edited photo are
@@ -204,35 +213,157 @@ export class PersonService extends BaseService {
     return this.personRepository.getStatistics(personGroupId, auth.user.id, toPrivateScope(auth));
   }
 
-  async getThumbnail(auth: AuthDto, personGroupId: string): Promise<ImmichFileResponse> {
+  async getThumbnail(auth: AuthDto, personGroupId: string, dto: PersonThumbnailDto = {}): Promise<ImmichFileResponse> {
     await this.requireAccess({ auth, permission: Permission.PersonRead, ids: [personGroupId] });
-    const person = await this.personRepository.getByGroupId({ ownerId: auth.user.id, personGroupId });
-    if (!person || !person.thumbnailPath) {
+    const ownerId = auth.user.id;
+    const person = await this.personRepository.getByGroupId({ ownerId, personGroupId });
+    if (!person) {
       throw new NotFoundException();
     }
 
-    // a feature photo cut from a private asset behaves like a missing thumbnail outside private mode
-    if (
-      !isPrivateMode(auth) &&
-      (await this.personRepository.isCoverAssetPrivate({ ownerId: auth.user.id, personGroupId }))
-    ) {
-      throw new NotFoundException();
-    }
-
-    // the same goes for a feature photo cut from an asset the active view hides
+    // a feature photo cut from a private asset is hidden outside private mode, and one cut from an asset the active
+    // view hides is hidden too, so a face crop never shows what the caller may not see
     const view = getActiveView(auth);
-    if (
-      !isViewUnrestricted(view) &&
-      !(await this.personRepository.isCoverAssetInView({ ownerId: auth.user.id, personGroupId }, view!))
-    ) {
-      throw new NotFoundException();
+    const isCoverHidden =
+      (!isPrivateMode(auth) && (await this.personRepository.isCoverAssetPrivate({ ownerId, personGroupId }))) ||
+      (!isViewUnrestricted(view) &&
+        !(await this.personRepository.isCoverAssetInView({ ownerId, personGroupId }, view)));
+
+    if (person.thumbnailPath && !isCoverHidden) {
+      return new ImmichFileResponse({
+        path: person.thumbnailPath,
+        contentType: mimeTypes.lookup(person.thumbnailPath),
+        cacheControl: CacheControl.PrivateWithoutCache,
+      });
     }
+
+    // stand-ins vary with private mode and the active view; PrivateWithoutCache makes clients revalidate every time
+    const fallbackFolder = StorageCore.getPersonFallbackFolder(person);
+    let face;
+    // shown next to an asset (its people list): the person's face on that asset, which the caller is looking at; an
+    // asset the caller may not read is ignored like any other hidden asset, so the tile still gets a stand-in
+    const readableAssetIds =
+      isCoverHidden && dto.assetId
+        ? await this.checkAccess({ auth, permission: Permission.AssetRead, ids: [dto.assetId] })
+        : new Set<string>();
+    if (dto.assetId && readableAssetIds.has(dto.assetId)) {
+      face = await this.personRepository.getVisibleFaceForThumbnail(
+        { ownerId, personGroupId },
+        toPrivateScope(auth),
+        dto.assetId,
+      );
+    }
+    if (isCoverHidden && !face) {
+      face = await this.personRepository.getVisibleFaceForThumbnail({ ownerId, personGroupId }, toPrivateScope(auth));
+    }
+
+    if (face) {
+      // keyed by the face and its last change, so an edited face box gets a new cut
+      const facePrefix = `${face.id}-`;
+      const facePath = join(fallbackFolder, `${facePrefix}${new Date(face.updatedAt).getTime()}.jpeg`);
+      const isCut = await this.cutFallbackOnce(facePath, async (temporaryPath) => {
+        const config = await this.getConfig({ withCache: true });
+        const repositories = { mediaRepository: this.mediaRepository, storageCore: this.storageCore };
+        if (!(await generateFaceThumbnail(repositories, config, face, temporaryPath))) {
+          return false;
+        }
+
+        // drop the cuts of earlier versions of this face
+        const files = await this.storageRepository.readdir(fallbackFolder);
+        const stale = files.filter((file) => file.startsWith(facePrefix) && file.endsWith('.jpeg'));
+        await Promise.all(stale.map((file) => this.storageRepository.unlink(join(fallbackFolder, file))));
+        return true;
+      });
+
+      if (isCut) {
+        return new ImmichFileResponse({
+          path: facePath,
+          contentType: 'image/jpeg',
+          cacheControl: CacheControl.PrivateWithoutCache,
+        });
+      }
+    }
+
+    // nothing the caller may see (or no thumbnail yet): a neutral silhouette instead of an error tile
+    const placeholderPath = join(fallbackFolder, 'placeholder.jpeg');
+    await this.cutFallbackOnce(placeholderPath, async (temporaryPath) => {
+      const { image } = await this.getConfig({ withCache: true });
+      const size = FACE_THUMBNAIL_SIZE;
+      const pixels = Buffer.alloc(size * size * 3);
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          // a head over the top of two shoulders, light gray on mid gray
+          const isHead = (x - size / 2) ** 2 + (y - size * 0.4) ** 2 <= (size * 0.18) ** 2;
+          const isShoulders = ((x - size / 2) / (size * 0.34)) ** 2 + ((y - size) / (size * 0.32)) ** 2 <= 1;
+          pixels.fill(isHead || isShoulders ? 0xe5 : 0xa3, (y * size + x) * 3, (y * size + x) * 3 + 3);
+        }
+      }
+
+      this.storageCore.ensureFolders(temporaryPath);
+      await this.mediaRepository.generateThumbnail(
+        pixels,
+        {
+          colorspace: image.colorspace,
+          format: ImageFormat.Jpeg,
+          raw: { width: size, height: size, channels: 3 },
+          quality: image.thumbnail.quality,
+          progressive: false,
+          processInvalidImages: false,
+        },
+        temporaryPath,
+      );
+      return true;
+    });
 
     return new ImmichFileResponse({
-      path: person.thumbnailPath,
-      contentType: mimeTypes.lookup(person.thumbnailPath),
+      path: placeholderPath,
+      contentType: 'image/jpeg',
       cacheControl: CacheControl.PrivateWithoutCache,
     });
+  }
+
+  /**
+   * Makes a cached stand-in thumbnail unless it is already on disk. The file is written next to its final path and
+   * renamed into place, so a reader never sees half a file; requests for the same file share one cut, and at most
+   * two cuts run at once because each decodes a whole original or runs ffmpeg.
+   */
+  private async cutFallbackOnce(path: string, cut: (temporaryPath: string) => Promise<boolean>): Promise<boolean> {
+    if (await this.storageRepository.checkFileExists(path)) {
+      return true;
+    }
+
+    let running = fallbackCuts.inFlight.get(path);
+    if (!running) {
+      running = (async () => {
+        while (fallbackCuts.running >= 2) {
+          await new Promise<void>((resolve) => {
+            fallbackCuts.waiting.push(resolve);
+          });
+        }
+
+        fallbackCuts.running++;
+        const temporaryPath = `${path}.${this.cryptoRepository.randomUUID()}.tmp`;
+        try {
+          if (!(await cut(temporaryPath))) {
+            return false;
+          }
+
+          await this.storageRepository.rename(temporaryPath, path);
+          return true;
+        } catch (error: Error | any) {
+          this.logger.error(`Unable to cut person thumbnail ${path}: ${error}`, error?.stack);
+          await this.storageRepository.unlink(temporaryPath).catch(() => {});
+          return false;
+        } finally {
+          fallbackCuts.running--;
+          fallbackCuts.waiting.shift()?.();
+          fallbackCuts.inFlight.delete(path);
+        }
+      })();
+      fallbackCuts.inFlight.set(path, running);
+    }
+
+    return running;
   }
 
   async create(auth: AuthDto, dto: PersonCreateDto): Promise<PersonResponseDto> {
@@ -322,6 +453,11 @@ export class PersonService extends BaseService {
 
     const people = await this.personRepository.delete(groupIds, ownerId);
     await Promise.all(people.map((person) => this.storageRepository.unlink(person.thumbnailPath)));
+    await Promise.all(
+      people.map((person) =>
+        this.storageRepository.unlinkDir(StorageCore.getPersonFallbackFolder(person), { recursive: true, force: true }),
+      ),
+    );
     await this.personRepository.deleteEmptyGroups();
     this.logger.debug(`Deleted ${groupIds.length} people`);
   }
