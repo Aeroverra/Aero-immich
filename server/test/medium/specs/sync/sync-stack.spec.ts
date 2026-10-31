@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { StackRepository } from 'src/repositories/stack.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
@@ -110,5 +111,43 @@ describe(SyncEntityType.StackV1, () => {
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.StacksV1]);
     await stackRepo.delete(stack.id);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.StacksV1]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold a stack whose primary asset is private and send it again once it is public and touched', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset: primary } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { asset: other } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { stack } = await ctx.newStack({ ownerId: user.id }, [primary.id, other.id]);
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.StacksV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.StackV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.StacksV1]);
+
+      await assetRepo.updateAll([primary.id, other.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([primary.id, other.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.StacksV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.StackV1,
+          data: expect.objectContaining({ id: stack.id, primaryAssetId: primary.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.StacksV1]);
+    });
+
+    it('should carry a stack whose primary asset is private for a client that opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { stack } = await ctx.newStack({ ownerId: user.id }, [asset.id]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.StacksV1], false, true)).resolves.toEqual([
+        expect.objectContaining({ type: SyncEntityType.StackV1, data: expect.objectContaining({ id: stack.id }) }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });

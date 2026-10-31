@@ -372,11 +372,11 @@ export class SyncTestContext extends MediumTestContext<typeof SyncService> {
     });
   }
 
-  async syncStream(auth: AuthDto, types: SyncRequestType[], shouldReset?: boolean) {
+  async syncStream(auth: AuthDto, types: SyncRequestType[], shouldReset?: boolean, includePrivate?: boolean) {
     const stream = mediumFactory.syncStream();
     // Wait for 2ms to ensure all updates are available and account for setTimeout inaccuracy
     await wait(2);
-    await this.sut.stream(auth, stream, { types, reset: shouldReset });
+    await this.sut.stream(auth, stream, { types, reset: shouldReset, includePrivate });
 
     return stream.getResponse();
   }
