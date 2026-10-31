@@ -709,6 +709,16 @@ export type AutoStackResponse = {
     /** Whether similar photos taken close together are stacked automatically */
     enabled: boolean;
 };
+export type CameraGroupsResponse = {
+    /** Whether the files of one shot get the same tags when they are stacked */
+    copyTags: boolean;
+    /** Whether files a camera saved from one shot are stacked when they are uploaded */
+    enabled: boolean;
+    /** Tags that stay on one file of a shot, such as where it came from; * matches anything */
+    keepTags: string[];
+    /** Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything */
+    reviewTags: string[];
+};
 export type CastResponse = {
     /** Whether Google Cast is enabled */
     gCastEnabled: boolean;
@@ -802,6 +812,7 @@ export type TagsResponse = {
 export type UserPreferencesResponseDto = {
     albums: AlbumsResponse;
     autoStack: AutoStackResponse;
+    cameraGroups: CameraGroupsResponse;
     cast: CastResponse;
     customViews: CustomViewsResponse;
     deletedReimport: DeletedReimportResponse;
@@ -828,6 +839,16 @@ export type AutoStackUpdate = {
 };
 export type AvatarUpdate = {
     color?: UserAvatarColor;
+};
+export type CameraGroupsUpdate = {
+    /** Whether the files of one shot get the same tags when they are stacked */
+    copyTags?: boolean;
+    /** Whether files a camera saved from one shot are stacked when they are uploaded */
+    enabled?: boolean;
+    /** Tags that stay on one file of a shot, such as where it came from; * matches anything */
+    keepTags?: string[];
+    /** Tags that stay only when every file of a shot has them, such as Unreviewed; * matches anything */
+    reviewTags?: string[];
 };
 export type CastUpdate = {
     /** Whether Google Cast is enabled */
@@ -921,6 +942,7 @@ export type UserPreferencesUpdateDto = {
     albums?: AlbumsUpdate;
     autoStack?: AutoStackUpdate;
     avatar?: AvatarUpdate;
+    cameraGroups?: CameraGroupsUpdate;
     cast?: CastUpdate;
     customViews?: CustomViewsUpdate;
     deletedReimport?: DeletedReimportUpdate;
@@ -9933,6 +9955,7 @@ export enum JobName {
     AssetGenerateThumbnails = "AssetGenerateThumbnails",
     AutoStackQueueAll = "AutoStackQueueAll",
     AutoStack = "AutoStack",
+    StackCameraGroup = "StackCameraGroup",
     AuditTableCleanup = "AuditTableCleanup",
     DatabaseBackup = "DatabaseBackup",
     FacialRecognitionQueueAll = "FacialRecognitionQueueAll",
