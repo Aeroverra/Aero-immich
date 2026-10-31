@@ -42,6 +42,26 @@ const newPrivatePair = async (ctx: ReturnType<typeof setup>['ctx'], ownerId: str
   return { publicAsset, privateAsset };
 };
 
+/** One tagged, one album, two plain (one favorite) and one trashed asset for the same user */
+const newLibrary = async () => {
+  const { sut, ctx } = setup();
+  const { user } = await ctx.newUser();
+  const { asset: tagged } = await ctx.newAsset({ ownerId: user.id });
+  const { asset: inAlbum } = await ctx.newAsset({ ownerId: user.id });
+  const { asset: plain } = await ctx.newAsset({ ownerId: user.id });
+  const { asset: plainFavorite } = await ctx.newAsset({ ownerId: user.id, isFavorite: true });
+  const { asset: trashed } = await ctx.newAsset({ ownerId: user.id });
+  await ctx.softDeleteAsset(trashed.id);
+
+  const { tag } = await ctx.newTag({ userId: user.id, value: 'holiday', color: '#000000' });
+  await ctx.newTagAsset({ tagIds: [tag.id], assetIds: [tagged.id] });
+  const { album } = await ctx.newAlbum({ ownerId: user.id });
+  await ctx.newAlbumAsset({ albumId: album.id, assetId: inAlbum.id });
+
+  const auth = factory.auth({ user: { id: user.id } });
+  return { sut, ctx, user, auth, tagged, inAlbum, plain, plainFavorite, trashed };
+};
+
 const ids = (items: { id: string }[]) => items.map(({ id }) => id).toSorted();
 
 beforeAll(async () => {
@@ -202,6 +222,124 @@ describe(SearchService.name, () => {
       await expect(sut.searchMetadata(auth, { size: 250, albumIds: [album.id] })).rejects.toThrow(
         'Not found or no album.read access',
       );
+    });
+  });
+
+  describe('untagged and not-in-album filters', () => {
+    it('should return only untagged assets for the deprecated tagIds: null', async () => {
+      const { sut, auth, inAlbum, plain, plainFavorite } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, tagIds: null });
+
+      expect(ids(response.assets.items)).toEqual(ids([inAlbum, plain, plainFavorite]));
+    });
+
+    it('should return only assets outside every album for the deprecated isNotInAlbum', async () => {
+      const { sut, auth, tagged, plain, plainFavorite } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, isNotInAlbum: true });
+
+      expect(ids(response.assets.items)).toEqual(ids([tagged, plain, plainFavorite]));
+    });
+
+    // the structured shape only excludes trashed assets when the filter says so
+    it('should return only untagged assets for hasTags: false', async () => {
+      const { sut, auth, inAlbum, plain, plainFavorite, trashed } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, filter: { hasTags: { eq: false } } });
+      expect(ids(response.assets.items)).toEqual(ids([inAlbum, plain, plainFavorite, trashed]));
+
+      const untrashed = await sut.searchMetadata(auth, {
+        size: 250,
+        filter: { hasTags: { eq: false }, trashedAt: { eq: null } },
+      });
+      expect(ids(untrashed.assets.items)).toEqual(ids([inAlbum, plain, plainFavorite]));
+    });
+
+    it('should return only assets outside every album for hasAlbums: false', async () => {
+      const { sut, auth, tagged, plain, plainFavorite } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        filter: { hasAlbums: { eq: false }, trashedAt: { eq: null } },
+      });
+
+      expect(ids(response.assets.items)).toEqual(ids([tagged, plain, plainFavorite]));
+    });
+
+    it('should combine both deprecated flags with a favorite filter', async () => {
+      const { sut, auth, plainFavorite } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        tagIds: null,
+        isNotInAlbum: true,
+        isFavorite: true,
+      });
+
+      expect(response.assets.items).toEqual([expect.objectContaining({ id: plainFavorite.id })]);
+    });
+
+    it('should combine both structured filters with a favorite filter', async () => {
+      const { sut, auth, plainFavorite } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, {
+        size: 250,
+        filter: { hasTags: { eq: false }, hasAlbums: { eq: false }, isFavorite: { eq: true } },
+      });
+
+      expect(response.assets.items).toEqual([expect.objectContaining({ id: plainFavorite.id })]);
+    });
+
+    it('should keep excluding trashed assets unless withDeleted is set', async () => {
+      const { sut, auth, plain, plainFavorite, trashed } = await newLibrary();
+
+      const response = await sut.searchMetadata(auth, { size: 250, tagIds: null, isNotInAlbum: true });
+      expect(ids(response.assets.items)).toEqual(ids([plain, plainFavorite]));
+
+      const withDeleted = await sut.searchMetadata(auth, {
+        size: 250,
+        tagIds: null,
+        isNotInAlbum: true,
+        withDeleted: true,
+      });
+      expect(ids(withDeleted.assets.items)).toEqual(ids([plain, plainFavorite, trashed]));
+    });
+
+    it('should apply both deprecated flags to smart search', async () => {
+      const { ctx, user, tagged, inAlbum, plain, plainFavorite, trashed } = await newLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      const assets = [tagged, inAlbum, plain, plainFavorite, trashed];
+      for (const [index, asset] of assets.entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      const { items } = await searchRepository.searchSmart(
+        { page: 1, size: 100 },
+        { embedding: unitVector(0), userIds: [user.id], tagIds: null, isNotInAlbum: true },
+      );
+
+      expect(ids(items)).toEqual(ids([plain, plainFavorite]));
+    });
+
+    it('should apply both structured filters to smart search', async () => {
+      const { ctx, user, tagged, inAlbum, plain, plainFavorite, trashed } = await newLibrary();
+      const searchRepository = ctx.get(SearchRepository);
+      const assets = [tagged, inAlbum, plain, plainFavorite, trashed];
+      for (const [index, asset] of assets.entries()) {
+        await searchRepository.upsert(asset.id, unitVector(index));
+      }
+
+      const { items } = await searchRepository.searchSmartV3(
+        { take: 100 },
+        {
+          filter: { hasTags: { eq: false }, hasAlbums: { eq: false }, trashedAt: { eq: null } },
+          embedding: unitVector(0),
+        },
+        { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null },
+      );
+
+      expect(ids(items)).toEqual(ids([plain, plainFavorite]));
     });
   });
 
