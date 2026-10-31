@@ -404,6 +404,32 @@ describe(SearchService.name, () => {
       );
     });
 
+    it('should refuse a hidden tag without an unhandled rejection while the query is encoded', async () => {
+      // real timers: the rejection must happen while the query is still being encoded
+      vitest.useRealTimers();
+      const unhandled = vitest.fn();
+      process.on('unhandledRejection', unhandled);
+      try {
+        mocks.access.tag.checkOwnerAccess.mockImplementation((_, ids, hidden) =>
+          Promise.resolve(hidden ? new Set(ids) : new Set<string>()),
+        );
+        mocks.machineLearning.encodeText.mockImplementation(
+          () => new Promise((resolve) => setTimeout(() => resolve('[1, 2, 3]'), 20)),
+        );
+
+        await expect(
+          sut.searchSmart(authStub.user1, { size: 100, query: 'test', tagIds: ['tag-1'] }),
+        ).rejects.toThrowError(new BadRequestException('Not found or no tag.read access'));
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(mocks.search.searchSmart).not.toHaveBeenCalled();
+      } finally {
+        process.off('unhandledRejection', unhandled);
+        vitest.useFakeTimers();
+      }
+    });
+
     it('should raise a BadRequestException if smart search is disabled', async () => {
       mocks.systemMetadata.get.mockResolvedValue({
         machineLearning: { clip: { enabled: false } },
