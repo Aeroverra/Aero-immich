@@ -7,6 +7,8 @@ import {
   type ServerVersionResponseDto,
   type SyncAssetEditV1,
   type SyncAssetV2,
+  type TakeoutExportDto,
+  type TakeoutRunDto,
 } from '@immich/sdk';
 import { io, type Socket } from 'socket.io-client';
 import { get, writable } from 'svelte/store';
@@ -41,6 +43,8 @@ export interface Events {
   on_new_release: (event: ReleaseEventV1) => void;
   on_session_delete: (sessionId: string) => void;
   on_notification: (notification: NotificationDto) => void;
+  on_takeout_export: (takeoutExport: TakeoutExportDto) => void;
+  on_takeout_run: (run: TakeoutRunDto) => void;
 
   AppRestartV1: (event: AppRestartEvent) => void;
 

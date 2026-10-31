@@ -44,6 +44,9 @@ import { SyncService } from 'src/services/sync.service';
 import { SystemConfigService } from 'src/services/system-config.service';
 import { SystemMetadataService } from 'src/services/system-metadata.service';
 import { TagService } from 'src/services/tag.service';
+import { TakeoutAnalyzeService } from 'src/services/takeout-analyze.service';
+import { TakeoutRunService } from 'src/services/takeout-run.service';
+import { TakeoutService } from 'src/services/takeout.service';
 import { TelemetryService } from 'src/services/telemetry.service';
 import { TimelineService } from 'src/services/timeline.service';
 import { TranscodingService } from 'src/services/transcoding.service';
@@ -103,6 +106,9 @@ export const services = [
   SystemConfigService,
   SystemMetadataService,
   TagService,
+  TakeoutService,
+  TakeoutAnalyzeService,
+  TakeoutRunService,
   TelemetryService,
   TimelineService,
   TranscodingService,

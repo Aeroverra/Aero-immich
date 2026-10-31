@@ -1,0 +1,121 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`planner golden snapshot > plans a representative mixed catalog 1`] = `
+{
+  "files": [
+    {
+      "action": "missingMetadata",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "image",
+      "isEditedCopy": false,
+      "jsonPath": null,
+      "matcher": null,
+      "tags": [],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/orphan.jpg",
+    },
+    {
+      "action": "upload",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "image",
+      "isEditedCopy": true,
+      "jsonPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg.json",
+      "matcher": "edited",
+      "tags": [
+        "takeout-20260914T211500Z-1",
+      ],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126-edited.jpg",
+    },
+    {
+      "action": "upload",
+      "albums": [
+        "Trip",
+      ],
+      "fallbacks": [],
+      "fileKind": "image",
+      "isEditedCopy": false,
+      "jsonPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg.json",
+      "matcher": "fastTrack",
+      "tags": [
+        "takeout-20260914T211500Z-1",
+      ],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg",
+    },
+    {
+      "action": "assetJson",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "json",
+      "isEditedCopy": false,
+      "jsonPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg.json",
+      "matcher": null,
+      "tags": [],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg.json",
+    },
+    {
+      "action": "upload",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "image",
+      "isEditedCopy": false,
+      "jsonPath": "Takeout/Google Photos/Photos from 2021/Screenshot_20200301-161151.png.supplemental-me.json",
+      "matcher": "normal",
+      "tags": [
+        "takeout-20260914T211500Z-1",
+      ],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/Screenshot_20200301-161151.png",
+    },
+    {
+      "action": "assetJson",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "json",
+      "isEditedCopy": false,
+      "jsonPath": "Takeout/Google Photos/Photos from 2021/Screenshot_20200301-161151.png.supplemental-me.json",
+      "matcher": null,
+      "tags": [],
+      "takeoutPath": "Takeout/Google Photos/Photos from 2021/Screenshot_20200301-161151.png.supplemental-me.json",
+    },
+    {
+      "action": "albumJson",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "json",
+      "isEditedCopy": false,
+      "jsonPath": null,
+      "matcher": null,
+      "tags": [],
+      "takeoutPath": "Takeout/Google Photos/Trip/metadata.json",
+    },
+    {
+      "action": "missingMetadata",
+      "albums": [],
+      "fallbacks": [],
+      "fileKind": "image",
+      "isEditedCopy": false,
+      "jsonPath": null,
+      "matcher": null,
+      "tags": [],
+      "takeoutPath": "Takeout/Google Photos/Trip/PXL_20210102_221126.jpg",
+    },
+  ],
+  "groups": [
+    {
+      "cover": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg",
+      "kind": "other",
+      "members": [
+        "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126-edited.jpg",
+        "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg",
+      ],
+    },
+    {
+      "cover": "Takeout/Google Photos/Photos from 2021/PXL_20210102_221126.jpg",
+      "kind": "none",
+      "members": [
+        "Takeout/Google Photos/Photos from 2021/Screenshot_20200301-161151.png",
+      ],
+    },
+  ],
+}
+`;
