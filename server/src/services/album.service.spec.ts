@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
-import { AlbumUserRole, AssetOrder, UserMetadataKey } from 'src/enum';
+import { AlbumUserRole, AssetOrder, DeletedReimportMode, UserMetadataKey } from 'src/enum';
 import { AlbumService } from 'src/services/album.service';
 import { AlbumUserFactory } from 'test/factories/album-user.factory';
 import { AlbumFactory } from 'test/factories/album.factory';
@@ -1586,6 +1586,7 @@ describe(AlbumService.name, () => {
       mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
       mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.user.getMetadata.mockResolvedValue([]);
       mocks.album.getAssetIds.mockResolvedValue(new Set([asset.id]));
 
       await expect(sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset.id] })).resolves.toEqual([
@@ -1601,6 +1602,7 @@ describe(AlbumService.name, () => {
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
       mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
       mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.user.getMetadata.mockResolvedValue([]);
       mocks.album.getAssetIds.mockResolvedValue(new Set());
 
       await expect(sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset.id] })).resolves.toEqual([
@@ -1616,6 +1618,7 @@ describe(AlbumService.name, () => {
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
       mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
       mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.user.getMetadata.mockResolvedValue([]);
       mocks.album.getAssetIds.mockResolvedValue(new Set([asset.id]));
 
       await expect(sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset.id] })).resolves.toEqual([
@@ -1631,6 +1634,7 @@ describe(AlbumService.name, () => {
       mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
       mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset1.id]));
       mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.user.getMetadata.mockResolvedValue([]);
       mocks.album.getAssetIds.mockResolvedValue(new Set([asset1.id, asset2.id]));
 
       await expect(sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset1.id] })).resolves.toEqual([
@@ -1676,4 +1680,47 @@ describe(AlbumService.name, () => {
 
   //   await expect(sut.removeAssets(auth, albumId, { ids: ['1'] })).rejects.toBeInstanceOf(ForbiddenException);
   // });
+
+  describe('removeAssets from the "Previously deleted" album', () => {
+    it('should forget the checksums of assets removed by the owner', async () => {
+      const asset = AssetFactory.create();
+      const album = AlbumFactory.create();
+      const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
+      mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.album.getAssetIds.mockResolvedValue(new Set([asset.id]));
+      mocks.user.getMetadata.mockResolvedValue([
+        {
+          key: UserMetadataKey.Preferences,
+          value: { deletedReimport: { mode: DeletedReimportMode.Album, albumId: album.id } },
+        },
+      ]);
+
+      await sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset.id] });
+
+      expect(mocks.user.getMetadata).toHaveBeenCalledWith(owner.id);
+      expect(mocks.assetDeletedChecksum.forgetAssets).toHaveBeenCalledWith([asset.id]);
+    });
+
+    it('should leave the checksums alone for any other album', async () => {
+      const asset = AssetFactory.create();
+      const album = AlbumFactory.create();
+      const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
+      mocks.access.album.checkOwnerAccess.mockResolvedValue(new Set([album.id]));
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set([asset.id]));
+      mocks.album.getById.mockResolvedValue(getForAlbum(album));
+      mocks.album.getAssetIds.mockResolvedValue(new Set([asset.id]));
+      mocks.user.getMetadata.mockResolvedValue([
+        {
+          key: UserMetadataKey.Preferences,
+          value: { deletedReimport: { mode: DeletedReimportMode.Album, albumId: newUuid() } },
+        },
+      ]);
+
+      await sut.removeAssets(AuthFactory.create(owner), album.id, { ids: [asset.id] });
+
+      expect(mocks.assetDeletedChecksum.forgetAssets).not.toHaveBeenCalled();
+    });
+  });
 });

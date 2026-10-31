@@ -16,6 +16,7 @@ export class TrashService extends BaseService {
     }
 
     await this.requireAccess({ auth, permission: Permission.AssetDelete, ids });
+    await this.assetDeletedChecksumRepository.forgetAssets(ids);
     await this.trashRepository.restoreAll(ids);
     await this.eventRepository.emit('AssetRestoreAll', { assetIds: ids, userId: auth.user.id });
 
@@ -25,6 +26,7 @@ export class TrashService extends BaseService {
   }
 
   async restore(auth: AuthDto): Promise<TrashResponseDto> {
+    await this.assetDeletedChecksumRepository.forgetTrashed(auth.user.id);
     const count = await this.trashRepository.restore(auth.user.id);
     if (count > 0) {
       this.logger.log(`Restored ${count} asset(s) from trash`);

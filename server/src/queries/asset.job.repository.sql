@@ -529,6 +529,8 @@ select
   "asset"."ownerId",
   "asset"."livePhotoVideoId",
   "asset"."originalPath",
+  "asset"."originalFileName",
+  "asset"."checksum",
   "asset"."isOffline",
   to_json("asset_exif") as "exifInfo",
   (

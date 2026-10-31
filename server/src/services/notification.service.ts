@@ -14,6 +14,7 @@ import {
 } from 'src/dtos/notification.dto';
 import {
   AssetFileType,
+  DeletedReimportMode,
   JobName,
   JobStatus,
   NotificationLevel,
@@ -30,9 +31,13 @@ import { getExternalDomain } from 'src/utils/misc';
 import { isEqualObject } from 'src/utils/object';
 import { getPreferences } from 'src/utils/preferences';
 
+const previouslyDeletedFiles = (count: number) => `${count} previously deleted file${count === 1 ? ' was' : 's were'}`;
+
 @Injectable()
 export class NotificationService extends BaseService {
   private static albumUpdateEmailDelayMs = 300_000;
+  /** quiet period after the last re-upload before the owner is told, so a bulk import produces one notification */
+  private static deletedReimportDelayMs = 300_000;
 
   async search(auth: AuthDto, dto: NotificationSearchDto): Promise<NotificationDto[]> {
     const items = await this.notificationRepository.search(auth.user.id, dto);
@@ -239,6 +244,15 @@ export class NotificationService extends BaseService {
         data: { id, recipientId, delay: NotificationService.albumUpdateEmailDelayMs },
       });
     }
+  }
+
+  @OnEvent({ name: 'AssetDeletedReimport' })
+  async onAssetDeletedReimport({ userId }: ArgOf<'AssetDeletedReimport'>) {
+    await this.jobRepository.removeJob(JobName.NotifyDeletedReimport, userId);
+    await this.jobRepository.queue({
+      name: JobName.NotifyDeletedReimport,
+      data: { userId, delay: NotificationService.deletedReimportDelayMs },
+    });
   }
 
   @OnEvent({ name: 'AlbumInvite' })
@@ -483,6 +497,56 @@ export class NotificationService extends BaseService {
       path: albumThumbnailFiles[0].path,
       cid: 'album-thumbnail',
     };
+  }
+
+  @OnJob({ name: JobName.NotifyDeletedReimport, queue: QueueName.Notification })
+  async handleDeletedReimport({ userId }: JobOf<JobName.NotifyDeletedReimport>) {
+    const pending = await this.assetDeletedChecksumRepository.getPendingNotification(userId);
+    const counts: Record<DeletedReimportMode, number> = { trash: 0, skip: 0, album: 0 };
+    for (const { reimportMode, count } of pending) {
+      if (reimportMode) {
+        counts[reimportMode] += Number(count);
+      }
+    }
+
+    const total = counts.trash + counts.skip + counts.album;
+    if (total === 0) {
+      return JobStatus.Skipped;
+    }
+
+    const user = await this.userRepository.get(userId, { withDeleted: false });
+    if (!user) {
+      return JobStatus.Skipped;
+    }
+
+    const parts = [
+      counts.trash > 0 && `${previouslyDeletedFiles(counts.trash)} moved to the trash`,
+      counts.skip > 0 && `${previouslyDeletedFiles(counts.skip)} not uploaded`,
+      counts.album > 0 && `${previouslyDeletedFiles(counts.album)} added to the "Previously deleted" album`,
+    ].filter((part) => part !== false);
+
+    const { deletedReimport } = getPreferences(user.metadata);
+    const item = await this.notificationRepository.create({
+      userId,
+      type: NotificationType.Custom,
+      level: NotificationLevel.Info,
+      title: 'Previously deleted files',
+      description: parts.join(', '),
+      data: JSON.stringify({
+        deletedReimport: {
+          trash: counts.trash,
+          skip: counts.skip,
+          album: counts.album,
+          albumId: counts.album > 0 ? deletedReimport.albumId : null,
+        },
+      }),
+    });
+
+    this.websocketRepository.clientSend('on_notification', userId, mapNotification(item));
+
+    await this.assetDeletedChecksumRepository.markNotified(userId);
+
+    return JobStatus.Success;
   }
 
   private async sendAlbumLocalNotification(
