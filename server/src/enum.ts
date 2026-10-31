@@ -943,6 +943,7 @@ export enum JobName {
 
   AutoStackQueueAll = 'AutoStackQueueAll',
   AutoStack = 'AutoStack',
+  StackCameraGroup = 'StackCameraGroup',
 
   AuditTableCleanup = 'AuditTableCleanup',
 
@@ -1083,6 +1084,7 @@ export enum DatabaseLock {
   IntegrityCheck = 67,
   VersionCheck = 800,
   HlsSessionCleanup = 850,
+  CameraGroupStack = 860,
 }
 
 export enum MaintenanceAction {
