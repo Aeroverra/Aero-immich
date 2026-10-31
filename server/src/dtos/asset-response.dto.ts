@@ -9,6 +9,7 @@ import { PersonResponseDto, PersonResponseSchema, mapPerson } from 'src/dtos/per
 import { TagResponseSchema, mapTag } from 'src/dtos/tag.dto';
 import { UserResponseSchema, mapUser } from 'src/dtos/user.dto';
 import {
+  AssetFileType,
   AssetStatus,
   AssetType,
   AssetTypeSchema,
@@ -117,6 +118,10 @@ export const AssetResponseSchema = SanitizedAssetResponseSchema.extend(
       .boolean()
       .describe('Is edited')
       .meta(new HistoryBuilder().added('v2.5.0').beta('v2.5.0').getExtensions()),
+    hasEncodedVideo: z
+      .boolean()
+      .optional()
+      .describe('Whether a transcoded copy of the video exists. Video playback serves it instead of the original file.'),
   }).shape,
 ).meta({ id: 'AssetResponseDto' });
 
@@ -254,5 +259,8 @@ export function mapAsset(entity: MaybeDehydrated<MapAsset>, options: AssetMapOpt
     width: entity.width,
     height: entity.height,
     isEdited: entity.isEdited,
+    hasEncodedVideo: entity.files
+      ? entity.files.some((file) => file.type === AssetFileType.EncodedVideo && !file.isEdited)
+      : undefined,
   };
 }
