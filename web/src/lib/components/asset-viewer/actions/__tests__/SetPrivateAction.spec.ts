@@ -37,7 +37,7 @@ describe('asset viewer SetPrivateAction component', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     privateModeManager.enabled = false;
-    sdkMock.getAllAlbums.mockResolvedValue([]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -90,7 +90,9 @@ describe('asset viewer SetPrivateAction component', () => {
 
   it('asks about the albums the asset is in and stops when declined', async () => {
     const asset = assetFactory.build({ isPrivate: false });
-    sdkMock.getAllAlbums.mockResolvedValue([albumFactory.build({ isPrivate: false })]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([
+      { album: albumFactory.build({ isPrivate: false }), assetIds: [asset.id] },
+    ]);
     vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
     const onAction = vi.fn();
     const preAction = vi.fn();

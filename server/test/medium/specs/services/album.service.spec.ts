@@ -40,6 +40,12 @@ beforeAll(async () => {
   defaultDatabase = await getKyselyDB();
 });
 
+// albums by id with their asset ids, so results compare regardless of order
+const sortByAlbum = (result: { album: { id: string }; assetIds: string[] }[]) =>
+  result
+    .map(({ album, assetIds }) => ({ id: album.id, assetIds: [...assetIds].sort() }))
+    .sort((x, y) => x.id.localeCompare(y.id));
+
 describe(AlbumService.name, () => {
   describe('removeAssets', () => {
     it('should not remove assets from an album of another user', async () => {
@@ -104,6 +110,51 @@ describe(AlbumService.name, () => {
       const byAsset = await sut.getAll(on, { assetId: plain.id });
       expect(byAsset.map(({ id }) => id).sort()).toEqual([album.id, plainAlbum.id].sort());
       await expect(sut.getStatistics(on)).resolves.toEqual({ owned: 2, shared: 0, notShared: 2 });
+    });
+
+    it('should list the albums of many assets at once with the assets each contains', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: other } = await ctx.newUser();
+      const { asset: a } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: b } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: c } = await ctx.newAsset({ ownerId: user.id });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      const { asset: theirs } = await ctx.newAsset({ ownerId: other.id });
+      const { album: first } = await ctx.newAlbum({ ownerId: user.id }, [a.id, b.id]);
+      const { album: second } = await ctx.newAlbum({ ownerId: user.id }, [b.id, c.id]);
+      const { album: privateAlbum } = await ctx.newAlbum({ ownerId: user.id }, [a.id, hidden.id]);
+      const { album: deleted } = await ctx.newAlbum({ ownerId: user.id }, [a.id]);
+      await ctx.softDeleteAlbum(deleted.id);
+      await ctx.newAlbum({ ownerId: other.id }, [theirs.id]);
+      await ctx.newAlbum({ ownerId: user.id }, [c.id]);
+
+      // well past the postgres bind parameter limit, so the ids must travel as one array parameter
+      const assetIds = [a.id, b.id, theirs.id, ...Array.from({ length: 70_000 }, () => newUuid())];
+
+      const off = factory.auth({ user });
+      await expect(sut.getAllForAssets(off, { assetIds }).then(sortByAlbum)).resolves.toEqual(
+        sortByAlbum([
+          { album: first, assetIds: [a.id, b.id] },
+          { album: second, assetIds: [b.id] },
+        ]),
+      );
+
+      const on = factory.auth({ user, session: { privateMode: true } });
+      const unlocked = await sut.getAllForAssets(on, { assetIds });
+      expect(sortByAlbum(unlocked)).toEqual(
+        sortByAlbum([
+          { album: first, assetIds: [a.id, b.id] },
+          { album: second, assetIds: [b.id] },
+          { album: privateAlbum, assetIds: [a.id] },
+        ]),
+      );
+      expect(unlocked.find(({ album }) => album.id === privateAlbum.id)?.album).toMatchObject({
+        isPrivate: true,
+        assetCount: 2,
+      });
+
+      await expect(sut.getAllForAssets(factory.auth({ user: other }), { assetIds: [a.id, b.id] })).resolves.toEqual([]);
     });
 
     it('should hide a private album from a co-viewer until their own session is in private mode', async () => {

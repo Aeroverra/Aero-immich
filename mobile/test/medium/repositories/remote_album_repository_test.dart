@@ -136,6 +136,13 @@ void main() {
         ], privateFilter: PrivateModeFilter(enabled: true, userId: user.id));
         expect(on.map((album) => album.name), unorderedEquals(['Trip', 'Family', 'Secrets']));
         expect(await sut.getAlbumsContainingAssets(const []), isEmpty);
+
+        // more ids than SQLite binds in one statement
+        final many = [first.id, ...List.generate(40000, (index) => 'missing-$index'), second.id];
+        expect(
+          (await sut.getAlbumsContainingAssets(many)).map((album) => album.name),
+          unorderedEquals(['Trip', 'Family']),
+        );
       },
     );
 
