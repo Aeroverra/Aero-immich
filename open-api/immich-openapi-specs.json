@@ -38697,6 +38697,11 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
+          "datesFromGoogle": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "errors": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -38758,6 +38763,7 @@
           "albumsCreated",
           "alreadyProcessed",
           "betterOnServer",
+          "datesFromGoogle",
           "errors",
           "largerUploaded",
           "metadataSaved",
