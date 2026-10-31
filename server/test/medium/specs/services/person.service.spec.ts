@@ -1022,7 +1022,7 @@ describe(PersonService.name, () => {
   });
 
   describe('addToAssets', () => {
-    it('should tag the person on videos with a whole frame face', async () => {
+    it('should mark videos and photos with a whole-asset face', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       const { user } = await ctx.newUser();
@@ -1034,12 +1034,13 @@ describe(PersonService.name, () => {
         height: 1080,
       });
       await ctx.newExif({ assetId: video.id, exifImageWidth: 1920, exifImageHeight: 1080 });
-      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image, width: 400, height: 300 });
+      await ctx.newExif({ assetId: photo.id, exifImageWidth: 4000, exifImageHeight: 3000 });
       const auth = factory.auth({ user });
 
       await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id, photo.id] })).resolves.toEqual([
         { id: video.id, success: true },
-        { id: photo.id, success: false, error: BulkIdErrorReason.VALIDATION },
+        { id: photo.id, success: true },
       ]);
 
       await expect(sut.getFacesById(auth, { id: video.id })).resolves.toEqual([
@@ -1052,9 +1053,13 @@ describe(PersonService.name, () => {
           boundingBoxX2: 1920,
           boundingBoxY2: 1080,
           sourceType: SourceType.Manual,
+          isWholeAsset: true,
         }),
       ]);
-      await expect(sut.getStatistics(auth, person.personGroupId)).resolves.toEqual({ assets: 1 });
+      await expect(sut.getFacesById(auth, { id: photo.id })).resolves.toEqual([
+        expect.objectContaining({ boundingBoxX2: 4000, boundingBoxY2: 3000, isWholeAsset: true }),
+      ]);
+      await expect(sut.getStatistics(auth, person.personGroupId)).resolves.toEqual({ assets: 2 });
       await expect(
         ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
       ).resolves.toMatchObject({ faceAssetId: expect.any(String) });
@@ -1065,25 +1070,27 @@ describe(PersonService.name, () => {
       await expect(sut.getFacesById(auth, { id: video.id })).resolves.toHaveLength(1);
     });
 
-    it('should not add the person to a video they are already detected on', async () => {
+    it('should not mark an asset the person is already detected on', async () => {
       const { sut, ctx } = setup();
       const { user } = await ctx.newUser();
-      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
-      const { person } = await newPersonWithFace(ctx, user.id, video.id);
+      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: photo.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person } = await newPersonWithFace(ctx, user.id, photo.id);
 
-      await expect(sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [video.id] })).resolves.toEqual(
-        [{ id: video.id, success: false, error: BulkIdErrorReason.DUPLICATE }],
+      await expect(sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [photo.id] })).resolves.toEqual(
+        [{ id: photo.id, success: false, error: BulkIdErrorReason.DUPLICATE }],
       );
     });
 
-    it('should refuse videos of other users and private videos outside private mode', async () => {
+    it('should refuse assets of other users and private assets outside private mode', async () => {
       const { sut, ctx } = setup();
       ctx.getMock(JobRepository).queueAll.mockResolvedValue();
       const { user } = await ctx.newUser();
       const { user: other } = await ctx.newUser();
       const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
       const { asset: foreign } = await ctx.newAsset({ ownerId: other.id, type: AssetType.Video });
-      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, isPrivate: true });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image, isPrivate: true });
+      await ctx.newExif({ assetId: hidden.id, exifImageWidth: 640, exifImageHeight: 480 });
 
       await expect(
         sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [foreign.id, hidden.id] }),
@@ -1105,10 +1112,132 @@ describe(PersonService.name, () => {
       const { user: other } = await ctx.newUser();
       const { person } = await ctx.newPerson({ ownerId: other.id, name: 'Someone' });
       const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 640, exifImageHeight: 480 });
 
       await expect(sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [video.id] })).rejects.toThrow(
         'Not found or no person.update access',
       );
+    });
+  });
+
+  describe('removeFromAssets', () => {
+    it('should remove marks and keep located faces', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: marked } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: marked.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: detected } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: detected.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: without } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: without.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person, assetFace } = await newPersonWithFace(ctx, user.id, detected.id);
+      await sut.addToAssets(auth, person.personGroupId, { ids: [marked.id] });
+
+      await expect(
+        sut.removeFromAssets(auth, person.personGroupId, { ids: [marked.id, detected.id, without.id] }),
+      ).resolves.toEqual([
+        { id: marked.id, success: true },
+        { id: detected.id, success: false, error: BulkIdErrorReason.VALIDATION },
+        { id: without.id, success: false, error: BulkIdErrorReason.NOT_FOUND },
+      ]);
+
+      await expect(sut.getFacesById(auth, { id: marked.id })).resolves.toEqual([]);
+      await expect(sut.getFacesById(auth, { id: detected.id })).resolves.toEqual([
+        expect.objectContaining({ id: assetFace.id, isWholeAsset: false }),
+      ]);
+    });
+  });
+
+  describe('getAssetCounts', () => {
+    it('should count people and the assets a removal would take them off', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: first } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: first.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: second } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: second.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: third } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: third.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person: detected } = await newPersonWithFace(ctx, user.id, first.id);
+      const { person: marked } = await ctx.newPerson({ ownerId: user.id, name: 'Marked' });
+      await sut.addToAssets(auth, detected.personGroupId, { ids: [second.id] });
+      await sut.addToAssets(auth, marked.personGroupId, { ids: [first.id, second.id] });
+
+      const counts = await sut.getAssetCounts(auth, { assetIds: [first.id, second.id, third.id] });
+      expect(counts).toHaveLength(2);
+      expect(counts).toEqual(
+        expect.arrayContaining([
+          { personId: detected.personGroupId, count: 2, removableCount: 1 },
+          { personId: marked.personGroupId, count: 2, removableCount: 2 },
+        ]),
+      );
+    });
+  });
+
+  describe('whole-asset marks', () => {
+    it('should prefer a located face as the feature photo', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: marked } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: marked.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: photo.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      await sut.addToAssets(auth, person.personGroupId, { ids: [marked.id] });
+      const { assetFace } = await ctx.newAssetFace({ assetId: photo.id, personGroupId: person.personGroupId });
+
+      await sut.createNewFeaturePhoto([{ ownerId: user.id, personGroupId: person.personGroupId }]);
+
+      await expect(
+        ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
+      ).resolves.toMatchObject({ faceAssetId: assetFace.id });
+    });
+
+    it('should delete the marks of a deleted person instead of leaving them without a person', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: marked } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: marked.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { asset: detected } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      await ctx.newExif({ assetId: detected.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person, assetFace } = await newPersonWithFace(ctx, user.id, detected.id);
+      await sut.addToAssets(auth, person.personGroupId, { ids: [marked.id] });
+
+      await sut.delete(auth, person.personGroupId);
+
+      await expect(sut.getFacesById(auth, { id: marked.id })).resolves.toEqual([]);
+      await expect(sut.getFacesById(auth, { id: detected.id })).resolves.toEqual([
+        expect.objectContaining({ id: assetFace.id, person: null }),
+      ]);
+    });
+
+    it('should keep one mark per asset when people are merged', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      ctx.getMock(StorageRepository).unlink.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const auth = factory.auth({ user });
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 640, exifImageHeight: 480 });
+      const { person: target } = await ctx.newPerson({ ownerId: user.id, name: 'Target' });
+      const { person: source } = await ctx.newPerson({ ownerId: user.id });
+      await sut.addToAssets(auth, target.personGroupId, { ids: [video.id] });
+      await sut.addToAssets(auth, source.personGroupId, { ids: [video.id] });
+
+      await sut.mergePeople(auth, { ids: [target.personGroupId, source.personGroupId] });
+
+      await expect(sut.getFacesById(auth, { id: video.id })).resolves.toEqual([
+        expect.objectContaining({ person: expect.objectContaining({ id: target.personGroupId }), isWholeAsset: true }),
+      ]);
     });
   });
 

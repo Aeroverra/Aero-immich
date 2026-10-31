@@ -16,6 +16,8 @@ import {
   MergePersonDto,
   PeopleResponseDto,
   PeopleUpdateDto,
+  PersonAssetCountResponseDto,
+  PersonAssetCountsDto,
   PersonCreateDto,
   PersonResponseDto,
   PersonSearchDto,
@@ -52,6 +54,30 @@ import { batched, findOrFail, isFacialRecognitionEnabled, isVideoFrameAnalysisEn
 import { Point, transformPoints } from 'src/utils/transform';
 
 const personKey = ({ ownerId, personGroupId }: PersonId) => `${ownerId}/${personGroupId}`;
+
+/**
+ * The frame a whole-asset face covers: the oriented original for a photo (the space faces drawn on an edited photo are
+ * stored in), the video's own dimensions for a video, and a unit frame when neither is known
+ */
+const getWholeAssetDimensions = (asset: {
+  type: AssetType;
+  width: number | null;
+  height: number | null;
+  exifImageWidth: number | null;
+  exifImageHeight: number | null;
+  orientation: string | null;
+}) => {
+  const original = getDimensions(asset);
+  if (asset.type === AssetType.Image && original.width && original.height) {
+    return original;
+  }
+
+  if (asset.width && asset.height) {
+    return { width: asset.width, height: asset.height };
+  }
+
+  return original.width && original.height ? original : { width: 1, height: 1 };
+};
 
 @Injectable()
 export class PersonService extends BaseService {
@@ -685,6 +711,7 @@ export class PersonService extends BaseService {
 
         try {
           await this.personRepository.reassignFaces(mergeData);
+          await this.personRepository.deleteDuplicateWholeAssetFaces(targetPerson.personGroupId);
           await this.removeAllPersonGroups([mergeId], targetPerson.ownerId);
 
           this.logger.log(`Merged ${mergeName} into ${targetPerson.name || targetPerson.personGroupId}`);
@@ -777,21 +804,22 @@ export class PersonService extends BaseService {
   }
 
   /**
-   * Marks videos as having a person in them. A video has no face box to draw, so each one gets a manual face covering
-   * the whole frame, unless the person is already on it. Photos are refused: their people are marked on the face itself.
+   * Marks assets as having a person in them without a location in the picture: close-ups, backs of heads and videos,
+   * which have no face box to draw. Each asset gets a manual face covering the whole asset, flagged as a whole-asset
+   * mark, unless the person is already on it in any way (a detected face, a drawn box or an earlier mark).
    */
   async addToAssets(auth: AuthDto, personGroupId: string, { ids }: BulkIdsDto): Promise<BulkIdResponseDto[]> {
     await this.requireAccess({ auth, permission: Permission.PersonUpdate, ids: [personGroupId] });
     const person = await this.findOrFail(auth, personGroupId);
 
     const allowedIds = await this.checkAccess({ auth, permission: Permission.AssetUpdate, ids });
-    const found = await this.assetRepository.getByIds([...allowedIds]);
+    const found = await this.personRepository.getAssetsForWholeAssetFaces([...allowedIds]);
     const assets = new Map(found.map((asset) => [asset.id, asset]));
     const faces = await this.personRepository.getFacesByIds(
       [...allowedIds].map((assetId) => ({ assetId, personGroupId })),
       { viewingUserId: auth.user.id },
     );
-    const tagged = new Set(faces.map(({ assetId }) => assetId));
+    const present = new Set(faces.map(({ assetId }) => assetId));
 
     const results: BulkIdResponseDto[] = [];
     const newFaces: Insertable<AssetFaceTable>[] = [];
@@ -807,19 +835,17 @@ export class PersonService extends BaseService {
         continue;
       }
 
-      if (asset.type !== AssetType.Video) {
+      if (asset.type !== AssetType.Image && asset.type !== AssetType.Video) {
         results.push({ id, success: false, error: BulkIdErrorReason.VALIDATION });
         continue;
       }
 
-      if (tagged.has(id)) {
+      if (present.has(id)) {
         results.push({ id, success: false, error: BulkIdErrorReason.DUPLICATE });
         continue;
       }
 
-      // a unit frame still covers the whole picture when the video has no known dimensions
-      const width = asset.width || 1;
-      const height = asset.height || 1;
+      const { width, height } = getWholeAssetDimensions(asset);
       newFaces.push({
         assetId: id,
         personGroupId: person.personGroupId,
@@ -830,8 +856,9 @@ export class PersonService extends BaseService {
         boundingBoxX2: width,
         boundingBoxY2: height,
         sourceType: SourceType.Manual,
+        isWholeAsset: true,
       });
-      tagged.add(id);
+      present.add(id);
       results.push({ id, success: true });
     }
 
@@ -842,6 +869,62 @@ export class PersonService extends BaseService {
     }
 
     return results;
+  }
+
+  /**
+   * Takes a person off assets by removing their whole-asset marks. A face of the person that is located in the picture
+   * (detected, or drawn in the face editor) stays: that asset is reported as a validation error, and the person has to
+   * be taken off that face in the face editor. An asset without the person is reported as not found.
+   */
+  async removeFromAssets(auth: AuthDto, personGroupId: string, { ids }: BulkIdsDto): Promise<BulkIdResponseDto[]> {
+    await this.requireAccess({ auth, permission: Permission.PersonUpdate, ids: [personGroupId] });
+    const person = await this.findOrFail(auth, personGroupId);
+
+    const allowedIds = await this.checkAccess({ auth, permission: Permission.AssetUpdate, ids });
+    const faces = await this.personRepository.getFacesByIds(
+      [...allowedIds].map((assetId) => ({ assetId, personGroupId })),
+      { viewingUserId: auth.user.id },
+    );
+    const facesByAsset = Map.groupBy(faces, ({ assetId }) => assetId);
+
+    const results: BulkIdResponseDto[] = [];
+    const markIds: string[] = [];
+    const handled = new Set<string>();
+    for (const id of ids) {
+      if (!allowedIds.has(id)) {
+        results.push({ id, success: false, error: BulkIdErrorReason.NO_PERMISSION });
+        continue;
+      }
+
+      const assetFaces = handled.has(id) ? [] : (facesByAsset.get(id) ?? []);
+      handled.add(id);
+      if (assetFaces.length === 0) {
+        results.push({ id, success: false, error: BulkIdErrorReason.NOT_FOUND });
+        continue;
+      }
+
+      markIds.push(...assetFaces.filter(({ isWholeAsset }) => isWholeAsset).map((face) => face.id));
+      const located = assetFaces.some(({ isWholeAsset }) => !isWholeAsset);
+      results.push(located ? { id, success: false, error: BulkIdErrorReason.VALIDATION } : { id, success: true });
+    }
+
+    await this.personRepository.deleteAssetFaces(markIds);
+
+    if (person.faceAssetId && markIds.includes(person.faceAssetId)) {
+      await this.createNewFeaturePhoto([person]);
+    }
+
+    return results;
+  }
+
+  async getAssetCounts(auth: AuthDto, { assetIds }: PersonAssetCountsDto): Promise<PersonAssetCountResponseDto[]> {
+    await this.requireAccess({ auth, permission: Permission.AssetRead, ids: assetIds });
+    const counts = await this.personRepository.getAssetCounts(auth.user.id, assetIds);
+    return counts.map(({ personGroupId, count, removableCount }) => ({
+      personId: personGroupId,
+      count,
+      removableCount,
+    }));
   }
 
   async deleteFace(auth: AuthDto, id: string, dto: AssetFaceDeleteDto): Promise<void> {
