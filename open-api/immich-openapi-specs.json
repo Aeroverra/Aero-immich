@@ -2387,6 +2387,60 @@
         "x-immich-state": "Stable"
       }
     },
+    "/albums/for-assets": {
+      "post": {
+        "description": "Retrieve the albums available to the authenticated user that contain any of the given assets, each with the given asset IDs it contains.",
+        "operationId": "getAlbumsForAssets",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlbumsForAssetsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AlbumForAssetsResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "List albums containing assets",
+        "tags": [
+          "Albums"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "album.read"
+      }
+    },
     "/albums/statistics": {
       "get": {
         "description": "Returns statistics about the albums available to the authenticated user.",
@@ -22378,6 +22432,27 @@
         ],
         "type": "object"
       },
+      "AlbumForAssetsResponseDto": {
+        "properties": {
+          "album": {
+            "$ref": "#/components/schemas/AlbumResponseDto"
+          },
+          "assetIds": {
+            "description": "The requested asset IDs this album contains",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "album",
+          "assetIds"
+        ],
+        "type": "object"
+      },
       "AlbumResponseDto": {
         "properties": {
           "albumName": {
@@ -22631,6 +22706,23 @@
         },
         "required": [
           "success"
+        ],
+        "type": "object"
+      },
+      "AlbumsForAssetsDto": {
+        "properties": {
+          "assetIds": {
+            "description": "Asset IDs to look up",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assetIds"
         ],
         "type": "object"
       },

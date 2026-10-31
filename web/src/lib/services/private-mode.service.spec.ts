@@ -35,15 +35,19 @@ describe('handleMarkPrivateAlbums', () => {
   });
 
   it('lists the non-private albums the assets appear in and proceeds when they are kept', async () => {
-    sdkMock.getAllAlbums.mockImplementation(({ assetId }) =>
-      Promise.resolve(assetId === 'asset-1' ? [plainAlbum, privateAlbum] : [plainAlbum, sharedAlbum]),
-    );
+    sdkMock.getAlbumsForAssets.mockResolvedValue([
+      { album: plainAlbum, assetIds: ['asset-1', 'asset-2'] },
+      { album: privateAlbum, assetIds: ['asset-1'] },
+      { album: sharedAlbum, assetIds: ['asset-2'] },
+    ]);
     vi.mocked(modalManager.show).mockResolvedValue('keep' as never);
 
     const result = await handleMarkPrivateAlbums(['asset-1', 'asset-2']);
 
     expect(result).toBe(true);
-    expect(sdkMock.getAllAlbums).toHaveBeenCalledTimes(2);
+    expect(sdkMock.getAlbumsForAssets).toHaveBeenCalledExactlyOnceWith({
+      albumsForAssetsDto: { assetIds: ['asset-1', 'asset-2'] },
+    });
     expect(modalManager.show).toHaveBeenCalledExactlyOnceWith(PrivateAlbumsModal, {
       albums: [plainAlbum, sharedAlbum],
     });
@@ -51,7 +55,7 @@ describe('handleMarkPrivateAlbums', () => {
   });
 
   it('skips the dialog when the assets are in no non-private album', async () => {
-    sdkMock.getAllAlbums.mockResolvedValue([privateAlbum]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([{ album: privateAlbum, assetIds: ['asset-1'] }]);
 
     const result = await handleMarkPrivateAlbums(['asset-1']);
 
@@ -60,7 +64,7 @@ describe('handleMarkPrivateAlbums', () => {
   });
 
   it('does not proceed when cancelled', async () => {
-    sdkMock.getAllAlbums.mockResolvedValue([plainAlbum]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([{ album: plainAlbum, assetIds: ['asset-1'] }]);
     vi.mocked(modalManager.show).mockResolvedValue(undefined as never);
 
     const result = await handleMarkPrivateAlbums(['asset-1']);
@@ -70,9 +74,10 @@ describe('handleMarkPrivateAlbums', () => {
   });
 
   it('removes only the assets that are in each album before proceeding when asked to', async () => {
-    sdkMock.getAllAlbums.mockImplementation(({ assetId }) =>
-      Promise.resolve(assetId === 'asset-1' ? [plainAlbum, sharedAlbum] : [sharedAlbum]),
-    );
+    sdkMock.getAlbumsForAssets.mockResolvedValue([
+      { album: plainAlbum, assetIds: ['asset-1'] },
+      { album: sharedAlbum, assetIds: ['asset-1', 'asset-2'] },
+    ]);
     vi.mocked(modalManager.show).mockResolvedValue('remove' as never);
 
     const result = await handleMarkPrivateAlbums(['asset-1', 'asset-2']);
@@ -90,12 +95,33 @@ describe('handleMarkPrivateAlbums', () => {
   });
 
   it('does not proceed when a removal fails', async () => {
-    sdkMock.getAllAlbums.mockResolvedValue([plainAlbum]);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([{ album: plainAlbum, assetIds: ['asset-1'] }]);
     vi.mocked(modalManager.show).mockResolvedValue('remove' as never);
     sdkMock.removeAssetFromAlbum.mockRejectedValue(new Error('nope'));
 
     const result = await handleMarkPrivateAlbums(['asset-1']);
 
     expect(result).toBe(false);
+  });
+
+  it('looks up the albums of a large selection with a single request', async () => {
+    const assetIds = Array.from({ length: 30_000 }, (_, index) => `asset-${index}`);
+    sdkMock.getAlbumsForAssets.mockResolvedValue([{ album: plainAlbum, assetIds: ['asset-7'] }]);
+    vi.mocked(modalManager.show).mockResolvedValue('keep' as never);
+
+    const result = await handleMarkPrivateAlbums(assetIds);
+
+    expect(result).toBe(true);
+    expect(sdkMock.getAlbumsForAssets).toHaveBeenCalledExactlyOnceWith({ albumsForAssetsDto: { assetIds } });
+    expect(sdkMock.getAllAlbums).not.toHaveBeenCalled();
+  });
+
+  it('does not proceed when the album lookup fails', async () => {
+    sdkMock.getAlbumsForAssets.mockRejectedValue(new Error('nope'));
+
+    const result = await handleMarkPrivateAlbums(['asset-1']);
+
+    expect(result).toBe(false);
+    expect(modalManager.show).not.toHaveBeenCalled();
   });
 });

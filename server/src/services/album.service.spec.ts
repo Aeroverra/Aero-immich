@@ -104,6 +104,33 @@ describe(AlbumService.name, () => {
       expect(mocks.album.getByAssetId).toHaveBeenCalledTimes(1);
     });
 
+    it('looks up the albums of many assets with one query', async () => {
+      const album = AlbumFactory.from().albumUser().build();
+      const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;
+      const assetIds = Array.from({ length: 30_000 }, () => newUuid());
+      mocks.album.getForAssetIds.mockResolvedValue([{ ...getForAlbum(album), assetIds: [assetIds[5], assetIds[7]] }]);
+      mocks.album.getMetadataForIds.mockResolvedValue([
+        { albumId: album.id, assetCount: 2, startDate: null, endDate: null, lastModifiedAssetTimestamp: null },
+      ]);
+
+      const result = await sut.getAllForAssets(AuthFactory.create(owner), { assetIds });
+
+      expect(result).toEqual([
+        { album: expect.objectContaining({ id: album.id, assetCount: 2 }), assetIds: [assetIds[5], assetIds[7]] },
+      ]);
+      expect(mocks.album.getForAssetIds).toHaveBeenCalledTimes(1);
+      expect(mocks.album.getForAssetIds).toHaveBeenCalledWith(owner.id, assetIds, {
+        privateMode: false,
+        userId: owner.id,
+      });
+      expect(mocks.album.getByAssetId).not.toHaveBeenCalled();
+    });
+
+    it('skips the lookup for an empty list of assets', async () => {
+      await expect(sut.getAllForAssets(AuthFactory.create(), { assetIds: [] })).resolves.toEqual([]);
+      expect(mocks.album.getForAssetIds).not.toHaveBeenCalled();
+    });
+
     it('gets list of albums that are shared', async () => {
       const album = AlbumFactory.from().albumUser().build();
       const { user: owner } = album.albumUsers.find(({ role }) => role === AlbumUserRole.Owner)!;

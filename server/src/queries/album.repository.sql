@@ -147,6 +147,67 @@ where
 order by
   "album"."createdAt" desc
 
+-- AlbumRepository.getForAssetIds
+select
+  "album".*,
+  (
+    select
+      coalesce(json_agg(agg), '[]')
+    from
+      (
+        select
+          "album_user"."role",
+          (
+            select
+              to_json(obj)
+            from
+              (
+                select
+                  "id",
+                  "name",
+                  "email",
+                  "avatarColor",
+                  "profileImagePath",
+                  "profileChangedAt"
+                from
+                  (
+                    select
+                      1
+                  ) as "dummy"
+              ) as obj
+          ) as "user"
+        from
+          "album_user"
+          inner join "user" on "user"."id" = "album_user"."userId"
+        where
+          "album_user"."albumId" = "album"."id"
+        order by
+          "album_user"."role",
+          "album_user"."userId" = $1 desc,
+          "user"."name" asc
+      ) as agg
+  ) as "albumUsers",
+  array_agg("album_asset"."assetId") as "assetIds"
+from
+  "album"
+  inner join "album_asset" on "album_asset"."albumId" = "album"."id"
+where
+  "album"."isPrivate" = $2
+  and exists (
+    select
+    from
+      "album_user"
+    where
+      "album_user"."albumId" = "album"."id"
+      and "album_user"."userId" = $3
+  )
+  and "album_asset"."assetId" = any ($4::uuid[])
+  and "album"."deletedAt" is null
+group by
+  "album"."id"
+order by
+  "album"."createdAt" desc
+
 -- AlbumRepository.getByAssetIds
 select
   "album"."id",

@@ -19,6 +19,7 @@ import { DB } from 'src/schema';
 import { AlbumTable } from 'src/schema/tables/album.table';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
 import {
+  anyUuid,
   asUuid,
   dummy,
   isViewUnrestricted,
@@ -148,6 +149,31 @@ export class AlbumRepository {
       .where('album_asset.assetId', '=', assetId)
       .where('album.deletedAt', 'is', null)
       .select(withAlbumUsers(ownerId))
+      .orderBy('album.createdAt', 'desc')
+      .execute();
+  }
+
+  /** The albums that contain any of the assets, each with the given asset ids it contains */
+  @GenerateSql({ params: [DummyValue.UUID, [DummyValue.UUID], { privateMode: false, userId: DummyValue.UUID }] })
+  getForAssetIds(ownerId: string, assetIds: string[], scope: PrivateScope) {
+    return this.db
+      .selectFrom('album')
+      .$call(withPrivateAlbumVisibility(scope))
+      .selectAll('album')
+      .innerJoin('album_asset', 'album_asset.albumId', 'album.id')
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('album_user')
+            .whereRef('album_user.albumId', '=', 'album.id')
+            .where('album_user.userId', '=', ownerId),
+        ),
+      )
+      .where('album_asset.assetId', '=', anyUuid(assetIds))
+      .where('album.deletedAt', 'is', null)
+      .select(withAlbumUsers(ownerId))
+      .select((eb) => eb.fn<string[]>('array_agg', ['album_asset.assetId']).as('assetIds'))
+      .groupBy('album.id')
       .orderBy('album.createdAt', 'desc')
       .execute();
   }
