@@ -1,5 +1,6 @@
 import { Kysely } from 'kysely';
 import { SyncEntityType, SyncRequestType } from 'src/enum';
+import { AssetRepository } from 'src/repositories/asset.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { DB } from 'src/schema';
 import { SyncTestContext } from 'test/medium.factory';
@@ -226,5 +227,47 @@ describe(SyncEntityType.AssetFaceV2, () => {
 
     await ctx.syncAckAll(auth, response);
     await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetFacesV2]);
+  });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold the faces of a private asset and send them again once it is public and touched', async () => {
+      const { auth, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      const { person } = await ctx.newPerson({ ownerId: auth.user.id });
+      const { assetFace } = await ctx.newAssetFace({ assetId: asset.id, personGroupId: person.personGroupId });
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AssetFacesV2]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AssetFaceV2);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetFacesV2]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AssetFacesV2]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetFaceV2,
+          data: expect.objectContaining({ id: assetFace.id, assetId: asset.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetFacesV2]);
+    });
+
+    it('should carry the faces of a private asset for a client that opted in', async () => {
+      const { auth, ctx } = await setup();
+      const { asset } = await ctx.newAsset({ ownerId: auth.user.id, isPrivate: true });
+      const { person } = await ctx.newPerson({ ownerId: auth.user.id });
+      const { assetFace } = await ctx.newAssetFace({ assetId: asset.id, personGroupId: person.personGroupId });
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetFacesV2], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetFaceV2,
+          data: expect.objectContaining({ id: assetFace.id, assetId: asset.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
   });
 });

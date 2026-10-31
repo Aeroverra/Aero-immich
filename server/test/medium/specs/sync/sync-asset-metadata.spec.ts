@@ -125,4 +125,45 @@ describe(SyncEntityType.AssetMetadataDeleteV1, () => {
       expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
     ]);
   });
+  describe('private assets and the includePrivate flag', () => {
+    it('should withhold the metadata of a private asset and send it again once it is public and touched', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await assetRepo.upsertMetadata(asset.id, [{ key: AssetMetadataKey.MobileApp, value: { iCloudId: 'abc123' } }]);
+
+      const withheld = await ctx.syncStream(auth, [SyncRequestType.AssetMetadataV1]);
+      expect(withheld.map(({ type }) => type)).not.toContain(SyncEntityType.AssetMetadataV1);
+      await ctx.syncAckAll(auth, withheld);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetMetadataV1]);
+
+      await assetRepo.updateAll([asset.id], { isPrivate: false });
+      await assetRepo.touchPrivateRelations([asset.id]);
+      const restored = await ctx.syncStream(auth, [SyncRequestType.AssetMetadataV1]);
+      expect(restored).toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetMetadataV1,
+          data: { key: AssetMetadataKey.MobileApp, assetId: asset.id, value: { iCloudId: 'abc123' } },
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+      await ctx.syncAckAll(auth, restored);
+      await ctx.assertSyncIsComplete(auth, [SyncRequestType.AssetMetadataV1]);
+    });
+
+    it('should carry the metadata of a private asset for a client that opted in', async () => {
+      const { auth, user, ctx } = await setup();
+      const assetRepo = ctx.get(AssetRepository);
+      const { asset } = await ctx.newAsset({ ownerId: user.id, isPrivate: true });
+      await assetRepo.upsertMetadata(asset.id, [{ key: AssetMetadataKey.MobileApp, value: { iCloudId: 'abc123' } }]);
+
+      await expect(ctx.syncStream(auth, [SyncRequestType.AssetMetadataV1], false, true)).resolves.toEqual([
+        expect.objectContaining({
+          type: SyncEntityType.AssetMetadataV1,
+          data: expect.objectContaining({ assetId: asset.id }),
+        }),
+        expect.objectContaining({ type: SyncEntityType.SyncCompleteV1 }),
+      ]);
+    });
+  });
 });
