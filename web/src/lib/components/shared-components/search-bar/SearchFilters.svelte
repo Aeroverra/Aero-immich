@@ -87,7 +87,13 @@
     ),
   );
   let tagsTitle = $state<string>();
-  let mediaTitle = $derived(getSearchMediaTitle(searchManager.filter.mediaType));
+  let mediaTitle = $derived(
+    getSearchMediaTitle(
+      searchManager.filter.mediaType,
+      searchManager.filter.minDuration,
+      searchManager.filter.maxDuration,
+    ),
+  );
 
   let filters = [
     {
