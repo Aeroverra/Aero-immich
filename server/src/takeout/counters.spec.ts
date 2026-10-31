@@ -67,7 +67,9 @@ describe('countersFromRows', () => {
     expect(c.scanned.sidecars).toBe(2);
     expect(c.matched.fastTrack).toBe(3);
     expect(c.matched.normal).toBe(2);
-    expect(c.matched.missingMetadata).toBe(1);
+    // the skipped missingMetadata row + the imported rows without a matcher (8: the smaller-version upload, the server
+    // duplicates, the better copy on the server, the rotated upload and the failed upload)
+    expect(c.matched.missingMetadata).toBe(1 + 8);
     expect(c.discarded.localDuplicates).toBe(5);
     expect(c.discarded.rotateOnlyDropped).toBe(2);
     expect(c.discarded.filteredPartner).toBe(1);
@@ -99,6 +101,48 @@ describe('countersFromRows', () => {
     expect(c.discarded.unreadable).toBe(2);
     expect(c.discarded.missingFromArchive).toBe(5);
     expect(c.scanned.files).toBe(0);
+  });
+
+  it('counts a media file imported without Google JSON as missing metadata, and only media files', () => {
+    const c = countersFromRows(
+      [
+        row({
+          action: 'upload',
+          status: 'done',
+          fileKind: 'video',
+          matcher: null,
+          count: 2,
+          fallbacks: ['noGoogleDate'],
+        }),
+        row({ action: 'serverDuplicate', status: 'done', fileKind: 'image', matcher: null, count: 1 }),
+        row({ action: 'upload', status: 'done', fileKind: 'image', matcher: 'normal', count: 7 }),
+        row({ action: 'missingMetadata', status: 'skipped', fileKind: 'image', matcher: null, count: 3 }),
+        row({ action: 'localDuplicate', status: 'skipped', fileKind: 'image', matcher: null, count: 4 }),
+        row({ action: 'assetJson', status: 'skipped', fileKind: 'json', matcher: null, count: 9 }),
+      ],
+      { total: 0, done: 0 },
+    );
+    expect(c.matched.missingMetadata).toBe(2 + 1 + 3);
+    expect(c.matched.normal).toBe(7);
+  });
+
+  it('counts server copies whose file-time date took the Google moment', () => {
+    const c = countersFromRows(
+      [
+        row({
+          action: 'serverDuplicate',
+          status: 'done',
+          matcher: 'normal',
+          count: 3,
+          fallbacks: ['metadataSaved', 'dateFromGoogle'],
+        }),
+        row({ action: 'serverDuplicate', status: 'done', matcher: 'normal', count: 5, fallbacks: ['metadataSaved'] }),
+      ],
+      { total: 0, done: 0 },
+    );
+    expect(c.result.datesFromGoogle).toBe(3);
+    expect(c.result.metadataSaved).toBe(8);
+    expect(emptyCounters().result.datesFromGoogle).toBe(0);
   });
 
   it('emptyCounters is all zero', () => {
