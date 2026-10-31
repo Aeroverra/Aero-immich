@@ -1189,12 +1189,36 @@ describe(SearchService.name, () => {
       const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
       const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
       expect(result.items.map(({ id }) => id)).toEqual([video.id, photo.id, other.id]);
+      expect(result.frameTimestamps).toEqual(new Map([[video.id, 1000]]));
 
       const legacy = await searchRepository.searchSmart(
         { page: 1, size: 10 },
         { embedding: unitVector(0), userIds: [user.id], privateScope: { privateMode: false, userId: user.id } },
       );
       expect(legacy.items.map(({ id }) => id)).toEqual([video.id, photo.id, other.id]);
+      expect(legacy.frameTimestamps).toEqual(new Map([[video.id, 1000]]));
+    });
+
+    it('should give the frame position only for videos that matched on a frame', async () => {
+      const { ctx } = setup();
+      const { user } = await ctx.newUser();
+      const searchRepository = ctx.get(SearchRepository);
+      // the thumbnail matches better than any frame
+      const { asset: thumbnailMatch } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await searchRepository.upsert(thumbnailMatch.id, unitVector(0));
+      await searchRepository.replaceFrames(thumbnailMatch.id, [{ frameTimestamp: 700, embedding: unitVector(1) }]);
+      // no thumbnail embedding at all, only frames: the closest frame is the second one
+      const { asset: framesOnly } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      await searchRepository.replaceFrames(framesOnly.id, [
+        { frameTimestamp: 4000, embedding: unitVector(2) },
+        { frameTimestamp: 9000, embedding: vector({ 0: 0.7, 2: 0.3 }) },
+      ]);
+
+      const options = { filter: {}, embedding: unitVector(0) };
+      const scope = { userIds: [user.id], lockedOwnerId: user.id, privateOwnerId: null };
+      const result = await searchRepository.searchSmartV3({ take: 10 }, options, scope);
+      expect(result.items.map(({ id }) => id)).toEqual([thumbnailMatch.id, framesOnly.id]);
+      expect(result.frameTimestamps).toEqual(new Map([[framesOnly.id, 9000]]));
     });
 
     it('should page through merged results without repeating assets', async () => {

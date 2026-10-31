@@ -7,6 +7,7 @@ import { authManager } from '$lib/managers/auth-manager.svelte';
 import { eventManager } from '$lib/managers/event-manager.svelte';
 import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
 import { searchManager } from '$lib/managers/search-manager.svelte';
+import { videoSearchMatchManager } from '$lib/managers/video-search-match-manager.svelte';
 import { Route } from '$lib/route';
 import { renderWithTooltips } from '$tests/helpers';
 import { preferencesFactory } from '@test-data/factories/preferences-factory';
@@ -120,5 +121,46 @@ describe('Search page private filter', () => {
 
     await vi.waitFor(() => expect(sdkMock.searchAssets).toHaveBeenCalledTimes(2));
     expect(goto).not.toHaveBeenCalled();
+  });
+});
+
+describe('Search page video matches', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('IntersectionObserver', getIntersectionObserverMock());
+    vi.stubGlobal('visualViewport', getVisualViewportMock());
+    authManager.setUser(userAdminFactory.build());
+    authManager.setPreferences(preferencesFactory.build());
+    sdkMock.searchAssets.mockResolvedValue(emptyResults);
+  });
+
+  afterEach(() => {
+    authManager.reset();
+    searchManager.reset();
+    videoSearchMatchManager.clear();
+  });
+
+  it('remembers where the videos of a smart search matched and forgets it when the page closes', async () => {
+    sdkMock.searchSmart.mockResolvedValue({
+      ...emptyResults,
+      assets: { ...emptyResults.assets, matchedFrames: [{ assetId: 'video-1', frameTimestamp: 83_000 }] },
+    });
+
+    const { unmount } = openSearch({ query: 'dog' });
+
+    await vi.waitFor(() => expect(videoSearchMatchManager.get('video-1')).toBe(83_000));
+
+    unmount();
+    expect(videoSearchMatchManager.get('video-1')).toBeUndefined();
+  });
+
+  it('forgets the matches of the previous search', async () => {
+    videoSearchMatchManager.add([{ assetId: 'old-video', frameTimestamp: 1000 }]);
+    sdkMock.searchSmart.mockResolvedValue(emptyResults);
+
+    openSearch({ query: 'cat' });
+
+    await vi.waitFor(() => expect(sdkMock.searchSmart).toHaveBeenCalledOnce());
+    expect(videoSearchMatchManager.get('old-video')).toBeUndefined();
   });
 });

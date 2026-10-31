@@ -27,6 +27,7 @@
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
   import { searchManager } from '$lib/managers/search-manager.svelte';
+  import { videoSearchMatchManager } from '$lib/managers/video-search-match-manager.svelte';
   import type { Viewport } from '$lib/managers/timeline-manager/types';
   import { Route } from '$lib/route';
   import { getAssetBulkActions } from '$lib/services/asset.service';
@@ -53,7 +54,7 @@
   } from '@immich/sdk';
   import { ActionButton, CommandPaletteDefaultProvider, Icon, IconButton, LoadingSpinner } from '@immich/ui';
   import { mdiArrowLeft, mdiClose, mdiDotsVertical, mdiImageOffOutline, mdiSelectAll } from '@mdi/js';
-  import { onMount, tick, untrack } from 'svelte';
+  import { onDestroy, onMount, tick, untrack } from 'svelte';
   import { t } from 'svelte-i18n';
 
   const viewport: Viewport = $state({ width: 0, height: 0 });
@@ -159,6 +160,7 @@
     nextPage = 1;
     searchResultAssets = [];
     searchResultAlbums = [];
+    videoSearchMatchManager.clear();
     await loadNextPage(true);
   }
 
@@ -185,6 +187,7 @@
 
       searchResultAlbums.push(...albums.items);
       searchResultAssets.push(...withoutShownStacks(assets.items, searchResultAssets));
+      videoSearchMatchManager.add(assets.matchedFrames);
 
       nextPage = Number(assets.nextPage) || 0;
     } catch (error) {
@@ -319,6 +322,7 @@
   }
 
   onMount(() => searchManager.setQuery(terms));
+  onDestroy(() => videoSearchMatchManager.clear());
 </script>
 
 <svelte:window bind:scrollY />

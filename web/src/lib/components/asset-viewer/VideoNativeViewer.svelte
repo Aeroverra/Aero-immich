@@ -8,6 +8,7 @@
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { mediaCapabilitiesManager } from '$lib/managers/media-capabilities-manager.svelte';
   import { videoBookmarkManager } from '$lib/managers/video-bookmark-manager.svelte';
+  import { videoSearchMatchManager } from '$lib/managers/video-search-match-manager.svelte';
   import { autoPlayVideo, lang, loopVideo as loopVideoPreference } from '$lib/stores/preferences.store';
   import { getAssetHlsSessionUrl, getAssetHlsUrl, getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
   import { formatVideoPosition } from '$lib/utils/people-utils';
@@ -21,6 +22,7 @@
     mdiChevronRight,
     mdiFullscreen,
     mdiFullscreenExit,
+    mdiMagnify,
     mdiPause,
     mdiPlay,
     mdiVolumeHigh,
@@ -425,6 +427,12 @@
     }
   };
 
+  // where smart search matched in this video, while it is shown from the search results
+  const searchMatch = $derived(extendedControls ? videoSearchMatchManager.get(assetId) : undefined);
+  const searchMatchLabel = $derived(
+    searchMatch === undefined ? '' : $t('video_search_match', { values: { time: formatVideoPosition(searchMatch) } }),
+  );
+
   const onDurationChange = (event: Event) => {
     const duration = (event.currentTarget as HTMLVideoElement).duration;
     durationSeconds = Number.isFinite(duration) ? duration : 0;
@@ -591,18 +599,33 @@
         {/if}
 
         <div class="flex h-32 w-full flex-col justify-end bg-linear-to-b to-black/80 px-4">
-          {#if extendedControls && playbackSourceText}
-            <div class="flex justify-end px-2">
-              <span
-                class="rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white"
-                title={playbackSourceText.description}
-                data-testid="video-playback-source"
-              >
-                {playbackSourceText.label}
-                {#if playbackResolution}
-                  <span class="opacity-75">· {playbackResolution}</span>
-                {/if}
-              </span>
+          {#if searchMatch !== undefined || (extendedControls && playbackSourceText)}
+            <div class="flex items-center gap-2 px-2">
+              {#if searchMatch !== undefined}
+                <button
+                  type="button"
+                  class="flex shrink-0 items-center gap-1 rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white transition-colors hover:bg-black/75 focus-visible:outline-2 focus-visible:outline-white"
+                  title={$t('video_search_match_description')}
+                  data-testid="video-search-match"
+                  onclick={() => onVideoSeek(searchMatch!)}
+                >
+                  <Icon icon={mdiMagnify} size="14" />
+                  {searchMatchLabel}
+                </button>
+              {/if}
+              <span class="grow"></span>
+              {#if extendedControls && playbackSourceText}
+                <span
+                  class="rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white"
+                  title={playbackSourceText.description}
+                  data-testid="video-playback-source"
+                >
+                  {playbackSourceText.label}
+                  {#if playbackResolution}
+                    <span class="opacity-75">· {playbackResolution}</span>
+                  {/if}
+                </span>
+              {/if}
             </div>
           {/if}
           <media-control-bar part="bottom" class="flex h-10 w-full gap-2">
@@ -647,6 +670,22 @@
           </media-control-bar>
           <div class="relative w-full">
             <immich-time-range class="h-8 w-full rounded-lg px-2 pb-3 outline-none"></immich-time-range>
+            {#if searchMatch !== undefined && bookmarkDuration > 0}
+              <!-- same box as the range track: px-2 and pb-3 of the time range -->
+              <div
+                class="pointer-events-none absolute inset-x-2 top-0 bottom-3"
+                data-testid="video-search-match-marker"
+              >
+                <button
+                  type="button"
+                  class="search-match-marker pointer-events-auto absolute top-1/2 h-4 w-3 -translate-1/2"
+                  style:left="{Math.min(100, (searchMatch / 1000 / bookmarkDuration) * 100)}%"
+                  title={searchMatchLabel}
+                  aria-label={searchMatchLabel}
+                  onclick={() => onVideoSeek(searchMatch!)}
+                ></button>
+              </div>
+            {/if}
             {#if bookmarksEnabled && videoBookmarkManager.assetId === assetId && bookmarkDuration > 0}
               <!-- same box as the range track: px-2 and pb-3 of the time range -->
               <div class="pointer-events-none absolute inset-x-2 top-0 bottom-3" data-testid="video-bookmark-markers">
@@ -749,6 +788,35 @@
   }
 
   .bookmark-marker:focus-visible {
+    outline: none;
+  }
+
+  /* the moment that matched the search: a white dot, so it reads apart from the yellow bookmark ticks */
+  .search-match-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 9px;
+    height: 9px;
+    border-radius: 9999px;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    box-shadow:
+      0 0 0 2px rgb(59 130 246),
+      0 0 3px rgb(0 0 0 / 0.8);
+    transition:
+      width 0.15s ease,
+      height 0.15s ease;
+  }
+
+  .search-match-marker:hover::after,
+  .search-match-marker:focus-visible::after {
+    width: 12px;
+    height: 12px;
+  }
+
+  .search-match-marker:focus-visible {
     outline: none;
   }
 
