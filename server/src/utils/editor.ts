@@ -1,4 +1,5 @@
 import { AssetFace } from 'src/database';
+import { AssetEditAction, AssetEditActionItem } from 'src/dtos/editing.dto';
 import { AssetOcrResponseDto } from 'src/dtos/ocr.dto';
 import { ImageDimensions } from 'src/types';
 
@@ -104,4 +105,27 @@ export const checkOcrVisibility = (
     visible: status.filter((s) => s.isVisible).map((s) => s.ocr),
     hidden: status.filter((s) => !s.isVisible).map((s) => s.ocr),
   };
+};
+
+/**
+ * Clockwise rotation in degrees (0, 90, 180 or 270) that the rotate edits of an asset add up to.
+ */
+export const getEditRotation = (edits: Pick<AssetEditActionItem, 'action' | 'parameters'>[]) => {
+  let angle = 0;
+  for (const edit of edits) {
+    if (edit.action === AssetEditAction.Rotate) {
+      angle += (edit.parameters as { angle: number }).angle;
+    }
+  }
+
+  return ((angle % 360) + 360) % 360;
+};
+
+/**
+ * Display rotation for a video (ffmpeg `-display_rotation`, counter-clockwise like the rotation ffprobe reports)
+ * that shows a stream with `sourceRotation` turned a further `clockwise` degrees. Kept within -90..180.
+ */
+export const getVideoDisplayRotation = (sourceRotation: number, clockwise: number) => {
+  const angle = (((sourceRotation - clockwise) % 360) + 360) % 360;
+  return angle > 180 ? angle - 360 : angle;
 };
