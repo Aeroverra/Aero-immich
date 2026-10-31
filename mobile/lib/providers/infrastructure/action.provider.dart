@@ -16,6 +16,7 @@ import 'package:immich_mobile/providers/timeline/multiselect.provider.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/services/action.service.dart';
 import 'package:immich_mobile/services/foreground_upload.service.dart';
+import 'package:immich_mobile/utils/private_share.dart';
 import 'package:logging/logging.dart';
 
 final actionProvider = NotifierProvider<ActionNotifier, void>(ActionNotifier.new, dependencies: [multiSelectProvider]);
@@ -97,7 +98,9 @@ class ActionNotifier extends Notifier<void> {
     }
   }
 
-  Future<ActionResult> addToAlbum(ActionSource source, RemoteAlbum album) async {
+  /// [confirmPrivate] acknowledges that private assets in the selection become visible to everyone
+  /// [album] is shared with. Without it the server's refusal is rethrown so the caller can ask.
+  Future<ActionResult> addToAlbum(ActionSource source, RemoteAlbum album, {bool confirmPrivate = false}) async {
     final selected = _getAssets(source).toList(growable: false);
     if (selected.isEmpty) {
       return const ActionResult(count: 0, success: true);
@@ -112,10 +115,13 @@ class ActionNotifier extends Notifier<void> {
     int failedRemote = 0;
     if (remoteIds.isNotEmpty) {
       try {
-        final result = await albumNotifier.addAssets(album.id, remoteIds);
+        final result = await albumNotifier.addAssets(album.id, remoteIds, confirmPrivate: confirmPrivate);
         addedRemote = result.added;
         failedRemote = result.failed;
       } catch (error, stack) {
+        if (isPrivateConfirmationRequired(error)) {
+          rethrow;
+        }
         _logger.severe('Failed to add assets to album ${album.id}', error, stack);
         return ActionResult(count: 0, success: false, error: error.toString());
       }

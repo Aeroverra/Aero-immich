@@ -54,6 +54,11 @@ const getDefaultPreferences = (): UserPreferences => {
     recentlyAdded: {
       sidebarWeb: false,
     },
+    privateMode: {
+      timeoutMinutes: 30,
+      sidebarWeb: true,
+      includeInMemories: false,
+    },
   };
 };
 

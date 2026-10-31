@@ -1,5 +1,6 @@
-import type { AlbumResponseDto } from '@immich/sdk';
+import type { AlbumResponseDto, AlbumUserCreateDto } from '@immich/sdk';
 import * as sdk from '@immich/sdk';
+import { modalManager } from '@immich/ui';
 import { orderBy } from 'lodash-es';
 import { t } from 'svelte-i18n';
 import { get } from 'svelte/store';
@@ -22,18 +23,46 @@ import { handleError } from '$lib/utils/handle-error';
  * Albums General Management
  * -------------------------
  */
-export const createAlbum = async (name?: string, assetIds?: string[]) => {
+export const createAlbum = async (
+  name?: string,
+  assetIds?: string[],
+  options?: {
+    /** users the album is shared with from the start */
+    albumUsers?: AlbumUserCreateDto[];
+    /** whether any of the initial assets is private; sharing them needs an explicit acknowledgement */
+    hasPrivate?: boolean;
+  },
+) => {
+  const $t = get(t);
+  const { albumUsers, hasPrivate = false } = options ?? {};
+
+  let confirmPrivate: boolean | undefined;
+  if (hasPrivate && albumUsers && albumUsers.length > 0) {
+    const confirmed = await modalManager.showDialog({
+      title: $t('private_mode'),
+      prompt: $t('share_private_assets_album_confirmation'),
+      confirmText: $t('create_album'),
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    confirmPrivate = true;
+  }
+
   try {
     const newAlbum: AlbumResponseDto = await sdk.createAlbum({
       createAlbumDto: {
         albumName: name ?? '',
         assetIds,
+        albumUsers,
+        confirmPrivate,
       },
     });
     eventManager.emit('AlbumCreate', newAlbum);
     return newAlbum;
   } catch (error) {
-    const $t = get(t);
     handleError(error, $t('errors.failed_to_create_album'));
   }
 };

@@ -3,6 +3,7 @@ import 'package:immich_mobile/domain/services/map.service.dart';
 import 'package:immich_mobile/presentation/widgets/map/map.state.dart';
 import 'package:immich_mobile/providers/infrastructure/db.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/timeline.provider.dart';
+import 'package:immich_mobile/providers/private_mode.provider.dart';
 import 'package:immich_mobile/providers/user.provider.dart';
 
 final mapServiceProvider = Provider<MapService>(
@@ -17,7 +18,11 @@ final mapServiceProvider = Provider<MapService>(
         : [user.id];
 
     final mapFactory = MapFactory(mapRepository: ref.watch(driftProvider).mapRepository);
-    final mapService = mapFactory.remote(users, ref.watch(mapStateProvider).toOptions());
+    final mapService = mapFactory.remote(
+      users,
+      ref.watch(mapStateProvider).toOptions(),
+      privateFilter: ref.watch(privateModeFilterProvider),
+    );
     return mapService;
   },
   // Empty dependencies to inform the framework that this provider

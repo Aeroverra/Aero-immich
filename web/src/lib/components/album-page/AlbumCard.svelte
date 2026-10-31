@@ -4,8 +4,8 @@
   import { getContextMenuPositionFromEvent, type ContextMenuPosition } from '$lib/utils/context-menu';
   import { getShortDateRange } from '$lib/utils/date-time';
   import { type AlbumResponseDto } from '@immich/sdk';
-  import { IconButton } from '@immich/ui';
-  import { mdiDotsVertical } from '@mdi/js';
+  import { Icon, IconButton } from '@immich/ui';
+  import { mdiDotsVertical, mdiLockOutline } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
   interface Props {
@@ -95,6 +95,16 @@
         {/if}
       {:else if album.shared}
         <p>{$t('shared')}</p>
+      {/if}
+
+      {#if album.isPrivate}
+        {#if showItemCount || showOwner || album.shared}
+          <p>•</p>
+        {/if}
+        <p class="flex items-center gap-1" data-testid="album-private">
+          <Icon icon={mdiLockOutline} size="16" />
+          {$t('private')}
+        </p>
       {/if}
     </span>
   </div>

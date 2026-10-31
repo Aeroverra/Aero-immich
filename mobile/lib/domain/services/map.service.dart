@@ -1,4 +1,5 @@
 import 'package:immich_mobile/domain/models/map.model.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/infrastructure/repositories/map.repository.dart';
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -11,8 +12,11 @@ class MapFactory {
 
   const MapFactory({required this._mapRepository});
 
-  MapService remote(List<String> ownerIds, TimelineMapOptions options) =>
-      MapService(_mapRepository.remote(ownerIds, options));
+  MapService remote(
+    List<String> ownerIds,
+    TimelineMapOptions options, {
+    PrivateModeFilter privateFilter = PrivateModeFilter.off,
+  }) => MapService(_mapRepository.remote(ownerIds, options, privateFilter: privateFilter));
 }
 
 class MapService {

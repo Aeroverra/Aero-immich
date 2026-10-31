@@ -28,6 +28,7 @@ const createAsset = (
   fileModifiedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   isFavorite: false,
+  isPrivate: false,
   isArchived: false,
   isTrashed: false,
   isOffline: false,

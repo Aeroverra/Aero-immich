@@ -10,13 +10,24 @@
   import SkipLink from '$lib/elements/SkipLink.svelte';
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
+  import { privateModeManager } from '$lib/managers/private-mode-manager.svelte';
+  import PrivateModePinModal from '$lib/modals/PrivateModePinModal.svelte';
   import { Route } from '$lib/route';
   import { getGlobalActions } from '$lib/services/app.service';
   import { mediaQueryManager } from '$lib/stores/media-query-manager.svelte';
   import { notificationManager } from '$lib/stores/notification-manager.svelte';
   import { sidebarStore } from '$lib/stores/sidebar.svelte';
-  import { ActionButton, Button, IconButton, Logo } from '@immich/ui';
-  import { mdiBellBadge, mdiBellOutline, mdiMagnify, mdiMenu, mdiTrayArrowUp } from '@mdi/js';
+  import { handleError } from '$lib/utils/handle-error';
+  import { ActionButton, Button, IconButton, Logo, modalManager } from '@immich/ui';
+  import {
+    mdiBellBadge,
+    mdiBellOutline,
+    mdiLockOpenVariantOutline,
+    mdiLockOutline,
+    mdiMagnify,
+    mdiMenu,
+    mdiTrayArrowUp,
+  } from '@mdi/js';
   import { onMount } from 'svelte';
   import { t } from 'svelte-i18n';
   import ThemeButton from '../ThemeButton.svelte';
@@ -45,6 +56,19 @@
   });
 
   const { Cast } = $derived(getGlobalActions($t));
+
+  const handlePrivateModeToggle = async () => {
+    if (!privateModeManager.enabled) {
+      await modalManager.show(PrivateModePinModal, {});
+      return;
+    }
+
+    try {
+      await privateModeManager.disable();
+    } catch (error) {
+      handleError(error, $t('errors.unable_to_disable_private_mode'));
+    }
+  };
 </script>
 
 <svelte:window bind:innerWidth />
@@ -122,6 +146,21 @@
             aria-label={$t('upload')}
             icon={mdiTrayArrowUp}
             class="lg:hidden"
+          />
+        {/if}
+
+        {#if !authManager.isSharedLink}
+          <IconButton
+            shape="round"
+            color={privateModeManager.enabled ? 'primary' : 'secondary'}
+            variant="ghost"
+            size="medium"
+            icon={privateModeManager.enabled ? mdiLockOpenVariantOutline : mdiLockOutline}
+            onclick={handlePrivateModeToggle}
+            title={privateModeManager.enabled ? $t('private_mode_disable') : $t('private_mode_enable')}
+            aria-label={privateModeManager.enabled ? $t('private_mode_disable') : $t('private_mode_enable')}
+            aria-pressed={privateModeManager.enabled}
+            data-testid="private-mode-toggle"
           />
         {/if}
 

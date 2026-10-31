@@ -4,7 +4,7 @@ import { TimeBucketAssetDto, TimeBucketDto, TimeBucketsResponseDto } from 'src/d
 import { AssetVisibility, Permission } from 'src/enum';
 import { TimeBucketOptions } from 'src/repositories/asset.repository';
 import { BaseService } from 'src/services/base.service';
-import { requireElevatedPermission } from 'src/utils/access';
+import { requireElevatedPermission, requirePrivateMode } from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
 
 @Injectable()
@@ -49,6 +49,10 @@ export class TimelineService extends BaseService {
       requireElevatedPermission(auth);
     }
 
+    if (dto.isPrivate) {
+      requirePrivateMode(auth);
+    }
+
     if (dto.albumId) {
       await this.requireAccess({ auth, permission: Permission.AlbumRead, ids: [dto.albumId] });
     } else {
@@ -63,6 +67,9 @@ export class TimelineService extends BaseService {
       if (dto.visibility === AssetVisibility.Locked && dto.userId !== auth.user.id) {
         throw new BadRequestException("You may not access another user's locked timeline");
       }
+      if (dto.isPrivate && dto.userId !== auth.user.id) {
+        throw new BadRequestException("You may not access another user's private timeline");
+      }
     }
 
     if (dto.tagId) {
@@ -74,6 +81,10 @@ export class TimelineService extends BaseService {
     }
 
     if (dto.withPartners) {
+      if (dto.isPrivate) {
+        throw new BadRequestException('withPartners is not supported for private assets');
+      }
+
       const isRequestedLocked = dto.visibility === AssetVisibility.Locked;
       const isRequestedArchived = dto.visibility === AssetVisibility.Archive || dto.visibility === undefined;
       const isRequestedFavorite = dto.isFavorite === true || dto.isFavorite === false;

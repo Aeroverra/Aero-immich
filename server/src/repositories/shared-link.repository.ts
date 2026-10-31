@@ -4,7 +4,7 @@ import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
 import _ from 'lodash';
 import { InjectKysely } from 'nestjs-kysely';
 import { Album, columns } from 'src/database';
-import { ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
+import { Chunked, ChunkedArray, DummyValue, GenerateSql } from 'src/decorators';
 import { AlbumUserRole, SharedLinkType } from 'src/enum';
 import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
@@ -140,6 +140,25 @@ export class SharedLinkRepository {
       .$if(!!id, (eb) => eb.where('shared_link.id', '=', id!))
       .orderBy('shared_link.createdAt', 'desc')
       .execute();
+  }
+
+  /** Whether any of the given assets is private, so a new link can require explicit confirmation. */
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  @Chunked({ mergeFn: (results: boolean[]) => results.some(Boolean) })
+  async hasPrivateAssets(assetIds: string[]): Promise<boolean> {
+    if (assetIds.length === 0) {
+      return false;
+    }
+
+    const row = await this.db
+      .selectFrom('asset')
+      .select('asset.id')
+      .where('asset.id', 'in', assetIds)
+      .where('asset.isPrivate', '=', true)
+      .limit(1)
+      .executeTakeFirst();
+
+    return !!row;
   }
 
   @GenerateSql({ params: [DummyValue.BUFFER] })

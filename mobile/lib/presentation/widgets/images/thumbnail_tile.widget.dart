@@ -198,6 +198,18 @@ class _ThumbnailTileState extends ConsumerState<ThumbnailTile> {
                       ),
                     ),
                   ),
+                if (asset is RemoteAsset && asset.isPrivate)
+                  AnimatedOpacity(
+                    duration: Durations.short4,
+                    opacity: _hideIndicators ? 0.0 : 1.0,
+                    child: Align(
+                      alignment: Alignment.bottomLeft,
+                      child: Padding(
+                        padding: EdgeInsets.only(left: asset.isFavorite ? 32.0 : 10.0, bottom: 6.0),
+                        child: const _TileOverlayIcon(Icons.lock_person_outlined),
+                      ),
+                    ),
+                  ),
                 if (uploadProgress != null) _UploadProgressOverlay(progress: uploadProgress),
               ],
             ),

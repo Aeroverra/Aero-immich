@@ -10,9 +10,10 @@
     onClose: () => void;
     albumId?: string;
     assetIds?: string[];
+    hasPrivate?: boolean;
   }
 
-  let { onClose, albumId, assetIds }: Props = $props();
+  let { onClose, albumId, assetIds, hasPrivate = false }: Props = $props();
 
   let description = $state('');
   let allowDownload = $state(true);
@@ -25,18 +26,21 @@
   let type = $derived(albumId ? SharedLinkType.Album : SharedLinkType.Individual);
 
   const onSubmit = async () => {
-    const success = await handleCreateSharedLink({
-      type,
-      albumId,
-      assetIds,
-      expiresAt,
-      allowUpload,
-      description,
-      password,
-      allowDownload,
-      showMetadata,
-      slug,
-    });
+    const success = await handleCreateSharedLink(
+      {
+        type,
+        albumId,
+        assetIds,
+        expiresAt,
+        allowUpload,
+        description,
+        password,
+        allowDownload,
+        showMetadata,
+        slug,
+      },
+      { hasPrivate },
+    );
     if (success) {
       onClose();
     }

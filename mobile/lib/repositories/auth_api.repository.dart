@@ -1,4 +1,5 @@
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:immich_mobile/domain/models/private_mode.model.dart';
 import 'package:immich_mobile/models/auth/login_response.model.dart';
 import 'package:immich_mobile/providers/api.provider.dart';
 import 'package:immich_mobile/repositories/api.repository.dart';
@@ -59,5 +60,33 @@ class AuthApiRepository extends ApiRepository {
 
   Future<void> lockPinCode() {
     return _apiService.authenticationApi.lockAuthSession();
+  }
+
+  Future<bool> enablePrivateMode(String pinCode) async {
+    try {
+      await _apiService.authenticationApi.enablePrivateMode(SessionUnlockDto(pinCode: Optional.present(pinCode)));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> disablePrivateMode() {
+    if (_apiService.apiClient.basePath.isEmpty) {
+      return Future.value();
+    }
+    return _apiService.authenticationApi.disablePrivateMode().timeout(const Duration(seconds: 7));
+  }
+
+  Future<PrivateModeStatus> getPrivateModeStatus() async {
+    final status = await _apiService.authenticationApi.getAuthStatus();
+    if (status == null) {
+      return const PrivateModeStatus(enabled: false);
+    }
+    final expiresAt = status.privateModeExpiresAt.orElse(null);
+    return PrivateModeStatus(
+      enabled: status.privateMode,
+      expiresAt: expiresAt == null ? null : DateTime.tryParse(expiresAt)?.toLocal(),
+    );
   }
 }
