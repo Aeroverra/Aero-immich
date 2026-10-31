@@ -21,6 +21,7 @@ import { asHumanReadable } from 'src/utils/bytes';
 import { mimeTypes } from 'src/utils/mime-types';
 import {
   isDuplicateDetectionEnabled,
+  isFaceAttributesEnabled,
   isFacialRecognitionEnabled,
   isOcrEnabled,
   isSmartSearchEnabled,
@@ -103,6 +104,7 @@ export class ServerService extends BaseService {
       oauth: oauth.enabled,
       oauthAutoLaunch: oauth.autoLaunch,
       ocr: isOcrEnabled(machineLearning),
+      faceAttributes: isFaceAttributesEnabled(machineLearning),
       passwordLogin: passwordLogin.enabled,
       configFile: !!configFile,
       email: notifications.smtp.enabled,

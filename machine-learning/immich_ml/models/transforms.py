@@ -89,5 +89,15 @@ def letterbox(image: NDArray[np.uint8] | Image.Image, size: int) -> tuple[NDArra
     return canvas, new_height / height
 
 
+def to_grayscale(image: Image.Image) -> NDArray[np.uint8]:
+    rgb = np.asarray(image if image.mode == "RGB" else image.convert("RGB"))
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)  # type: ignore
+
+
+def laplacian_variance(gray: NDArray[np.uint8]) -> float:
+    """Variance of the Laplacian, a standard focus measure: blurry images have few edges and a low variance."""
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
 def ensure_dims(array: NDArray[np.float32], ndim: int) -> NDArray[np.float32]:
     return array if array.ndim >= ndim else np.expand_dims(array, axis=tuple(range(ndim - array.ndim)))
