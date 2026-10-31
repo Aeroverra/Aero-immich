@@ -1,9 +1,10 @@
 import { NotFoundException } from '@nestjs/common';
 import { Kysely } from 'kysely';
 import { DateTime } from 'luxon';
+import { BulkIdErrorReason } from 'src/dtos/asset-ids.response.dto';
 import { AssetEditAction, MirrorAxis } from 'src/dtos/editing.dto';
 import { AssetFaceCreateDto } from 'src/dtos/person.dto';
-import { AssetFileType, JobName } from 'src/enum';
+import { AssetFileType, AssetType, JobName, SourceType } from 'src/enum';
 import { AccessRepository } from 'src/repositories/access.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
@@ -1016,6 +1017,97 @@ describe(PersonService.name, () => {
             boundingBoxY2: 90,
           }),
         ]),
+      );
+    });
+  });
+
+  describe('addToAssets', () => {
+    it('should tag the person on videos with a whole frame face', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: video } = await ctx.newAsset({
+        ownerId: user.id,
+        type: AssetType.Video,
+        width: 1920,
+        height: 1080,
+      });
+      await ctx.newExif({ assetId: video.id, exifImageWidth: 1920, exifImageHeight: 1080 });
+      const { asset: photo } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Image });
+      const auth = factory.auth({ user });
+
+      await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id, photo.id] })).resolves.toEqual([
+        { id: video.id, success: true },
+        { id: photo.id, success: false, error: BulkIdErrorReason.VALIDATION },
+      ]);
+
+      await expect(sut.getFacesById(auth, { id: video.id })).resolves.toEqual([
+        expect.objectContaining({
+          person: expect.objectContaining({ id: person.personGroupId }),
+          imageWidth: 1920,
+          imageHeight: 1080,
+          boundingBoxX1: 0,
+          boundingBoxY1: 0,
+          boundingBoxX2: 1920,
+          boundingBoxY2: 1080,
+          sourceType: SourceType.Manual,
+        }),
+      ]);
+      await expect(sut.getStatistics(auth, person.personGroupId)).resolves.toEqual({ assets: 1 });
+      await expect(
+        ctx.get(PersonRepository).getByGroupId({ ownerId: user.id, personGroupId: person.personGroupId }),
+      ).resolves.toMatchObject({ faceAssetId: expect.any(String) });
+
+      await expect(sut.addToAssets(auth, person.personGroupId, { ids: [video.id] })).resolves.toEqual([
+        { id: video.id, success: false, error: BulkIdErrorReason.DUPLICATE },
+      ]);
+      await expect(sut.getFacesById(auth, { id: video.id })).resolves.toHaveLength(1);
+    });
+
+    it('should not add the person to a video they are already detected on', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+      const { person } = await newPersonWithFace(ctx, user.id, video.id);
+
+      await expect(sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [video.id] })).resolves.toEqual(
+        [{ id: video.id, success: false, error: BulkIdErrorReason.DUPLICATE }],
+      );
+    });
+
+    it('should refuse videos of other users and private videos outside private mode', async () => {
+      const { sut, ctx } = setup();
+      ctx.getMock(JobRepository).queueAll.mockResolvedValue();
+      const { user } = await ctx.newUser();
+      const { user: other } = await ctx.newUser();
+      const { person } = await ctx.newPerson({ ownerId: user.id, name: 'Someone' });
+      const { asset: foreign } = await ctx.newAsset({ ownerId: other.id, type: AssetType.Video });
+      const { asset: hidden } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video, isPrivate: true });
+
+      await expect(
+        sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [foreign.id, hidden.id] }),
+      ).resolves.toEqual([
+        { id: foreign.id, success: false, error: BulkIdErrorReason.NO_PERMISSION },
+        { id: hidden.id, success: false, error: BulkIdErrorReason.NO_PERMISSION },
+      ]);
+
+      await expect(
+        sut.addToAssets(factory.auth({ user, session: { privateMode: true } }), person.personGroupId, {
+          ids: [hidden.id],
+        }),
+      ).resolves.toEqual([{ id: hidden.id, success: true }]);
+    });
+
+    it('should refuse a person of another user', async () => {
+      const { sut, ctx } = setup();
+      const { user } = await ctx.newUser();
+      const { user: other } = await ctx.newUser();
+      const { person } = await ctx.newPerson({ ownerId: other.id, name: 'Someone' });
+      const { asset: video } = await ctx.newAsset({ ownerId: user.id, type: AssetType.Video });
+
+      await expect(sut.addToAssets(factory.auth({ user }), person.personGroupId, { ids: [video.id] })).rejects.toThrow(
+        'Not found or no person.update access',
       );
     });
   });
