@@ -8,6 +8,7 @@
   import { authManager } from '$lib/managers/auth-manager.svelte';
   import { mediaCapabilitiesManager } from '$lib/managers/media-capabilities-manager.svelte';
   import { videoBookmarkManager } from '$lib/managers/video-bookmark-manager.svelte';
+  import { videoTranscriptManager } from '$lib/managers/video-transcript-manager.svelte';
   import { videoSearchMatchManager } from '$lib/managers/video-search-match-manager.svelte';
   import { autoPlayVideo, lang, loopVideo as loopVideoPreference } from '$lib/stores/preferences.store';
   import { getAssetHlsSessionUrl, getAssetHlsUrl, getAssetMediaUrl, getAssetPlaybackUrl } from '$lib/utils';
@@ -20,6 +21,8 @@
     mdiCheck,
     mdiChevronLeft,
     mdiChevronRight,
+    mdiClosedCaption,
+    mdiClosedCaptionOutline,
     mdiFullscreen,
     mdiFullscreenExit,
     mdiMagnify,
@@ -33,6 +36,7 @@
   import 'hls-video-element';
   import type HlsVideoElement from 'hls-video-element';
   import Hls, { AbrController, Events, type FragLoadedData, type FragLoadingData, type HlsConfig } from 'hls.js';
+  import 'media-chrome/media-captions-button';
   import 'media-chrome/media-control-bar';
   import 'media-chrome/media-controller';
   import 'media-chrome/media-fullscreen-button';
@@ -426,11 +430,104 @@
     }
   };
 
-  // where smart search matched in this video, while it is shown from the search results
+  // where search matched in this video, while it is shown from the search results
   const searchMatch = $derived(extendedControls ? videoSearchMatchManager.get(assetId) : undefined);
+  const isSpeechMatch = $derived(videoSearchMatchManager.getKind(assetId) === 'speech');
   const searchMatchLabel = $derived(
-    searchMatch === undefined ? '' : $t('video_search_match', { values: { time: formatVideoPosition(searchMatch) } }),
+    searchMatch === undefined
+      ? ''
+      : $t(isSpeechMatch ? 'video_transcript_match' : 'video_search_match', {
+          values: { time: formatVideoPosition(searchMatch) },
+        }),
   );
+
+  // the transcript, like bookmarks, needs a signed in user: captions for the player, lines for the info panel
+  const transcriptEnabled = $derived(bookmarksEnabled && !!featureFlagsManager.value.videoTranscription);
+  const captionsUrl = $derived(
+    transcriptEnabled && videoTranscriptManager.assetId === assetId ? videoTranscriptManager.captionsUrl : undefined,
+  );
+
+  $effect(() => {
+    if (transcriptEnabled) {
+      void videoTranscriptManager.load(assetId);
+    }
+  });
+
+  onDestroy(() => {
+    if (videoTranscriptManager.assetId === assetId) {
+      videoTranscriptManager.clear();
+    }
+  });
+
+  let mediaController = $state<HTMLElement>();
+  let controls = $state<HTMLElement>();
+
+  // the captions sit above the controls while those are shown, and at the bottom once they hide
+  $effect(() => {
+    const video = videoPlayer;
+    const controller = mediaController;
+    if (!captionsUrl || !video || !controller) {
+      return;
+    }
+
+    const place = () => {
+      const height = video.clientHeight;
+      const reserved = controller.hasAttribute('userinactive') || !controls || !height ? 0 : controls.clientHeight;
+      // a negative line counts caption lines up from the bottom, a caption line being 5% of the video height,
+      // and a caption of several lines grows upwards from there
+      const line = reserved ? -Math.ceil(reserved / (height * 0.05)) - 2 : 'auto';
+      for (const track of video.textTracks) {
+        let moved = false;
+        for (const cue of track.kind === 'captions' ? (track.cues ?? []) : []) {
+          if (!(cue instanceof VTTCue) || cue.line === line) {
+            continue;
+          }
+          cue.line = line;
+          moved = true;
+        }
+        // a caption already on screen keeps its place until the track is shown again
+        if (moved && track.mode === 'showing') {
+          track.mode = 'hidden';
+          track.mode = 'showing';
+        }
+      }
+    };
+
+    // a captions track loads its cues once it is shown, and announces them with cuechange
+    const tracks: TextTrack[] = [];
+    const watch = () => {
+      for (const track of video.textTracks) {
+        if (tracks.includes(track)) {
+          continue;
+        }
+        tracks.push(track);
+        track.addEventListener('cuechange', place);
+      }
+      place();
+    };
+
+    const observer = new MutationObserver(place);
+    observer.observe(controller, { attributes: true, attributeFilter: ['userinactive'] });
+    const resizeObserver = new ResizeObserver(place);
+    resizeObserver.observe(video);
+    video.textTracks.addEventListener('addtrack', watch);
+    video.textTracks.addEventListener('change', place);
+    watch();
+    return () => {
+      observer.disconnect();
+      resizeObserver.disconnect();
+      video.textTracks.removeEventListener('addtrack', watch);
+      video.textTracks.removeEventListener('change', place);
+      for (const track of tracks) {
+        track.removeEventListener('cuechange', place);
+      }
+    };
+  });
+
+  const onPlaybackUpdate = (event: Event) => {
+    const video = event.currentTarget as HTMLVideoElement;
+    videoTranscriptManager.setPlayback(assetId, video.currentTime * 1000, !video.paused);
+  };
 
   const onDurationChange = (event: Event) => {
     const duration = (event.currentTarget as HTMLVideoElement).duration;
@@ -503,6 +600,7 @@
     {:else}
       <!-- dir=ltr based on https://github.com/videojs/video.js/issues/949 -->
       <media-controller
+        bind:this={mediaController}
         dir="ltr"
         lang={$lang}
         nohotkeys
@@ -529,6 +627,9 @@
             ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
+            ontimeupdate={onPlaybackUpdate}
+            onplay={onPlaybackUpdate}
+            onpause={onPlaybackUpdate}
             onplaying={(e: Event) => {
               if (hasFocused) {
                 return;
@@ -539,7 +640,11 @@
             }}
             onclose={onClose}
             poster={getAssetMediaUrl({ id: asset.id, size: AssetMediaSize.Preview, cacheKey })}
-          ></hls-video>
+          >
+            {#if captionsUrl}
+              {@render captionsTrack(captionsUrl)}
+            {/if}
+          </hls-video>
         {:else}
           <video
             bind:this={videoPlayer}
@@ -560,6 +665,9 @@
             ondurationchange={onDurationChange}
             onended={onVideoEnded}
             onseeking={onSeeking}
+            ontimeupdate={onPlaybackUpdate}
+            onplay={onPlaybackUpdate}
+            onpause={onPlaybackUpdate}
             onplaying={(e) => {
               if (hasFocused) {
                 return;
@@ -570,7 +678,11 @@
             }}
             onclose={onClose}
             poster={getAssetMediaUrl({ id: asset.id, size: AssetMediaSize.Preview, cacheKey })}
-          ></video>
+          >
+            {#if captionsUrl}
+              {@render captionsTrack(captionsUrl)}
+            {/if}
+          </video>
         {/if}
 
         {#if extendedControls}
@@ -597,14 +709,14 @@
           </media-settings-menu>
         {/if}
 
-        <div class="flex h-32 w-full flex-col justify-end bg-linear-to-b to-black/80 px-4">
+        <div bind:this={controls} class="flex h-32 w-full flex-col justify-end bg-linear-to-b to-black/80 px-4">
           {#if searchMatch !== undefined || (extendedControls && playbackSourceText)}
             <div class="flex items-center gap-2 px-2">
               {#if searchMatch !== undefined}
                 <button
                   type="button"
                   class="flex shrink-0 items-center gap-1 rounded-full bg-black/50 px-2.5 py-0.5 text-xs font-medium text-white transition-colors hover:bg-black/75 focus-visible:outline-2 focus-visible:outline-white"
-                  title={$t('video_search_match_description')}
+                  title={$t(isSpeechMatch ? 'video_transcript_match_description' : 'video_search_match_description')}
                   data-testid="video-search-match"
                   onclick={() => onVideoSeek(searchMatch!)}
                 >
@@ -658,6 +770,13 @@
                 <Icon slot="high" icon={mdiVolumeHigh} />
               </media-mute-button>
             </div>
+
+            {#if captionsUrl}
+              <media-captions-button class="shrink-0 rounded-full p-2 outline-none" data-testid="video-captions-button">
+                <Icon slot="on" icon={mdiClosedCaption} />
+                <Icon slot="off" icon={mdiClosedCaptionOutline} />
+              </media-captions-button>
+            {/if}
 
             {#if extendedControls}
               <media-fullscreen-button class="shrink-0 rounded-full p-2 outline-none">
@@ -720,6 +839,11 @@
     {/if}
   </div>
 {/if}
+
+{#snippet captionsTrack(src: string)}
+  <!-- captions start off, the captions button turns them on -->
+  <track kind="captions" {src} srclang={videoTranscriptManager.language ?? undefined} label={$t('transcript')} />
+{/snippet}
 
 <style>
   media-controller {

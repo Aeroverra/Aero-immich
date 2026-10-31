@@ -63,6 +63,11 @@ class SearchManager {
       queryType = QueryType.OCR;
     }
 
+    if (searchQuery.transcript) {
+      query = searchQuery.transcript;
+      queryType = QueryType.TRANSCRIPT;
+    }
+
     return {
       query,
       ocr: searchQuery.ocr,
@@ -131,6 +136,7 @@ class SearchManager {
       query: this.filter.queryType === 'smart' ? query : undefined,
       queryAssetId: this.filter.queryAssetId || undefined,
       ocr: this.filter.queryType === 'ocr' ? query : undefined,
+      transcript: this.filter.queryType === 'transcript' ? query : undefined,
       originalFileName: this.filter.queryType === 'metadata' ? query : undefined,
       description: this.filter.queryType === 'description' ? query : undefined,
       originalPath: this.filter.queryType === 'fullPath' ? this.filter.query.trim() || undefined : undefined,

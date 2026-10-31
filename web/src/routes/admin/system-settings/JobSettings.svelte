@@ -26,6 +26,7 @@
     QueueName.Migration,
     QueueName.Ocr,
     QueueName.VideoFrameAnalysis,
+    QueueName.VideoTranscription,
   ];
 
   function isSystemConfigJobDto(jobName: string): jobName is keyof AdminConfigJobDto {
@@ -52,6 +53,7 @@
     [QueueName.Ocr]: $t('admin.machine_learning_ocr'),
     [QueueName.FaceAttributes]: $t('admin.machine_learning_face_attributes'),
     [QueueName.VideoFrameAnalysis]: $t('admin.video_frame_analysis_job'),
+    [QueueName.VideoTranscription]: $t('admin.video_transcription_job'),
     [QueueName.Workflow]: $t('workflows'),
     [QueueName.Editor]: $t('editor'),
     [QueueName.IntegrityCheck]: $t('integrity_checks'),
