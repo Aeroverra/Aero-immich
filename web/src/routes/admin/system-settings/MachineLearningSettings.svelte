@@ -460,6 +460,89 @@
           />
         </div>
       </SettingAccordion>
+
+      <SettingAccordion
+        key="video-frame-analysis"
+        title={$t('admin.machine_learning_video_frame_analysis')}
+        subtitle={$t('admin.machine_learning_video_frame_analysis_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_video_frame_analysis_enabled')}
+            subtitle={$t('admin.machine_learning_video_frame_analysis_enabled_description')}
+            bind:checked={configToEdit.machineLearning.videoFrameAnalysis.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_video_frame_analysis_frame_density')}
+            description={$t('admin.machine_learning_video_frame_analysis_frame_density_description')}
+            bind:value={configToEdit.machineLearning.videoFrameAnalysis.frameDensity}
+            step="0.1"
+            min={0.1}
+            max={10}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.enabled}
+            isEdited={configToEdit.machineLearning.videoFrameAnalysis.frameDensity !==
+              config.machineLearning.videoFrameAnalysis.frameDensity}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_video_frame_analysis_min_frame_interval')}
+            description={$t('admin.machine_learning_video_frame_analysis_min_frame_interval_description')}
+            bind:value={configToEdit.machineLearning.videoFrameAnalysis.minFrameInterval}
+            step="0.5"
+            min={0.5}
+            max={600}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.enabled}
+            isEdited={configToEdit.machineLearning.videoFrameAnalysis.minFrameInterval !==
+              config.machineLearning.videoFrameAnalysis.minFrameInterval}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_video_frame_analysis_max_frames')}
+            description={$t('admin.machine_learning_video_frame_analysis_max_frames_description')}
+            bind:value={configToEdit.machineLearning.videoFrameAnalysis.maxFrames}
+            step="1"
+            min={1}
+            max={200}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.enabled}
+            isEdited={configToEdit.machineLearning.videoFrameAnalysis.maxFrames !==
+              config.machineLearning.videoFrameAnalysis.maxFrames}
+          />
+
+          <SettingSwitch
+            title={$t('admin.machine_learning_video_frame_analysis_detect_faces')}
+            subtitle={$t('admin.machine_learning_video_frame_analysis_detect_faces_description')}
+            bind:checked={configToEdit.machineLearning.videoFrameAnalysis.detectFaces}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.enabled ||
+              !configToEdit.machineLearning.facialRecognition.enabled}
+          />
+
+          <SettingSwitch
+            title={$t('admin.machine_learning_video_frame_analysis_create_people')}
+            subtitle={$t('admin.machine_learning_video_frame_analysis_create_people_description')}
+            bind:checked={configToEdit.machineLearning.videoFrameAnalysis.createPeople}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.enabled ||
+              !configToEdit.machineLearning.facialRecognition.enabled ||
+              !configToEdit.machineLearning.videoFrameAnalysis.detectFaces}
+          />
+        </div>
+      </SettingAccordion>
       <SettingButtonsRow bind:configToEdit keys={['machineLearning']} {disabled} />
     </form>
   </div>

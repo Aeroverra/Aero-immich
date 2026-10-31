@@ -197,6 +197,7 @@ const AdminConfigSchemaWithVisibility = z
         workflow: AdminConfigJobSettingsSchema,
         editor: AdminConfigJobSettingsSchema,
         integrityCheck: AdminConfigJobSettingsSchema,
+        videoFrameAnalysis: AdminConfigJobSettingsSchema,
       })
       .meta({ id: 'AdminConfigJobDto' }),
     logging: z
@@ -305,6 +306,23 @@ const AdminConfigSchemaWithVisibility = z
             .describe('Minimum confidence score for text recognition')
             .meta({ format: 'double' }),
         }).meta({ id: 'AdminConfigOcrDto' }),
+        videoFrameAnalysis: AdminConfigMachineLearningTaskSchema.extend({
+          frameDensity: z
+            .number()
+            .min(0.1)
+            .max(10)
+            .describe('Frames sampled per video, multiplied by the square root of the duration in seconds')
+            .meta({ format: 'double' }),
+          minFrameInterval: z
+            .number()
+            .min(0.5)
+            .max(600)
+            .describe('Minimum number of seconds between two sampled frames')
+            .meta({ format: 'double' }),
+          maxFrames: z.int().min(1).max(200).describe('Maximum number of frames sampled per video'),
+          detectFaces: z.boolean().describe('Whether to detect faces in the sampled frames'),
+          createPeople: z.boolean().describe('Whether faces found only in video frames may create new people'),
+        }).meta({ id: 'AdminConfigVideoFrameAnalysisDto' }),
       })
       .meta({ id: 'AdminConfigMachineLearningDto' }),
     map: z
@@ -660,6 +678,7 @@ export const defaults = Object.freeze<SystemConfig>({
     workflow: { concurrency: 5 },
     editor: { concurrency: 2 },
     integrityCheck: { concurrency: 1 },
+    videoFrameAnalysis: { concurrency: 1 },
   },
   logging: {
     enabled: true,
@@ -709,6 +728,14 @@ export const defaults = Object.freeze<SystemConfig>({
       minDetectionScore: 0.5,
       minRecognitionScore: 0.8,
       maxResolution: 736,
+    },
+    videoFrameAnalysis: {
+      enabled: false,
+      frameDensity: 1.2,
+      minFrameInterval: 2,
+      maxFrames: 30,
+      detectFaces: true,
+      createPeople: false,
     },
   },
   map: {

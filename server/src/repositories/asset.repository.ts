@@ -436,6 +436,7 @@ export class AssetRepository {
               metadataExtractedAt: eb.ref('excluded.metadataExtractedAt'),
               ocrAt: eb.ref('excluded.ocrAt'),
               autoStackedAt: eb.ref('excluded.autoStackedAt'),
+              videoFramesAnalyzedAt: eb.ref('excluded.videoFramesAnalyzedAt'),
             },
             values[0],
           ),

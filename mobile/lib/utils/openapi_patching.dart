@@ -49,12 +49,20 @@ final Map<String, Map<String, Object?>> openApiPatches = {
   'LoginResponseDto': {'isOnboarded': false},
   'SyncUserV1': {'profileChangedAt': _now, 'hasProfileImage': false},
   'SyncAssetV1': {'isEdited': false},
-  'ServerFeaturesDto': {'ocr': false, 'faceAttributes': false, 'realtimeTranscoding': false},
+  'ServerFeaturesDto': {
+    'ocr': false,
+    'faceAttributes': false,
+    'realtimeTranscoding': false,
+    'videoFrameAnalysis': false,
+  },
   'SearchAssetResponseDto': {'nextCursor': null},
   'StackResponseDto': {'source': 'manual'},
   'AssetStackResponseDto': {'source': 'manual'},
   'MemoriesResponse': {'duration': 5, 'sidebarWeb': false},
-  'AdminConfigJobDto': {'faceAttributes': AdminConfigJobSettingsDto(concurrency: 2).toJson()},
+  'AdminConfigJobDto': {
+    'faceAttributes': AdminConfigJobSettingsDto(concurrency: 2).toJson(),
+    'videoFrameAnalysis': AdminConfigJobSettingsDto(concurrency: 1).toJson(),
+  },
   'AdminConfigMachineLearningDto': {
     'faceAttributes': AdminConfigFaceAttributesDto(enabled: false, modelName: 'face_landmarker').toJson(),
     'autoStack': AdminConfigAutoStackDto(
@@ -68,13 +76,26 @@ final Map<String, Map<String, Object?>> openApiPatches = {
       maxSpanSeconds: 30,
       maxYawChange: 15,
     ).toJson(),
+    'videoFrameAnalysis': AdminConfigVideoFrameAnalysisDto(
+      createPeople: false,
+      detectFaces: true,
+      enabled: false,
+      frameDensity: 1.2,
+      maxFrames: 30,
+      minFrameInterval: 2,
+    ).toJson(),
   },
   'AdminConfigNightlyTasksDto': {'autoStack': false},
   'UserConfigMachineLearningDto': {
     'faceAttributes': UserConfigFaceAttributesDto(enabled: false).toJson(),
     'autoStack': UserConfigAutoStackDto(enabled: false).toJson(),
+    'videoFrameAnalysis': UserConfigVideoFrameAnalysisDto(enabled: false).toJson(),
   },
-  'QueuesResponseLegacyDto': {'faceAttributes': _emptyQueue, 'autoStack': _emptyQueue},
+  'QueuesResponseLegacyDto': {
+    'faceAttributes': _emptyQueue,
+    'autoStack': _emptyQueue,
+    'videoFrameAnalysis': _emptyQueue,
+  },
   'WorkflowResponseDto': {'logging': false},
 };
 
