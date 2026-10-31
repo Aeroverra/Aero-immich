@@ -163,6 +163,7 @@ class SearchPage extends HookConsumerWidget {
 
     void showPeoplePicker() {
       var people = filter.value.people;
+      var excludedPeople = filter.value.excludedPeople;
       PeopleFilterOptions options = (
         onlyPeople: filter.value.onlyPeople,
         hasPeople: filter.value.hasPeople,
@@ -170,8 +171,9 @@ class SearchPage extends HookConsumerWidget {
         hasUnnamedFaces: filter.value.hasUnnamedFaces,
       );
 
-      void handleOnChanged(Set<Person> value, PeopleFilterOptions next) {
+      void handleOnChanged(Set<Person> value, Set<Person> excluded, PeopleFilterOptions next) {
         people = value;
+        excludedPeople = excluded;
         options = next;
       }
 
@@ -180,6 +182,7 @@ class SearchPage extends HookConsumerWidget {
         search(
           filter.value.copyWith(
             people: {},
+            excludedPeople: {},
             onlyPeople: null,
             hasPeople: null,
             hasNamedFaces: null,
@@ -189,11 +192,12 @@ class SearchPage extends HookConsumerWidget {
       }
 
       void handleApply() {
-        final label = peopleFilterLabel(context, people, options);
+        final label = peopleFilterLabel(context, people, options, excludedPeople: excludedPeople);
         peopleCurrentFilterWidget.value = label.isNotEmpty ? Text(label, style: context.textTheme.labelLarge) : null;
         search(
           filter.value.copyWith(
             people: people,
+            excludedPeople: excludedPeople,
             onlyPeople: options.onlyPeople,
             hasPeople: options.hasPeople,
             hasNamedFaces: options.hasNamedFaces,
@@ -215,6 +219,7 @@ class SearchPage extends HookConsumerWidget {
               onClear: handleClear,
               child: PeopleFilterPicker(
                 initialPeople: filter.value.people,
+                initialExcludedPeople: filter.value.excludedPeople,
                 initialOptions: options,
                 onChanged: handleOnChanged,
               ),
