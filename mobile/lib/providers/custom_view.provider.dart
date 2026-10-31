@@ -44,6 +44,19 @@ final visibleTagsProvider = Provider<List<TagEntry>>((ref) {
   return hidden.isEmpty ? tags : tags.where((tag) => !hidden.contains(tag.id)).toList();
 });
 
+/// Waits until the synced views and tags are loaded, so a filter read right after applies the view. A link can open
+/// the app before any screen listened to them.
+Future<void> loadCustomViews(WidgetRef ref) async {
+  try {
+    await Future.wait([
+      ref.read(localViewsProvider.future),
+      ref.read(localTagsProvider.future),
+    ]).timeout(const Duration(seconds: 2));
+  } catch (_) {
+    // the filter then applies whatever is loaded, like the timeline does while it starts
+  }
+}
+
 /// The synced views of the current user in display order
 final localViewsProvider = StreamProvider<List<CustomView>>((ref) {
   final userId = ref.watch(currentUserProvider.select((user) => user?.id));
