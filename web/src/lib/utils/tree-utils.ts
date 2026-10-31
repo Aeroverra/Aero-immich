@@ -10,6 +10,7 @@ export class TreeNode extends Map<string, TreeNode> {
   hasAssets: boolean;
   id: string | undefined;
   color: string | undefined;
+  isHidden: boolean | undefined;
   private _parents: TreeNode[] | undefined;
   private _children: TreeNode[] | undefined;
 
@@ -37,6 +38,7 @@ export class TreeNode extends Map<string, TreeNode> {
       current.hasAssets = true;
       current.id = tag.id;
       current.color = tag.color;
+      current.isHidden = tag.isHidden;
     }
     return root;
   }

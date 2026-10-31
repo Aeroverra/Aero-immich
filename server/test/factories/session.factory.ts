@@ -22,6 +22,8 @@ export class SessionFactory {
       parentId: null,
       pinExpiresAt: null,
       privateModeExpiresAt: null,
+      viewId: null,
+      viewExpiresAt: null,
       token: Buffer.from('abc123'),
       updateId: newUuidV7(),
       updatedAt: newDate(),

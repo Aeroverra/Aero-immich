@@ -302,7 +302,16 @@ select
           "tag"."createdAt",
           "tag"."updatedAt",
           "tag"."color",
-          "tag"."parentId"
+          "tag"."parentId",
+          exists (
+            select
+            from
+              "tag_closure"
+              inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+            where
+              "tag_closure"."id_descendant" = "tag"."id"
+              and "hidden_tag"."isHidden" = $1
+          ) as "isHidden"
         from
           "tag"
           inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
@@ -315,7 +324,7 @@ from
   "asset"
   left join "asset_exif" on "asset"."id" = "asset_exif"."assetId"
 where
-  "asset"."id" = any ($1::uuid[])
+  "asset"."id" = any ($2::uuid[])
 
 -- AssetRepository.deleteAll
 delete from "asset"

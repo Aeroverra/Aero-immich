@@ -27,7 +27,16 @@ with
                   "tag"."createdAt",
                   "tag"."updatedAt",
                   "tag"."color",
-                  "tag"."parentId"
+                  "tag"."parentId",
+                  exists (
+                    select
+                    from
+                      "tag_closure"
+                      inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+                    where
+                      "tag_closure"."id_descendant" = "tag"."id"
+                      and "hidden_tag"."isHidden" = $1
+                  ) as "isHidden"
                 from
                   "tag"
                   inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
@@ -42,8 +51,8 @@ with
       ) as "asset2" on true
     where
       "asset"."visibility" in ('archive', 'timeline')
-      and "asset"."isPrivate" = $1
-      and "asset"."ownerId" = $2::uuid
+      and "asset"."isPrivate" = $2
+      and "asset"."ownerId" = $3::uuid
       and "asset"."duplicateId" is not null
       and "asset"."deletedAt" is null
       and "asset"."stackId" is null
@@ -55,7 +64,7 @@ select
 from
   "duplicates"
 where
-  json_array_length("assets") > $3
+  json_array_length("assets") > $4
 
 -- DuplicateRepository.cleanupSingletonGroups
 with
@@ -107,7 +116,16 @@ from
               "tag"."createdAt",
               "tag"."updatedAt",
               "tag"."color",
-              "tag"."parentId"
+              "tag"."parentId",
+              exists (
+                select
+                from
+                  "tag_closure"
+                  inner join "tag" as "hidden_tag" on "hidden_tag"."id" = "tag_closure"."id_ancestor"
+                where
+                  "tag_closure"."id_descendant" = "tag"."id"
+                  and "hidden_tag"."isHidden" = $1
+              ) as "isHidden"
             from
               "tag"
               inner join "tag_asset" on "tag"."id" = "tag_asset"."tagId"
@@ -122,8 +140,8 @@ from
   ) as "asset2" on true
 where
   "asset"."visibility" in ('archive', 'timeline')
-  and "asset"."isPrivate" = $1
-  and "asset"."duplicateId" = $2::uuid
+  and "asset"."isPrivate" = $2
+  and "asset"."duplicateId" = $3::uuid
   and "asset"."deletedAt" is null
   and "asset"."stackId" is null
 group by

@@ -20,7 +20,7 @@ import { AlbumAssetCount, AlbumInfoOptions } from 'src/repositories/album.reposi
 import { BaseService } from 'src/services/base.service';
 import { isPrivateMode, requirePrivateMode, toPrivateScope } from 'src/utils/access';
 import { addAssets, removeAssets } from 'src/utils/asset.util';
-import { PrivateScope } from 'src/utils/database';
+import { isViewUnrestricted, PrivateScope } from 'src/utils/database';
 import { asDateTimeString } from 'src/utils/date';
 import { findOrFail } from 'src/utils/misc';
 import { getPreferences } from 'src/utils/preferences';
@@ -28,6 +28,14 @@ import { getPreferences } from 'src/utils/preferences';
 // Shared-link viewers see everything the owner put behind the link, private assets included.
 const toAlbumScope = (auth: AuthDto): PrivateScope =>
   auth.sharedLink ? { privateMode: true, userId: auth.user.id } : toPrivateScope(auth);
+
+type AlbumViewMetadata = {
+  metadata?: AlbumAssetCount;
+  /** the active view hides every asset of this non-empty album */
+  isHidden: boolean;
+  albumThumbnailAssetId: string | null;
+  hiddenByViewCount?: number;
+};
 
 // an album whose contents reach someone other than the owner: other album users or a shared link
 const isAlbumShared = (album: { albumUsers: unknown[]; sharedLinks: unknown[] }) =>
@@ -43,10 +51,19 @@ export class AlbumService extends BaseService {
       this.albumRepository.getAll(auth.user.id, { isOwned: true, isShared: false, privateMode }),
     ]);
 
+    const scope = toAlbumScope(auth);
+    const countVisible = async (albums: { id: string; albumThumbnailAssetId: string | null }[]) => {
+      if (isViewUnrestricted(scope.view) || albums.length === 0) {
+        return albums.length;
+      }
+      const metadata = await this.getViewMetadata(auth, albums, scope);
+      return albums.filter((album) => !metadata.get(album.id)?.isHidden).length;
+    };
+
     return {
-      owned: owned.length,
-      shared: shared.length,
-      notShared: notShared.length,
+      owned: await countVisible(owned),
+      shared: await countVisible(shared),
+      notShared: await countVisible(notShared),
     };
   }
 
@@ -63,26 +80,25 @@ export class AlbumService extends BaseService {
       return [];
     }
 
-    // Get asset count for each album. Then map the result to an object:
-    // { [albumId]: assetCount }
-    const results = await this.albumRepository.getMetadataForIds(
-      albums.map((album) => album.id),
-      scope,
-    );
-    const albumMetadata: Record<string, AlbumAssetCount> = {};
-    for (const metadata of results) {
-      albumMetadata[metadata.albumId] = metadata;
-    }
+    // asset count, dates and cover of each album, following the active view
+    const albumMetadata = await this.getViewMetadata(auth, albums, scope);
 
-    return albums.map((album) => ({
-      ...mapAlbum(album),
-      sharedLinks: undefined,
-      startDate: asDateTimeString(albumMetadata[album.id]?.startDate ?? undefined),
-      endDate: asDateTimeString(albumMetadata[album.id]?.endDate ?? undefined),
-      assetCount: albumMetadata[album.id]?.assetCount ?? 0,
-      // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
-      lastModifiedAssetTimestamp: asDateTimeString(albumMetadata[album.id]?.lastModifiedAssetTimestamp ?? undefined),
-    }));
+    return albums
+      .filter((album) => !albumMetadata.get(album.id)?.isHidden)
+      .map((album) => {
+        const { metadata, albumThumbnailAssetId, hiddenByViewCount } = albumMetadata.get(album.id)!;
+        return {
+          ...mapAlbum(album),
+          albumThumbnailAssetId,
+          sharedLinks: undefined,
+          startDate: asDateTimeString(metadata?.startDate ?? undefined),
+          endDate: asDateTimeString(metadata?.endDate ?? undefined),
+          assetCount: metadata?.assetCount ?? 0,
+          // lastModifiedAssetTimestamp is only used in mobile app, please remove if not need
+          lastModifiedAssetTimestamp: asDateTimeString(metadata?.lastModifiedAssetTimestamp ?? undefined),
+          hiddenByViewCount,
+        };
+      });
   }
 
   async get(auth: AuthDto, id: string): Promise<AlbumResponseDto> {
@@ -90,7 +106,8 @@ export class AlbumService extends BaseService {
     await this.albumRepository.updateThumbnails();
     const album = await this.findOrFail(id, auth.user.id, { withAssets: false });
     const scope = toAlbumScope(auth);
-    const [albumMetadataForIds] = await this.albumRepository.getMetadataForIds([album.id], scope);
+    const albumMetadata = await this.getViewMetadata(auth, [album], scope);
+    const { metadata, albumThumbnailAssetId, hiddenByViewCount } = albumMetadata.get(album.id)!;
 
     const hasSharedUsers = album.albumUsers && album.albumUsers.length > 1;
     const hasSharedLink = album.sharedLinks && album.sharedLinks.length > 0;
@@ -98,12 +115,54 @@ export class AlbumService extends BaseService {
 
     return {
       ...mapAlbum(album),
-      startDate: asDateTimeString(albumMetadataForIds?.startDate ?? undefined),
-      endDate: asDateTimeString(albumMetadataForIds?.endDate ?? undefined),
-      assetCount: albumMetadataForIds?.assetCount ?? 0,
-      lastModifiedAssetTimestamp: asDateTimeString(albumMetadataForIds?.lastModifiedAssetTimestamp ?? undefined),
+      albumThumbnailAssetId,
+      startDate: asDateTimeString(metadata?.startDate ?? undefined),
+      endDate: asDateTimeString(metadata?.endDate ?? undefined),
+      assetCount: metadata?.assetCount ?? 0,
+      lastModifiedAssetTimestamp: asDateTimeString(metadata?.lastModifiedAssetTimestamp ?? undefined),
       contributorCounts: isShared ? await this.albumRepository.getContributorCounts(album.id, scope) : undefined,
+      hiddenByViewCount,
     };
+  }
+
+  /**
+   * Album counts, dates and covers follow the active view: they are computed from the assets that pass it, a cover
+   * the view hides is replaced by the newest visible asset, and a non-empty album whose assets are all hidden is
+   * hidden itself. The number of hidden assets is reported only while private mode is unlocked.
+   */
+  private async getViewMetadata(
+    auth: AuthDto,
+    albums: { id: string; albumThumbnailAssetId: string | null }[],
+    scope: PrivateScope,
+  ): Promise<Map<string, AlbumViewMetadata>> {
+    const ids = albums.map((album) => album.id);
+    const visibleMetadata = await this.albumRepository.getMetadataForIds(ids, scope);
+    const visible = new Map(visibleMetadata.map((metadata) => [metadata.albumId, metadata]));
+
+    const totalMetadata = isViewUnrestricted(scope.view)
+      ? undefined
+      : await this.albumRepository.getMetadataForIds(ids, { ...scope, view: null });
+    const total = totalMetadata && new Map(totalMetadata.map((metadata) => [metadata.albumId, metadata.assetCount]));
+
+    const result = new Map<string, AlbumViewMetadata>();
+    for (const album of albums) {
+      const metadata = visible.get(album.id);
+      if (!total) {
+        result.set(album.id, { metadata, isHidden: false, albumThumbnailAssetId: album.albumThumbnailAssetId });
+        continue;
+      }
+
+      const visibleCount = metadata?.assetCount ?? 0;
+      const hiddenCount = (total.get(album.id) ?? 0) - visibleCount;
+      result.set(album.id, {
+        metadata,
+        isHidden: visibleCount === 0 && hiddenCount > 0,
+        albumThumbnailAssetId: metadata?.hasThumbnail ? album.albumThumbnailAssetId : (metadata?.firstAssetId ?? null),
+        hiddenByViewCount: isPrivateMode(auth) && hiddenCount > 0 ? hiddenCount : undefined,
+      });
+    }
+
+    return result;
   }
 
   async getMapMarkers(auth: AuthDto, id: string): Promise<MapMarkerResponseDto[]> {

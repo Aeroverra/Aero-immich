@@ -5,6 +5,7 @@ import { AuthDto } from 'src/dtos/auth.dto';
 import { TrashResponseDto } from 'src/dtos/trash.dto';
 import { JobName, JobStatus, Permission, QueueName } from 'src/enum';
 import { BaseService } from 'src/services/base.service';
+import { viewArgs } from 'src/utils/access';
 import { batched } from 'src/utils/misc';
 
 @Injectable()
@@ -27,7 +28,7 @@ export class TrashService extends BaseService {
 
   async restore(auth: AuthDto): Promise<TrashResponseDto> {
     await this.assetDeletedChecksumRepository.forgetTrashed(auth.user.id);
-    const count = await this.trashRepository.restore(auth.user.id);
+    const count = await this.trashRepository.restore(auth.user.id, ...viewArgs(auth));
     if (count > 0) {
       this.logger.log(`Restored ${count} asset(s) from trash`);
     }
@@ -35,7 +36,7 @@ export class TrashService extends BaseService {
   }
 
   async empty(auth: AuthDto): Promise<TrashResponseDto> {
-    const count = await this.trashRepository.empty(auth.user.id);
+    const count = await this.trashRepository.empty(auth.user.id, ...viewArgs(auth));
     if (count > 0) {
       await this.jobRepository.queue({ name: JobName.AssetEmptyTrash, data: {} });
     }

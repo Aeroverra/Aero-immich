@@ -25,7 +25,13 @@ import {
 import { AssetOrder, AssetVisibility, Permission } from 'src/enum';
 import { AssetSearchScope } from 'src/repositories/search.repository';
 import { BaseService } from 'src/services/base.service';
-import { isPrivateMode, requireElevatedPermission, requirePrivateMode, toPrivateScope } from 'src/utils/access';
+import {
+  getActiveView,
+  isPrivateMode,
+  requireElevatedPermission,
+  requirePrivateMode,
+  toPrivateScope,
+} from 'src/utils/access';
 import { getMyPartnerIds } from 'src/utils/asset.util';
 import { PrivateScope } from 'src/utils/database';
 import { isSmartSearchEnabled } from 'src/utils/misc';
@@ -99,7 +105,7 @@ export class SearchService extends BaseService {
     } else if (auth.sharedLink) {
       throw new BadRequestException('Shared link access is only allowed in combination with an albumIds filter');
     } else {
-      userIds = await this.getUserIdsToSearch(auth, dto.visibility);
+      userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
     }
 
     const page = dto.page ?? 1;
@@ -125,7 +131,7 @@ export class SearchService extends BaseService {
       return this.searchStatisticsV3(auth, dto);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
     if (dto.visibility === AssetVisibility.Locked) {
       requireElevatedPermission(auth);
     }
@@ -156,7 +162,7 @@ export class SearchService extends BaseService {
       requirePrivateMode(auth);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
     const items = await this.searchRepository.searchRandom(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -176,7 +182,7 @@ export class SearchService extends BaseService {
       requirePrivateMode(auth);
     }
 
-    const userIds = await this.getUserIdsToSearch(auth, dto.visibility);
+    const userIds = await this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
     const items = await this.searchRepository.searchLargeAssets(dto.size, {
       ...dto,
       visibility: dto.visibility ?? (auth.session?.hasElevatedPermission ? undefined : 'not-locked'),
@@ -205,7 +211,7 @@ export class SearchService extends BaseService {
       throw new BadRequestException('Smart search is not enabled');
     }
 
-    const userIds = this.getUserIdsToSearch(auth, dto.visibility);
+    const userIds = this.getUserIdsToSearch(auth, dto.visibility, dto.tagIds);
     const embedding = await this.resolveEmbedding(auth, dto, machineLearning);
     const page = dto.page ?? 1;
     const size = dto.size;
@@ -343,6 +349,8 @@ export class SearchService extends BaseService {
       throw new BadRequestException('Shared link access is only allowed in combination with an albumIds filter');
     }
 
+    await this.requireVisibleTags(auth, collectFilterIds(filter, 'tagIds'));
+
     const albumIds = collectFilterIds(filter, 'albumIds');
     const [userIds] = await Promise.all([
       // a fully confined filter searches albums only, so the unused universe can skip the partner lookup
@@ -357,6 +365,7 @@ export class SearchService extends BaseService {
         lockedOwnerId: auth.user.id,
         privateOwnerId: isPrivateMode(auth) ? auth.user.id : null,
         viewingUserId: auth.user.id,
+        view: getActiveView(auth),
       },
     };
   }
@@ -392,7 +401,26 @@ export class SearchService extends BaseService {
     throw new BadRequestException('Either `query` or `queryAssetId` must be set');
   }
 
-  private async getUserIdsToSearch(auth: AuthDto, visibility?: AssetVisibility): Promise<string[]> {
+  /** a hidden tag does not exist while private mode is locked, so filtering by it is refused like an unknown tag */
+  private async requireVisibleTags(auth: AuthDto, tagIds?: string[] | null) {
+    if (!tagIds || tagIds.length === 0 || isPrivateMode(auth)) {
+      return;
+    }
+
+    const owned = await this.accessRepository.tag.checkOwnerAccess(auth.user.id, new Set(tagIds), true);
+    const visible = await this.accessRepository.tag.checkOwnerAccess(auth.user.id, owned, false);
+    if (visible.size < owned.size) {
+      throw new BadRequestException(`Not found or no ${Permission.TagRead} access`);
+    }
+  }
+
+  private async getUserIdsToSearch(
+    auth: AuthDto,
+    visibility?: AssetVisibility,
+    tagIds?: string[] | null,
+  ): Promise<string[]> {
+    await this.requireVisibleTags(auth, tagIds);
+
     // Locked assets are personal. Never include partner IDs, regardless of A's elevated session.
     if (visibility === AssetVisibility.Locked) {
       return [auth.user.id];

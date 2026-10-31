@@ -23,6 +23,7 @@ import {
   ImageFormat,
   IntegrityReport,
   JobName,
+  LockTrigger,
   MemoryType,
   QueueName,
   StackActionMode,
@@ -630,6 +631,10 @@ export type UserPreferences = {
     timeoutMinutes: number;
     sidebarWeb: boolean;
     includeInMemories: boolean;
+    lockTrigger: LockTrigger;
+  };
+  customViews: {
+    lockTrigger: LockTrigger;
   };
   autoStack: {
     enabled: boolean;

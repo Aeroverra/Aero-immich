@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Kysely, OrderByDirection, Selectable, SelectQueryBuilder, ShallowDehydrateObject, sql } from 'kysely';
 import { InjectKysely } from 'nestjs-kysely';
-import { columns } from 'src/database';
+import { columns, ViewFilter } from 'src/database';
 import { DummyValue, GenerateSql } from 'src/decorators';
 import { MapAsset } from 'src/dtos/asset-response.dto';
 import { SearchFilter, SearchOrder } from 'src/dtos/search.dto';
@@ -11,6 +11,7 @@ import { DB } from 'src/schema';
 import { AssetExifTable } from 'src/schema/tables/asset-exif.table';
 import {
   anyUuid,
+  isViewUnrestricted,
   type PrivateScope,
   searchAssetBuilder,
   searchAssetBuilderLegacy,
@@ -18,6 +19,7 @@ import {
   searchRandomV3Examples,
   searchSmartV3Examples,
   searchStatisticsV3Examples,
+  viewAssetPredicate,
   withExifInner,
   withSearchOrder,
 } from 'src/utils/database';
@@ -152,6 +154,8 @@ export interface AssetSearchScope {
   privateOwnerId: string | null;
   /** whose version of the people to select, required when selecting faces or people */
   viewingUserId?: string;
+  /** the view of the requesting session; missing shows everything */
+  view?: ViewFilter | null;
 }
 
 export interface AssetSearchBuilderV3Options {
@@ -527,6 +531,7 @@ export class SearchRepository {
               ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
               : eb('asset.isPrivate', '=', false),
           )
+          .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
           .orderBy('city')
           .limit(1);
 
@@ -548,6 +553,7 @@ export class SearchRepository {
                     ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
                     : eb('asset.isPrivate', '=', false),
                 )
+                .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
                 .whereRef('asset_exif.city', '>', 'cte.city')
                 .orderBy('city')
                 .limit(1)
@@ -771,6 +777,7 @@ export class SearchRepository {
           ? eb.or([eb('asset.isPrivate', '=', false), eb('asset.ownerId', '=', scope.userId)])
           : eb('asset.isPrivate', '=', false),
       )
+      .$if(!isViewUnrestricted(scope.view), (qb) => qb.where((eb) => viewAssetPredicate(eb, scope.view!)))
       .where(field, 'is not', null)
       .where(field, '!=', '');
   }

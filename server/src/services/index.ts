@@ -10,6 +10,7 @@ import { AuthService } from 'src/services/auth.service';
 import { AutoStackService } from 'src/services/auto-stack.service';
 import { CliService } from 'src/services/cli.service';
 import { ClusterGroupService } from 'src/services/cluster-group.service';
+import { CustomViewService } from 'src/services/custom-view.service';
 import { DatabaseBackupService } from 'src/services/database-backup.service';
 import { DatabaseService } from 'src/services/database.service';
 import { DownloadService } from 'src/services/download.service';
@@ -85,6 +86,7 @@ export const services = [
   OcrService,
   FaceAttributeService,
   ClusterGroupService,
+  CustomViewService,
   PartnerService,
   PersonService,
   PluginService,
