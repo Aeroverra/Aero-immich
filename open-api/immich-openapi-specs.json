@@ -5197,6 +5197,63 @@
         "x-immich-state": "Stable"
       }
     },
+    "/assets/{id}/transcript": {
+      "get": {
+        "description": "Retrieve what is said in the specified video, line by line with positions in milliseconds, as found by video transcription.",
+        "operationId": "getAssetTranscript",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetTranscriptResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve the transcript of a video",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.2.2",
+            "state": "Added"
+          },
+          {
+            "version": "v3.2.2",
+            "state": "Beta"
+          }
+        ],
+        "x-immich-permission": "asset.read",
+        "x-immich-state": "Beta"
+      }
+    },
     "/assets/{id}/video/playback": {
       "get": {
         "description": "Streams the video file for the specified asset. This endpoint also supports byte range requests.",
@@ -13019,6 +13076,31 @@
               "format": "date-time",
               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
               "example": "2024-01-01T00:00:00.000Z",
+              "type": "string"
+            }
+          },
+          {
+            "name": "transcript",
+            "required": false,
+            "in": "query",
+            "description": "Filter videos by words said in them (video transcription)",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated",
+            "deprecated": true,
+            "schema": {
               "type": "string"
             }
           },
@@ -22268,6 +22350,9 @@
           "videoFrameAnalysis": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           },
+          "videoTranscription": {
+            "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
+          },
           "workflow": {
             "$ref": "#/components/schemas/AdminConfigJobSettingsDto"
           }
@@ -22289,6 +22374,7 @@
           "thumbnailGeneration",
           "videoConversion",
           "videoFrameAnalysis",
+          "videoTranscription",
           "workflow"
         ],
         "type": "object"
@@ -22431,6 +22517,9 @@
           },
           "videoFrameAnalysis": {
             "$ref": "#/components/schemas/AdminConfigVideoFrameAnalysisDto"
+          },
+          "videoTranscription": {
+            "$ref": "#/components/schemas/AdminConfigVideoTranscriptionDto"
           }
         },
         "required": [
@@ -22444,7 +22533,8 @@
           "ocr",
           "personSuggestions",
           "urls",
-          "videoFrameAnalysis"
+          "videoFrameAnalysis",
+          "videoTranscription"
         ],
         "type": "object"
       },
@@ -23017,6 +23107,33 @@
           "frameDensity",
           "maxFrames",
           "minFrameInterval"
+        ],
+        "type": "object"
+      },
+      "AdminConfigVideoTranscriptionDto": {
+        "properties": {
+          "computeType": {
+            "$ref": "#/components/schemas/TranscriptionComputeType"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "language": {
+            "description": "Language code of the speech (for example en), empty to detect the language of every video",
+            "maxLength": 16,
+            "type": "string"
+          },
+          "modelName": {
+            "description": "Name of the model to use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "computeType",
+          "enabled",
+          "language",
+          "modelName"
         ],
         "type": "object"
       },
@@ -24899,6 +25016,60 @@
         ],
         "type": "object"
       },
+      "AssetTranscriptResponseDto": {
+        "properties": {
+          "assetId": {
+            "description": "Video asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "language": {
+            "description": "Language code of the speech, null when no speech was found",
+            "nullable": true,
+            "type": "string"
+          },
+          "segments": {
+            "description": "Lines of speech in playback order, empty when the video was not transcribed or has no speech",
+            "items": {
+              "$ref": "#/components/schemas/AssetTranscriptSegmentResponseDto"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assetId",
+          "language",
+          "segments"
+        ],
+        "type": "object"
+      },
+      "AssetTranscriptSegmentResponseDto": {
+        "properties": {
+          "endTime": {
+            "description": "Position in milliseconds where the line ends",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "startTime": {
+            "description": "Position in milliseconds where the line starts",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "description": "What was said",
+            "type": "string"
+          }
+        },
+        "required": [
+          "endTime",
+          "startTime",
+          "text"
+        ],
+        "type": "object"
+      },
       "AssetTypeEnum": {
         "description": "Asset type",
         "enum": [
@@ -26673,6 +26844,8 @@
           "VersionCheck",
           "AssetAnalyzeVideoFramesQueueAll",
           "AssetAnalyzeVideoFrames",
+          "AssetTranscribeVideoQueueAll",
+          "AssetTranscribeVideo",
           "OcrQueueAll",
           "Ocr",
           "WorkflowAssetTrigger",
@@ -28321,6 +28494,26 @@
           "thumbnailPath": {
             "deprecated": true,
             "description": "Filter by thumbnail file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter videos by words said in them (video transcription)",
             "type": "string",
             "x-immich-history": [
               {
@@ -30337,6 +30530,7 @@
           "integrityCheck",
           "editor",
           "videoFrameAnalysis",
+          "videoTranscription",
           "takeout"
         ],
         "type": "string"
@@ -30519,6 +30713,9 @@
           "videoFrameAnalysis": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "videoTranscription": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "workflow": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           }
@@ -30546,6 +30743,7 @@
           "thumbnailGeneration",
           "videoConversion",
           "videoFrameAnalysis",
+          "videoTranscription",
           "workflow"
         ],
         "type": "object"
@@ -31257,6 +31455,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter videos by words said in them (video transcription)",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "trashedAfter": {
             "deprecated": true,
             "description": "Filter by trash date (after)",
@@ -31683,6 +31901,24 @@
             ],
             "x-immich-state": "Beta"
           },
+          "matchedTranscripts": {
+            "description": "Spoken words search only: the videos of this page whose speech matched, with the line that matched",
+            "items": {
+              "$ref": "#/components/schemas/SearchMatchedTranscriptResponseDto"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "version": "v3.2.2",
+                "state": "Added"
+              },
+              {
+                "version": "v3.2.2",
+                "state": "Beta"
+              }
+            ],
+            "x-immich-state": "Beta"
+          },
           "nextCursor": {
             "description": "Cursor for the next page of results",
             "nullable": true,
@@ -31909,6 +32145,9 @@
           "takenAt": {
             "$ref": "#/components/schemas/DateFilter"
           },
+          "transcript": {
+            "$ref": "#/components/schemas/StringSimilarityFilter"
+          },
           "trashedAt": {
             "$ref": "#/components/schemas/DateFilterNullable"
           },
@@ -32014,6 +32253,9 @@
           "takenAt": {
             "$ref": "#/components/schemas/DateFilter"
           },
+          "transcript": {
+            "$ref": "#/components/schemas/StringSimilarityFilter"
+          },
           "trashedAt": {
             "$ref": "#/components/schemas/DateFilterNullable"
           },
@@ -32048,6 +32290,40 @@
         "required": [
           "assetId",
           "frameTimestamp"
+        ],
+        "type": "object"
+      },
+      "SearchMatchedTranscriptResponseDto": {
+        "description": "A video that matched a spoken words search, with the line of its transcript that matched best",
+        "properties": {
+          "assetId": {
+            "description": "Video asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "endTime": {
+            "description": "Position in milliseconds where the matching line of speech ends",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "startTime": {
+            "description": "Position in milliseconds where the matching line of speech starts",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "description": "The line of speech that matched",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetId",
+          "endTime",
+          "startTime",
+          "text"
         ],
         "type": "object"
       },
@@ -32393,6 +32669,10 @@
           },
           "videoFrameAnalysis": {
             "description": "Whether enhanced video analysis of sampled frames is enabled",
+            "type": "boolean"
+          },
+          "videoTranscription": {
+            "description": "Whether speech in videos is transcribed (transcripts, captions and spoken word search). Absent on servers without it.",
             "type": "boolean"
           }
         },
@@ -33820,6 +34100,26 @@
             ],
             "x-immich-state": "Deprecated"
           },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter videos by words said in them (video transcription)",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
           "trashedAfter": {
             "deprecated": true,
             "description": "Filter by trash date (after)",
@@ -34854,6 +35154,26 @@
             "example": "2024-01-01T00:00:00.000Z",
             "format": "date-time",
             "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "version": "v1",
+                "state": "Added"
+              },
+              {
+                "version": "v2",
+                "state": "Stable"
+              },
+              {
+                "version": "v3.2.0",
+                "state": "Deprecated"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "transcript": {
+            "deprecated": true,
+            "description": "Filter videos by words said in them (video transcription)",
             "type": "string",
             "x-immich-history": [
               {
@@ -40245,6 +40565,17 @@
           "bitrate",
           "required",
           "disabled"
+        ],
+        "type": "string"
+      },
+      "TranscriptionComputeType": {
+        "description": "Precision of the speech to text model",
+        "enum": [
+          "auto",
+          "int8",
+          "int8_float16",
+          "float16",
+          "float32"
         ],
         "type": "string"
       },

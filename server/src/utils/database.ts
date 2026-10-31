@@ -731,6 +731,17 @@ const isCJK = (c: number): boolean =>
   (c >= 0x30_a0 && c <= 0x30_ff) ||
   (c >= 0x34_00 && c <= 0x4d_bf);
 
+/** videos with a line of speech that contains the words, with the same word similarity as the OCR filter */
+const transcriptMatches = (eb: ExpressionBuilder<DB, 'asset'>, text: string) =>
+  eb.exists(
+    eb
+      .selectFrom('asset_transcript_segment')
+      .whereRef('asset_transcript_segment.assetId', '=', 'asset.id')
+      .where(
+        sql<SqlBool>`f_unaccent(asset_transcript_segment.text) %>> f_unaccent(${tokenizeForSearch(text).join(' ')})`,
+      ),
+  );
+
 export const tokenizeForSearch = (text: string): string[] => {
   /* eslint-disable unicorn/prefer-code-point */
   const tokens: string[] = [];
@@ -924,6 +935,7 @@ export function searchAssetBuilderLegacy(kysely: Kysely<DB>, options: AssetSearc
           .innerJoin('ocr_search', 'asset.id', 'ocr_search.assetId')
           .where(() => sql`f_unaccent(ocr_search.text) %>> f_unaccent(${tokenizeForSearch(options.ocr!).join(' ')})`),
       )
+      .$if(!!options.transcript, (qb) => qb.where((eb) => transcriptMatches(eb, options.transcript!)))
       .$if(!!options.type, (qb) => qb.where('asset.type', '=', options.type!))
       .$if(options.isFavorite !== undefined, (qb) => qb.where('asset.isFavorite', '=', options.isFavorite!))
       .$if(options.isPrivate !== undefined, (qb) => qb.where('asset.isPrivate', '=', options.isPrivate!))
@@ -1178,6 +1190,7 @@ function branchPredicates(eb: AssetExpressionBuilder, branch: SearchFilterBranch
           ),
         ]
       : []),
+    ...(branch.transcript ? [transcriptMatches(eb, branch.transcript.matches)] : []),
     ...comparisonPredicates(eb, 'asset_exif.rating', branch.rating),
     ...comparisonPredicates(eb, 'asset_exif.fileSizeInByte', branch.fileSizeInBytes),
     ...comparisonPredicates(eb, 'asset.fileCreatedAt', branch.takenAt),
@@ -1341,6 +1354,10 @@ export const searchMetadataV3Examples: GenerateSqlQueries[] = [
   {
     name: 'string-similarity-ocr',
     params: [{ take: 100 }, { filter: { ocr: { matches: DummyValue.STRING } } }, scopeExample],
+  },
+  {
+    name: 'string-similarity-transcript',
+    params: [{ take: 100 }, { filter: { transcript: { matches: DummyValue.STRING } } }, scopeExample],
   },
   {
     name: 'ids-any',

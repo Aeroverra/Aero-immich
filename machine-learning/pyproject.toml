@@ -8,6 +8,7 @@ readme = "README.md"
 dependencies = [
     "aiocache>=0.12.1,<1.0",
     "fastapi>=0.95.2,<1.0",
+    "faster-whisper>=1.2.1,<2",
     "gunicorn>=21.1.0",
     "huggingface-hub>=1.0,<2.0",
     "mediapipe>=1.0.1,<2.0",
@@ -63,6 +64,13 @@ override-dependencies = [
     "opencv-contrib-python; sys_platform == 'never'",
     "sounddevice; sys_platform == 'never'",
 ]
+
+# faster-whisper requires onnxruntime for its voice activity detection model, which would replace the
+# onnxruntime-gpu, onnxruntime-openvino and onnxruntime-migraphx builds that provide the same module.
+# every device extra already installs an onnxruntime build, so the requirement is dropped here.
+[[tool.uv.dependency-metadata]]
+name = "faster-whisper"
+requires-dist = ["av>=11", "ctranslate2>=4.0,<5", "huggingface-hub>=0.21", "tokenizers>=0.13,<1", "tqdm"]
 
 [tool.hatch.build.targets.sdist]
 include = ["immich_ml"]

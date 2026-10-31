@@ -44,6 +44,7 @@
   import AlbumListItemDetails from './AlbumListItemDetails.svelte';
   import DetailPanelBookmarks from '$lib/components/asset-viewer/DetailPanelBookmarks.svelte';
   import DetailPanelPeople from '$lib/components/asset-viewer/DetailPanelPeople.svelte';
+  import DetailPanelTranscript from '$lib/components/asset-viewer/DetailPanelTranscript.svelte';
   import { faceManager } from '$lib/stores/face.svelte';
 
   interface Props {
@@ -131,6 +132,7 @@
     [DetailPanelSection.Description]: descriptionSection,
     [DetailPanelSection.Rating]: ratingSection,
     [DetailPanelSection.Bookmarks]: bookmarksSection,
+    [DetailPanelSection.Transcript]: transcriptSection,
     [DetailPanelSection.People]: peopleSection,
     [DetailPanelSection.Details]: detailsSection,
     [DetailPanelSection.Map]: mapSection,
@@ -235,6 +237,12 @@
 {#snippet bookmarksSection()}
   <div class="relative px-2">
     <DetailPanelBookmarks {asset} />
+  </div>
+{/snippet}
+
+{#snippet transcriptSection()}
+  <div class="relative px-2">
+    <DetailPanelTranscript {asset} />
   </div>
 {/snippet}
 

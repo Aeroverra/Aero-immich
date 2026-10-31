@@ -27,6 +27,7 @@ describe('detail panel sections', () => {
         DetailPanelSection.Description,
         DetailPanelSection.Rating,
         DetailPanelSection.Bookmarks,
+        DetailPanelSection.Transcript,
         DetailPanelSection.People,
         DetailPanelSection.Details,
         DetailPanelSection.Map,

@@ -23,6 +23,19 @@ describe('VideoSearchMatchManager', () => {
     expect(videoSearchMatchManager.get('video-2')).toBe(2000);
   });
 
+  it('should remember where the speech matched, and say so', () => {
+    videoSearchMatchManager.add([{ assetId: 'video-1', frameTimestamp: 1000 }]);
+    videoSearchMatchManager.addSpeech([
+      { assetId: 'video-2', startTime: 484_000, endTime: 488_500, text: 'the full moon party' },
+    ]);
+    videoSearchMatchManager.addSpeech();
+
+    expect(videoSearchMatchManager.get('video-2')).toBe(484_000);
+    expect(videoSearchMatchManager.getKind('video-2')).toBe('speech');
+    expect(videoSearchMatchManager.getKind('video-1')).toBe('frame');
+    expect(videoSearchMatchManager.getKind('photo')).toBeUndefined();
+  });
+
   it('should forget everything on clear', () => {
     videoSearchMatchManager.add([{ assetId: 'video-1', frameTimestamp: 1000 }]);
 

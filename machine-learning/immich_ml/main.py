@@ -7,12 +7,16 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from functools import partial
+from io import BytesIO
 from typing import Any, AsyncGenerator, Callable, Iterator
 from zipfile import BadZipFile
 
+import av
+import numpy as np
 import orjson
 from fastapi import Depends, FastAPI, File, Form, HTTPException
 from fastapi.responses import PlainTextResponse
+from numpy.typing import NDArray
 from onnxruntime.capi.onnxruntime_pybind11_state import InvalidProtobuf, NoSuchFile
 from PIL.Image import Image
 from pydantic import ValidationError
@@ -76,7 +80,10 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
 
 async def preload_models(preload: PreloadModelData) -> None:
-    log.info(f"Preloading models: clip:{preload.clip} facial_recognition:{preload.facial_recognition}")
+    log.info(
+        f"Preloading models: clip:{preload.clip} facial_recognition:{preload.facial_recognition} "
+        f"speech_to_text:{preload.speech_to_text}"
+    )
 
     async def load_models(model_string: str, model_type: ModelType, model_task: ModelTask) -> None:
         for model_name in model_string.split(","):
@@ -116,6 +123,13 @@ async def preload_models(preload: PreloadModelData) -> None:
             preload.ocr.recognition,
             ModelType.RECOGNITION,
             ModelTask.OCR,
+        )
+
+    if preload.speech_to_text.transcription is not None:
+        await load_models(
+            preload.speech_to_text.transcription,
+            ModelType.TRANSCRIPTION,
+            ModelTask.SPEECH_TO_TEXT,
         )
 
 
@@ -168,21 +182,37 @@ async def predict(
     entries: InferenceEntries = Depends(get_entries),
     image: bytes | None = File(default=None),
     text: str | None = Form(default=None),
+    audio: bytes | None = File(default=None),
 ) -> Any:
     if image is not None:
         decoded = await run(lambda: decode_pil(image))
         if decoded.width == 0 or decoded.height == 0:
             raise HTTPException(400, "Image has zero width or height")
-        inputs: Image | str = decoded
+        inputs: Image | str | NDArray[np.float32] = decoded
     elif text is not None:
         inputs = text
+    elif audio is not None:
+        inputs = await run(decode_audio, audio)
     else:
-        raise HTTPException(400, "Either image or text must be provided")
+        raise HTTPException(400, "Either image, text or audio must be provided")
     response = await run_inference(inputs, entries)
     return ORJSONResponse(response)
 
 
-async def run_inference(payload: Image | str, entries: InferenceEntries) -> InferenceResponse:
+def decode_audio(audio: bytes) -> NDArray[np.float32]:
+    from faster_whisper import decode_audio as decode
+
+    try:
+        decoded: NDArray[np.float32] = decode(BytesIO(audio), sampling_rate=16000)
+    except (av.FFmpegError, IndexError) as e:  # IndexError when there is no audio stream
+        log.error(f"Failed to decode audio: {e}")
+        raise HTTPException(400, "Invalid audio")
+    if decoded.size == 0:
+        raise HTTPException(400, "Audio has no samples")
+    return decoded
+
+
+async def run_inference(payload: Image | str | NDArray[np.float32], entries: InferenceEntries) -> InferenceResponse:
     outputs: dict[ModelIdentity, Any] = {}
     response: InferenceResponse = {}
 

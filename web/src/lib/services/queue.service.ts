@@ -30,6 +30,7 @@ import {
   mdiPlay,
   mdiPlus,
   mdiStateMachine,
+  mdiSubtitlesOutline,
   mdiTable,
   mdiTagFaces,
   mdiTrashCanOutline,
@@ -226,6 +227,11 @@ export const asQueueItem = ($t: MessageFormatter, queue: { name: QueueName }): Q
       icon: mdiMovieSearch,
       title: $t('admin.video_frame_analysis_job'),
       subtitle: $t('admin.video_frame_analysis_job_description'),
+    },
+    [QueueName.VideoTranscription]: {
+      icon: mdiSubtitlesOutline,
+      title: $t('admin.video_transcription_job'),
+      subtitle: $t('admin.video_transcription_job_description'),
     },
     [QueueName.VideoConversion]: {
       icon: mdiVideo,

@@ -52,6 +52,7 @@ import { TakeoutService } from 'src/services/takeout.service';
 import { TelemetryService } from 'src/services/telemetry.service';
 import { TimelineService } from 'src/services/timeline.service';
 import { TranscodingService } from 'src/services/transcoding.service';
+import { TranscriptService } from 'src/services/transcript.service';
 import { TrashService } from 'src/services/trash.service';
 import { UserAdminService } from 'src/services/user-admin.service';
 import { UserService } from 'src/services/user.service';
@@ -122,6 +123,7 @@ export const services = [
   UserService,
   VersionService,
   VideoFrameAnalysisService,
+  TranscriptService,
   VideoBookmarkService,
   ViewService,
   WorkflowExecutionService,

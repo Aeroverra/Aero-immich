@@ -303,6 +303,44 @@ export class MediaRepository {
     timeoutMs = 120_000,
   ): Promise<Buffer> {
     const args = ['-nostdin', '-v', 'error', ...inputOptions, '-i', input, ...outputOptions, 'pipe:1'];
+    return this.pipeFfmpeg(args, timeoutMs, 'a frame');
+  }
+
+  /**
+   * Extracts one audio stream as 16 kHz mono Ogg Opus, the sample rate speech recognition works at.
+   * Speech stays clear at this bitrate and an hour of audio is about 15 MB.
+   */
+  extractAudio(input: string, streamIndex: number, timeoutMs = 600_000): Promise<Buffer> {
+    const args = [
+      '-nostdin',
+      '-v',
+      'error',
+      '-i',
+      input,
+      '-map',
+      `0:${streamIndex}`,
+      '-vn',
+      '-sn',
+      '-dn',
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-c:a',
+      'libopus',
+      '-b:a',
+      '32k',
+      '-application',
+      'voip',
+      '-f',
+      'ogg',
+      'pipe:1',
+    ];
+    return this.pipeFfmpeg(args, timeoutMs, 'audio');
+  }
+
+  private pipeFfmpeg(args: string[], timeoutMs: number, output: string): Promise<Buffer> {
+    const input = args[args.indexOf('-i') + 1];
     this.logger.debug(`ffmpeg ${args.join(' ')}`);
     const ffmpegProcess = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
     try {
@@ -324,7 +362,7 @@ export class MediaRepository {
     return new Promise<Buffer>((resolve, reject) => {
       const timeout = setTimeout(() => {
         ffmpegProcess.kill('SIGKILL');
-        reject(new Error(`ffmpeg timed out after ${timeoutMs}ms while extracting a frame from ${input}`));
+        reject(new Error(`ffmpeg timed out after ${timeoutMs}ms while extracting ${output} from ${input}`));
       }, timeoutMs);
 
       ffmpegProcess.on('error', (error) => {
@@ -336,7 +374,7 @@ export class MediaRepository {
         clearTimeout(timeout);
         const buffer = Buffer.concat(chunks);
         if (code !== 0 || buffer.length === 0) {
-          return reject(new Error(`ffmpeg exited with code ${code} without a frame: ${stderr.trim()}`));
+          return reject(new Error(`ffmpeg exited with code ${code} without ${output}: ${stderr.trim()}`));
         }
         resolve(buffer);
       });
