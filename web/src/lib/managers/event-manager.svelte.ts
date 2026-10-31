@@ -39,6 +39,7 @@ export type Events = {
   AssetsUnarchive: [TimelineAsset[]];
   AssetsUndoArchive: [TimelineAsset[]];
   AssetsDelete: [string[]];
+  AssetsRestore: [TimelineAsset[]];
   AssetEditsApplied: [string];
   AssetsTag: [string[]];
 
